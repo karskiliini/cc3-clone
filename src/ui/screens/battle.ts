@@ -1,5 +1,5 @@
-import type { CursorKind, InputState, OrderType, Screen, Team } from '@/shared/types';
-import { ORDER_HOTKEYS, ORDER_TYPES, PANEL_Y, VIEW_H, VIEW_W, otherSide } from '@/shared/types';
+import type { CursorKind, InputState, OrderType, Screen, Team, Vec2 } from '@/shared/types';
+import { ORDER_HOTKEYS, ORDER_TYPES, VIEW_H, VIEW_W, otherSide } from '@/shared/types';
 import { game } from '@/game';
 import type { Battle } from '@/sim/battle';
 import { teamCanFire, teamHasSmoke } from '@/sim/team';
@@ -17,13 +17,15 @@ import { Minimap } from '@/ui/hud/minimap';
 import { drawHudBase } from '@/ui/hud/hudChrome';
 import { CommandMenu } from '@/ui/commandMenu';
 import { drawTextCentered, FONT_BIG_H } from '@/render/pixelfont';
-import { PALETTE, ORDER_COLOR } from '@/render/palette';
+import { PALETTE } from '@/render/palette';
 import { updateCameraEdgeScrollAndKeys } from './common';
 import { DebriefScreen } from './debrief';
 import { OverviewScreen } from './overview';
 import { OptionsScreen } from './options';
 
 const SPEEDS: (1 | 2 | 4)[] = [1, 2, 4];
+const MOVE_TYPES: OrderType[] = ['move', 'moveFast', 'sneak'];
+const DRAG_THRESHOLD_PX = 6;
 
 /** Big gold word on a 60%-black box, centred in the map viewport — used for
  * the PAUSED overlay and the end-of-battle result word. */
@@ -48,6 +50,13 @@ interface RightDrag {
   moved: number;
 }
 
+interface LeftDrag {
+  active: boolean;
+  startX: number;
+  startY: number;
+  moved: number;
+}
+
 export class BattleScreen implements Screen {
   private battle: Battle;
   private terrain: TerrainRenderer;
@@ -58,10 +67,19 @@ export class BattleScreen implements Screen {
   private minimap = new Minimap();
   private commandMenu = new CommandMenu();
   private selectedTeamId: number | null = null;
+  private selectedTeamIds: number[] = [];
   private pendingOrder: OrderType | null = null;
+  private pendingWaypoints: Vec2[] = [];
   private paused = false;
   private endedAt: number | null = null;
   private rightDrag: RightDrag = { active: false, startX: 0, startY: 0, lastX: 0, lastY: 0, moved: 0 };
+  private leftDrag: LeftDrag = { active: false, startX: 0, startY: 0, moved: 0 };
+
+  // F5/F6/F7 toggles, Ctrl+K show-dead toggle (original CC3 keyboard reference).
+  private showTeamGrid = true;
+  private showMinimap = true;
+  private showSoldierMonitor = true;
+  private showDead = true;
 
   constructor(battle: Battle) {
     this.battle = battle;
@@ -73,6 +91,41 @@ export class BattleScreen implements Screen {
     const zone = map.def.deployZones[this.battle.playerSide()];
     centerCamera(game.cam, { x: zone.x + zone.w / 2, y: zone.y + zone.h / 2 });
     clampCamera(game.cam, map.width, map.height);
+  }
+
+  private setSelection(ids: number[]): void {
+    this.selectedTeamIds = ids;
+    this.selectedTeamId = ids.length > 0 ? ids[0] : null;
+  }
+
+  private issueOrderToSelection(input: InputState, world: Vec2): void {
+    const battle = this.battle;
+    const state = battle.state;
+    const ids = this.selectedTeamIds.length > 0 ? this.selectedTeamIds : (this.selectedTeamId != null ? [this.selectedTeamId] : []);
+    if (ids.length === 0 || !this.pendingOrder) return;
+    const primary = state.teams.get(ids[0]);
+    const isMoveType = MOVE_TYPES.includes(this.pendingOrder);
+    const enemy = battle.teamAt(world, otherSide(battle.playerSide()));
+    const waypoints = this.pendingWaypoints.length > 0 ? [...this.pendingWaypoints] : undefined;
+    for (const id of ids) {
+      const team = state.teams.get(id);
+      if (!team) continue;
+      // Move-type group orders keep each team's relative offset from the
+      // primary team; Fire/Smoke centre every team on the same point.
+      const target = isMoveType && primary && ids.length > 1
+        ? { x: world.x + (team.pos.x - primary.pos.x), y: world.y + (team.pos.y - primary.pos.y) }
+        : world;
+      battle.issueOrder(id, {
+        type: this.pendingOrder,
+        target,
+        targetTeamId: enemy ? enemy.id : undefined,
+        issuedAt: state.time,
+        waypoints,
+      });
+    }
+    game.audio?.play('click');
+    this.pendingOrder = null;
+    this.pendingWaypoints = [];
   }
 
   update(dt: number, input: InputState): void {
@@ -139,66 +192,87 @@ export class BattleScreen implements Screen {
         this.commandMenu.close();
       } else if (r) {
         this.pendingOrder = r;
+        this.pendingWaypoints = [];
         this.commandMenu.close();
       }
     }
 
     if (input.keysPressed.has('escape')) {
       if (this.commandMenu.isOpen) this.commandMenu.close();
-      else this.pendingOrder = null;
+      else { this.pendingOrder = null; this.pendingWaypoints = []; }
     }
 
-    // left click: issue pending order, or select
+    // left mouse: press starts a potential drag (box-select), release decides
+    // whether it was a simple click (select/issue order) or a drag (box-select).
     for (const c of input.clicks) {
-      if (c.button !== 0 || c.y >= VIEW_H) continue;
-      if (this.commandMenu.isOpen || menuWasOpen) continue;
-      const world = screenToWorld(cam, { x: c.x, y: c.y });
-      if (this.pendingOrder && this.selectedTeamId != null) {
-        const enemy = battle.teamAt(world, otherSide(battle.playerSide()));
-        battle.issueOrder(this.selectedTeamId, {
-          type: this.pendingOrder,
-          target: world,
-          targetTeamId: enemy ? enemy.id : undefined,
-          issuedAt: state.time,
-        });
-        game.audio?.play('click');
-        this.pendingOrder = null;
-      } else {
-        const soldier = battle.soldierAt(world, battle.playerSide());
-        this.selectedTeamId = soldier ? soldier.teamId : null;
+      if (c.button === 0 && c.y < VIEW_H && !this.commandMenu.isOpen && !menuWasOpen) {
+        this.leftDrag = { active: true, startX: c.x, startY: c.y, moved: 0 };
       }
+    }
+    if (this.leftDrag.active && input.buttons.left) {
+      this.leftDrag.moved = Math.max(this.leftDrag.moved, Math.hypot(input.mouse.x - this.leftDrag.startX, input.mouse.y - this.leftDrag.startY));
+    }
+    for (const r of input.releases) {
+      if (r.button !== 0 || !this.leftDrag.active) continue;
+      if (r.y >= VIEW_H) {
+        this.leftDrag.active = false;
+        continue;
+      }
+      const dragged = this.leftDrag.moved >= DRAG_THRESHOLD_PX;
+      if (dragged && !this.pendingOrder) {
+        // box select: any friendly, selectable team whose position falls in the rect
+        const x0 = Math.min(this.leftDrag.startX, r.x), x1 = Math.max(this.leftDrag.startX, r.x);
+        const y0 = Math.min(this.leftDrag.startY, r.y), y1 = Math.max(this.leftDrag.startY, r.y);
+        const inBox = battle.selectableTeams(battle.playerSide()).filter((t) => {
+          const p = worldToScreen(cam, t.pos);
+          return p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1;
+        });
+        if (inBox.length > 0) this.setSelection(inBox.map((t) => t.id));
+      } else {
+        const world = screenToWorld(cam, { x: r.x, y: r.y });
+        if (this.pendingOrder && this.selectedTeamId != null) {
+          const chaining = MOVE_TYPES.includes(this.pendingOrder) && input.keysDown.has('shift');
+          if (chaining) {
+            this.pendingWaypoints.push(world);
+          } else {
+            this.issueOrderToSelection(input, world);
+          }
+        } else {
+          const soldier = battle.soldierAt(world, battle.playerSide());
+          this.setSelection(soldier ? [soldier.teamId] : []);
+        }
+      }
+      this.leftDrag.active = false;
     }
 
     if (input.keysPressed.has('tab')) {
       const teams = battle.selectableTeams(battle.playerSide());
       if (teams.length > 0) {
         const idx = teams.findIndex((t) => t.id === this.selectedTeamId);
-        this.selectedTeamId = teams[(idx + 1) % teams.length].id;
+        this.setSelection([teams[(idx + 1) % teams.length].id]);
       }
     }
 
     if (this.selectedTeamId != null && !this.commandMenu.isOpen) {
       for (const ot of ORDER_TYPES) {
-        if (input.keysPressed.has(ORDER_HOTKEYS[ot])) this.pendingOrder = ot;
+        if (input.keysPressed.has(ORDER_HOTKEYS[ot])) { this.pendingOrder = ot; this.pendingWaypoints = []; }
       }
     }
 
     const teams = battle.selectableTeams(battle.playerSide());
     const gridClick = this.teamGrid.update(input, teams);
     if (gridClick != null) {
-      this.selectedTeamId = gridClick;
+      this.setSelection([gridClick]);
       const team = state.teams.get(gridClick);
       if (team) centerCamera(cam, team.pos);
       clampCamera(cam, state.map.width, state.map.height);
     }
 
-    if (this.minimap.update(input, cam, state.map.width, state.map.height)) {
-      // camera recentred by the minimap itself
-    }
+    if (this.showMinimap) this.minimap.update(input, cam, state.map.width, state.map.height);
 
     this.combatMessages.update(input, state);
     const selTeamForMonitor = this.selectedTeamId != null ? state.teams.get(this.selectedTeamId) ?? null : null;
-    this.soldierMonitor.update(input, state, selTeamForMonitor);
+    if (this.showSoldierMonitor) this.soldierMonitor.update(input, state, selTeamForMonitor);
 
     const action = this.bottomStrip.update(input);
     if (action === 'truce') {
@@ -217,8 +291,7 @@ export class BattleScreen implements Screen {
         }
       }
     } else if (action === 'map') {
-      game.setScreen(new OverviewScreen(battle, this));
-      return;
+      this.showMinimap = !this.showMinimap;
     } else if (action === 'options') {
       game.setScreen(new OptionsScreen(this));
       return;
@@ -227,6 +300,17 @@ export class BattleScreen implements Screen {
     } else if (action === 'zoomOut') {
       zoomOut(cam, state.map.width, state.map.height);
     }
+
+    if (input.keysPressed.has('o')) {
+      game.setScreen(new OverviewScreen(battle, this));
+      return;
+    }
+    if (input.keysPressed.has('f3') || input.keysPressed.has('pause')) this.paused = !this.paused;
+    if (input.keysPressed.has('f5')) this.showTeamGrid = !this.showTeamGrid;
+    if (input.keysPressed.has('f6')) this.showMinimap = !this.showMinimap;
+    if (input.keysPressed.has('f7')) this.showSoldierMonitor = !this.showSoldierMonitor;
+    if (input.keysPressed.has('f8')) { game.setScreen(new OptionsScreen(this)); return; }
+    if (input.keysDown.has('control') && input.keysPressed.has('k')) this.showDead = !this.showDead;
 
     if (input.keysPressed.has(' ')) this.paused = !this.paused;
     if (input.keysPressed.has('+') || input.keysPressed.has('=')) {
@@ -255,7 +339,7 @@ export class BattleScreen implements Screen {
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
     this.terrain.draw(ctx, cam);
     this.terrain.drawOverlays(ctx, cam, state);
-    drawUnits(ctx, cam, state, battle.playerSide(), this.selectedTeamId, game.settings);
+    drawUnits(ctx, cam, state, battle.playerSide(), this.selectedTeamIds, game.settings, this.showDead);
     drawEffects(ctx, cam, state);
 
     const selTeam = this.selectedTeamId != null ? state.teams.get(this.selectedTeamId) ?? null : null;
@@ -264,7 +348,7 @@ export class BattleScreen implements Screen {
       const to = screenToWorld(cam, game.input.state.mouse);
       const a = worldToScreen(cam, from);
       const b = worldToScreen(cam, to);
-      ctx.strokeStyle = ORDER_COLOR[this.pendingOrder];
+      ctx.strokeStyle = PALETTE.gold;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
@@ -272,22 +356,34 @@ export class BattleScreen implements Screen {
       ctx.stroke();
     }
 
-    if (game.settings.losLines && selTeam && game.input.state.keysDown.has('shift')) {
+    if (this.pendingOrder === 'fire' && selTeam && game.input.state.keysDown.has('alt')) {
       const leader = state.soldiers.get(selTeam.leaderId);
       if (leader) {
         const to = screenToWorld(cam, game.input.state.mouse);
-        drawLOSLine(ctx, cam, state.map, leader.pos, to);
+        drawLOSLine(ctx, cam, state.map, leader.pos, to, { state, team: selTeam });
       }
+    }
+
+    // group-select marquee
+    if (this.leftDrag.active && this.leftDrag.moved >= DRAG_THRESHOLD_PX && !this.pendingOrder) {
+      const mouse = game.input.state.mouse;
+      const x0 = Math.min(this.leftDrag.startX, mouse.x), x1 = Math.max(this.leftDrag.startX, mouse.x);
+      const y0 = Math.min(this.leftDrag.startY, mouse.y), y1 = Math.max(this.leftDrag.startY, mouse.y);
+      ctx.strokeStyle = PALETTE.gold;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 2]);
+      ctx.strokeRect(x0 + 0.5, y0 + 0.5, x1 - x0, y1 - y0);
+      ctx.setLineDash([]);
     }
 
     ctx.restore();
 
     // Minimap and soldier monitor sit over the map viewport itself.
-    this.minimap.draw(ctx, this.terrain, state, cam, battle.playerSide());
-    this.soldierMonitor.draw(ctx, state, selTeam);
+    if (this.showMinimap) this.minimap.draw(ctx, this.terrain, state, cam, battle.playerSide());
+    if (this.showSoldierMonitor) this.soldierMonitor.draw(ctx, state, selTeam);
 
     drawHudBase(ctx);
-    this.teamGrid.draw(ctx, battle.selectableTeams(battle.playerSide()), state, this.selectedTeamId);
+    if (this.showTeamGrid) this.teamGrid.draw(ctx, battle.selectableTeams(battle.playerSide()), state, this.selectedTeamId);
     this.combatMessages.draw(ctx, state);
     this.bottomStrip.draw(ctx, state, selTeam);
 

@@ -20,6 +20,7 @@ export function hitRect(p: Vec2, r: Rect): boolean {
  * sunken=false (default): light on top/left, dark on bottom/right (raised).
  * sunken=true: reversed (inset look). */
 export function drawBevelBox(ctx: CanvasRenderingContext2D, r: Rect, sunken = false, face: string = PALETTE.chromeBg): void {
+  ctx.save();
   const x = Math.round(r.x), y = Math.round(r.y), w = Math.round(r.w), h = Math.round(r.h);
   ctx.fillStyle = face;
   ctx.fillRect(x, y, w, h);
@@ -31,6 +32,7 @@ export function drawBevelBox(ctx: CanvasRenderingContext2D, r: Rect, sunken = fa
   ctx.fillStyle = dark;
   ctx.fillRect(x, y + h - 2, w, 2);
   ctx.fillRect(x + w - 2, y, 2, h);
+  ctx.restore();
 }
 
 /** Draws a full panel: bevel box plus an optional title strip (small gold text,

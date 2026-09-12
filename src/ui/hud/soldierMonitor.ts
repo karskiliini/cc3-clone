@@ -37,7 +37,7 @@ function role(vehicle: Vehicle | undefined, soldiers: Soldier[], index: number, 
 function healthWord(s: Soldier): string {
   switch (s.health) {
     case 'healthy': return 'Healthy';
-    case 'wounded': return 'Wounded';
+    case 'wounded': return 'Slightly injured';
     case 'incapacitated': return 'Incap.';
     case 'dead': return 'Dead';
   }

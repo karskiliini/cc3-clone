@@ -412,6 +412,11 @@ export class ForcePicker {
   points: number;
   rosterIds: string[];
   category: 'regular' | 'armor' = 'regular';
+  /** When true, shows the "* unit is equipped for winter combat" note (the
+   * original marked individual winter-pattern teams with an asterisk; our
+   * data doesn't carry a per-team winter flag, so this shows the blanket
+   * note on winter maps instead). */
+  winterMap: boolean;
 
   private poolIds: string[] = [];
   private poolSelected = -1;
@@ -421,24 +426,25 @@ export class ForcePicker {
 
   private regularBtn: Rect = { x: 60, y: 96, w: 110, h: 22 };
   private armorBtn: Rect = { x: 178, y: 96, w: 110, h: 22 };
-  private poolListRect: Rect = { x: 60, y: 128, w: 330, h: 234 };
+  private poolListRect: Rect = { x: 60, y: 128, w: 330, h: 220 };
   private infoRect: Rect = { x: 60, y: 368, w: 330, h: 96 };
 
-  private refitBtn: Rect = { x: 440, y: 96, w: 76, h: 20 };
-  private restBtn: Rect = { x: 520, y: 96, w: 76, h: 20 };
-  private renameBtn: Rect = { x: 600, y: 96, w: 76, h: 20 };
-  private retireBtn: Rect = { x: 680, y: 96, w: 76, h: 20 };
-  private rosterListRect: Rect = { x: 440, y: 128, w: 330, h: 234 };
+  private detailsBtn: Rect = { x: 440, y: 96, w: 96, h: 20 };
+  private retireBtn: Rect = { x: 544, y: 96, w: 96, h: 20 };
+  private revertBtn: Rect = { x: 648, y: 96, w: 96, h: 20 };
+  private rosterListRect: Rect = { x: 440, y: 128, w: 330, h: 220 };
+  private pointsRect: Rect = { x: 440, y: 368, w: 330, h: 34 };
 
-  private readonly poolRowH = 26;
-  private readonly rosterRowH = 26;
+  private readonly poolRowH = 27;
+  private readonly rosterRowH = 27;
   private readonly maxRosterSlots = 15;
 
-  constructor(side: Side, year: number, points: number, initialRosterIds: string[]) {
+  constructor(side: Side, year: number, points: number, initialRosterIds: string[], winterMap = false) {
     this.side = side;
     this.year = year;
     this.points = points;
     this.rosterIds = [...initialRosterIds];
+    this.winterMap = winterMap;
     this.refreshPool();
   }
 
@@ -460,9 +466,6 @@ export class ForcePicker {
   }
 
   update(input: InputState): void {
-    if (pointInRect(input.mouse, this.regularBtn) === false && pointInRect(input.mouse, this.armorBtn) === false) {
-      // no-op branch kept for clarity/hit-order; category clicks handled below
-    }
     for (const c of input.clicks) {
       if (c.button !== 0) continue;
       const p = { x: c.x, y: c.y };
@@ -569,11 +572,17 @@ export class ForcePicker {
       ctx.fillText('Select a unit from the force pool to see its description.', this.infoRect.x + 10, this.infoRect.y + 20);
     }
 
+    if (this.winterMap) {
+      ctx.font = 'italic 10px Arial, Helvetica, sans-serif';
+      ctx.fillStyle = '#e0c04a';
+      ctx.textAlign = 'left';
+      ctx.fillText('* unit is equipped for winter combat', this.poolListRect.x, this.poolListRect.y + this.poolListRect.h + 12);
+    }
+
     drawVerticalStencil(ctx, 'ACTIVE ROSTER', 792, 372);
-    drawSmallMetalButton(ctx, this.refitBtn, 'Refit', { disabled: true });
-    drawSmallMetalButton(ctx, this.restBtn, 'Rest', { disabled: true });
-    drawSmallMetalButton(ctx, this.renameBtn, 'Rename', { disabled: true });
+    drawSmallMetalButton(ctx, this.detailsBtn, 'Details', { disabled: true });
     drawSmallMetalButton(ctx, this.retireBtn, 'Retire', { disabled: this.rosterSelected < 0 });
+    drawSmallMetalButton(ctx, this.revertBtn, 'Revert', { disabled: true });
 
     drawDarkPanel(ctx, this.rosterListRect);
     ctx.save();
@@ -620,10 +629,22 @@ export class ForcePicker {
     }
     ctx.restore();
 
+    drawDarkPanel(ctx, this.pointsRect);
     ctx.font = 'bold 13px Arial, Helvetica, sans-serif';
     ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
     ctx.fillStyle = '#f0f0ec';
-    ctx.fillText('Requisition Points Remaining', this.rosterListRect.x, 380 + 0); // placeholder, repositioned below
+    ctx.fillText('Requisition Points Remaining', this.pointsRect.x + 10, this.pointsRect.y + this.pointsRect.h / 2);
+    const boxW = 56;
+    const boxRect: Rect = { x: this.pointsRect.x + this.pointsRect.w - boxW - 8, y: this.pointsRect.y + 6, w: boxW, h: this.pointsRect.h - 12 };
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(boxRect.x, boxRect.y, boxRect.w, boxRect.h);
+    ctx.strokeStyle = 'rgba(210,210,205,0.35)';
+    ctx.strokeRect(boxRect.x + 0.5, boxRect.y + 0.5, boxRect.w - 1, boxRect.h - 1);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = this.remaining() < 0 ? '#d02020' : '#f0d840';
+    ctx.fillText(String(this.remaining()), boxRect.x + boxRect.w / 2, boxRect.y + boxRect.h / 2);
+    ctx.textBaseline = 'alphabetic';
   }
 }
 

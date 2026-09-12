@@ -35,7 +35,7 @@ function paintMap(p: MapPainter): void {
     { x: 100, y: 0 }, { x: 104, y: 25 }, { x: 98, y: 45 }, { x: 104, y: 60 },
     { x: 96, y: 80 }, { x: 100, y: 100 }, { x: 94, y: 120 }, { x: 100, y: 140 }, { x: 98, y: 160 },
   ], 3);
-  p.noiseFill('mud', 0.05, ['grass']);
+  p.noiseFill('mud', 0.02, ['grass']);
   p.bridge(96, 57, 14, 6);
   p.bridge(87, 117, 14, 2); // ford, narrower crossing off the main road
 

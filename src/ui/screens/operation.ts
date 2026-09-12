@@ -1,14 +1,12 @@
 import type { BattleConfig, BattleResult, CursorKind, InputState, OperationState, Rect, Screen, Side } from '@/shared/types';
-import { SCREEN_W, otherSide } from '@/shared/types';
+import { otherSide } from '@/shared/types';
+import { pointInRect } from '@/shared/math';
 import { game } from '@/game';
 import { Battle } from '@/sim/battle';
-import { OPERATION, DEFAULT_FORCES, initialForcePool } from '@/data/operation';
-import { TEAM_DEFS, teamsForYear } from '@/data/units';
+import { OPERATION, initialForcePool } from '@/data/operation';
 import { getMap } from '@/data/maps';
-import { Button, drawButton, drawPanel, drawTitleBanner, hitRect } from '@/ui/chrome';
-import { drawText, drawTextCentered } from '@/render/pixelfont';
-import { PALETTE } from '@/render/palette';
-import { drawBackdrop, createBackButton, ListBox, wordWrap } from './common';
+import { drawDarkPanel, drawLogo, drawScreenTitle, drawShadowText, drawSmallMetalButton } from '@/ui/chrome';
+import { beginMenuFrame, toMenuInput, BottomStrip, ForcePicker, wordWrap } from './common';
 import { MainMenuScreen } from './mainMenu';
 import { DeployScreen } from './deploy';
 
@@ -60,97 +58,83 @@ export function advanceOperation(result: BattleResult): void {
   saveOperation(op);
 }
 
-function clickedIn(input: InputState, r: Rect): boolean {
-  for (const c of input.clicks) {
-    if (c.button === 0 && hitRect({ x: c.x, y: c.y }, r)) return true;
-  }
-  return false;
-}
-
 export class OperationScreen implements Screen {
   private mode: 'new' | 'briefing' | 'complete';
   private newSide: Side = 'german';
   private hasSaved: boolean;
 
   // new-operation widgets
-  private sideGerR: Rect = { x: (SCREEN_W - 340) / 2, y: 220, w: 160, h: 24 };
-  private sideSovR: Rect = { x: (SCREEN_W - 340) / 2 + 180, y: 220, w: 160, h: 24 };
-  private startBtn = new Button({ x: (SCREEN_W - 160) / 2, y: 270, w: 160, h: 24 }, 'START');
-  private continueBtn = new Button({ x: (SCREEN_W - 200) / 2, y: 310, w: 200, h: 24 }, 'CONTINUE OPERATION');
+  private sideGerR: Rect = { x: 220, y: 220, w: 176, h: 26 };
+  private sideSovR: Rect = { x: 404, y: 220, w: 176, h: 26 };
+  private startR: Rect = { x: 320, y: 272, w: 160, h: 26 };
+  private continueR: Rect = { x: 300, y: 312, w: 200, h: 26 };
 
-  // briefing / force-picker widgets
-  private availableList = new ListBox({ x: 40, y: 260, w: 320, h: 240 }, 16);
-  private chosenList = new ListBox({ x: 440, y: 260, w: 320, h: 240 }, 16);
-  private addBtn = new Button({ x: 380, y: 320, w: 40, h: 20 }, '>>');
-  private removeBtn = new Button({ x: 380, y: 350, w: 40, h: 20 }, '<<');
-  private beginBtn = new Button({ x: SCREEN_W - 180, y: 556, w: 160, h: 20 }, 'BEGIN BATTLE');
-  private backBtn = createBackButton('BACK', 20, 556);
-  private chosen: string[] = [];
-  private availableDefIds: string[] = [];
+  private picker: ForcePicker | null = null;
+  private strip: BottomStrip;
 
   constructor() {
     this.hasSaved = loadOperation() != null;
     if (!game.operation) {
       this.mode = 'new';
+      this.strip = new BottomStrip({ showBack: true, nextEnabled: false });
     } else if (game.operation.index >= OPERATION.length) {
       this.mode = 'complete';
+      this.strip = new BottomStrip({ showBack: true, nextEnabled: false });
     } else {
       this.mode = 'briefing';
-      this.chosen = game.operation.forcePool.map((f) => f.defId);
-      this.refreshAvailable();
+      this.strip = new BottomStrip({ showBack: true, nextLabel: 'Next →' });
+      this.initPicker();
     }
   }
 
-  private refreshAvailable(): void {
+  private initPicker(): void {
     const op = game.operation;
     if (!op) return;
-    const def = OPERATION[op.index];
-    const pool = teamsForYear(op.playerSide, def.year);
-    this.availableList.items = pool.map((d) => `${d.name} (${d.cost})`);
-    this.availableDefIds = pool.map((d) => d.id);
-    this.chosenList.items = this.chosen.map((id) => TEAM_DEFS[id]?.name ?? id);
-  }
-
-  private requisitionRemaining(): number {
-    const op = game.operation;
-    if (!op) return 0;
-    const spent = this.chosen.reduce((sum, id) => sum + (TEAM_DEFS[id]?.cost ?? 0), 0);
-    return op.requisition - spent;
+    const battleDef = OPERATION[op.index];
+    const mapDef = getMap(battleDef.mapId);
+    this.picker = new ForcePicker(op.playerSide, battleDef.year, op.requisition, op.forcePool.map((f) => f.defId), mapDef.season === 'winter');
   }
 
   update(_dt: number, input: InputState): void {
+    const m = toMenuInput(input);
+
     if (this.mode === 'new') {
-      if (clickedIn(input, this.sideGerR)) this.newSide = 'german';
-      if (clickedIn(input, this.sideSovR)) this.newSide = 'soviet';
-      if (this.startBtn.update(input)) {
-        const op: OperationState = {
-          index: 0,
-          playerSide: this.newSide,
-          results: [],
-          forcePool: initialForcePool(this.newSide),
-          requisition: OPERATION[0].requisition[this.newSide],
-        };
-        game.operation = op;
-        saveOperation(op);
-        this.mode = 'briefing';
-        this.chosen = op.forcePool.map((f) => f.defId);
-        this.refreshAvailable();
-      }
-      if (this.hasSaved && this.continueBtn.update(input)) {
-        const saved = loadOperation();
-        if (saved) {
-          game.operation = saved;
-          this.mode = saved.index >= OPERATION.length ? 'complete' : 'briefing';
-          this.chosen = saved.forcePool.map((f) => f.defId);
-          this.refreshAvailable();
+      for (const c of m.clicks) {
+        if (c.button !== 0) continue;
+        const p = { x: c.x, y: c.y };
+        if (pointInRect(p, this.sideGerR)) this.newSide = 'german';
+        else if (pointInRect(p, this.sideSovR)) this.newSide = 'soviet';
+        else if (pointInRect(p, this.startR)) {
+          const op: OperationState = {
+            index: 0,
+            playerSide: this.newSide,
+            results: [],
+            forcePool: initialForcePool(this.newSide),
+            requisition: OPERATION[0].requisition[this.newSide],
+          };
+          game.operation = op;
+          saveOperation(op);
+          this.mode = 'briefing';
+          this.strip = new BottomStrip({ showBack: true, nextLabel: 'Next →' });
+          this.initPicker();
+        } else if (this.hasSaved && pointInRect(p, this.continueR)) {
+          const saved = loadOperation();
+          if (saved) {
+            game.operation = saved;
+            this.mode = saved.index >= OPERATION.length ? 'complete' : 'briefing';
+            this.strip = new BottomStrip({ showBack: true, nextLabel: this.mode === 'briefing' ? 'Next →' : undefined, nextEnabled: this.mode === 'briefing' });
+            if (this.mode === 'briefing') this.initPicker();
+          }
         }
       }
-      if (this.backBtn.update(input)) game.setScreen(new MainMenuScreen());
+      const result = this.strip.update(m);
+      if (result.quitOrBack || result.main) game.setScreen(new MainMenuScreen());
       return;
     }
 
     if (this.mode === 'complete') {
-      if (this.backBtn.update(input)) {
+      const result = this.strip.update(m);
+      if (result.quitOrBack || result.main) {
         game.operation = null;
         try {
           localStorage.removeItem(OPERATION_KEY);
@@ -164,34 +148,15 @@ export class OperationScreen implements Screen {
 
     // briefing
     const op = game.operation;
-    if (!op) return;
-    const defIds = this.availableDefIds;
-    this.availableList.update(input);
-    this.chosenList.update(input);
+    if (!op || !this.picker) return;
+    this.picker.update(m);
 
-    if (this.addBtn.update(input)) {
-      const id = defIds[this.availableList.selected];
-      const def = id ? TEAM_DEFS[id] : undefined;
-      if (def && this.requisitionRemaining() >= def.cost) {
-        this.chosen.push(def.id);
-        this.chosenList.items = this.chosen.map((cid) => TEAM_DEFS[cid]?.name ?? cid);
-      }
-    }
-    if (this.removeBtn.update(input)) {
-      const idx = this.chosenList.selected;
-      if (idx >= 0 && idx < this.chosen.length) {
-        this.chosen.splice(idx, 1);
-        this.chosenList.items = this.chosen.map((cid) => TEAM_DEFS[cid]?.name ?? cid);
-        this.chosenList.selected = -1;
-      }
-    }
-
-    if (this.backBtn.update(input)) {
+    const result = this.strip.update(m);
+    if (result.quitOrBack || result.main) {
       game.setScreen(new MainMenuScreen());
       return;
     }
-
-    if (this.beginBtn.update(input) && this.chosen.length > 0) {
+    if (result.next && this.picker.rosterIds.length > 0) {
       const battleDef = OPERATION[op.index];
       const enemy = otherSide(op.playerSide);
       const cfg: BattleConfig = {
@@ -201,7 +166,7 @@ export class OperationScreen implements Screen {
         seed: Date.now() & 0xffff,
         durationS: 20 * 60,
         difficulty: 'normal',
-        forces: { [op.playerSide]: this.chosen, [enemy]: battleDef.aiForces[enemy] } as Record<Side, string[]>,
+        forces: { [op.playerSide]: [...this.picker.rosterIds], [enemy]: battleDef.aiForces[enemy] } as Record<Side, string[]>,
       };
       game.battleConfig = cfg;
       game.battle = new Battle(cfg);
@@ -210,50 +175,53 @@ export class OperationScreen implements Screen {
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
-    drawBackdrop(ctx);
-    drawTitleBanner(ctx, 'OPERATION', 8);
+    beginMenuFrame(ctx);
+    drawLogo(ctx);
+    drawScreenTitle(ctx, 'OPERATION');
 
     if (this.mode === 'new') {
-      drawPanel(ctx, { x: (SCREEN_W - 400) / 2, y: 160, w: 400, h: 200 }, { title: 'NEW OPERATION' });
-      drawText(ctx, 'CHOOSE YOUR SIDE', (SCREEN_W - 100) / 2, 190, PALETTE.gold, 'small');
-      drawButton(ctx, this.sideGerR, 'GERMAN', { pressed: this.newSide === 'german' });
-      drawButton(ctx, this.sideSovR, 'SOVIET', { pressed: this.newSide === 'soviet' });
-      this.startBtn.draw(ctx);
-      if (this.hasSaved) this.continueBtn.draw(ctx);
-      this.backBtn.draw(ctx);
+      drawDarkPanel(ctx, { x: 200, y: 160, w: 400, h: 200 });
+      drawShadowText(ctx, 'NEW OPERATION — CHOOSE YOUR SIDE', 220, 194, 'bold 15px Arial, Helvetica, sans-serif', '#f0d840');
+      drawSmallMetalButton(ctx, this.sideGerR, 'German', { hot: this.newSide === 'german' });
+      drawSmallMetalButton(ctx, this.sideSovR, 'Soviet', { hot: this.newSide === 'soviet' });
+      drawSmallMetalButton(ctx, this.startR, 'Start');
+      if (this.hasSaved) drawSmallMetalButton(ctx, this.continueR, 'Continue Operation');
+      this.strip.draw(ctx);
+      ctx.restore();
       return;
     }
 
     if (this.mode === 'complete') {
-      drawTextCentered(ctx, 'OPERATION COMPLETE', SCREEN_W / 2, 240, PALETTE.gold, 'big');
-      this.backBtn.draw(ctx);
+      ctx.font = 'bold 28px Arial, Helvetica, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#f0d840';
+      ctx.fillText('OPERATION COMPLETE', 400, 260);
+      this.strip.draw(ctx);
+      ctx.restore();
       return;
     }
 
     const op = game.operation;
-    if (!op) return;
+    if (!op || !this.picker) {
+      ctx.restore();
+      return;
+    }
     const battleDef = OPERATION[op.index];
     const mapDef = getMap(battleDef.mapId);
-    drawPanel(ctx, { x: 20, y: 40, w: SCREEN_W - 40, h: 200 }, { title: `BATTLE ${op.index + 1} OF ${OPERATION.length}` });
-    drawText(ctx, battleDef.title, 40, 66, PALETTE.gold, 'small');
-    drawText(ctx, mapDef.name, 40, 82, PALETTE.text, 'small');
-    let ty = 98;
-    for (const line of wordWrap(mapDef.description, SCREEN_W - 100, 'small')) {
-      drawText(ctx, line, 40, ty, PALETTE.dim, 'small');
-      ty += 9;
-    }
-    drawText(ctx, `Results so far: ${op.results.map((r) => r.toUpperCase()).join(', ') || 'none'}`, 40, 168, PALETTE.text, 'small');
-    drawText(ctx, `Requisition remaining: ${this.requisitionRemaining()}`, 40, 184, PALETTE.gold, 'small');
+    drawDarkPanel(ctx, { x: 16, y: 46, w: 768, h: 42 });
+    ctx.font = 'bold 13px Arial, Helvetica, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#f0d840';
+    ctx.fillText(`BATTLE ${op.index + 1} OF ${OPERATION.length}: ${battleDef.title}`, 24, 62);
+    ctx.font = '11px Arial, Helvetica, sans-serif';
+    ctx.fillStyle = '#e8e8e0';
+    const desc = wordWrap(`${mapDef.name} — ${mapDef.description}`, 740, 'small').slice(0, 1).join(' ');
+    ctx.fillText(desc, 24, 78);
 
-    drawPanel(ctx, { x: 20, y: 250, w: 360, h: 260 }, { title: 'AVAILABLE FORCES' });
-    this.availableList.draw(ctx);
-    drawPanel(ctx, { x: 420, y: 250, w: 360, h: 260 }, { title: 'YOUR FORCE' });
-    this.chosenList.draw(ctx);
-    this.addBtn.draw(ctx);
-    this.removeBtn.draw(ctx);
+    this.picker.draw(ctx);
 
-    this.backBtn.draw(ctx);
-    this.beginBtn.draw(ctx);
+    this.strip.draw(ctx);
+    ctx.restore();
   }
 
   cursor(): CursorKind {

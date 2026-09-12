@@ -9,7 +9,6 @@ const SEED = 1941;
  * guard screen holding two farmsteads and a crossroads. */
 function paintMap(p: MapPainter): void {
   p.fill('grass');
-  p.noiseFill('tallgrass', 0.1, ['grass']);
 
   // irregular crop parcels either side of the stream, built from overlapping field blobs
   p.field(35, 35, 22, 18, 'crops', 1);
@@ -42,7 +41,7 @@ function paintMap(p: MapPainter): void {
     { x: 150, y: 75 }, { x: 143, y: 95 }, { x: 152, y: 115 }, { x: 148, y: 135 }, { x: 152, y: 150 },
   ], 3);
   p.treeLine([{ x: 145, y: 0 }, { x: 141, y: 20 }, { x: 148, y: 40 }, { x: 140, y: 60 }], 13, 0.4);
-  p.noiseFill('mud', 0.05, ['grass', 'tallgrass']);
+  p.noiseFill('mud', 0.02, ['grass', 'tallgrass']);
 
   // curving dirt road west-east through the crossroads, spur south, farm tracks
   p.road([

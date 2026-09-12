@@ -9,7 +9,6 @@ const SEED = 1942;
  * paved main street, anchored on the stone church and school. */
 function paintMap(p: MapPainter): void {
   p.fill('grass');
-  p.noiseFill('tallgrass', 0.08, ['grass']);
 
   // irregular crop parcels flanking the village, cut by grass strips and a dirt track
   p.field(35, 40, 26, 18, 'crops', 1);
@@ -86,7 +85,7 @@ function paintMap(p: MapPainter): void {
   p.farmstead(35, 130, 32);
 
   // mud patches near the street and low ground
-  p.noiseFill('mud', 0.08, ['grass', 'dirtroad']);
+  p.noiseFill('mud', 0.02, ['grass', 'dirtroad']);
 
   // rural/village decor scatter
   p.scatterDecor('bush', 0, 0, WIDTH, HEIGHT, 24, 60);

@@ -964,22 +964,31 @@ function buildTree(variant: number, season: Season): HTMLCanvasElement {
   }
   ctx.fillStyle = colors.canopy[0];
   ctx.beginPath();
-  ctx.arc(cx, cy, 9, 0, Math.PI * 2);
+  ctx.arc(cx, cy, 6.5, 0, Math.PI * 2);
   ctx.fill();
 
-  // NW highlight blob (light 3rd tone) plus a couple of bright fleck pixels.
+  // NW highlight fleck (light 3rd tone) — small, not a big overpowering blob.
   ctx.fillStyle = colors.hi;
   ctx.beginPath();
-  ctx.arc(cx - 4, cy - 5, 3, 0, Math.PI * 2);
+  ctx.arc(cx - 3.5, cy - 4.5, 1.6, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillRect(cx - 5, cy - 7, 1, 1);
+  ctx.fillRect(cx - 4, cy - 7, 1, 1);
   ctx.fillRect(cx - 1, cy - 8, 1, 1);
 
-  ctx.strokeStyle = 'rgba(20,20,16,0.4)';
+  // Per-lobe dark edge (drawn per-lobe above would double up, so a light
+  // overall wobble outline instead of one perfect circle).
+  ctx.strokeStyle = 'rgba(20,20,16,0.35)';
   ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.arc(cx, cy, 9.4, 0, Math.PI * 2);
-  ctx.stroke();
+  for (let i = 0; i < 7; i++) {
+    const ang = (i / 7) * Math.PI * 2 + hash2(variant, i, 1) * 0.6;
+    const dist = 3 + hash2(variant, i, 2) * 4;
+    const rad = 5 + hash2(variant, i, 3) * 3.2;
+    const x = cx + Math.cos(ang) * dist;
+    const y = cy + Math.sin(ang) * dist * 0.8;
+    ctx.beginPath();
+    ctx.arc(x, y, rad, 0, Math.PI * 2);
+    ctx.stroke();
+  }
   return c;
 }
 

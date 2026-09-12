@@ -45,6 +45,13 @@ function hashStr(s: string): number {
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
   return h >>> 0;
 }
+// hashStr is called a couple of times per pixel with one of ~19 Terrain strings — memoize.
+const hashStrCacheMap = new Map<string, number>();
+function hashStrCached(s: string): number {
+  let v = hashStrCacheMap.get(s);
+  if (v === undefined) { v = hashStr(s); hashStrCacheMap.set(s, v); }
+  return v;
+}
 
 interface BuildingBBox {
   minX: number; minY: number; maxX: number; maxY: number;
@@ -152,19 +159,33 @@ function rampLerp(ramp: RGB[], t: number): RGB {
  */
 function groundColorFbm(t: Terrain, season: Season, X: number, Y: number, seed: number): RGB {
   const ramp = rampRgb(season, t);
-  const f64 = fbm64(X, Y, seed + hashStr(t));
-  const f14 = fbm14(X, Y, seed + hashStr(t));
+  const th = hashStrCached(t);
+  const f64 = fbm64(X, Y, seed + th);
+  const f14 = fbm14(X, Y, seed + th);
   const g = hash2(X, Y, seed + 31);
   const tt = clamp01(0.5 + 0.9 * (f64 - 0.5) + 0.5 * (f14 - 0.5) + 0.18 * (g - 0.5));
   return rampLerp(ramp, tt);
 }
 
-/** Smooth low-frequency relief shading factor (NW light), 0.85..1.15. */
+/** Smooth low-frequency relief shading factor (NW light), 0.85..1.15.
+ * heightField's wavelength (~400px) is far larger than a pixel, so this is
+ * computed once per 4x4-pixel block and cached for the life of a chunk bake
+ * (reset per bakeChunk call) rather than resampled every pixel. */
+let reliefCache: Map<number, number> | null = null;
 function reliefFactor(X: number, Y: number, seed: number): number {
+  const bx = X >> 2, by = Y >> 2;
+  const key = (bx & 0xffff) * 100003 + (by & 0xffff);
+  const cache = reliefCache;
+  if (cache) {
+    const hit = cache.get(key);
+    if (hit !== undefined) return hit;
+  }
   const h1 = heightField(X - 4, Y - 4, seed);
   const h2 = heightField(X + 4, Y + 4, seed);
-  const f = 1 + 0.18 * (h1 - h2) * 8;
-  return f < 0.85 ? 0.85 : f > 1.15 ? 1.15 : f;
+  let f = 1 + 0.18 * (h1 - h2) * 8;
+  f = f < 0.85 ? 0.85 : f > 1.15 ? 1.15 : f;
+  if (cache) cache.set(key, f);
+  return f;
 }
 
 function setPixel(data: Uint8ClampedArray, w: number, x: number, y: number, c: RGB): void {
@@ -178,23 +199,29 @@ function setPixel(data: Uint8ClampedArray, w: number, x: number, y: number, c: R
 // once per chunk (with 1 tile of padding) so pixel-loop sampling is pure
 // array lookups plus a small amount of noise.
 // ============================================================================
-interface Grid { data: Float32Array; size: number }
+interface Grid { data: Float32Array; size: number; any: boolean }
 
 function buildGrid(map: GameMap, x0: number, y0: number, tiles: number, classify: (t: Terrain) => boolean): Grid {
   const size = tiles + 3;
   const data = new Float32Array(size * size);
+  let any = false;
   for (let gy = 0; gy < size; gy++) {
     const ty = y0 - 1 + gy;
     for (let gx = 0; gx < size; gx++) {
       const tx = x0 - 1 + gx;
-      data[gy * size + gx] = classify(tileAt(map, tx, ty)) ? 1 : 0;
+      const v = classify(tileAt(map, tx, ty)) ? 1 : 0;
+      data[gy * size + gx] = v;
+      if (v) any = true;
     }
   }
-  return { data, size };
+  return { data, size, any };
 }
 
-/** Bilinear sample of `grid` at the pixel (tx,px,ty,py) local to the chunk, plus hash noise. */
+/** Bilinear sample of `grid` at the pixel (tx,px,ty,py) local to the chunk, plus hash noise.
+ * Skips straight to 0 (no array/hash work at all) when the whole chunk has none of this
+ * feature — a common case (e.g. a chunk deep in a forest has no roads/crops/water/rubble). */
 function sampleGrid(grid: Grid, tx: number, px: number, ty: number, py: number, wpx: number, wpy: number, seed: number, noiseAmt = 0.08): number {
+  if (!grid.any) return 0;
   const { data, size } = grid;
   const gx0 = tx + (px < 5 ? 0 : 1);
   const fx = px < 5 ? 0.5 + px / TILE_PX : px / TILE_PX - 0.5;
@@ -261,40 +288,49 @@ function paintGroundAndFeatures(
         for (let px = 0; px < TILE_PX; px++) {
           const wpx = wx * TILE_PX + px;
 
-          // -------------------------------------------------- smoothed ground (feathered blend)
-          const cx0 = px < 5 ? wx - 1 : wx, cx1 = cx0 + 1;
-          const cy0 = py < 5 ? wy - 1 : wy, cy1 = cy0 + 1;
-          const tA = groundAt(cx0, cy0), tB = groundAt(cx1, cy0), tC = groundAt(cx0, cy1), tD = groundAt(cx1, cy1);
-          const fxx = px < 5 ? 0.5 + px / TILE_PX : px / TILE_PX - 0.5;
-          const fyy = py < 5 ? 0.5 + py / TILE_PX : py / TILE_PX - 0.5;
-          const scores = new Map<Terrain, number>();
-          scores.set(tA, (scores.get(tA) || 0) + (1 - fxx) * (1 - fyy));
-          scores.set(tB, (scores.get(tB) || 0) + fxx * (1 - fyy));
-          scores.set(tC, (scores.get(tC) || 0) + (1 - fxx) * fyy);
-          scores.set(tD, (scores.get(tD) || 0) + fxx * fyy);
-          let bestT: Terrain = tA, bestS = -1, secondT: Terrain | null = null, secondS = -1;
-          for (const [t, s] of scores) {
-            const noisy = s + (hash2(wpx, wpy, seed + hashStr(t)) - 0.5) * 0.16;
-            if (noisy > bestS) { secondT = bestT; secondS = bestS; bestT = t; bestS = noisy; }
-            else if (noisy > secondS) { secondT = t; secondS = noisy; }
-          }
-          let groundT: Terrain = bestT;
-          let color = groundColorFbm(bestT, season, wpx, wpy, seed);
-          // feathered 6px-ish blend band near borders (only pay for a second sample when close)
-          if (secondT && bestS - secondS < 0.3) {
-            const blend = clamp01(0.5 - (bestS - secondS) / 0.6) * 0.85;
-            color = lerpRGB(color, groundColorFbm(secondT, season, wpx, wpy, seed), blend);
-          }
-
-          // -------------------------------------------------------- coverage samples
+          // -------------------------------------------------------- coverage samples (cheap:
+          // a handful of array lookups + one hash2 each — always computed first so the far
+          // more expensive fbm ground blend below can be skipped entirely for pixels deep
+          // inside a feature, since one of the branches further down will overwrite `color`
+          // unconditionally in that case anyway).
           const covCrop = sampleGrid(cropsGrid, tx, px, ty, py, wpx, wpy, seed + 3001);
           const covPaved = sampleGrid(pavedGrid, tx, px, ty, py, wpx, wpy, seed + 3101);
           const covDirt = sampleGrid(dirtGrid, tx, px, ty, py, wpx, wpy, seed + 3201);
           const covWater = sampleGrid(waterGrid, tx, px, ty, py, wpx, wpy, seed + 3301);
           const covRubble = sampleGrid(rubbleGrid, tx, px, ty, py, wpx, wpy, seed + 3401);
+          const deepFeature = covCrop > 0.85 || covPaved > 0.85 || covDirt > 0.85 || covWater > 0.85 || covRubble > 0.85;
+
+          // -------------------------------------------------- smoothed ground (feathered blend)
+          let groundT: Terrain = 'grass';
+          let color: RGB;
+          if (!deepFeature) {
+            const cx0 = px < 5 ? wx - 1 : wx, cx1 = cx0 + 1;
+            const cy0 = py < 5 ? wy - 1 : wy, cy1 = cy0 + 1;
+            const tA = groundAt(cx0, cy0), tB = groundAt(cx1, cy0), tC = groundAt(cx0, cy1), tD = groundAt(cx1, cy1);
+            const fxx = px < 5 ? 0.5 + px / TILE_PX : px / TILE_PX - 0.5;
+            const fyy = py < 5 ? 0.5 + py / TILE_PX : py / TILE_PX - 0.5;
+            const sA = (1 - fxx) * (1 - fyy), sB = fxx * (1 - fyy), sC = (1 - fxx) * fyy, sD = fxx * fyy;
+            const nA = sA + (hash2(wpx, wpy, seed + hashStrCached(tA)) - 0.5) * 0.16;
+            const nB = sB + (hash2(wpx, wpy, seed + hashStrCached(tB)) - 0.5) * 0.16;
+            const nC = sC + (hash2(wpx, wpy, seed + hashStrCached(tC)) - 0.5) * 0.16;
+            const nD = sD + (hash2(wpx, wpy, seed + hashStrCached(tD)) - 0.5) * 0.16;
+            let bestT: Terrain, bestS: number, secondT: Terrain, secondS: number;
+            if (nA >= nB) { bestT = tA; bestS = nA; secondT = tB; secondS = nB; } else { bestT = tB; bestS = nB; secondT = tA; secondS = nA; }
+            if (nC > bestS) { secondT = bestT; secondS = bestS; bestT = tC; bestS = nC; } else if (nC > secondS) { secondT = tC; secondS = nC; }
+            if (nD > bestS) { secondT = bestT; secondS = bestS; bestT = tD; bestS = nD; } else if (nD > secondS) { secondT = tD; secondS = nD; }
+            groundT = bestT;
+            color = groundColorFbm(bestT, season, wpx, wpy, seed);
+            // feathered 6px-ish blend band near borders (only pay for a second sample when close)
+            if (secondT !== bestT && bestS - secondS < 0.3) {
+              const blend = clamp01(0.5 - (bestS - secondS) / 0.6) * 0.85;
+              color = lerpRGB(color, groundColorFbm(secondT, season, wpx, wpy, seed), blend);
+            }
+          } else {
+            color = { r: 0, g: 0, b: 0 }; // overwritten unconditionally by a covX>0.5 branch below
+          }
 
           // ------------------------------------------------- wear: worn shoulders near roads
-          if ((groundT === 'grass' || groundT === 'open' || groundT === 'tallgrass') && covCrop <= 0.5 && covWater <= 0.5) {
+          if (!deepFeature && (groundT === 'grass' || groundT === 'open' || groundT === 'tallgrass') && covCrop <= 0.5 && covWater <= 0.5) {
             const roadProx = Math.max(covDirt, covPaved * 0.7);
             if (roadProx > 0.02 && roadProx < 0.55) {
               const wearAmt = clamp01(roadProx / 0.55) * 0.4;
@@ -941,11 +977,13 @@ export class TerrainRenderer {
 
     // ------------------------------------------------------------ ground+features pass
     const img = ctx.createImageData(CHUNK_PX, CHUNK_PX);
+    reliefCache = new Map<number, number>();
     paintGroundAndFeatures(
       img.data, CHUNK_PX, map, season, this.seed, x0, y0, CHUNK_TILES, CHUNK_TILES,
       this.groundUnder, map.width, map.height, this.fieldId, this.fieldAxis,
       cropsGrid, pavedGrid, dirtGrid, waterGrid, rubbleGrid, dirtyGrid,
     );
+    reliefCache = null;
     ctx.putImageData(img, 0, 0);
 
     // ------------------------------------------------------------ detail pass (walls/hedges/etc + ground texture)

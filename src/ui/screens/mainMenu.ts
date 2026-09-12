@@ -1,94 +1,81 @@
-import type { CursorKind, InputState, Screen } from '@/shared/types';
-import { SCREEN_H, SCREEN_W } from '@/shared/types';
+import type { CursorKind, InputState, Rect, Screen } from '@/shared/types';
 import { game } from '@/game';
-import { Button, drawMarqueeTitle } from '@/ui/chrome';
-import { drawText, drawTextCentered } from '@/render/pixelfont';
-import { PALETTE } from '@/render/palette';
-import { buildMap } from '@/sim/map';
-import { getMap } from '@/data/maps';
-import { TerrainRenderer } from '@/render/terrainRender';
-import { drawBackdrop } from './common';
+import { drawLogo, drawMetalButton, drawScreenTitle } from '@/ui/chrome';
+import { pointInRect } from '@/shared/math';
+import { beginMenuFrame, toMenuInput, BottomStrip } from './common';
 import { BattleSetupScreen } from './battleSetup';
 import { OperationScreen } from './operation';
 import { OptionsScreen } from './options';
 
-const BTN_W = 160;
-const BTN_H = 20;
-
-// Rendered once, lazily, and cached at module scope so every MainMenuScreen
-// instance (returning to the menu, etc.) reuses the same backdrop bitmap.
-let titleBg: HTMLCanvasElement | null | undefined; // undefined = not attempted yet, null = failed
-
-function getTitleBackground(): HTMLCanvasElement | null {
-  if (titleBg !== undefined) return titleBg;
-  try {
-    const map = buildMap(getMap('village_1942'));
-    titleBg = new TerrainRenderer(map).thumbnail(SCREEN_W, SCREEN_H);
-  } catch {
-    titleBg = null;
-  }
-  return titleBg;
+interface MenuButtonSpec {
+  label: string;
+  rect: Rect;
+  disabled?: boolean;
+  action?: () => void;
 }
 
+const BTN_W = 340;
+const BTN_H = 46;
+
 export class MainMenuScreen implements Screen {
-  private battleBtn = new Button({ x: (SCREEN_W - BTN_W) / 2, y: 300, w: BTN_W, h: BTN_H }, 'BATTLE');
-  private operationBtn = new Button({ x: (SCREEN_W - BTN_W) / 2, y: 328, w: BTN_W, h: BTN_H }, 'OPERATION');
-  private optionsBtn = new Button({ x: (SCREEN_W - BTN_W) / 2, y: 356, w: BTN_W, h: BTN_H }, 'OPTIONS');
+  private buttons: MenuButtonSpec[] = [
+    { label: 'Play A Game', rect: { x: 340, y: 148, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new BattleSetupScreen()) },
+    { label: 'Boot Camp (Training)', rect: { x: 360, y: 236, w: BTN_W, h: BTN_H }, disabled: true },
+    { label: 'Operation', rect: { x: 380, y: 324, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OperationScreen()) },
+    { label: 'Options', rect: { x: 400, y: 412, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OptionsScreen(this)) },
+  ];
+  private hotIndex = -1;
+  private strip = new BottomStrip({ showBack: false, nextEnabled: false });
 
   update(_dt: number, input: InputState): void {
     if (input.clicks.length > 0) game.audio?.unlock?.();
+    const m = toMenuInput(input);
 
-    if (this.battleBtn.update(input)) {
-      game.setScreen(new BattleSetupScreen());
+    this.hotIndex = -1;
+    for (let i = 0; i < this.buttons.length; i++) {
+      const b = this.buttons[i];
+      if (!b.disabled && pointInRect(m.mouse, b.rect)) this.hotIndex = i;
+    }
+    for (const c of m.clicks) {
+      if (c.button !== 0) continue;
+      for (const b of this.buttons) {
+        if (!b.disabled && pointInRect({ x: c.x, y: c.y }, b.rect)) {
+          b.action?.();
+          return;
+        }
+      }
+    }
+
+    const result = this.strip.update(m);
+    if (result.quitOrBack || result.main) {
+      // already home; harmless reset
+      game.setScreen(new MainMenuScreen());
       return;
     }
-    if (this.operationBtn.update(input)) {
-      game.setScreen(new OperationScreen());
-      return;
-    }
-    if (this.optionsBtn.update(input)) {
+    if (result.options) {
       game.setScreen(new OptionsScreen(this));
-      return;
     }
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
-    const bg = getTitleBackground();
-    if (bg) {
-      ctx.drawImage(bg, 0, 0);
-      // darken to ~35% opacity with a vertical gradient (darker top/bottom)
-      const grad = ctx.createLinearGradient(0, 0, 0, SCREEN_H);
-      grad.addColorStop(0, 'rgba(8,9,7,0.85)');
-      grad.addColorStop(0.35, 'rgba(8,9,7,0.6)');
-      grad.addColorStop(0.65, 'rgba(8,9,7,0.6)');
-      grad.addColorStop(1, 'rgba(8,9,7,0.88)');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
-      ctx.strokeStyle = 'rgba(0,0,0,0.65)';
-      ctx.lineWidth = 8;
-      ctx.strokeRect(4, 4, SCREEN_W - 8, SCREEN_H - 8);
-      ctx.strokeStyle = 'rgba(216,180,72,0.25)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(9.5, 9.5, SCREEN_W - 19, SCREEN_H - 19);
-    } else {
-      drawBackdrop(ctx);
+    beginMenuFrame(ctx);
+
+    drawLogo(ctx);
+    drawScreenTitle(ctx, 'MAIN');
+
+    for (let i = 0; i < this.buttons.length; i++) {
+      const b = this.buttons[i];
+      drawMetalButton(ctx, b.rect, b.label, { disabled: b.disabled, hot: i === this.hotIndex });
     }
 
-    const cx = SCREEN_W / 2;
-    const ruleW = 360;
-    ctx.fillStyle = PALETTE.gold;
-    ctx.fillRect(cx - ruleW / 2, 78, ruleW, 1);
-    drawMarqueeTitle(ctx, 'CLOSE COMBAT III', cx, 88);
-    ctx.fillRect(cx - ruleW / 2, 88 + 17 + 8, ruleW, 1);
+    ctx.font = '11px Arial, Helvetica, sans-serif';
+    ctx.fillStyle = 'rgba(232,232,224,0.7)';
+    ctx.textAlign = 'left';
+    ctx.fillText('Microsoft(R) Close Combat(TM) III: The Russian Front (tribute) - all art procedural', 16, 522);
+    ctx.fillText('(c) 1998-1999 Atomic Games, Inc. -- fan-made clone, no affiliation.', 16, 536);
 
-    drawTextCentered(ctx, 'THE RUSSIAN FRONT', cx, 88 + 17 + 20, PALETTE.gold, 'big');
-
-    this.battleBtn.draw(ctx);
-    this.operationBtn.draw(ctx);
-    this.optionsBtn.draw(ctx);
-
-    const credit = "A tribute to the 1999 Atomic Games classic - all art procedural";
-    drawText(ctx, credit, 16, SCREEN_H - 20, PALETTE.dim, 'small');
+    this.strip.draw(ctx);
+    ctx.restore();
   }
 
   cursor(): CursorKind {

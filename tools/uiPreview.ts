@@ -1,10 +1,11 @@
 // ============================================================================
-// tools/uiPreview.ts — dev-only Vite page. Draws the full 800x600 bottom
-// panel (team list + soldier monitor + message panel) and the command menu
-// with a hand-built fake BattleState so a human can eyeball the CC3 chrome
-// look without running the sim. Deliberately does NOT import '@/sim/battle',
-// '@/sim/spawn' or any other sim orchestration module — only '@/sim/los' via
-// losTool.ts, which is an explicit, declared dependency of that module.
+// tools/uiPreview.ts — dev-only Vite page. Draws the full 1024x768 in-battle
+// HUD (team grid, combat messages, bottom strip, soldier monitor, minimap)
+// and the command menu with a hand-built fake BattleState so a human can
+// eyeball the CC3 chrome look without running the sim. Deliberately does NOT
+// import '@/sim/battle', '@/sim/spawn' or any other sim orchestration module
+// — only '@/sim/los' via losTool.ts, which is an explicit, declared
+// dependency of that module.
 // ============================================================================
 import type {
   BattleState,
@@ -18,13 +19,16 @@ import type {
   Vec2,
   Side,
 } from '@/shared/types';
-import { SIDES } from '@/shared/types';
-import { createCamera, screenToWorld } from '@/engine/camera';
-import { PALETTE } from '@/render/palette';
-import { drawText } from '@/render/pixelfont';
-import { TeamListPanel } from '@/ui/teamList';
-import { drawSoldierMonitor } from '@/ui/soldierMonitor';
-import { MessagePanel } from '@/ui/messagePanel';
+import { VIEW_H, VIEW_W } from '@/shared/types';
+import { createCamera, screenToWorld, zoomIn, zoomOut } from '@/engine/camera';
+import { HUD } from '@/render/palette';
+import { drawHudBase, setHudFont } from '@/ui/hud/hudChrome';
+import { TeamGrid } from '@/ui/hud/teamGrid';
+import { CombatMessages } from '@/ui/hud/combatMessages';
+import { BottomStrip } from '@/ui/hud/bottomStrip';
+import { SoldierMonitorPopup } from '@/ui/hud/soldierMonitor';
+import { Minimap } from '@/ui/hud/minimap';
+import { TerrainRenderer } from '@/render/terrainRender';
 import { CommandMenu } from '@/ui/commandMenu';
 import { drawLOSLine } from '@/ui/losTool';
 
@@ -38,7 +42,10 @@ function fakeMapDef(): MapDef {
     height: 24,
     season: 'summer',
     paint: () => {},
-    victoryLocations: [],
+    victoryLocations: [
+      { id: 1, name: "Pavlov's House", x: 12, y: 10, value: 2 },
+      { id: 2, name: 'Hill 227', x: 28, y: 6, value: 1 },
+    ],
     deployZones: {
       german: { x: 1, y: 1, w: 5, h: 5 },
       soviet: { x: 34, y: 18, w: 5, h: 5 },
@@ -57,7 +64,7 @@ function fakeMap(): GameMap {
     tiles: new Array(n).fill('open'),
     buildingId: new Int16Array(n).fill(-1),
     windows: new Uint8Array(n),
-    victoryLocations: [],
+    victoryLocations: def.victoryLocations.map((vl) => ({ ...vl, owner: null, captureTimer: 0, capturingSide: null })),
     smoke: new Float32Array(n),
     craters: [],
   };
@@ -119,92 +126,66 @@ function buildFakeState(): BattleState {
   const soldiers = new Map<number, Soldier>();
   const teams = new Map<number, Team>();
 
-  // --- Team 1: German Rifle Squad (6 soldiers, leader healthy, some casualties) ---
-  const t1Id = allocId();
-  const t1Soldiers: Soldier[] = [
-    makeSoldier(t1Id, 'german', true, 'Fw', 'Weber', 'kar98k'),
-    makeSoldier(t1Id, 'german', false, 'Gefr', 'Klein', 'mp40'),
-    makeSoldier(t1Id, 'german', false, 'Ogefr', 'Bauer', 'kar98k'),
-    makeSoldier(t1Id, 'german', false, 'Sold', 'Hoffmann', 'mg34'),
-    makeSoldier(t1Id, 'german', false, 'Sold', 'Schmidt', 'kar98k'),
-    makeSoldier(t1Id, 'german', false, 'Sold', 'Wagner', 'kar98k'),
-  ];
-  t1Soldiers[3].health = 'wounded';
-  t1Soldiers[3].activity = 'pinned';
-  t1Soldiers[4].health = 'incapacitated';
-  t1Soldiers[4].activity = 'incapacitated';
-  t1Soldiers[1].activity = 'firing';
-  t1Soldiers[0].activity = 'defending';
-  for (const s of t1Soldiers) soldiers.set(s.id, s);
+  function addTeam(name: string, type: Team['type'], side: Side, status: Team['status'], soldierSpecs: [string, string, string][]): Team {
+    const id = allocId();
+    const built = soldierSpecs.map(([rank, sname, weapon], i) => makeSoldier(id, side, i === 0, rank, sname, weapon));
+    for (const s of built) soldiers.set(s.id, s);
+    const team: Team = {
+      id,
+      defId: `${side}_${type}`,
+      side,
+      name,
+      type,
+      soldierIds: built.map((s) => s.id),
+      leaderId: built[0].id,
+      vehicleId: null,
+      order: null,
+      facing: 4,
+      experience: 45,
+      morale: 62,
+      status,
+      pos: { x: 5 + id, y: 5 },
+      outOfAction: false,
+      kills: 0,
+      aiObjective: null,
+    };
+    teams.set(id, team);
+    return team;
+  }
 
-  const team1: Team = {
-    id: t1Id,
-    defId: 'ger_rifle_43',
-    side: 'german',
-    name: 'Rifle Squad',
-    type: 'rifle',
-    soldierIds: t1Soldiers.map((s) => s.id),
-    leaderId: t1Soldiers[0].id,
-    vehicleId: null,
-    order: { type: 'defend', target: { x: 10, y: 10 }, issuedAt: 0 },
-    facing: 4,
-    experience: 45,
-    morale: 62,
-    status: 'Defending',
-    pos: { x: 5, y: 5 },
-    outOfAction: false,
-    kills: 2,
-    aiObjective: null,
-  };
-  teams.set(team1.id, team1);
-
-  // --- Team 2: Soviet Rifle Squad (6 soldiers, badly mauled, out of action test) ---
-  const t2Id = allocId();
-  const t2Soldiers: Soldier[] = [
-    makeSoldier(t2Id, 'soviet', true, 'Serzh', 'Ivanov', 'mosin'),
-    makeSoldier(t2Id, 'soviet', false, 'Ryad', 'Petrov', 'ppsh41'),
-    makeSoldier(t2Id, 'soviet', false, 'Ryad', 'Kuznetsov', 'mosin'),
-    makeSoldier(t2Id, 'soviet', false, 'Ryad', 'Volkov', 'dp28'),
-    makeSoldier(t2Id, 'soviet', false, 'Ryad', 'Sokolov', 'mosin'),
-    makeSoldier(t2Id, 'soviet', false, 'Ryad', 'Popov', 'svt40'),
-  ];
-  t2Soldiers[1].health = 'dead';
-  t2Soldiers[1].activity = 'dead';
-  t2Soldiers[2].health = 'wounded';
-  t2Soldiers[2].activity = 'cowering';
-  t2Soldiers[3].activity = 'panicked';
-  t2Soldiers[4].stance = 'prone';
-  t2Soldiers[4].activity = 'sneaking';
-  t2Soldiers[5].activity = 'moving';
-  for (const s of t2Soldiers) soldiers.set(s.id, s);
-
-  const team2: Team = {
-    id: t2Id,
-    defId: 'sov_rifle_43',
-    side: 'soviet',
-    name: 'Rifle Squad',
-    type: 'rifle',
-    soldierIds: t2Soldiers.map((s) => s.id),
-    leaderId: t2Soldiers[0].id,
-    vehicleId: null,
-    order: { type: 'moveFast', target: { x: 20, y: 20 }, issuedAt: 0 },
-    facing: 2,
-    experience: 30,
-    morale: 22,
-    status: 'Panicked',
-    pos: { x: 20, y: 20 },
-    outOfAction: false,
-    kills: 0,
-    aiObjective: null,
-  };
-  teams.set(team2.id, team2);
+  addTeam('Group Leader', 'command', 'german', 'Ambushing', [
+    ['Fw', 'Weber', 'kar98k'], ['Gefr', 'Klein', 'mp40'],
+  ]);
+  addTeam('Light Infantry', 'rifle', 'german', 'Ambushing', [
+    ['Uffz', 'Bauer', 'kar98k'], ['Sold', 'Hoffmann', 'kar98k'], ['Sold', 'Schmidt', 'kar98k'], ['Sold', 'Wagner', 'kar98k'],
+  ]);
+  addTeam('StuG IIIC', 'spg', 'german', 'Defending', [
+    ['Uffz', 'Krause', 'kar98k'],
+  ]);
+  const t4 = addTeam('MG Infantry', 'mg', 'german', 'Firing', [
+    ['Uffz', 'Fischer', 'kar98k'], ['Gefr', 'Meyer', 'mg34'], ['Sold', 'Vogel', 'kar98k'],
+  ]);
+  t4.soldierIds.forEach((id, i) => {
+    const s = soldiers.get(id)!;
+    if (i === 1) { s.activity = 'firing'; }
+  });
+  addTeam('Mortar-80mm', 'mortar', 'german', 'Ambushing', [
+    ['Uffz', 'Braun', 'kar98k'], ['Sold', 'Wolf', 'kar98k'],
+  ]);
+  const t6 = addTeam('HMG Infantry', 'mg', 'german', 'Pinned', [
+    ['Sgt', 'Strehle', 'mg34'], ['Sold', 'Bingler', 'kar98k'], ['Sold', 'Kubert', 'kar98k'],
+  ]);
+  soldiers.get(t6.soldierIds[0])!.health = 'dead';
+  soldiers.get(t6.soldierIds[0])!.activity = 'dead';
+  soldiers.get(t6.soldierIds[1])!.health = 'wounded';
+  soldiers.get(t6.soldierIds[2])!.activity = 'pinned';
 
   const messages: BattleMessage[] = [
     { time: 12, text: 'Battle begins.', kind: 'info' },
-    { time: 44, text: 'Rifle Squad spots the enemy.', kind: 'info' },
-    { time: 61, text: 'Klein opens fire.', kind: 'info' },
-    { time: 88, text: 'Rifle Squad is pinned down!', kind: 'warn' },
-    { time: 95, text: 'Petrov is killed.', kind: 'bad' },
+    { time: 44, text: 'Light Infantry Strategic Fire out of LOS.', kind: 'good' },
+    { time: 61, text: "MG Infantry We're pinned down.", kind: 'warn' },
+    { time: 88, text: 'Mortar-80mm Heading for cover.', kind: 'good' },
+    { time: 95, text: 'HMG Infantry KIA.', kind: 'bad' },
   ];
 
   const state: BattleState = {
@@ -235,9 +216,6 @@ function buildFakeState(): BattleState {
 }
 
 // ------------------------------------------------------------------- input
-// A minimal, self-contained InputState feed (mirrors src/engine/input.ts's
-// shape) so this preview never has to import '@/game' — that module chains
-// into screens/battle orchestration this tool intentionally stays clear of.
 function createLocalInput(canvas: HTMLCanvasElement): { state: InputState; endFrame(): void } {
   const state: InputState = {
     mouse: { x: 0, y: 0 },
@@ -251,9 +229,9 @@ function createLocalInput(canvas: HTMLCanvasElement): { state: InputState; endFr
 
   function toLogical(clientX: number, clientY: number): Vec2 {
     const rect = canvas.getBoundingClientRect();
-    const scale = Math.min(rect.width / 800, rect.height / 600);
-    const dispW = 800 * scale;
-    const dispH = 600 * scale;
+    const scale = Math.min(rect.width / 1024, rect.height / 768);
+    const dispW = 1024 * scale;
+    const dispH = 768 * scale;
     const offX = rect.left + (rect.width - dispW) / 2;
     const offY = rect.top + (rect.height - dispH) / 2;
     return { x: (clientX - offX) / (scale || 1), y: (clientY - offY) / (scale || 1) };
@@ -308,21 +286,21 @@ const ctx = canvas.getContext('2d')!;
 ctx.imageSmoothingEnabled = false;
 
 const state = buildFakeState();
-const teamListPanel = new TeamListPanel();
-const messagePanel = new MessagePanel();
+const terrain = new TerrainRenderer(state.map);
+const teamGrid = new TeamGrid();
+const combatMessages = new CombatMessages();
+const bottomStrip = new BottomStrip('battle');
+const soldierMonitor = new SoldierMonitorPopup();
+const minimap = new Minimap();
 const commandMenu = new CommandMenu();
 const { state: input, endFrame } = createLocalInput(canvas);
 
 let selectedTeamId: number | null = state.teams.values().next().value?.id ?? null;
-let paused = false;
-let speed: 1 | 2 | 4 = 1;
 
 const cam = createCamera();
 const losFrom: Vec2 = { x: 8, y: 6 };
 
 function friendlyTeams(): Team[] {
-  // Preview shows both sides in the roster so both TeamListPanel rows and
-  // dimmed/out-of-action styling can be inspected side by side.
   return Array.from(state.teams.values());
 }
 
@@ -334,7 +312,6 @@ function pushMessage(text: string, kind: BattleMessage['kind'] = 'info'): void {
 function frame(): void {
   const teams = friendlyTeams();
 
-  // Command menu takes input priority while open.
   if (commandMenu.isOpen) {
     const result = commandMenu.update(input);
     if (result && result !== 'cancel') {
@@ -343,11 +320,16 @@ function frame(): void {
       pushMessage('Command menu cancelled.', 'info');
     }
   } else {
-    const clickedId = teamListPanel.update(input, teams, state);
+    const clickedId = teamGrid.update(input, teams);
     if (clickedId != null) selectedTeamId = clickedId;
 
+    minimap.update(input, cam, state.map.width, state.map.height);
+    combatMessages.update(input, state);
+    const selTeam = selectedTeamId != null ? state.teams.get(selectedTeamId) ?? null : null;
+    soldierMonitor.update(input, state, selTeam);
+
     for (const c of input.clicks) {
-      if (c.button === 2 && c.y < 480) {
+      if (c.button === 2 && c.y < VIEW_H) {
         const team = selectedTeamId != null ? state.teams.get(selectedTeamId) : null;
         if (team) {
           commandMenu.open({ x: c.x, y: c.y }, team, { canSmoke: team.type === 'mortar', canFire: true });
@@ -355,16 +337,19 @@ function frame(): void {
       }
     }
 
-    const action = messagePanel.update(input);
-    if (action === 'pause') paused = !paused;
-    else if (action === 'truce') pushMessage('Truce offered.', 'warn');
-    else if (action === 'overview') pushMessage('Overview requested.', 'info');
+    const action = bottomStrip.update(input);
+    if (action === 'truce') pushMessage('Truce offered.', 'warn');
+    else if (action === 'flee') pushMessage('Flee ordered.', 'warn');
+    else if (action === 'map') pushMessage('Map requested.', 'info');
     else if (action === 'options') pushMessage('Options requested.', 'info');
-    if (action) pushMessage(`Button: ${action.toUpperCase()}`, 'info');
+    else if (action === 'zoomIn') zoomIn(cam, state.map.width, state.map.height);
+    else if (action === 'zoomOut') zoomOut(cam, state.map.width, state.map.height);
   }
 
-  if (input.keysPressed.has('+')) speed = speed === 1 ? 2 : speed === 2 ? 4 : 4;
-  if (input.keysPressed.has('-')) speed = speed === 4 ? 2 : 1;
+  if (input.wheel !== 0) {
+    if (input.wheel < 0) zoomIn(cam, state.map.width, state.map.height, input.mouse);
+    else zoomOut(cam, state.map.width, state.map.height, input.mouse);
+  }
 
   draw();
   endFrame();
@@ -372,19 +357,29 @@ function frame(): void {
 }
 
 function draw(): void {
-  ctx.fillStyle = '#1a2e1c';
-  ctx.fillRect(0, 0, 800, 480);
-  drawText(ctx, 'MAP VIEWPORT (fake) — hold Shift + move mouse here for the LOS tool', 8, 8, PALETTE.dim, 'small');
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, VIEW_W, VIEW_H);
+  ctx.clip();
+  terrain.draw(ctx, cam);
+  ctx.restore();
+  setHudFont(ctx, 'small');
+  ctx.fillStyle = HUD.dim;
+  ctx.fillText('MAP VIEWPORT (fake) — hold Shift + move mouse here for the LOS tool', 8, 8);
 
   if (input.keysDown.has('shift')) {
     const to = screenToWorld(cam, input.mouse);
     drawLOSLine(ctx, cam, state.map, losFrom, to);
   }
 
+  minimap.draw(ctx, terrain, state, cam, 'german');
   const selectedTeam = selectedTeamId != null ? state.teams.get(selectedTeamId) ?? null : null;
-  teamListPanel.draw(ctx, friendlyTeams(), state, selectedTeamId);
-  drawSoldierMonitor(ctx, state, selectedTeam);
-  messagePanel.draw(ctx, state, paused, speed);
+  soldierMonitor.draw(ctx, state, selectedTeam);
+
+  drawHudBase(ctx);
+  teamGrid.draw(ctx, friendlyTeams(), state, selectedTeamId);
+  combatMessages.draw(ctx, state);
+  bottomStrip.draw(ctx, state, selectedTeam);
 
   commandMenu.draw(ctx);
 }

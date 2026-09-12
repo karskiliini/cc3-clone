@@ -5,10 +5,10 @@
 import type {
   Camera, BattleState, Side, GameSettings, Soldier, Team, Facing8,
 } from '@/shared/types';
-import { VIEW_W, VIEW_H } from '@/shared/types';
+import { VIEW_W, VIEW_H, ORDER_DOT_COLOR } from '@/shared/types';
 import { facingAngle } from '@/shared/math';
 import { worldToScreen } from '@/engine/camera';
-import { PALETTE, ORDER_COLOR } from '@/render/palette';
+import { PALETTE } from '@/render/palette';
 import { getSoldierSprite, getVehicleSprite, getFlagSprite } from '@/render/sprites';
 import { drawText, textWidth } from '@/render/pixelfont';
 import { VEHICLE_DEFS } from '@/data/units';
@@ -21,13 +21,13 @@ function soldierBarColor(s: Soldier): string {
   return PALETTE.green;
 }
 
-/** Draws a small 12x3 colour bar 8px above each living soldier of the
+/** Draws a small 12x3 colour bar 8px above each living soldier of every
  * selected team — green healthy, yellow pinned/wounded, red broken/incap,
  * matching CC3's selected-team status ticks. */
-function drawSelectedTeamBars(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, selectedTeamId: number | null): void {
-  if (selectedTeamId == null) return;
+function drawSelectedTeamBars(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, selectedTeamIds: readonly number[]): void {
+  if (selectedTeamIds.length === 0) return;
   for (const s of state.soldiers.values()) {
-    if (s.teamId !== selectedTeamId) continue;
+    if (!selectedTeamIds.includes(s.teamId)) continue;
     if (s.health === 'dead' || s.vehicleId != null) continue;
     if (!visible(s.pos, cam)) continue;
     const p = worldToScreen(cam, s.pos);
@@ -60,7 +60,8 @@ function isEnemyVisible(state: BattleState, playerSide: Side, side: Side, id: nu
   return set.has(id);
 }
 
-function drawCorpses(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side): void {
+function drawCorpses(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side, showDead: boolean): void {
+  if (!showDead) return;
   const season = state.map.def.season;
   for (const s of state.soldiers.values()) {
     if (s.health !== 'dead') continue;
@@ -115,7 +116,7 @@ function drawFacingTick(ctx: CanvasRenderingContext2D, p: { x: number; y: number
   ctx.restore();
 }
 
-function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side, selectedTeamId: number | null): void {
+function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side, selectedTeamIds: readonly number[]): void {
   const season = state.map.def.season;
   for (const s of state.soldiers.values()) {
     if (s.health === 'dead') continue;
@@ -123,7 +124,7 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
     if (!isEnemyVisible(state, playerSide, s.side, s.id, false)) continue;
     if (!visible(s.pos, cam)) continue;
     const p = worldToScreen(cam, s.pos);
-    const selected = s.teamId === selectedTeamId;
+    const selected = selectedTeamIds.includes(s.teamId);
     if (selected) drawSelectionRing(ctx, p);
     const stance = s.health === 'incapacitated' ? 'prone' : s.stance;
     const sprite = getSoldierSprite(s.side, season, stance, s.facing, frameOf(s));
@@ -175,10 +176,20 @@ function drawTeamLabels(ctx: CanvasRenderingContext2D, cam: Camera, state: Battl
   }
 }
 
+/** Order dot colour: Move blue, Move Fast purple, Sneak yellow, Smoke gray,
+ * Fire red (direct, has a locked target team) or orange (suppression fire at
+ * a bare point); Defend/Ambush use their arc colours (blue/green). */
+function orderColor(team: Team): string {
+  const order = team.order;
+  if (!order) return ORDER_DOT_COLOR.move;
+  if (order.type === 'fire' && order.targetTeamId == null) return '#e08a2c';
+  return ORDER_DOT_COLOR[order.type];
+}
+
 function drawOrderLine(ctx: CanvasRenderingContext2D, cam: Camera, team: Team): void {
   const order = team.order;
   if (!order) return;
-  const color = ORDER_COLOR[order.type];
+  const color = orderColor(team);
   const from = worldToScreen(cam, team.pos);
   if (order.type === 'defend' || order.type === 'ambush') {
     const rad = facingAngle(team.facing) - Math.PI / 2;
@@ -186,31 +197,42 @@ function drawOrderLine(ctx: CanvasRenderingContext2D, cam: Camera, team: Team): 
     ctx.save();
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;
-    ctx.setLineDash([3, 2]);
     ctx.beginPath();
     ctx.arc(from.x, from.y, 20 * cam.zoom, rad - spread, rad + spread);
     ctx.stroke();
     ctx.restore();
     return;
   }
-  const to = worldToScreen(cam, order.target);
+  // Thin line from the team to each waypoint (if any) and finally the
+  // target, with a small filled dot at each stop — matches the original's
+  // order-dot presentation rather than a dashed line with an end marker.
+  const points = [order.target, ...(order.waypoints ?? [])];
   ctx.save();
   ctx.strokeStyle = color;
   ctx.lineWidth = 1;
-  ctx.setLineDash([3, 2]); // CC3-style dashed order line
-  ctx.beginPath();
-  ctx.moveTo(from.x, from.y);
-  ctx.lineTo(to.x, to.y);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.fillStyle = color;
-  ctx.fillRect(Math.round(to.x - 1), Math.round(to.y - 1), 3, 3);
+  let prev = from;
+  for (const wp of points) {
+    const to = worldToScreen(cam, wp);
+    ctx.beginPath();
+    ctx.moveTo(prev.x, prev.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+    prev = to;
+  }
+  for (const wp of points) {
+    const p = worldToScreen(cam, wp);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.restore();
 }
 
 export function drawUnits(
   ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState,
-  playerSide: Side, selectedTeamId: number | null, settings: GameSettings,
+  playerSide: Side, selectedTeamIds: readonly number[], settings: GameSettings,
+  showDead = true,
 ): void {
   ctx.save();
   ctx.beginPath();
@@ -218,15 +240,15 @@ export function drawUnits(
   ctx.clip();
   ctx.imageSmoothingEnabled = false;
 
-  drawCorpses(ctx, cam, state, playerSide);
+  drawCorpses(ctx, cam, state, playerSide, showDead);
   drawVehicles(ctx, cam, state, playerSide);
-  drawSoldiers(ctx, cam, state, playerSide, selectedTeamId);
-  drawSelectedTeamBars(ctx, cam, state, selectedTeamId);
+  drawSoldiers(ctx, cam, state, playerSide, selectedTeamIds);
+  drawSelectedTeamBars(ctx, cam, state, selectedTeamIds);
   drawFlags(ctx, cam, state);
   drawTeamLabels(ctx, cam, state, settings);
 
-  if (selectedTeamId != null) {
-    const team = state.teams.get(selectedTeamId);
+  for (const id of selectedTeamIds) {
+    const team = state.teams.get(id);
     if (team && team.side === playerSide) drawOrderLine(ctx, cam, team);
   }
 

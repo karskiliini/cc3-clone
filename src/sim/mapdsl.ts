@@ -1,4 +1,4 @@
-import type { DecorItem, DecorKind, Terrain, Vec2 } from '@/shared/types';
+import type { DecorItem, DecorKind, MapVectorFeature, Terrain, Vec2 } from '@/shared/types';
 import { hash2 } from '@/shared/rng';
 
 const NON_DECOR_TILES = new Set<Terrain>(['water', 'buildingWood', 'buildingStone', 'floor']);
@@ -11,6 +11,9 @@ export class MapPainter {
   seed: number;
   /** Visual dressing collected while painting; filtered against final tiles at the end. */
   decor: DecorItem[] = [];
+  /** Vector source geometry for road()/river()/line() calls, so the renderer can paint smooth
+   * curves instead of the stepped tile rasterization (tiles remain the sim ground truth). */
+  vectors: MapVectorFeature[] = [];
 
   constructor(tiles: Terrain[], w: number, h: number, seed = 0) {
     this.tiles = tiles;
@@ -61,40 +64,45 @@ export class MapPainter {
     }
   }
 
-  /** Scatters clumps of `t` over the map (optionally restricted to `onlyOver` tiles). */
+  /** A `patch()`-style organic blob, but each candidate cell is only painted when its CURRENT
+   * terrain is in `restrict` (or unconditionally when `restrict` is null) — used by `noiseFill`
+   * so blobs read as round/hand-painted rather than a jagged per-tile dilate mask. */
+  private patchRestricted(cx: number, cy: number, r: number, t: Terrain, restrict: Set<Terrain> | null, seedOffset: number): void {
+    const steps = Math.max(16, Math.round(r * 6));
+    const x0 = Math.floor(cx - r * 1.3), x1 = Math.ceil(cx + r * 1.3);
+    const y0 = Math.floor(cy - r * 1.3), y1 = Math.ceil(cy + r * 1.3);
+    for (let yy = y0; yy <= y1; yy++) {
+      for (let xx = x0; xx <= x1; xx++) {
+        if (xx < 0 || yy < 0 || xx >= this.w || yy >= this.h) continue;
+        if (restrict && !restrict.has(this.tiles[yy * this.w + xx])) continue;
+        const dx = xx + 0.5 - cx, dy = yy + 0.5 - cy;
+        const dist = Math.hypot(dx, dy);
+        if (dist > r * 1.3) continue;
+        const angle = Math.atan2(dy, dx);
+        const angleBucket = Math.round(((angle + Math.PI) / (2 * Math.PI)) * steps);
+        const noise = hash2(angleBucket, Math.round(r * 100) + seedOffset, this.seed);
+        const localR = r * (0.75 + noise * 0.5); // +-25%
+        if (dist <= localR) this.tiles[yy * this.w + xx] = t;
+      }
+    }
+  }
+
+  /** Scatters a handful of round, organically-edged blobs of `t` over the map (optionally
+   * restricted to cells currently painted `onlyOver`) — few and large, never a tile-aligned
+   * jagged silhouette. Blob count/size is derived from `density` so callers keep the same
+   * "fraction of map area" mental model as before. */
   noiseFill(t: Terrain, density: number, onlyOver?: Terrain[]): void {
+    if (density <= 0) return;
     const restrict = onlyOver ? new Set(onlyOver) : null;
-    const mask = new Uint8Array(this.w * this.h);
-    for (let y = 0; y < this.h; y++) {
-      for (let x = 0; x < this.w; x++) {
-        const i = y * this.w + x;
-        if (restrict && !restrict.has(this.tiles[i])) continue;
-        const n = hash2(x, y, this.seed + 101);
-        if (n > 1 - density) mask[i] = 1;
-      }
-    }
-    // dilate once for clumping, using a second hash so clumps look natural
-    const dilated = new Uint8Array(this.w * this.h);
-    for (let y = 0; y < this.h; y++) {
-      for (let x = 0; x < this.w; x++) {
-        const i = y * this.w + x;
-        if (mask[i]) { dilated[i] = 1; continue; }
-        let touching = false;
-        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          const nx = x + dx, ny = y + dy;
-          if (nx < 0 || ny < 0 || nx >= this.w || ny >= this.h) continue;
-          if (mask[ny * this.w + nx]) { touching = true; break; }
-        }
-        if (touching && hash2(x, y, this.seed + 202) > 0.5) dilated[i] = 1;
-      }
-    }
-    for (let y = 0; y < this.h; y++) {
-      for (let x = 0; x < this.w; x++) {
-        const i = y * this.w + x;
-        if (!dilated[i]) continue;
-        if (restrict && !restrict.has(this.tiles[i])) continue;
-        this.tiles[i] = t;
-      }
+    const avgBlobArea = Math.PI * 3.5 * 3.5; // radius ~3.5 tiles on average
+    const targetArea = this.w * this.h * density;
+    const count = Math.max(1, Math.round(targetArea / avgBlobArea));
+    const callSeed = 90000 + t.length * 977 + Math.round(density * 100000);
+    for (let i = 0; i < count; i++) {
+      const cx = hash2(i, 3, this.seed + callSeed) * this.w;
+      const cy = hash2(i, 7, this.seed + callSeed + 1) * this.h;
+      const r = 2 + hash2(i, 13, this.seed + callSeed + 2) * 3; // 2..5 tiles
+      this.patchRestricted(cx, cy, r, t, restrict, callSeed + i * 31);
     }
   }
 
@@ -130,14 +138,17 @@ export class MapPainter {
 
   road(points: Vec2[], width: number, t: 'dirtroad' | 'pavedroad'): void {
     this.rasterizeLine(points, width, t);
+    this.vectors.push({ kind: 'road', terrain: t, points: points.slice(), width });
   }
 
   river(points: Vec2[], width: number): void {
     this.rasterizeLine(points, width, 'water');
+    this.vectors.push({ kind: 'river', terrain: 'water', points: points.slice(), width });
   }
 
   line(points: Vec2[], t: Terrain): void {
     this.rasterizeLine(points, 1, t);
+    this.vectors.push({ kind: 'line', terrain: t, points: points.slice(), width: 1 });
   }
 
   bridge(x: number, y: number, w: number, h: number): void {

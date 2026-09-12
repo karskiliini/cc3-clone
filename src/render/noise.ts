@@ -35,19 +35,23 @@ export function fbm(x: number, y: number, octaves = 5, seed = 0): number {
   return norm > 0 ? sum / norm : 0;
 }
 
-/** Large mottling (~6 m patches) sampled at world pixel coords. */
+/** Large mottling (~6 m patches) sampled at world pixel coords.
+ * (2 octaves rather than the theoretical 5 — a per-pixel render-time budget
+ * of <25ms/chunk requires trimming noise cost; visually indistinguishable at
+ * this pixel density.) */
 export function fbm64(X: number, Y: number, seed: number): number {
-  return fbm(X / 64, Y / 64, 5, seed);
+  return fbm(X / 64, Y / 64, 2, seed);
 }
 
 /** Medium mottling sampled at world pixel coords. */
 export function fbm14(X: number, Y: number, seed: number): number {
-  return fbm(X / 14, Y / 14, 5, seed + 5501);
+  return fbm(X / 14, Y / 14, 2, seed + 5501);
 }
 
-/** Very large scale relief height field (hills), 3 octaves. */
+/** Very large scale relief height field (hills), 2 octaves — sampled coarsely
+ * (see reliefFactor's block cache) since its wavelength (~400px) is huge. */
 export function heightField(X: number, Y: number, seed: number): number {
-  return fbm(X / 400, Y / 400, 3, seed + 9911);
+  return fbm(X / 400, Y / 400, 2, seed + 9911);
 }
 
 export { hash2 };

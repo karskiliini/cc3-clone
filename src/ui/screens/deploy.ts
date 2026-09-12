@@ -1,5 +1,5 @@
-import type { CursorKind, InputState, Screen } from '@/shared/types';
-import { VIEW_H, VIEW_W } from '@/shared/types';
+import type { Camera, CursorKind, InputState, Screen } from '@/shared/types';
+import { VIEW_H, VIEW_W, otherSide } from '@/shared/types';
 import { game } from '@/game';
 import type { Battle } from '@/sim/battle';
 import { aiDeploy } from '@/sim/ai';
@@ -29,6 +29,8 @@ export class DeployScreen implements Screen {
   private draggingTeamId: number | null = null;
   private dragPan = makeDragPanState();
   private invalidTimer = 0;
+  private showMinimap = true;
+  private shadeCanvas = document.createElement('canvas');
 
   constructor(battle: Battle) {
     this.battle = battle;
@@ -40,6 +42,16 @@ export class DeployScreen implements Screen {
     const zone = map.def.deployZones[this.battle.playerSide()];
     centerCamera(game.cam, { x: zone.x + zone.w / 2, y: zone.y + zone.h / 2 });
     clampCamera(game.cam, map.width, map.height);
+
+    // Default starting orders per the manual: infantry Ambush, armour Defend.
+    for (const team of this.battle.selectableTeams(this.battle.playerSide())) {
+      if (team.order) continue;
+      this.battle.issueOrder(team.id, {
+        type: team.vehicleId != null ? 'defend' : 'ambush',
+        target: team.pos,
+        issuedAt: 0,
+      });
+    }
   }
 
   update(dt: number, input: InputState): void {
@@ -89,7 +101,7 @@ export class DeployScreen implements Screen {
       clampCamera(cam, map.width, map.height);
     }
 
-    this.minimap.update(input, cam, map.width, map.height);
+    if (this.showMinimap) this.minimap.update(input, cam, map.width, map.height);
     this.combatMessages.update(input, state);
     const selTeam = this.selectedTeamId != null ? state.teams.get(this.selectedTeamId) ?? null : null;
     this.soldierMonitor.update(input, state, selTeam);
@@ -100,11 +112,44 @@ export class DeployScreen implements Screen {
     } else if (action === 'begin') {
       this.battle.start();
       game.setScreen(new BattleScreen(this.battle));
+    } else if (action === 'map') {
+      this.showMinimap = !this.showMinimap;
     } else if (action === 'zoomIn') {
       zoomIn(cam, map.width, map.height);
     } else if (action === 'zoomOut') {
       zoomOut(cam, map.width, map.height);
     }
+    if (input.keysPressed.has('f6')) this.showMinimap = !this.showMinimap;
+  }
+
+  /** Deployment shading: own zone unshaded, enemy zone dark gray, everything
+   * else (neutral ground) light gray — drawn to an offscreen buffer first so
+   * the compositing punch-hole doesn't erase the terrain already drawn. */
+  private drawDeploymentShading(ctx: CanvasRenderingContext2D, cam: Camera): void {
+    const map = this.battle.state.map;
+    this.shadeCanvas.width = VIEW_W;
+    this.shadeCanvas.height = VIEW_H;
+    const sctx = this.shadeCanvas.getContext('2d')!;
+    sctx.clearRect(0, 0, VIEW_W, VIEW_H);
+    sctx.fillStyle = 'rgba(0,0,0,0.2)';
+    sctx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+    const ownZone = map.def.deployZones[this.battle.playerSide()];
+    const otl = worldToScreen(cam, { x: ownZone.x, y: ownZone.y });
+    const obr = worldToScreen(cam, { x: ownZone.x + ownZone.w, y: ownZone.y + ownZone.h });
+    sctx.save();
+    sctx.globalCompositeOperation = 'destination-out';
+    sctx.fillStyle = 'rgba(0,0,0,1)';
+    sctx.fillRect(otl.x, otl.y, obr.x - otl.x, obr.y - otl.y);
+    sctx.restore();
+
+    const enemyZone = map.def.deployZones[otherSide(this.battle.playerSide())];
+    const etl = worldToScreen(cam, { x: enemyZone.x, y: enemyZone.y });
+    const ebr = worldToScreen(cam, { x: enemyZone.x + enemyZone.w, y: enemyZone.y + enemyZone.h });
+    sctx.fillStyle = 'rgba(0,0,0,0.45)';
+    sctx.fillRect(etl.x, etl.y, ebr.x - etl.x, ebr.y - etl.y);
+
+    ctx.drawImage(this.shadeCanvas, 0, 0);
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
@@ -121,20 +166,11 @@ export class DeployScreen implements Screen {
     this.terrain.draw(ctx, cam);
     this.terrain.drawOverlays(ctx, cam, state);
 
-    // tint the player's deploy zone
-    const zone = map.def.deployZones[this.battle.playerSide()];
-    const tl = worldToScreen(cam, { x: zone.x, y: zone.y });
-    const br = worldToScreen(cam, { x: zone.x + zone.w, y: zone.y + zone.h });
-    ctx.fillStyle = 'rgba(90,160,255,0.18)';
-    ctx.fillRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
-    ctx.save();
-    ctx.strokeStyle = 'rgba(170,215,255,0.95)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 2]);
-    ctx.strokeRect(tl.x + 0.5, tl.y + 0.5, br.x - tl.x - 1, br.y - tl.y - 1);
-    ctx.restore();
+    // Deployment shading (manual): own zone unshaded, enemy zone dark gray,
+    // neutral ground light gray.
+    this.drawDeploymentShading(ctx, cam);
 
-    drawUnits(ctx, cam, state, this.battle.playerSide(), this.selectedTeamId, game.settings);
+    drawUnits(ctx, cam, state, this.battle.playerSide(), this.selectedTeamId != null ? [this.selectedTeamId] : [], game.settings);
 
     if (this.draggingTeamId != null) {
       const mouse = game.input.state.mouse;
@@ -150,7 +186,7 @@ export class DeployScreen implements Screen {
     }
     ctx.restore();
 
-    this.minimap.draw(ctx, this.terrain, state, cam, this.battle.playerSide());
+    if (this.showMinimap) this.minimap.draw(ctx, this.terrain, state, cam, this.battle.playerSide());
     const selTeam = this.selectedTeamId != null ? state.teams.get(this.selectedTeamId) ?? null : null;
     this.soldierMonitor.draw(ctx, state, selTeam);
 

@@ -70,6 +70,14 @@ export type DecorKind =
 /** Purely visual map dressing (no sim effect). Position in tile coords (may be fractional). */
 export interface DecorItem { kind: DecorKind; x: number; y: number; variant?: number }
 
+/** Vector source geometry recorded by the map DSL so the renderer can paint smooth curves (tiles remain the sim truth). */
+export interface MapVectorFeature {
+  kind: 'road' | 'river' | 'line';
+  terrain: Terrain;          // dirtroad/pavedroad/water/hedge/fence/stonewall/trench
+  points: Vec2[];            // tile coordinates (may be fractional)
+  width: number;             // tiles
+}
+
 export interface MapDef {
   id: string;
   name: string;
@@ -85,6 +93,8 @@ export interface MapDef {
   attacker: Side;
   /** optional visual dressing */
   decor?: DecorItem[];
+  /** optional vector geometry for smooth rendering of roads/rivers/linear features */
+  vectors?: MapVectorFeature[];
 }
 
 export interface GameMap {
@@ -242,6 +252,9 @@ export interface Order {
   target: Vec2;               // destination, fire point, or facing point
   targetTeamId?: number;      // for fire orders on a team
   issuedAt: number;           // battle seconds
+  /** Move/MoveFast/Sneak only: additional waypoints after `target`, placed by
+   * holding Shift while clicking (HUD-side chain; sim support may follow). */
+  waypoints?: Vec2[];
 }
 
 export type TeamMoraleWord = 'Fanatic' | 'Confident' | 'Steady' | 'Shaken' | 'Broken';
@@ -413,4 +426,10 @@ export interface GameSettings {
   unitLabels: boolean;
   losLines: boolean;
   speed: 1 | 2 | 4;
+  // ---- "realism" toggles from the original's Options screen (cosmetic
+  // no-ops for now; stored so the UI has somewhere to persist them) ----
+  alwaysSeeEnemy?: boolean;
+  neverActOnInitiative?: boolean;
+  alwaysFullEnemyInfo?: boolean;
+  alwaysObeyOrders?: boolean;
 }

@@ -14,7 +14,6 @@ function paintMap(p: MapPainter): void {
   p.patch(200, 60, 12, 'open');
   p.patch(50, 140, 9, 'open');
   p.patch(210, 40, 8, 'open');
-  p.noiseFill('tallgrass', 0.06, ['grass']);
 
   // sunflower / crops fields as irregular overlapping parcels, cut by dirt tracks
   p.field(35, 68, 26, 22, 'crops', 1);
