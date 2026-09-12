@@ -1,4 +1,4 @@
-import type { DecorItem, MapDef, Terrain } from '@/shared/types';
+import type { DecorItem, MapDef, MapVectorFeature, Terrain } from '@/shared/types';
 import { MapPainter } from '@/sim/mapdsl';
 
 const WIDTH = 200;
@@ -41,7 +41,11 @@ function paintMap(p: MapPainter): void {
     { x: 150, y: 75 }, { x: 143, y: 95 }, { x: 152, y: 115 }, { x: 148, y: 135 }, { x: 152, y: 150 },
   ], 3);
   p.treeLine([{ x: 145, y: 0 }, { x: 141, y: 20 }, { x: 148, y: 40 }, { x: 140, y: 60 }], 13, 0.4);
-  p.noiseFill('mud', 0.02, ['grass', 'tallgrass']);
+  // a few large mud patches along the stream banks and one at the crossroads' worn shoulder
+  p.patch(143, 20, 4, 'mud');
+  p.patch(145, 60, 4, 'mud');
+  p.patch(148, 115, 4, 'mud');
+  p.patch(60, 76, 3, 'mud');
 
   // curving dirt road west-east through the crossroads, spur south, farm tracks
   p.road([
@@ -73,14 +77,15 @@ function paintMap(p: MapPainter): void {
   p.addDecor('sign', 138, 72);
 }
 
-const decor: DecorItem[] = (() => {
+const { decor, vectors }: { decor: DecorItem[]; vectors: MapVectorFeature[] } = (() => {
   const tiles: Terrain[] = new Array(WIDTH * HEIGHT).fill('open');
   const p = new MapPainter(tiles, WIDTH, HEIGHT, SEED);
   paintMap(p);
-  return p.decor.filter((d) => {
+  const decor = p.decor.filter((d) => {
     const t = tiles[Math.floor(d.y) * WIDTH + Math.floor(d.x)];
     return t !== 'water' && t !== 'buildingWood' && t !== 'buildingStone' && t !== 'floor';
   });
+  return { decor, vectors: p.vectors };
 })();
 
 export const border_1941: MapDef = {
@@ -107,4 +112,5 @@ export const border_1941: MapDef = {
     soviet: { x: 170, y: 0, w: 30, h: 150 },
   },
   decor,
+  vectors,
 };

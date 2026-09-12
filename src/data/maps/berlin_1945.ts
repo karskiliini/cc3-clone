@@ -1,4 +1,4 @@
-import type { DecorItem, MapDef, Terrain } from '@/shared/types';
+import type { DecorItem, MapDef, MapVectorFeature, Terrain } from '@/shared/types';
 import { MapPainter } from '@/sim/mapdsl';
 
 const WIDTH = 220;
@@ -77,14 +77,15 @@ function paintMap(p: MapPainter): void {
   p.scatterDecor('puddle', 0, 0, WIDTH, HEIGHT, 14, 55);
 }
 
-const decor: DecorItem[] = (() => {
+const { decor, vectors }: { decor: DecorItem[]; vectors: MapVectorFeature[] } = (() => {
   const tiles: Terrain[] = new Array(WIDTH * HEIGHT).fill('open');
   const p = new MapPainter(tiles, WIDTH, HEIGHT, SEED);
   paintMap(p);
-  return p.decor.filter((d) => {
+  const decor = p.decor.filter((d) => {
     const t = tiles[Math.floor(d.y) * WIDTH + Math.floor(d.x)];
     return t !== 'water' && t !== 'buildingWood' && t !== 'buildingStone' && t !== 'floor';
   });
+  return { decor, vectors: p.vectors };
 })();
 
 export const berlin_1945: MapDef = {
@@ -111,4 +112,5 @@ export const berlin_1945: MapDef = {
     german: { x: 0, y: 0, w: 30, h: 160 },
   },
   decor,
+  vectors,
 };

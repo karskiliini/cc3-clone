@@ -1,4 +1,4 @@
-import type { DecorItem, MapDef, Terrain } from '@/shared/types';
+import type { DecorItem, MapDef, MapVectorFeature, Terrain } from '@/shared/types';
 import { MapPainter } from '@/sim/mapdsl';
 
 const WIDTH = 240;
@@ -84,14 +84,15 @@ function paintMap(p: MapPainter): void {
   p.scatterDecor('sign', 90, 100, 1, 1, 1, 65);
 }
 
-const decor: DecorItem[] = (() => {
+const { decor, vectors }: { decor: DecorItem[]; vectors: MapVectorFeature[] } = (() => {
   const tiles: Terrain[] = new Array(WIDTH * HEIGHT).fill('open');
   const p = new MapPainter(tiles, WIDTH, HEIGHT, SEED);
   paintMap(p);
-  return p.decor.filter((d) => {
+  const decor = p.decor.filter((d) => {
     const t = tiles[Math.floor(d.y) * WIDTH + Math.floor(d.x)];
     return t !== 'water' && t !== 'buildingWood' && t !== 'buildingStone' && t !== 'floor';
   });
+  return { decor, vectors: p.vectors };
 })();
 
 export const steppe_1943: MapDef = {
@@ -118,4 +119,5 @@ export const steppe_1943: MapDef = {
     soviet: { x: 0, y: 145, w: 240, h: 25 },
   },
   decor,
+  vectors,
 };

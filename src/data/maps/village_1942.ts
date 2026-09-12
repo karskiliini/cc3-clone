@@ -1,4 +1,4 @@
-import type { DecorItem, MapDef, Terrain } from '@/shared/types';
+import type { DecorItem, MapDef, MapVectorFeature, Terrain } from '@/shared/types';
 import { MapPainter } from '@/sim/mapdsl';
 
 const WIDTH = 220;
@@ -84,8 +84,10 @@ function paintMap(p: MapPainter): void {
   p.farmstead(180, 55, 30);
   p.farmstead(35, 130, 32);
 
-  // mud patches near the street and low ground
-  p.noiseFill('mud', 0.02, ['grass', 'dirtroad']);
+  // a few large mud patches near the street and the dirt-track low ground
+  p.patch(20, 65, 3, 'mud');
+  p.patch(162, 100, 3, 'mud');
+  p.patch(100, 84, 3, 'mud');
 
   // rural/village decor scatter
   p.scatterDecor('bush', 0, 0, WIDTH, HEIGHT, 24, 60);
@@ -96,14 +98,15 @@ function paintMap(p: MapPainter): void {
   p.scatterDecor('stump', 100, 130, 30, 20, 5, 65);
 }
 
-const decor: DecorItem[] = (() => {
+const { decor, vectors }: { decor: DecorItem[]; vectors: MapVectorFeature[] } = (() => {
   const tiles: Terrain[] = new Array(WIDTH * HEIGHT).fill('open');
   const p = new MapPainter(tiles, WIDTH, HEIGHT, SEED);
   paintMap(p);
-  return p.decor.filter((d) => {
+  const decor = p.decor.filter((d) => {
     const t = tiles[Math.floor(d.y) * WIDTH + Math.floor(d.x)];
     return t !== 'water' && t !== 'buildingWood' && t !== 'buildingStone' && t !== 'floor';
   });
+  return { decor, vectors: p.vectors };
 })();
 
 export const village_1942: MapDef = {
@@ -131,4 +134,5 @@ export const village_1942: MapDef = {
     german: { x: 0, y: 130, w: 220, h: 30 },
   },
   decor,
+  vectors,
 };
