@@ -20,10 +20,10 @@
 // tile) canvas scaled up, so scrolling never stalls. `thumbnail()` never
 // bakes full-res chunks at all — it only ever scales that low-res canvas.
 // ============================================================================
-import type { Camera, GameMap, BattleState, Terrain, Season } from '@/shared/types';
+import type { Camera, GameMap, BattleState, MapVectorFeature, Terrain, Season, Vec2 } from '@/shared/types';
 import { TILE_PX, VIEW_W, VIEW_H } from '@/shared/types';
 import { hash2 } from '@/shared/rng';
-import { fbm64, fbm14, heightField } from '@/render/noise';
+import { fbm, fbm64, fbm14, heightField } from '@/render/noise';
 import { idx, tileAt, inBounds } from '@/sim/map';
 import { TERRAIN_COLORS } from '@/render/palette';
 import { getTreeSprite, getSmokePuff } from '@/render/sprites';
@@ -254,6 +254,72 @@ function coverageAt(map: GameMap, classify: (t: Terrain) => boolean, tileXf: num
   return v;
 }
 
+// ============================================================================
+// vector geometry rendering (roads/rivers) — signed-distance-to-polyline
+// coverage instead of tile-grid rasterization, so edges are smooth ribbons
+// rather than 1-tile stair-steps. Only used when the map declares
+// `def.vectors`; tile-grid coverage (above) remains the fallback.
+// ============================================================================
+const VEC_FEATHER_PX = 6;
+
+interface VecSegW { ax: number; ay: number; bx: number; by: number; halfW: number }
+interface VecAreaField { segs: VecSegW[] }
+
+/** Builds a segment list (in world PIXEL coords) for every vector of `kind`+`terrain`, clipped
+ * to segments whose (width+feather+wobble)-expanded bbox actually overlaps this chunk. */
+function buildAreaField(
+  vectors: MapVectorFeature[] | undefined, kind: 'road' | 'river', terrain: Terrain,
+  x0: number, y0: number, tilesW: number, tilesH: number,
+): VecAreaField | null {
+  if (!vectors || !vectors.length) return null;
+  const pad = TILE_PX * 3; // generous margin for half-width + feather + fbm wobble
+  const minX = x0 * TILE_PX - pad, maxX = (x0 + tilesW) * TILE_PX + pad;
+  const minY = y0 * TILE_PX - pad, maxY = (y0 + tilesH) * TILE_PX + pad;
+  const segs: VecSegW[] = [];
+  for (const v of vectors) {
+    if (v.kind !== kind || v.terrain !== terrain) continue;
+    const halfW = (v.width * TILE_PX) / 2;
+    for (let i = 0; i < v.points.length - 1; i++) {
+      const a = v.points[i], b = v.points[i + 1];
+      const ax = a.x * TILE_PX, ay = a.y * TILE_PX, bx = b.x * TILE_PX, by = b.y * TILE_PX;
+      const sminX = Math.min(ax, bx) - halfW, smaxX = Math.max(ax, bx) + halfW;
+      const sminY = Math.min(ay, by) - halfW, smaxY = Math.max(ay, by) + halfW;
+      if (smaxX < minX || sminX > maxX || smaxY < minY || sminY > maxY) continue;
+      segs.push({ ax, ay, bx, by, halfW });
+    }
+  }
+  return segs.length ? { segs } : null;
+}
+
+interface VecSample { cov: number; dist: number; halfW: number }
+const VEC_SAMPLE_NONE: VecSample = { cov: 0, dist: 0, halfW: 1 };
+
+/** Coverage of a road/river vector field at world pixel (wpx,wpy): signed distance to the nearest
+ * polyline segment (round joins, since it's a min over segments), smoothstep-feathered over
+ * VEC_FEATHER_PX at a half-width modulated by low-amplitude coherent fbm so shoulders wander. */
+function sampleVecArea(field: VecAreaField, wpx: number, wpy: number, seed: number): VecSample {
+  let bestCov = 0, bestDist = 0, bestHalfW = 1;
+  for (const s of field.segs) {
+    const dx = s.bx - s.ax, dy = s.by - s.ay;
+    const len2 = dx * dx + dy * dy;
+    let t = len2 > 1e-6 ? ((wpx - s.ax) * dx + (wpy - s.ay) * dy) / len2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const cx = s.ax + t * dx, cy = s.ay + t * dy;
+    const ddx = wpx - cx, ddy = wpy - cy;
+    // wobble amplitude is +-TILE_PX*0.25 and the feather band is VEC_FEATHER_PX either side of
+    // that, so anything further than half-width + ~12px can never affect coverage — reject early.
+    const margin = s.halfW + TILE_PX * 0.25 + VEC_FEATHER_PX + 2;
+    const dist2 = ddx * ddx + ddy * ddy;
+    if (dist2 > margin * margin) continue; // cheap reject before paying for fbm
+    const dist = Math.sqrt(dist2);
+    const wobble = (fbm(wpx / 40, wpy / 40, 2, seed) - 0.5) * TILE_PX * 0.5;
+    const effHalf = s.halfW + wobble;
+    const cov = clamp01(0.5 - (dist - effHalf) / VEC_FEATHER_PX);
+    if (cov > bestCov) { bestCov = cov; bestDist = dist; bestHalfW = s.halfW; }
+  }
+  return bestCov > 0 ? { cov: bestCov, dist: bestDist, halfW: bestHalfW } : VEC_SAMPLE_NONE;
+}
+
 const isCrops = (t: Terrain) => t === 'crops';
 const isPaved = (t: Terrain) => t === 'pavedroad';
 const isDirtRoad = (t: Terrain) => t === 'dirtroad';
@@ -269,6 +335,7 @@ function paintGroundAndFeatures(
   groundUnder: Terrain[], mapW: number, mapH: number,
   fieldId: Int32Array, fieldAxis: Map<number, FieldInfo>,
   cropsGrid: Grid, pavedGrid: Grid, dirtGrid: Grid, waterGrid: Grid, rubbleGrid: Grid, dirtyGrid: Grid,
+  pavedVec: VecAreaField | null, dirtVec: VecAreaField | null, waterVec: VecAreaField | null,
 ): void {
   const groundAt = (tx: number, ty: number): Terrain => {
     const cx = tx < 0 ? 0 : tx >= mapW ? mapW - 1 : tx;
@@ -292,11 +359,16 @@ function paintGroundAndFeatures(
           // a handful of array lookups + one hash2 each — always computed first so the far
           // more expensive fbm ground blend below can be skipped entirely for pixels deep
           // inside a feature, since one of the branches further down will overwrite `color`
-          // unconditionally in that case anyway).
+          // unconditionally in that case anyway). Roads/rivers prefer the smooth vector
+          // distance field when the map declares one (see MapDef.vectors); tile-grid coverage
+          // is the fallback (and always used for crops/rubble, which aren't vectorized).
           const covCrop = sampleGrid(cropsGrid, tx, px, ty, py, wpx, wpy, seed + 3001);
-          const covPaved = sampleGrid(pavedGrid, tx, px, ty, py, wpx, wpy, seed + 3101);
-          const covDirt = sampleGrid(dirtGrid, tx, px, ty, py, wpx, wpy, seed + 3201);
-          const covWater = sampleGrid(waterGrid, tx, px, ty, py, wpx, wpy, seed + 3301);
+          const pavedRes = pavedVec ? sampleVecArea(pavedVec, wpx, wpy, seed + 3101) : null;
+          const covPaved = pavedRes ? pavedRes.cov : sampleGrid(pavedGrid, tx, px, ty, py, wpx, wpy, seed + 3101);
+          const dirtRes = dirtVec ? sampleVecArea(dirtVec, wpx, wpy, seed + 3201) : null;
+          const covDirt = dirtRes ? dirtRes.cov : sampleGrid(dirtGrid, tx, px, ty, py, wpx, wpy, seed + 3201);
+          const waterRes = waterVec ? sampleVecArea(waterVec, wpx, wpy, seed + 3301) : null;
+          const covWater = waterRes ? waterRes.cov : sampleGrid(waterGrid, tx, px, ty, py, wpx, wpy, seed + 3301);
           const covRubble = sampleGrid(rubbleGrid, tx, px, ty, py, wpx, wpy, seed + 3401);
           const deepFeature = covCrop > 0.85 || covPaved > 0.85 || covDirt > 0.85 || covWater > 0.85 || covRubble > 0.85;
 
@@ -307,13 +379,19 @@ function paintGroundAndFeatures(
             const cx0 = px < 5 ? wx - 1 : wx, cx1 = cx0 + 1;
             const cy0 = py < 5 ? wy - 1 : wy, cy1 = cy0 + 1;
             const tA = groundAt(cx0, cy0), tB = groundAt(cx1, cy0), tC = groundAt(cx0, cy1), tD = groundAt(cx1, cy1);
-            const fxx = px < 5 ? 0.5 + px / TILE_PX : px / TILE_PX - 0.5;
-            const fyy = py < 5 ? 0.5 + py / TILE_PX : py / TILE_PX - 0.5;
+            // coherent low-frequency fbm wobble of the sample position (not per-pixel white
+            // noise) so tile-to-tile ground borders wander like a brushed edge rather than
+            // staying tile-aligned — applies uniformly to every soft-ground class (grass,
+            // open, tallgrass, snow, mud all flow through this same code path).
+            const wobX = (fbm(wpx / 24, wpy / 24, 1, seed + 8801) - 0.5) * (VEC_FEATHER_PX * 1.6);
+            const wobY = (fbm(wpx / 24, wpy / 24, 1, seed + 8802) - 0.5) * (VEC_FEATHER_PX * 1.6);
+            const fxx = clamp01((px < 5 ? 0.5 + px / TILE_PX : px / TILE_PX - 0.5) + wobX / TILE_PX);
+            const fyy = clamp01((py < 5 ? 0.5 + py / TILE_PX : py / TILE_PX - 0.5) + wobY / TILE_PX);
             const sA = (1 - fxx) * (1 - fyy), sB = fxx * (1 - fyy), sC = (1 - fxx) * fyy, sD = fxx * fyy;
-            const nA = sA + (hash2(wpx, wpy, seed + hashStrCached(tA)) - 0.5) * 0.16;
-            const nB = sB + (hash2(wpx, wpy, seed + hashStrCached(tB)) - 0.5) * 0.16;
-            const nC = sC + (hash2(wpx, wpy, seed + hashStrCached(tC)) - 0.5) * 0.16;
-            const nD = sD + (hash2(wpx, wpy, seed + hashStrCached(tD)) - 0.5) * 0.16;
+            const nA = sA + (hash2(wpx, wpy, seed + hashStrCached(tA)) - 0.5) * 0.06;
+            const nB = sB + (hash2(wpx, wpy, seed + hashStrCached(tB)) - 0.5) * 0.06;
+            const nC = sC + (hash2(wpx, wpy, seed + hashStrCached(tC)) - 0.5) * 0.06;
+            const nD = sD + (hash2(wpx, wpy, seed + hashStrCached(tD)) - 0.5) * 0.06;
             let bestT: Terrain, bestS: number, secondT: Terrain, secondS: number;
             if (nA >= nB) { bestT = tA; bestS = nA; secondT = tB; secondS = nB; } else { bestT = tB; bestS = nB; secondT = tA; secondS = nA; }
             if (nC > bestS) { secondT = bestT; secondS = bestS; bestT = tC; bestS = nC; } else if (nC > secondS) { secondT = tC; secondS = nC; }
@@ -353,14 +431,21 @@ function paintGroundAndFeatures(
           // -------------------------------------------------------- roads
           if (covPaved > 0.5) {
             let rc = groundColorFbm('pavedroad', season, wpx, wpy, seed);
-            if (covPaved < 0.58) rc = shade(rc, -0.16); // kerb
+            const nearEdge = pavedRes ? pavedRes.dist > pavedRes.halfW * 0.82 : covPaved < 0.58;
+            if (nearEdge) rc = shade(rc, -0.16); // kerb
             const crackBlockX = Math.floor(wpx / 3), crackBlockY = Math.floor(wpy / 3);
             if (hash2(crackBlockX, crackBlockY, seed + 4501) < 0.02) rc = shade(rc, -0.24);
             color = rc;
           } else if (covDirt > 0.5) {
             let rc = groundColorFbm('dirtroad', season, wpx, wpy, seed);
-            // softened, worn ruts: two shallow iso-bands with hash breaks so they read as worn, not painted-on
-            if (covDirt >= 0.6 && covDirt <= 0.72 && hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4602) > 0.2) {
+            // softened, worn ruts: two shallow bands either side of the centreline, with hash
+            // breaks so they read as worn, not painted-on. From vector geometry this is a
+            // proper distance iso-band at +-0.35*halfwidth; from the tile-grid fallback it's
+            // an approximation via the coverage value itself.
+            if (dirtRes) {
+              const rutBand = Math.abs(dirtRes.dist - 0.35 * dirtRes.halfW);
+              if (rutBand < 1.6 && hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4602) > 0.2) rc = shade(rc, -0.1);
+            } else if (covDirt >= 0.6 && covDirt <= 0.72 && hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4602) > 0.2) {
               rc = shade(rc, -0.1);
             }
             if (hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4610) < 0.02) rc = shade(rc, -0.2); // sparse stones
@@ -370,13 +455,18 @@ function paintGroundAndFeatures(
           // -------------------------------------------------------- water
           if (covWater > 0.5) {
             let wc = groundColorFbm('water', season, wpx, wpy, seed);
+            const bankRatio = waterRes ? waterRes.dist / waterRes.halfW : null;
             if (season === 'winter') {
               const crackBlockX = Math.floor(wpx / 5), crackBlockY = Math.floor(wpy / 5);
               if (hash2(crackBlockX, crackBlockY, seed + 4801) < 0.03) wc = shade(wc, -0.18);
-              if (covWater < 0.66) wc = lerpRGB(wc, { r: 236, g: 240, b: 244 }, 0.5); // snow drift at the bank
+              const atBank = bankRatio !== null ? bankRatio > 0.66 : covWater < 0.66;
+              if (atBank) wc = lerpRGB(wc, { r: 236, g: 240, b: 244 }, 0.5); // snow drift at the bank
+            } else if (bankRatio !== null) {
+              if (bankRatio > 0.82) wc = shade(wc, -0.3); // dark bank line
+              else if (bankRatio > 0.62) wc = shade(wc, 0.18); // bank highlight band
             } else {
-              if (covWater < 0.62) wc = shade(wc, -0.3); // dark bank line
-              else if (covWater < 0.72) wc = shade(wc, 0.18); // bank highlight
+              if (covWater < 0.62) wc = shade(wc, -0.3);
+              else if (covWater < 0.72) wc = shade(wc, 0.18);
             }
             color = wc;
           }
@@ -814,17 +904,91 @@ function paintTrees(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy:
   }
 }
 
-function paintDetail(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number, season: Season, seed: number): void {
+/** Tiles whose terrain is in `vectorLineTerrains` are rendered by `paintLineVector` as one
+ * smooth stroked path per chunk instead — skip the blocky per-tile band for those here. */
+function paintDetail(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number, season: Season, seed: number, vectorLineTerrains: Set<Terrain>): void {
   const t = tileAt(map, wx, wy);
   switch (t) {
     case 'mud': paintMud(ctx, wx, wy, ox, oy, seed); break;
     case 'crater': paintCraterTile(ctx, ox, oy, seed, season); break;
-    case 'trench': paintTrench(ctx, map, wx, wy, ox, oy, seed); break;
-    case 'hedge': paintHedge(ctx, map, wx, wy, ox, oy, seed); break;
-    case 'fence': paintFence(ctx, map, wx, wy, ox, oy); break;
-    case 'stonewall': paintStonewall(ctx, map, wx, wy, ox, oy); break;
+    case 'trench': if (!vectorLineTerrains.has('trench')) paintTrench(ctx, map, wx, wy, ox, oy, seed); break;
+    case 'hedge': if (!vectorLineTerrains.has('hedge')) paintHedge(ctx, map, wx, wy, ox, oy, seed); break;
+    case 'fence': if (!vectorLineTerrains.has('fence')) paintFence(ctx, map, wx, wy, ox, oy); break;
+    case 'stonewall': if (!vectorLineTerrains.has('stonewall')) paintStonewall(ctx, map, wx, wy, ox, oy); break;
     case 'bridge': paintBridge(ctx, map, wx, wy, ox, oy); break;
     default: paintGroundTexture(ctx, map, wx, wy, ox, oy, season, seed); break;
+  }
+}
+
+// ------------------------------------------------- smooth vector line features (hedge/fence/
+// stonewall/trench): a single stroked path with round joins per feature, instead of the
+// per-tile axis-aligned band, so diagonal runs don't stair-step.
+function strokePolylineWorld(ctx: CanvasRenderingContext2D, points: Vec2[], x0: number, y0: number, widthPx: number, color: string): void {
+  if (points.length < 2 || widthPx <= 0) return;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = widthPx;
+  ctx.beginPath();
+  ctx.moveTo((points[0].x - x0) * TILE_PX, (points[0].y - y0) * TILE_PX);
+  for (let i = 1; i < points.length; i++) ctx.lineTo((points[i].x - x0) * TILE_PX, (points[i].y - y0) * TILE_PX);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** Walks a polyline (tile coords) at a fixed pixel spacing, calling `cb` with the world-pixel
+ * position and unit tangent at each stop — used to place fence posts / wall joint ticks. */
+function walkPolylineWorld(points: Vec2[], spacingPx: number, cb: (wx: number, wy: number, ux: number, uy: number) => void): void {
+  let carry = 0;
+  for (let s = 0; s < points.length - 1; s++) {
+    const a = points[s], b = points[s + 1];
+    const ax = a.x * TILE_PX, ay = a.y * TILE_PX, bx = b.x * TILE_PX, by = b.y * TILE_PX;
+    const dx = bx - ax, dy = by - ay;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-6) continue;
+    const ux = dx / len, uy = dy / len;
+    let d = carry;
+    while (d < len) {
+      cb(ax + ux * d, ay + uy * d, ux, uy);
+      d += spacingPx;
+    }
+    carry = d - len;
+  }
+}
+
+function paintLineVector(ctx: CanvasRenderingContext2D, v: MapVectorFeature, x0: number, y0: number, seed: number): void {
+  const pts = v.points;
+  if (pts.length < 2) return;
+  if (v.terrain === 'hedge') {
+    strokePolylineWorld(ctx, pts, x0, y0, TILE_PX * 0.4, 'rgba(10,20,8,0.28)');
+    strokePolylineWorld(ctx, pts, x0, y0, TILE_PX * 0.3, '#2c3d22');
+    strokePolylineWorld(ctx, pts, x0, y0, TILE_PX * 0.15, 'rgba(76,106,52,0.55)');
+  } else if (v.terrain === 'stonewall') {
+    strokePolylineWorld(ctx, pts, x0, y0, TILE_PX * 0.24, 'rgba(16,16,8,0.3)');
+    strokePolylineWorld(ctx, pts, x0, y0, TILE_PX * 0.2, '#9a9a92');
+    ctx.strokeStyle = '#5a5a52';
+    ctx.lineWidth = 1;
+    walkPolylineWorld(pts, 3, (wx, wy, ux, uy) => {
+      const lx = wx - x0 * TILE_PX, ly = wy - y0 * TILE_PX;
+      const px_ = -uy * 2, py_ = ux * 2;
+      ctx.beginPath();
+      ctx.moveTo(lx - px_, ly - py_);
+      ctx.lineTo(lx + px_, ly + py_);
+      ctx.stroke();
+    });
+  } else if (v.terrain === 'fence') {
+    strokePolylineWorld(ctx, pts, x0, y0, 2, '#5a4326');
+    ctx.fillStyle = '#3a2c18';
+    walkPolylineWorld(pts, TILE_PX * 2, (wx, wy) => {
+      const lx = wx - x0 * TILE_PX, ly = wy - y0 * TILE_PX;
+      ctx.fillRect(lx - 1, ly - 1, 3, 3);
+    });
+  } else if (v.terrain === 'trench') {
+    strokePolylineWorld(ctx, pts, x0, y0, TILE_PX * 0.35, 'rgba(120,108,84,0.32)');
+    strokePolylineWorld(ctx, pts, x0, y0, TILE_PX * 0.25, '#161410');
+  } else {
+    void seed;
   }
 }
 
@@ -841,6 +1005,9 @@ export class TerrainRenderer {
   private fieldAxis = new Map<number, FieldInfo>();
   private groundUnder: Terrain[];
   private lowRes: HTMLCanvasElement | null = null;
+  /** Terrains (hedge/fence/stonewall/trench) fully covered by a 'line' vector on this map — the
+   * per-tile band painter is skipped for these and a smooth stroked path is drawn instead. */
+  private vectorLineTerrains = new Set<Terrain>();
 
   constructor(map: GameMap) {
     this.map = map;
@@ -851,6 +1018,9 @@ export class TerrainRenderer {
     this.computeBuildingBBoxes();
     this.computeFields();
     this.groundUnder = this.computeGroundUnder();
+    if (map.def.vectors) {
+      for (const v of map.def.vectors) if (v.kind === 'line') this.vectorLineTerrains.add(v.terrain);
+    }
   }
 
   /** Nearest soft-ground terrain per tile (BFS/Voronoi from all soft-ground tiles), used as the
@@ -967,13 +1137,19 @@ export class TerrainRenderer {
     const x0 = cx * CHUNK_TILES, y0 = cy * CHUNK_TILES;
     const map = this.map;
 
-    // ------------------------------------------------------ coverage grids
+    // ------------------------------------------------------ coverage grids (fallback when a
+    // road/river has no vector geometry, and always for crops/rubble which aren't vectorized)
     const cropsGrid = buildGrid(map, x0, y0, CHUNK_TILES, isCrops);
     const pavedGrid = buildGrid(map, x0, y0, CHUNK_TILES, isPaved);
     const dirtGrid = buildGrid(map, x0, y0, CHUNK_TILES, isDirtRoad);
     const waterGrid = buildGrid(map, x0, y0, CHUNK_TILES, isWater);
     const rubbleGrid = buildGrid(map, x0, y0, CHUNK_TILES, isRubble);
     const dirtyGrid = season === 'winter' ? buildGrid(map, x0, y0, CHUNK_TILES, isDirtySource) : cropsGrid;
+
+    // ------------------------------------------------------ vector geometry (smooth roads/rivers)
+    const pavedVec = buildAreaField(map.def.vectors, 'road', 'pavedroad', x0, y0, CHUNK_TILES, CHUNK_TILES);
+    const dirtVec = buildAreaField(map.def.vectors, 'road', 'dirtroad', x0, y0, CHUNK_TILES, CHUNK_TILES);
+    const waterVec = buildAreaField(map.def.vectors, 'river', 'water', x0, y0, CHUNK_TILES, CHUNK_TILES);
 
     // ------------------------------------------------------------ ground+features pass
     const img = ctx.createImageData(CHUNK_PX, CHUNK_PX);
@@ -982,6 +1158,7 @@ export class TerrainRenderer {
       img.data, CHUNK_PX, map, season, this.seed, x0, y0, CHUNK_TILES, CHUNK_TILES,
       this.groundUnder, map.width, map.height, this.fieldId, this.fieldAxis,
       cropsGrid, pavedGrid, dirtGrid, waterGrid, rubbleGrid, dirtyGrid,
+      pavedVec, dirtVec, waterVec,
     );
     reliefCache = null;
     ctx.putImageData(img, 0, 0);
@@ -994,7 +1171,17 @@ export class TerrainRenderer {
         const wx = x0 + tx;
         if (wx >= map.width) continue;
         if (BUILDING_TERRAINS.has(tileAt(map, wx, wy))) continue;
-        paintDetail(ctx, map, wx, wy, tx * TILE_PX, ty * TILE_PX, season, this.seed);
+        paintDetail(ctx, map, wx, wy, tx * TILE_PX, ty * TILE_PX, season, this.seed, this.vectorLineTerrains);
+      }
+    }
+
+    // ------------------------------------------------------------ smooth vector line features
+    // (hedge/fence/stonewall/trench) drawn once per chunk as a stroked path, replacing the
+    // per-tile bands skipped above for terrains that have vector geometry on this map.
+    if (map.def.vectors && this.vectorLineTerrains.size) {
+      for (const v of map.def.vectors) {
+        if (v.kind !== 'line') continue;
+        paintLineVector(ctx, v, x0, y0, this.seed);
       }
     }
 

@@ -210,34 +210,46 @@ export function drawPoster(ctx: CanvasRenderingContext2D): void {
  * with a small orange vertical divider between the two words. */
 export function drawLogo(ctx: CanvasRenderingContext2D): void {
   const x = 16;
-  const y = 34;
+  const y = 42;
   ctx.save();
-  ctx.font = 'bold 22px Impact, "Arial Black", Arial, sans-serif';
+  ctx.font = '900 36px Impact, "Arial Black", Arial, sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
   let cx = x;
   const drawWord = (word: string) => {
     for (const ch of word) {
-      ctx.fillStyle = 'rgba(0,0,0,0.7)';
-      ctx.fillText(ch, cx + 2, y + 2);
-      ctx.fillStyle = '#f2f2ec';
+      ctx.fillStyle = 'rgba(0,0,0,0.75)';
+      ctx.fillText(ch, cx + 3, y + 3);
+      ctx.fillStyle = '#f4f4ee';
       ctx.fillText(ch, cx, y);
-      cx += ctx.measureText(ch).width + 3;
+      cx += ctx.measureText(ch).width + 2;
     }
   };
   drawWord('CLOSE');
-  cx += 6;
-  ctx.fillStyle = '#c8501a';
-  ctx.fillRect(Math.round(cx), y - 18, 3, 22);
-  ctx.fillRect(Math.round(cx) + 7, y - 18, 3, 22);
-  cx += 18;
+  cx += 8;
+  // divider: two beveled orange bars with rivet dots top/middle/bottom
+  for (const barX of [Math.round(cx), Math.round(cx) + 9]) {
+    ctx.fillStyle = '#a8420e';
+    ctx.fillRect(barX, y - 26, 6, 30);
+    ctx.fillStyle = '#e0611c';
+    ctx.fillRect(barX, y - 26, 6, 22);
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.fillRect(barX, y - 26, 6, 3);
+    ctx.fillStyle = '#2a0a06';
+    for (const dy of [y - 22, y - 12, y - 2]) {
+      ctx.beginPath();
+      ctx.arc(barX + 3, dy, 1.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  cx += 22;
   drawWord('COMBAT');
   ctx.restore();
 }
 
 /** Top-right screen-name label, e.g. 'MAIN', 'REQUISITION', 'BATTLE'. */
 export function drawScreenTitle(ctx: CanvasRenderingContext2D, text: string): void {
-  drawShadowText(ctx, text.toUpperCase(), 784, 34, 'bold 26px Arial, Helvetica, sans-serif', '#f5f5f0', 'rgba(0,0,0,0.75)', 'right');
+  drawShadowText(ctx, text.toUpperCase(), 784, 40, 'bold 28px Arial, Helvetica, sans-serif', '#f5f5f0', 'rgba(0,0,0,0.75)', 'right');
 }
 
 export interface MetalButtonOpts {
@@ -252,8 +264,8 @@ function buttonSeed(r: Rect): number {
 /** Builds (but doesn't stroke/fill) a ragged torn-metal outline path for `r`. */
 function jaggedButtonPath(ctx: CanvasRenderingContext2D, r: Rect, seed: number): void {
   const { x, y, w, h } = r;
-  const jag = (i: number, salt: number) => (hash2(seed + i, salt) - 0.5) * 5;
-  const teethX = 8;
+  const jag = (i: number, salt: number) => (hash2(seed + i, salt) - 0.5) * 14;
+  const teethX = 9;
   const teethY = 3;
   ctx.beginPath();
   ctx.moveTo(x, y + jag(0, 1));
@@ -269,26 +281,34 @@ function jaggedButtonPath(ctx: CanvasRenderingContext2D, r: Rect, seed: number):
 export function drawMetalButton(ctx: CanvasRenderingContext2D, r: Rect, label: string, opts: MetalButtonOpts = {}): void {
   const { hot = false, disabled = false } = opts;
   const seed = buttonSeed(r);
+
+  // 3px offset drop shadow at 40% opacity, cut to the same jagged silhouette
+  ctx.save();
+  ctx.translate(3, 3);
+  jaggedButtonPath(ctx, r, seed);
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fill();
+  ctx.restore();
+
   ctx.save();
   jaggedButtonPath(ctx, r, seed);
   ctx.clip();
-  const grad = ctx.createLinearGradient(0, r.y, 0, r.y + r.h);
+  // diagonal gunmetal gradient
+  const grad = ctx.createLinearGradient(r.x, r.y, r.x + r.w * 0.5, r.y + r.h);
   if (disabled) {
-    grad.addColorStop(0, '#3c3c3c');
-    grad.addColorStop(0.5, '#242424');
-    grad.addColorStop(1, '#181818');
+    grad.addColorStop(0, '#333333');
+    grad.addColorStop(1, '#151515');
   } else if (hot) {
     grad.addColorStop(0, '#6e6e6e');
     grad.addColorStop(0.5, '#414141');
     grad.addColorStop(1, '#242424');
   } else {
-    grad.addColorStop(0, '#57575a');
-    grad.addColorStop(0.5, '#333336');
-    grad.addColorStop(1, '#1c1c1e');
+    grad.addColorStop(0, '#3a3a3a');
+    grad.addColorStop(1, '#1a1a1a');
   }
   ctx.fillStyle = grad;
   ctx.fillRect(r.x - 6, r.y - 6, r.w + 12, r.h + 12);
-  ctx.fillStyle = 'rgba(255,255,255,0.16)';
+  ctx.fillStyle = disabled ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.18)';
   ctx.fillRect(r.x, r.y, r.w, 3);
   ctx.fillStyle = 'rgba(0,0,0,0.5)';
   for (let rx = r.x + 12; rx < r.x + r.w - 6; rx += 36) {
@@ -299,15 +319,23 @@ export function drawMetalButton(ctx: CanvasRenderingContext2D, r: Rect, label: s
     ctx.arc(rx, r.y + r.h - 4, 1.4, 0, Math.PI * 2);
     ctx.fill();
   }
+  if (disabled) {
+    // flat 45% grey wash desaturates the whole button in one pass
+    ctx.fillStyle = 'rgba(60,60,60,0.45)';
+    ctx.fillRect(r.x - 6, r.y - 6, r.w + 12, r.h + 12);
+  }
   ctx.restore();
 
   jaggedButtonPath(ctx, r, seed);
-  ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+  ctx.lineWidth = 2;
   ctx.stroke();
 
-  const textColor = disabled ? '#7a7a7a' : hot ? '#f2d048' : '#f4f4f0';
+  const textColor = disabled ? '#6a6a6a' : hot ? '#f2d048' : '#f4f4f0';
+  ctx.save();
+  if (disabled) ctx.globalAlpha = 0.55;
   drawShadowText(ctx, label, r.x + 18, r.y + r.h / 2 + 9, 'bold 26px Arial, Helvetica, sans-serif', textColor);
+  ctx.restore();
 }
 
 export interface SmallButtonOpts {
@@ -319,9 +347,10 @@ export interface SmallButtonOpts {
  * used for the bottom control strip present on every menu screen. */
 export function drawSmallMetalButton(ctx: CanvasRenderingContext2D, r: Rect, label: string, opts: SmallButtonOpts = {}): void {
   const { hot = false, disabled = false } = opts;
-  drawBevelBox(ctx, r, false, disabled ? '#2a2a2a' : hot ? '#4c4c4e' : '#38383a');
-  const color = disabled ? '#6c6c6c' : hot ? '#f2d048' : '#f0f0ec';
   ctx.save();
+  if (disabled) ctx.globalAlpha = 0.55;
+  drawBevelBox(ctx, r, false, disabled ? '#232323' : hot ? '#4c4c4e' : '#38383a');
+  const color = disabled ? '#5a5a5a' : hot ? '#f2d048' : '#f0f0ec';
   ctx.font = 'bold 12px Arial, Helvetica, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -346,28 +375,58 @@ export function drawBottomStrip(ctx: CanvasRenderingContext2D, buttons: BottomSt
   for (const b of buttons) drawSmallMetalButton(ctx, b.rect, b.label, { disabled: b.disabled, hot: b.hot });
 }
 
-/** A translucent dark panel with a thin light-grey frame — used for list
- * panels on the poster-style screens. */
+/** A translucent dark panel with a beveled metal-plate frame (light top/left,
+ * dark bottom/right edges) plus a corner rivet dot at each corner — used for
+ * list/info panels on the poster-style screens. */
 export function drawDarkPanel(ctx: CanvasRenderingContext2D, r: Rect): void {
+  const x = Math.round(r.x), y = Math.round(r.y), w = Math.round(r.w), h = Math.round(r.h);
+  ctx.save();
   ctx.fillStyle = 'rgba(0,0,0,0.45)';
-  ctx.fillRect(r.x, r.y, r.w, r.h);
-  ctx.strokeStyle = 'rgba(210,210,205,0.35)';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+  ctx.fillRect(x, y, w, h);
+  // beveled edges
+  ctx.fillStyle = '#6b3a22';
+  ctx.fillRect(x, y, w, 2);
+  ctx.fillRect(x, y, 2, h);
+  ctx.fillStyle = '#170a06';
+  ctx.fillRect(x, y + h - 2, w, 2);
+  ctx.fillRect(x + w - 2, y, 2, h);
+  // corner rivets
+  const rivet = (cx: number, cy: number) => {
+    ctx.fillStyle = '#0d0d0d';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.beginPath();
+    ctx.arc(cx - 0.6, cy - 0.6, 0.8, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  rivet(x + 6, y + 6);
+  rivet(x + w - 6, y + 6);
+  rivet(x + 6, y + h - 6);
+  rivet(x + w - 6, y + h - 6);
+  ctx.restore();
 }
 
-/** Draws `text` rotated -90deg (bottom-to-top), used for the vertical
- * "FORCE POOL" / "ACTIVE ROSTER" stencil labels on the requisition screen. */
-export function drawVerticalStencil(ctx: CanvasRenderingContext2D, text: string, x: number, yBottom: number, color = '#e08a2c'): void {
+/** Draws `text` rotated -90deg (bottom-to-top) in a chunky, letter-spaced
+ * "stencil" treatment (heavy outline + gaps read as cut stencil lettering),
+ * used for the vertical "FORCE POOL" / "ACTIVE ROSTER" labels. */
+export function drawVerticalStencil(ctx: CanvasRenderingContext2D, text: string, x: number, yBottom: number, color = '#ff7a1a'): void {
   ctx.save();
   ctx.translate(x, yBottom);
   ctx.rotate(-Math.PI / 2);
-  ctx.font = 'bold 24px Impact, "Arial Black", Arial, sans-serif';
+  ctx.font = '900 25px Impact, "Arial Black", Arial, sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = 'rgba(0,0,0,0.6)';
-  ctx.fillText(text, 2, 2);
-  ctx.fillStyle = color;
-  ctx.fillText(text, 0, 0);
+  let cx = 0;
+  for (const ch of text) {
+    const w = ctx.measureText(ch).width;
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#1a0a05';
+    ctx.strokeText(ch, cx, 0);
+    ctx.fillStyle = color;
+    ctx.fillText(ch, cx, 0);
+    cx += w + 2;
+  }
   ctx.restore();
 }

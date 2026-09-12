@@ -9,7 +9,7 @@ import { HUD } from '@/render/palette';
 import { clamp } from '@/shared/math';
 import { getTeamIcon } from '@/render/sprites';
 import { WEAPONS } from '@/data/weapons';
-import { drawHudBevel, drawHudButton, setHudFont, clipTextToWidth, teamBarColor, teamStatusLabel } from './hudChrome';
+import { drawHudBevel, drawHudButton, setHudFont, clipTextToWidth, teamBarColor, teamStatusLabel, teamStatusTextColor, tintedTeamIcon } from './hudChrome';
 
 export type BottomStripAction = 'chat' | 'options' | 'zoomIn' | 'zoomOut' | 'map' | 'truce' | 'flee' | 'begin' | 'auto';
 
@@ -148,20 +148,21 @@ export class BottomStrip {
 
     drawHudBevel(ctx, TEAM_ICON_R, true, HUD.base);
     if (selectedTeam) {
-      const icon = getTeamIcon(selectedTeam.type);
+      const icon = tintedTeamIcon(getTeamIcon(selectedTeam.type), selectedTeam.type);
       ctx.imageSmoothingEnabled = false;
       const iw = icon.width * 2, ih = icon.height * 2;
       ctx.drawImage(icon, Math.round(TEAM_ICON_R.x + (TEAM_ICON_R.w - iw) / 2), Math.round(TEAM_ICON_R.y + (TEAM_ICON_R.h - ih) / 2), iw, ih);
 
-      const barColor = teamBarColor(selectedTeam.status);
+      const barColor = teamBarColor(selectedTeam);
       ctx.fillStyle = barColor;
       ctx.fillRect(Math.round(NAME_BAR_R.x), Math.round(NAME_BAR_R.y), Math.round(NAME_BAR_R.w), Math.round(NAME_BAR_R.h));
+      const nameOnDark = barColor === HUD.darkRed || barColor === HUD.red;
       setHudFont(ctx, 'tiny');
-      ctx.fillStyle = HUD.black;
+      ctx.fillStyle = nameOnDark ? HUD.text : HUD.black;
       ctx.fillText(clipTextToWidth(ctx, selectedTeam.name, NAME_BAR_R.w - 4), Math.round(NAME_BAR_R.x + 2), Math.round(NAME_BAR_R.y + 1));
 
       setHudFont(ctx, 'small');
-      ctx.fillStyle = HUD.text;
+      ctx.fillStyle = teamStatusTextColor(selectedTeam.status);
       ctx.fillText(clipTextToWidth(ctx, teamStatusLabel(selectedTeam.status), STATUS_R.w), Math.round(STATUS_R.x), Math.round(STATUS_R.y));
 
       const soldiers = aliveSoldiersIncDead(state, selectedTeam).slice(0, 10);
@@ -177,9 +178,8 @@ export class BottomStrip {
       drawAmmoBar(ctx, 'Anti-Pers:', AP_LABEL, AP_BAR, ammoFraction(state, selectedTeam, 'ap'));
       drawAmmoBar(ctx, 'Anti-Tank:', AT_LABEL, AT_BAR, ammoFraction(state, selectedTeam, 'at'));
     } else {
-      setHudFont(ctx, 'small');
-      ctx.fillStyle = HUD.dim;
-      ctx.fillText('No team selected', NAME_BAR_R.x, NAME_BAR_R.y);
+      // Nothing selected: leave the name/status/icon area blank, matching
+      // the original (it is icon-only once a team is picked, empty otherwise).
       drawAmmoBar(ctx, 'Anti-Pers:', AP_LABEL, AP_BAR, 0);
       drawAmmoBar(ctx, 'Anti-Tank:', AT_LABEL, AT_BAR, 0);
     }

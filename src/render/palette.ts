@@ -164,6 +164,8 @@ export const HUD = {
   green: '#3fbf3f',
   yellow: '#e8d83c',
   red: '#d02020',
+  darkRed: '#6e1616',
+  cyan: '#3ccfc8',
   dim: '#a89088',
   titleRed: '#d64b3c',
   black: '#0c0402',

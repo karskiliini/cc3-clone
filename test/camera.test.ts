@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createCamera, worldToScreen, screenToWorld, clampCamera, panCamera, centerCamera } from '@/engine/camera';
+import { createCamera, worldToScreen, screenToWorld, clampCamera, panCamera, centerCamera, zoomIn, zoomOut } from '@/engine/camera';
 import { TILE_PX, VIEW_W, VIEW_H } from '@/shared/types';
 
 describe('camera', () => {
@@ -94,5 +94,28 @@ describe('camera', () => {
     centerCamera(cam, { x: 50, y: 60 });
     expect(cam.x).toBeCloseTo(50 - viewTilesW / 2, 6);
     expect(cam.y).toBeCloseTo(60 - viewTilesH / 2, 6);
+  });
+
+  it('zoomIn increases cam.zoom (magnifies) and zoomOut decreases it (pulls back)', () => {
+    const cam = createCamera();
+    expect(cam.zoom).toBe(1);
+    zoomIn(cam, 1000, 1000);
+    expect(cam.zoom).toBe(2);
+    zoomIn(cam, 1000, 1000);
+    expect(cam.zoom).toBe(2); // clamped at the top of ZOOM_LEVELS
+    zoomOut(cam, 1000, 1000);
+    expect(cam.zoom).toBe(1);
+    zoomOut(cam, 1000, 1000);
+    expect(cam.zoom).toBe(0.5);
+    zoomOut(cam, 1000, 1000);
+    expect(cam.zoom).toBe(0.5); // clamped at the bottom
+  });
+
+  it('zooming out shows more of the map (more tiles fit the same viewport)', () => {
+    const cam = createCamera();
+    const tilesAtZoom1 = VIEW_W / (TILE_PX * cam.zoom);
+    zoomOut(cam, 1000, 1000);
+    const tilesAtZoomOut = VIEW_W / (TILE_PX * cam.zoom);
+    expect(tilesAtZoomOut).toBeGreaterThan(tilesAtZoom1);
   });
 });

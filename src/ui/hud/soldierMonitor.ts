@@ -4,12 +4,65 @@
 // selected: one 2-line row per soldier (surname/role/health, activity/weapon/
 // rounds), a header tab row for vehicle teams, and a left scroll arrow.
 // ============================================================================
-import type { Rect, BattleState, Team, Soldier, Vehicle, InputState } from '@/shared/types';
+import type { Rect, BattleState, Team, Soldier, Vehicle, InputState, WeaponClass } from '@/shared/types';
 import { PANEL_Y } from '@/shared/types';
 import { clamp } from '@/shared/math';
 import { HUD } from '@/render/palette';
 import { WEAPONS } from '@/data/weapons';
 import { drawHudBevel, hitRect, setHudFont, clipTextToWidth } from './hudChrome';
+
+const GLYPH_SIZE = 8;
+
+/** Small line-art weapon pictogram (rifle/mg/pistol/mortar/AT/flame silhouette)
+ * drawn to the left of the ammo readout, matching the original's icon-first
+ * weapon/ammo line instead of plain text alone. */
+function drawWeaponGlyph(ctx: CanvasRenderingContext2D, x: number, y: number, cls: WeaponClass): void {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.strokeStyle = HUD.dim;
+  ctx.fillStyle = HUD.dim;
+  ctx.lineWidth = 1;
+  switch (cls) {
+    case 'rifle':
+    case 'atrifle':
+      ctx.beginPath(); ctx.moveTo(0, 7); ctx.lineTo(7, 0); ctx.stroke();
+      ctx.fillRect(0, 6, 2, 2);
+      break;
+    case 'smg':
+    case 'pistol':
+      ctx.beginPath(); ctx.moveTo(0, 6); ctx.lineTo(6, 1); ctx.stroke();
+      ctx.fillRect(2, 4, 2, 3);
+      break;
+    case 'lmg':
+    case 'hmg':
+    case 'coaxmg':
+      ctx.beginPath(); ctx.moveTo(0, 6); ctx.lineTo(7, 2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(1, 7); ctx.lineTo(3, 5); ctx.moveTo(5, 7); ctx.lineTo(3, 5); ctx.stroke();
+      break;
+    case 'mortar':
+      ctx.beginPath(); ctx.moveTo(1, 7); ctx.lineTo(6, 0); ctx.stroke();
+      ctx.fillRect(0, 6, 7, 1);
+      break;
+    case 'atgun':
+    case 'tankgun':
+      ctx.fillRect(0, 5, 3, 2);
+      ctx.beginPath(); ctx.moveTo(3, 6); ctx.lineTo(8, 2); ctx.stroke();
+      break;
+    case 'atrocket':
+      ctx.beginPath(); ctx.moveTo(0, 4); ctx.lineTo(6, 4); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(6, 2); ctx.lineTo(8, 4); ctx.lineTo(6, 6); ctx.closePath(); ctx.fill();
+      break;
+    case 'flamethrower':
+      ctx.beginPath(); ctx.arc(3, 4, 3, 0, Math.PI * 2); ctx.stroke();
+      break;
+    case 'grenade':
+      ctx.beginPath(); ctx.arc(3, 5, 2.5, 0, Math.PI * 2); ctx.fill();
+      break;
+    default:
+      ctx.strokeRect(0.5, 0.5, 6, 6);
+  }
+  ctx.restore();
+}
 
 const RIGHT_X = 1024;
 const WIDTH = 242;
@@ -153,8 +206,9 @@ export class SoldierMonitorPopup {
       ctx.fillStyle = activityColor(s);
       ctx.fillText(activityWord(s), contentX, rowY + 13);
       const w = WEAPONS[s.weaponId];
+      if (w) drawWeaponGlyph(ctx, contentX + 76, rowY + 11, w.cls);
       ctx.fillStyle = HUD.dim;
-      ctx.fillText(clipTextToWidth(ctx, w?.name ?? s.weaponId, 60), contentX + 76, rowY + 13);
+      ctx.fillText(clipTextToWidth(ctx, w?.name ?? s.weaponId, 50), contentX + 76 + GLYPH_SIZE + 3, rowY + 13);
       ctx.textAlign = 'right';
       ctx.fillText(`${s.ammo} rds.`, r.x + r.w - 6, rowY + 13);
       ctx.textAlign = 'left';

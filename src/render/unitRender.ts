@@ -150,19 +150,48 @@ function drawOutlinedLabel(ctx: CanvasRenderingContext2D, text: string, cx: numb
   ctx.textAlign = 'left';
 }
 
+const FLAG_SCALE = 1.6; // native flag sprite art is small; scale up so it reads as a flag, not a dot
+
 function drawFlags(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
   for (const vl of state.map.victoryLocations) {
     const pos = { x: vl.x, y: vl.y };
     if (!visible(pos, cam)) continue;
     const p = worldToScreen(cam, pos);
-    const sprite = getFlagSprite(vl.owner);
-    ctx.drawImage(sprite, Math.round(p.x - sprite.width / 2), Math.round(p.y - sprite.height));
-    drawOutlinedLabel(ctx, vl.name, Math.round(p.x), Math.round(p.y + 2));
+    const scale = FLAG_SCALE * cam.zoom;
+    const contested = vl.capturingSide != null && vl.capturingSide !== vl.owner;
+    if (contested) {
+      // Split flag: owner's colours on the left half, the capturing side's on the right.
+      const a = getFlagSprite(vl.owner);
+      const b = getFlagSprite(vl.capturingSide);
+      const w = a.width * scale, h = a.height * scale;
+      const x0 = Math.round(p.x - w / 2), y0 = Math.round(p.y - h);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x0, y0, w / 2, h);
+      ctx.clip();
+      ctx.drawImage(a, x0, y0, w, h);
+      ctx.restore();
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x0 + w / 2, y0, w / 2, h);
+      ctx.clip();
+      ctx.drawImage(b, x0, y0, w, h);
+      ctx.restore();
+    } else {
+      const sprite = getFlagSprite(vl.owner);
+      const w = sprite.width * scale, h = sprite.height * scale;
+      ctx.drawImage(sprite, Math.round(p.x - w / 2), Math.round(p.y - h), w, h);
+    }
+    drawOutlinedLabel(ctx, vl.name, Math.round(p.x), Math.round(p.y + 3));
   }
 }
 
 function drawTeamLabels(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, settings: GameSettings): void {
+  // Manual: "Team information bars appear... hidden when zoomed in/out" —
+  // and even at normal zoom the original shows none by default (this is an
+  // opt-in debug overlay here, off by default per game.ts).
   if (!settings.unitLabels) return;
+  if (cam.zoom !== 1) return;
   for (const team of state.teams.values()) {
     const leader = state.soldiers.get(team.leaderId);
     const pos = leader && leader.health !== 'dead' ? leader.pos : team.pos;

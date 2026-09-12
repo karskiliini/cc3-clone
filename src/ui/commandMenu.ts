@@ -1,18 +1,30 @@
 // ============================================================================
 // commandMenu.ts — right-click popup: a small vertical maroon menu of orders,
-// bold white text with a red highlight on hover, hotkey underlined.
+// grouped into the manual's three categories (Movement / Targeting / Dig-in)
+// with thin separators and a small colour swatch per order, bold white text,
+// red highlight on hover, hotkey underlined.
 // ============================================================================
 import type { Rect, Vec2, InputState, Team, OrderType } from '@/shared/types';
-import { ORDER_TYPES, ORDER_LABELS, ORDER_HOTKEYS, SCREEN_W, SCREEN_H } from '@/shared/types';
+import { ORDER_LABELS, ORDER_HOTKEYS, ORDER_DOT_COLOR, SCREEN_W, SCREEN_H } from '@/shared/types';
 import { clamp } from '@/shared/math';
 import { HUD } from '@/render/palette';
 import { drawHudBevel, hitRect, setHudFont } from '@/ui/hud/hudChrome';
 
-const ROW_W = 96;
+// Manual's three named categories: Movement, Targeting, Dig-in.
+const MENU_GROUPS: OrderType[][] = [
+  ['sneak', 'move', 'moveFast'],
+  ['fire', 'smoke'],
+  ['defend', 'ambush'],
+];
+const MENU_ORDER: OrderType[] = MENU_GROUPS.flat();
+
+const ROW_W = 104;
 const ROW_H = 16;
+const GROUP_GAP = 4; // thin separator gap between categories
 const BORDER = 2;
+const SWATCH_SIZE = 6;
 const PANEL_W = ROW_W + BORDER * 2;
-const PANEL_H = ROW_H * ORDER_TYPES.length + BORDER * 2;
+const PANEL_H = ROW_H * MENU_ORDER.length + GROUP_GAP * (MENU_GROUPS.length - 1) + BORDER * 2;
 
 export interface CommandMenuOpts {
   canSmoke: boolean;
@@ -22,6 +34,23 @@ export interface CommandMenuOpts {
 function titleCase(s: string): string {
   return s.replace(/\w\S*/g, (w) => w[0].toUpperCase() + w.slice(1).toLowerCase());
 }
+
+/** Row layout: (groupIndex, rowWithinGroup, orderType) for every visible row,
+ * precomputed once since the grouping never changes at runtime. */
+interface RowLayout { type: OrderType; y: number }
+function buildLayout(): RowLayout[] {
+  const rows: RowLayout[] = [];
+  let y = BORDER;
+  for (const group of MENU_GROUPS) {
+    for (const type of group) {
+      rows.push({ type, y });
+      y += ROW_H;
+    }
+    y += GROUP_GAP;
+  }
+  return rows;
+}
+const LAYOUT = buildLayout();
 
 export class CommandMenu {
   isOpen = false;
@@ -50,11 +79,11 @@ export class CommandMenu {
   }
 
   private rowRect(i: number): Rect {
-    return { x: this.rect.x + BORDER, y: this.rect.y + BORDER + i * ROW_H, w: ROW_W, h: ROW_H };
+    return { x: this.rect.x + BORDER, y: this.rect.y + LAYOUT[i].y, w: ROW_W, h: ROW_H };
   }
 
   private rowIndexAt(p: Vec2): number | null {
-    for (let i = 0; i < ORDER_TYPES.length; i++) {
+    for (let i = 0; i < LAYOUT.length; i++) {
       if (hitRect(p, this.rowRect(i))) return i;
     }
     return null;
@@ -71,7 +100,7 @@ export class CommandMenu {
       return 'cancel';
     }
 
-    for (const type of ORDER_TYPES) {
+    for (const type of MENU_ORDER) {
       if (input.keysPressed.has(ORDER_HOTKEYS[type]) && !this.disabled[type]) {
         this.close();
         return type;
@@ -84,7 +113,7 @@ export class CommandMenu {
         if (c.button === 0) {
           const idx = this.rowIndexAt(p);
           if (idx != null) {
-            const type = ORDER_TYPES[idx];
+            const type = LAYOUT[idx].type;
             if (!this.disabled[type]) {
               this.close();
               return type;
@@ -105,8 +134,8 @@ export class CommandMenu {
     if (!this.isOpen) return;
     drawHudBevel(ctx, this.rect, false);
 
-    for (let i = 0; i < ORDER_TYPES.length; i++) {
-      const type = ORDER_TYPES[i];
+    for (let i = 0; i < LAYOUT.length; i++) {
+      const type = LAYOUT[i].type;
       const r = this.rowRect(i);
       const disabled = !!this.disabled[type];
       const hot = this.hoverIndex === i && !disabled;
@@ -116,10 +145,19 @@ export class CommandMenu {
         ctx.fillRect(Math.round(r.x), Math.round(r.y), Math.round(r.w), Math.round(r.h));
       }
 
+      // Order-colour swatch (manual's exact per-order colour table).
+      const swatchColor = ORDER_DOT_COLOR[type];
+      const sy = Math.round(r.y + (r.h - SWATCH_SIZE) / 2);
+      ctx.fillStyle = disabled ? HUD.dim : swatchColor;
+      ctx.fillRect(Math.round(r.x + 3), sy, SWATCH_SIZE, SWATCH_SIZE);
+      ctx.strokeStyle = HUD.black;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(Math.round(r.x + 3) + 0.5, sy + 0.5, SWATCH_SIZE - 1, SWATCH_SIZE - 1);
+
       const label = titleCase(ORDER_LABELS[type]);
       setHudFont(ctx, 'small');
       const color = disabled ? HUD.dim : HUD.text;
-      const tx = Math.round(r.x + 5);
+      const tx = Math.round(r.x + 3 + SWATCH_SIZE + 5);
       const ty = Math.round(r.y + 3);
       ctx.fillStyle = color;
       ctx.fillText(label, tx, ty);
@@ -133,6 +171,20 @@ export class CommandMenu {
         ctx.fillStyle = color;
         ctx.fillRect(Math.round(ux0), Math.round(ty + 12), Math.round(chWidth), 1);
       }
+    }
+
+    // Thin separators between the three categories (Movement/Targeting/Dig-in).
+    ctx.strokeStyle = HUD.bevelDark;
+    ctx.lineWidth = 1;
+    let rowCursor = 0;
+    for (let g = 0; g < MENU_GROUPS.length - 1; g++) {
+      rowCursor += MENU_GROUPS[g].length;
+      const afterRow = LAYOUT[rowCursor - 1];
+      const sepY = Math.round(this.rect.y + afterRow.y + ROW_H + GROUP_GAP / 2);
+      ctx.beginPath();
+      ctx.moveTo(this.rect.x + 2, sepY + 0.5);
+      ctx.lineTo(this.rect.x + this.rect.w - 2, sepY + 0.5);
+      ctx.stroke();
     }
   }
 }

@@ -3,7 +3,7 @@
 // a small ListBox widget, word-wrap, camera-control helpers and a BACK button
 // factory. Nothing here owns simulation state.
 // ============================================================================
-import type { Camera, InputState, Rect, Side, TeamType } from '@/shared/types';
+import type { Camera, InputState, Rect, Side, TeamDef, TeamType } from '@/shared/types';
 import { SCREEN_W, SCREEN_H, VIEW_W, VIEW_H, MENU_X, MENU_Y, MENU_W, MENU_H } from '@/shared/types';
 import { pointInRect } from '@/shared/math';
 import { panCamera, clampCamera } from '@/engine/camera';
@@ -11,7 +11,8 @@ import { Button, drawDarkPanel, drawBottomStrip, drawSmallMetalButton, drawVerti
 import { PALETTE } from '@/render/palette';
 import { drawText, textWidth } from '@/render/pixelfont';
 import { getTeamIcon } from '@/render/sprites';
-import { TEAM_DEFS, teamsForYear } from '@/data/units';
+import { TEAM_DEFS, VEHICLE_DEFS, teamsForYear } from '@/data/units';
+import { WEAPONS } from '@/data/weapons';
 
 // ------------------------------------------------------------------- noise --
 /** Deterministic 2D hash in [0,1), used for the painted-texture backdrop dither. */
@@ -396,6 +397,74 @@ export const TEAM_FLAVOR: Record<TeamType, string> = {
 
 const ARMOR_TYPES: TeamType[] = ['tank', 'spg', 'halftrack'];
 
+// Deterministic per-weapon "composition" colour, so each team's stripe hints
+// at its loadout mix (rifles vs. automatic weapons vs. AT/HE) at a glance.
+const COMPOSITION_PALETTE = ['#6b8a4a', '#c8892c', '#5a8fd0', '#c04030'];
+function compositionColor(weaponId: string): string {
+  let h = 0;
+  for (let i = 0; i < weaponId.length; i++) h = (h * 31 + weaponId.charCodeAt(i)) >>> 0;
+  return COMPOSITION_PALETTE[h % COMPOSITION_PALETTE.length];
+}
+
+/** A small 4-segment colour-coded "barcode" stripe hinting at a team's weapon
+ * mix, drawn between the icon and the name/subtype text on force-pool/roster
+ * rows (each segment ~3x14px, side by side). */
+function drawCompositionStripe(ctx: CanvasRenderingContext2D, x: number, y: number, def: TeamDef): void {
+  const ids = def.soldiers.map((s) => s.weaponId).filter((v, i, a) => a.indexOf(v) === i).slice(0, 4);
+  for (let i = 0; i < 4; i++) {
+    ctx.fillStyle = ids[i] ? compositionColor(ids[i]) : 'rgba(255,255,255,0.08)';
+    ctx.fillRect(x + i * 3, y, 2, 14);
+  }
+}
+
+/** Scale factor that fits `icon` inside a `boxW`x`boxH` box, preserving
+ * aspect ratio, never upscaling beyond native size (icons are drawn at 1x
+ * or smaller so they never overlap adjacent rows). */
+function iconFitScale(icon: HTMLCanvasElement, boxW: number, boxH: number): number {
+  return Math.min(1, boxW / icon.width, boxH / icon.height);
+}
+
+const CATEGORY_LABEL: Record<TeamType, string> = {
+  rifle: 'Rifle Infantry',
+  smg: 'SMG Infantry',
+  mg: 'Machine Gun Infantry',
+  mortar: 'Medium Mortar',
+  atgun: 'Antitank Gun',
+  sniper: 'Sniper',
+  atteam: 'Antitank Team',
+  tank: 'Medium Tank',
+  spg: 'Assault Gun',
+  halftrack: 'Halftrack',
+  command: 'Command Team',
+  engineer: 'Engineers',
+};
+
+/** Category label for a team row, e.g. 'Rifle Infantry', 'Heavy Tank'. Tanks
+ * are upgraded to 'Heavy Tank' when their vehicle's front armour is thick
+ * (matches the original's Medium/Heavy naming split). */
+function categoryLabel(def: TeamDef): string {
+  if (def.type === 'tank') {
+    const v = def.vehicleDefId ? VEHICLE_DEFS[def.vehicleDefId] : undefined;
+    if (v && v.armor.front >= 90) return 'Heavy Tank';
+  }
+  return CATEGORY_LABEL[def.type] ?? def.type;
+}
+
+/** The requisition row's subtype line: a category label, plus — for
+ * infantry-type teams only — the leader's and main support weapon's display
+ * names in parentheses (e.g. 'Rifle Infantry (Kar98k, MG34)'). Vehicles show
+ * just the category label; the hull variant is already the row's title. */
+function subtypeLabel(def: TeamDef): string {
+  const label = categoryLabel(def);
+  if (def.vehicleDefId) return label;
+  const ids = def.soldiers.map((s) => s.weaponId);
+  const leaderName = WEAPONS[ids[0]]?.name ?? ids[0];
+  const supportId = ids.slice(1).find((id) => id !== ids[0]);
+  const supportName = supportId ? WEAPONS[supportId]?.name ?? supportId : undefined;
+  const names = supportName ? `${leaderName}, ${supportName}` : leaderName;
+  return `${label} (${names})`;
+}
+
 function truncateToWidth(ctx: CanvasRenderingContext2D, text: string, maxW: number): string {
   if (ctx.measureText(text).width <= maxW) return text;
   let s = text;
@@ -429,9 +498,13 @@ export class ForcePicker {
   private poolListRect: Rect = { x: 60, y: 128, w: 330, h: 220 };
   private infoRect: Rect = { x: 60, y: 368, w: 330, h: 96 };
 
-  private detailsBtn: Rect = { x: 440, y: 96, w: 96, h: 20 };
-  private retireBtn: Rect = { x: 544, y: 96, w: 96, h: 20 };
-  private revertBtn: Rect = { x: 648, y: 96, w: 96, h: 20 };
+  // five roster action buttons, matching the original's Refit/Rest/Rename/
+  // Retire row (we add Details in place of Rename; only Retire is wired up)
+  private refitBtn: Rect = { x: 440, y: 96, w: 62, h: 20 };
+  private restBtn: Rect = { x: 506, y: 96, w: 62, h: 20 };
+  private detailsBtn: Rect = { x: 572, y: 96, w: 62, h: 20 };
+  private retireBtn: Rect = { x: 638, y: 96, w: 62, h: 20 };
+  private revertBtn: Rect = { x: 704, y: 96, w: 62, h: 20 };
   private rosterListRect: Rect = { x: 440, y: 128, w: 330, h: 220 };
   private pointsRect: Rect = { x: 440, y: 368, w: 330, h: 34 };
 
@@ -509,10 +582,35 @@ export class ForcePicker {
     }
   }
 
+  private drawTab(ctx: CanvasRenderingContext2D, r: Rect, label: string, active: boolean): void {
+    ctx.save();
+    if (active) {
+      ctx.fillStyle = '#e8dcc8';
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+      ctx.strokeStyle = '#170a06';
+      ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+      ctx.fillStyle = '#161208';
+    } else {
+      ctx.fillStyle = '#2a2a2a';
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+      ctx.strokeStyle = '#0d0d0d';
+      ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+      ctx.fillStyle = '#f0f0ec';
+    }
+    ctx.font = 'bold 12px Arial, Helvetica, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, r.x + 10, r.y + r.h / 2);
+    // small dropdown caret, right-padded
+    ctx.textAlign = 'right';
+    ctx.fillText('▾', r.x + r.w - 10, r.y + r.h / 2);
+    ctx.restore();
+  }
+
   draw(ctx: CanvasRenderingContext2D): void {
     drawVerticalStencil(ctx, 'FORCE POOL', 30, 372);
-    drawSmallMetalButton(ctx, this.regularBtn, 'Regular', { hot: this.category === 'regular' });
-    drawSmallMetalButton(ctx, this.armorBtn, 'Armor', { hot: this.category === 'armor' });
+    this.drawTab(ctx, this.regularBtn, 'Regular', this.category === 'regular');
+    this.drawTab(ctx, this.armorBtn, 'Armor', this.category === 'armor');
 
     drawDarkPanel(ctx, this.poolListRect);
     ctx.save();
@@ -531,24 +629,43 @@ export class ForcePicker {
         ctx.fillRect(this.poolListRect.x, ry, this.poolListRect.w, this.poolRowH);
       }
       const icon = getTeamIcon(def.iconId);
+      const iconScale = iconFitScale(icon, 36, 24);
+      const iconW = icon.width * iconScale;
+      const iconH = icon.height * iconScale;
       ctx.save();
-      ctx.translate(this.poolListRect.x + 4, ry + (this.poolRowH - icon.height * 2) / 2);
-      ctx.scale(2, 2);
+      ctx.translate(this.poolListRect.x + 4, ry + (this.poolRowH - iconH) / 2);
+      ctx.scale(iconScale, iconScale);
       ctx.drawImage(icon, 0, 0);
       ctx.restore();
-      const textX = this.poolListRect.x + 34;
+      drawCompositionStripe(ctx, this.poolListRect.x + 4 + iconW + 3, ry + (this.poolRowH - 14) / 2, def);
+
+      const textX = this.poolListRect.x + 4 + iconW + 3 + 16;
+      const lowPoints = def.cost > this.remaining();
+      const costText = String(def.cost);
       ctx.font = 'bold 12px Arial, Helvetica, sans-serif';
+      const costW = ctx.measureText(costText).width;
+      let warnW = 0;
+      if (lowPoints) {
+        ctx.font = 'bold 11px Arial, Helvetica, sans-serif';
+        warnW = ctx.measureText('Low Points').width;
+      }
       ctx.textAlign = 'right';
+      ctx.font = 'bold 12px Arial, Helvetica, sans-serif';
       ctx.fillStyle = '#f0d840';
-      ctx.fillText(String(def.cost), this.poolListRect.x + this.poolListRect.w - 6, ry + 11);
+      ctx.fillText(costText, this.poolListRect.x + this.poolListRect.w - 6, ry + 11);
+      if (lowPoints) {
+        ctx.font = 'bold 11px Arial, Helvetica, sans-serif';
+        ctx.fillStyle = '#ff3b30';
+        ctx.fillText('Low Points', this.poolListRect.x + this.poolListRect.w - 10 - costW, ry + 11);
+      }
       ctx.textAlign = 'left';
+      ctx.font = 'bold 12px Arial, Helvetica, sans-serif';
       ctx.fillStyle = '#f0f0ec';
-      const name = truncateToWidth(ctx, def.name, this.poolListRect.w - 34 - 44);
+      const name = truncateToWidth(ctx, def.name, this.poolListRect.w - (textX - this.poolListRect.x) - costW - warnW - 20);
       ctx.fillText(name, textX, ry + 11);
-      ctx.font = '10px Arial, Helvetica, sans-serif';
-      ctx.fillStyle = '#e0c04a';
-      const subtype = def.soldiers.map((s) => s.weaponId).filter((v, i2, a) => a.indexOf(v) === i2).slice(0, 2).join(', ');
-      ctx.fillText(truncateToWidth(ctx, subtype, this.poolListRect.w - 34 - 44), textX, ry + 23);
+      ctx.font = 'bold italic 11px Arial, Helvetica, sans-serif';
+      ctx.fillStyle = '#e8a33d';
+      ctx.fillText(truncateToWidth(ctx, subtypeLabel(def), this.poolListRect.w - (textX - this.poolListRect.x) - 8), textX, ry + 23);
     }
     ctx.restore();
 
@@ -580,6 +697,8 @@ export class ForcePicker {
     }
 
     drawVerticalStencil(ctx, 'ACTIVE ROSTER', 792, 372);
+    drawSmallMetalButton(ctx, this.refitBtn, 'Refit', { disabled: true });
+    drawSmallMetalButton(ctx, this.restBtn, 'Rest', { disabled: true });
     drawSmallMetalButton(ctx, this.detailsBtn, 'Details', { disabled: true });
     drawSmallMetalButton(ctx, this.retireBtn, 'Retire', { disabled: this.rosterSelected < 0 });
     drawSmallMetalButton(ctx, this.revertBtn, 'Revert', { disabled: true });
@@ -605,16 +724,20 @@ export class ForcePicker {
         ctx.fillRect(this.rosterListRect.x, ry, this.rosterListRect.w, this.rosterRowH);
       }
       const icon = getTeamIcon(def.iconId);
+      const iconScale = iconFitScale(icon, 36, 24);
+      const iconW = icon.width * iconScale;
+      const iconH = icon.height * iconScale;
       ctx.save();
-      ctx.translate(this.rosterListRect.x + 4, ry + (this.rosterRowH - icon.height * 2) / 2);
-      ctx.scale(2, 2);
+      ctx.translate(this.rosterListRect.x + 4, ry + (this.rosterRowH - iconH) / 2);
+      ctx.scale(iconScale, iconScale);
       ctx.drawImage(icon, 0, 0);
       ctx.restore();
-      const textX = this.rosterListRect.x + 34;
+      drawCompositionStripe(ctx, this.rosterListRect.x + 4 + iconW + 3, ry + (this.rosterRowH - 14) / 2, def);
+      const textX = this.rosterListRect.x + 4 + iconW + 3 + 16;
       ctx.font = 'bold 12px Arial, Helvetica, sans-serif';
       ctx.textAlign = 'left';
       ctx.fillStyle = '#f0f0ec';
-      ctx.fillText(truncateToWidth(ctx, def.name, this.rosterListRect.w - 34 - 90), textX, ry + 11);
+      ctx.fillText(truncateToWidth(ctx, def.name, this.rosterListRect.w - (textX - this.rosterListRect.x) - 90), textX, ry + 11);
       // small green soldier squares, one per soldier in the squad
       const sqSize = 6;
       let sx = this.rosterListRect.x + this.rosterListRect.w - 6 - Math.min(def.soldiers.length, 10) * (sqSize + 2);
@@ -623,9 +746,9 @@ export class ForcePicker {
         ctx.fillRect(sx, ry + 4, sqSize, sqSize);
         sx += sqSize + 2;
       }
-      ctx.font = '10px Arial, Helvetica, sans-serif';
-      ctx.fillStyle = '#e0c04a';
-      ctx.fillText(truncateToWidth(ctx, def.soldiers[0]?.weaponId ?? '', this.rosterListRect.w - 34), textX, ry + 23);
+      ctx.font = 'bold italic 11px Arial, Helvetica, sans-serif';
+      ctx.fillStyle = '#e8a33d';
+      ctx.fillText(truncateToWidth(ctx, subtypeLabel(def), this.rosterListRect.w - (textX - this.rosterListRect.x) - 8), textX, ry + 23);
     }
     ctx.restore();
 

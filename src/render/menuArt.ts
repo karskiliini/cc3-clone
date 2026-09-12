@@ -70,7 +70,15 @@ function drawBrickBand(ctx: CanvasRenderingContext2D, w: number, bandH: number):
   ctx.beginPath();
   ctx.rect(0, 0, w, bandH);
   ctx.clip();
-  ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+  // darken the whole band toward near-black before the mortar-line texture,
+  // fading out at the bottom edge so it blends into the poster body
+  const dark = ctx.createLinearGradient(0, 0, 0, bandH);
+  dark.addColorStop(0, 'rgba(21,13,10,0.85)');
+  dark.addColorStop(0.7, 'rgba(21,13,10,0.5)');
+  dark.addColorStop(1, 'rgba(21,13,10,0)');
+  ctx.fillStyle = dark;
+  ctx.fillRect(0, 0, w, bandH);
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
   ctx.lineWidth = 1;
   const rowH = 14;
   let row = 0;
@@ -109,36 +117,198 @@ function drawScratches(ctx: CanvasRenderingContext2D, w: number, h: number): voi
   ctx.restore();
 }
 
-// -------------------------------------------------------------- silhouette --
-/** A large abstract soldier silhouette on the left third: helmet, shoulders,
- * and an outstretched pointing arm, built from ellipses/rects only. */
-function drawSoldierSilhouette(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+// ---------------------------------------------------------------- warscene --
+// A backlit war-poster tableau along the lower third: a row of small marching
+// soldiers plus a tank in profile, silhouetted dark against the fire glow,
+// with wavering smoke columns rising behind them. Small, simple shapes read
+// far more convincingly at this scale than one giant abstract figure.
+const SIL_DARK = '#1d0c08';
+const SIL_RIM = '#7a3216';
+
+function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+/** One small marching-soldier silhouette: helmet (flattened ellipse + brim
+ * ledge), head/neck rect, trapezoid torso, two angled mid-stride legs, and a
+ * rifle slung diagonally over the shoulder. `gx`/`groundY` are the figure's
+ * feet position; `H` is its total height. Uses whatever fillStyle the caller
+ * has already set (so it can be called once per rim/dark pass). */
+function drawMarchingSoldierShape(ctx: CanvasRenderingContext2D, gx: number, groundY: number, H: number, seed: number): void {
+  const legH = H * 0.4;
+  const torsoH = H * 0.32;
+  const neckH = H * 0.08;
+  const helmetRX = H * 0.21;
+  const helmetRY = H * 0.13;
+  const shoulderHalfW = H * 0.18;
+  const waistHalfW = H * 0.12;
+  const legW = H * 0.1;
+  const stride = H * 0.14 + (hash2(seed, 1, 41) - 0.5) * H * 0.08;
+  const frontLeg = seed % 2 === 0 ? 1 : -1;
+
+  const torsoBottomY = groundY - legH;
+  const torsoTopY = torsoBottomY - torsoH;
+  const neckTopY = torsoTopY - neckH;
+  const headCY = neckTopY - helmetRY * 0.55;
+
+  // legs, mid-stride (one forward, one back)
   ctx.save();
-  ctx.fillStyle = 'rgba(30,6,4,0.5)';
-  const hx = w * 0.15;
-  const hy = h * 0.32;
-  // helmet dome
-  ctx.beginPath();
-  ctx.ellipse(hx, hy, 78, 60, 0, Math.PI, Math.PI * 2);
-  ctx.fill();
-  // helmet brim
-  ctx.fillRect(hx - 86, hy - 4, 172, 12);
-  // neck/torso
-  ctx.beginPath();
-  ctx.ellipse(hx - 6, h * 0.74, 130, 170, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // outstretched arm pointing toward the buttons
+  ctx.translate(gx - frontLeg * stride * 0.5, torsoBottomY);
+  ctx.rotate(-frontLeg * 0.16);
+  ctx.fillRect(-legW / 2, 0, legW, legH);
+  ctx.restore();
   ctx.save();
-  ctx.translate(w * 0.2, h * 0.6);
-  ctx.rotate(-0.18);
+  ctx.translate(gx + frontLeg * stride * 0.5, torsoBottomY);
+  ctx.rotate(frontLeg * 0.24);
+  ctx.fillRect(-legW / 2, 0, legW, legH);
+  ctx.restore();
+
+  // torso trapezoid (wider at the shoulders)
   ctx.beginPath();
-  ctx.ellipse(110, 0, 130, 17, 0, 0, Math.PI * 2);
+  ctx.moveTo(gx - shoulderHalfW, torsoTopY);
+  ctx.lineTo(gx + shoulderHalfW, torsoTopY);
+  ctx.lineTo(gx + waistHalfW, torsoBottomY);
+  ctx.lineTo(gx - waistHalfW, torsoBottomY);
+  ctx.closePath();
+  ctx.fill();
+
+  // neck
+  ctx.fillRect(gx - neckH * 0.45, neckTopY, neckH * 0.9, neckH);
+
+  // helmet: brim ledge then dome, touching/overlapping the neck
+  ctx.beginPath();
+  ctx.ellipse(gx, headCY + helmetRY * 0.55, helmetRX * 1.2, helmetRY * 0.32, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.beginPath();
-  ctx.ellipse(228, 4, 20, 12, 0, 0, Math.PI * 2);
+  ctx.ellipse(gx, headCY, helmetRX, helmetRY, 0, 0, Math.PI * 2);
   ctx.fill();
+
+  // rifle slung diagonally over the shoulder
+  ctx.save();
+  ctx.translate(gx + shoulderHalfW * 0.4, torsoTopY + torsoH * 0.3);
+  ctx.rotate(-0.62 - (hash2(seed, 2, 41) - 0.5) * 0.3);
+  ctx.fillRect(-H * 0.03, -H * 0.5, H * 0.06, H * 0.62);
   ctx.restore();
+}
+
+/** Draws one marching soldier with a 1px rim-light pass (fire side) under a
+ * dark main pass, so it reads as backlit rather than a flat cutout. */
+function drawMarchingSoldier(ctx: CanvasRenderingContext2D, gx: number, groundY: number, H: number, seed: number): void {
+  ctx.save();
+  ctx.translate(1, -1);
+  ctx.fillStyle = SIL_RIM;
+  drawMarchingSoldierShape(ctx, gx, groundY, H, seed);
   ctx.restore();
+  ctx.fillStyle = SIL_DARK;
+  drawMarchingSoldierShape(ctx, gx, groundY, H, seed);
+}
+
+/** A tank in profile: hull trapezoid, rounded turret, long barrel, and a row
+ * of road-wheel circles along the hull's underside. `x0` is the hull's left
+ * edge, `groundY` its track line, `wPx` its overall width. */
+function drawTankShape(ctx: CanvasRenderingContext2D, x0: number, groundY: number, wPx: number): void {
+  const hullH = wPx * 0.26;
+  const hullY = groundY - hullH;
+  const turretW = wPx * 0.42;
+  const turretH = wPx * 0.17;
+  const turretX = x0 + wPx * 0.28;
+  const turretY = hullY - turretH * 0.85;
+  const barrelLen = wPx * 0.5;
+  const barrelH = wPx * 0.045;
+
+  // hull
+  ctx.beginPath();
+  ctx.moveTo(x0 + wPx * 0.06, hullY);
+  ctx.lineTo(x0 + wPx * 0.94, hullY);
+  ctx.lineTo(x0 + wPx, groundY);
+  ctx.lineTo(x0, groundY);
+  ctx.closePath();
+  ctx.fill();
+
+  // turret + barrel
+  roundRectPath(ctx, turretX, turretY, turretW, turretH, turretH * 0.4);
+  ctx.fill();
+  ctx.fillRect(turretX + turretW * 0.72, turretY + turretH * 0.38, barrelLen, barrelH);
+
+  // road wheels
+  const wheelR = hullH * 0.3;
+  const wheelY = groundY - wheelR * 0.5;
+  const wheelCount = 5;
+  for (let i = 0; i < wheelCount; i++) {
+    const wx = x0 + wPx * 0.1 + (i * (wPx * 0.8)) / (wheelCount - 1);
+    ctx.beginPath();
+    ctx.ellipse(wx, wheelY, wheelR, wheelR, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawTank(ctx: CanvasRenderingContext2D, x0: number, groundY: number, wPx: number): void {
+  ctx.save();
+  ctx.translate(1, -1);
+  ctx.fillStyle = SIL_RIM;
+  drawTankShape(ctx, x0, groundY, wPx);
+  ctx.restore();
+  ctx.fillStyle = SIL_DARK;
+  drawTankShape(ctx, x0, groundY, wPx);
+}
+
+/** One wavering column of smoke: stacked translucent ellipses that widen and
+ * fade as they rise toward the fire glow, with a per-level horizontal wobble
+ * so the column doesn't read as a rigid straight line. */
+function drawSmokeColumn(ctx: CanvasRenderingContext2D, x: number, baseY: number, topY: number, seed: number): void {
+  ctx.save();
+  const steps = 16;
+  for (let i = 0; i < steps; i++) {
+    const t = i / (steps - 1);
+    const y = baseY + (topY - baseY) * t;
+    const wobble = (hash2(seed, i, 53) - 0.5) * 46 * t;
+    const rx = 9 + 30 * t;
+    const ry = 12 + 9 * t;
+    const alpha = 0.4 - 0.18 * t;
+    ctx.fillStyle = `rgba(18,12,10,${Math.max(0.06, alpha).toFixed(3)})`;
+    ctx.beginPath();
+    ctx.ellipse(x + wobble, y, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** The full lower-third war-poster tableau: dark horizon ground, wavering
+ * smoke columns rising into the fire glow, a tank silhouette at the left,
+ * and a row of small marching soldiers (varied height/pose via hash) —
+ * everything backlit and silhouetted, per the original's poster composition. */
+function drawWarScene(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const groundY = h * 0.78;
+
+  // smoke columns first, so the ground/figures drawn afterward occlude
+  // their base and they read as rising from behind the horizon
+  drawSmokeColumn(ctx, w * 0.13, groundY - 8, h * 0.08, 5);
+  drawSmokeColumn(ctx, w * 0.48, groundY - 8, h * 0.05, 19);
+  drawSmokeColumn(ctx, w * 0.8, groundY - 8, h * 0.12, 31);
+
+  // dark ground strip the figures stand on, with a thin fire-lit rim at the
+  // horizon line itself
+  ctx.fillStyle = 'rgba(12,7,5,0.6)';
+  ctx.fillRect(0, groundY, w, h - groundY);
+  ctx.fillStyle = 'rgba(255,154,60,0.3)';
+  ctx.fillRect(0, groundY - 1, w, 2);
+
+  drawTank(ctx, 0, groundY, 180);
+
+  const soldierCount = 7;
+  const startX = 216;
+  const endX = w - 30;
+  for (let i = 0; i < soldierCount; i++) {
+    const gx = startX + ((endX - startX) * i) / (soldierCount - 1);
+    const H = 70 + hash2(i, 7, 61) * 20;
+    drawMarchingSoldier(ctx, gx, groundY, H, i);
+  }
 }
 
 /** 2-3 faint vertical "post" lines crossing the poster. */
@@ -180,17 +350,18 @@ function buildPosterBackground(w: number, h: number): HTMLCanvasElement {
   }
   ctx.putImageData(img, 0, 0);
 
-  // fire glow, lower-centre
-  const glow = ctx.createRadialGradient(w * 0.6, h * 0.95, 10, w * 0.6, h * 0.95, h * 0.8);
-  glow.addColorStop(0, 'rgba(255,205,120,0.55)');
-  glow.addColorStop(0.4, 'rgba(230,140,40,0.28)');
+  // fire glow: strongest right along the horizon band so the war-scene
+  // silhouettes drawn on top read as backlit
+  const glow = ctx.createRadialGradient(w * 0.5, h * 0.76, 10, w * 0.5, h * 0.76, h * 0.68);
+  glow.addColorStop(0, 'rgba(255,154,60,0.7)');
+  glow.addColorStop(0.35, 'rgba(255,154,60,0.4)');
   glow.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, w, h);
 
-  drawBrickBand(ctx, w, 112);
+  drawBrickBand(ctx, w, 90);
   drawScratches(ctx, w, h);
-  drawSoldierSilhouette(ctx, w, h);
+  drawWarScene(ctx, w, h);
   drawPosts(ctx, w, h);
 
   // vignette

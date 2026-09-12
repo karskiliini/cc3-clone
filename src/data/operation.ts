@@ -80,9 +80,20 @@ export const DEFAULT_FORCES: Record<number, Record<Side, string[]>> = {
 };
 
 /** Starting force pool for a fresh operation: everything available in the first battle's year. */
+/** Starting roster for a fresh operation: greedily picks teams (in their
+ * defined order) for that year until the starting requisition budget is
+ * spent, so the player opens Operation 1 with an affordable roster instead
+ * of an over-budget one they must immediately trim. */
 export function initialForcePool(side: Side): OperationState['forcePool'] {
   const year = OPERATION[0].year;
-  return teamsForYear(side, year)
-    .filter((d) => d.id in TEAM_DEFS)
-    .map((d) => ({ defId: d.id, experience: 30, alive: d.soldiers.length }));
+  const budget = OPERATION[0].requisition[side];
+  let spent = 0;
+  const picked: OperationState['forcePool'] = [];
+  for (const d of teamsForYear(side, year)) {
+    if (!(d.id in TEAM_DEFS)) continue;
+    if (spent + d.cost > budget) continue;
+    spent += d.cost;
+    picked.push({ defId: d.id, experience: 30, alive: d.soldiers.length });
+  }
+  return picked;
 }

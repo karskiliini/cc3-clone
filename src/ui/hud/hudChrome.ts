@@ -3,7 +3,7 @@
 // bevelled boxes, the bottom-panel background, real (non-bitmap) fonts, and
 // team-status -> colour mappings shared by teamGrid/soldierMonitor/unitRender.
 // ============================================================================
-import type { Rect, TeamStatusWord, Vec2 } from '@/shared/types';
+import type { Rect, Team, TeamStatusWord, Vec2 } from '@/shared/types';
 import { PANEL_H, PANEL_Y, SCREEN_W } from '@/shared/types';
 import { pointInRect } from '@/shared/math';
 import { HUD } from '@/render/palette';
@@ -65,9 +65,39 @@ export function clipTextToWidth(ctx: CanvasRenderingContext2D, text: string, max
   return s;
 }
 
-/** Team-status word -> one of the three HUD bar colours (green/yellow/red). */
-export function teamBarColor(word: TeamStatusWord): string {
+/** Team name-bar colour: driven by team state first (dead/broken -> dark
+ * red, suppressed/panicking -> yellow), falling back to a role colour for
+ * teams that are otherwise fine — command teams read cyan/teal in the
+ * original regardless of activity, everyone else green. */
+export function teamBarColor(team: Team): string {
+  switch (team.status) {
+    case 'Destroyed':
+    case 'Knocked Out':
+      return HUD.darkRed;
+    case 'Broken':
+    case 'Panicked':
+    case 'Routed':
+      return HUD.red;
+    case 'Pinned':
+    case 'Cowering':
+      return HUD.yellow;
+    default:
+      break;
+  }
+  if (team.type === 'command') return HUD.cyan;
+  return HUD.green;
+}
+
+/** Team-status word -> status-text colour (independent of the bar colour). */
+export function teamStatusTextColor(word: TeamStatusWord): string {
   switch (word) {
+    case 'Ambushing':
+    case 'Idle':
+      return HUD.green;
+    case 'Firing':
+      return HUD.yellow;
+    case 'Moving Fast':
+      return HUD.red;
     case 'Pinned':
     case 'Cowering':
       return HUD.yellow;
@@ -78,7 +108,7 @@ export function teamBarColor(word: TeamStatusWord): string {
     case 'Knocked Out':
       return HUD.red;
     default:
-      return HUD.green;
+      return HUD.text;
   }
 }
 
@@ -120,6 +150,45 @@ export function drawHudScrollArrows(ctx: CanvasRenderingContext2D, r: Rect, upHo
   const size = Math.max(2, Math.floor(w / 3));
   triangle(ctx, x + w / 2, y + halfH / 2, size, 'up', HUD.text);
   triangle(ctx, x + w / 2, y + halfH + (h - halfH) / 2, size, 'down', HUD.text);
+}
+
+// ----------------------------------------------------------------- icons ---
+/** Uniform tone per team type for the otherwise-monochrome grid/glyph icons
+ * (infantry read khaki/olive, vehicles read steel-blue, command reads cyan)
+ * — applied as a colour tint over the icon's opaque pixels only. */
+const ICON_TINT: Record<string, string> = {
+  rifle: '#9a9a6a', smg: '#9a9a6a', mg: '#9a9a6a', mortar: '#9a9a6a',
+  atgun: '#9a9a6a', sniper: '#9a9a6a', atteam: '#9a9a6a', engineer: '#9a9a6a',
+  tank: '#7a8fa8', spg: '#7a8fa8', halftrack: '#7a8fa8',
+  command: HUD.cyan,
+};
+
+const tintCache = new WeakMap<HTMLCanvasElement, Map<string, HTMLCanvasElement>>();
+
+/** Returns `icon` recoloured (source-atop tint) for the given team type,
+ * cached per (icon, type) pair. Falls back to the icon unchanged if no tint
+ * is defined for that type. */
+export function tintedTeamIcon(icon: HTMLCanvasElement, teamType: string): HTMLCanvasElement {
+  const color = ICON_TINT[teamType];
+  if (!color) return icon;
+  let byColor = tintCache.get(icon);
+  if (!byColor) { byColor = new Map(); tintCache.set(icon, byColor); }
+  let out = byColor.get(color);
+  if (!out) {
+    out = document.createElement('canvas');
+    out.width = icon.width;
+    out.height = icon.height;
+    const octx = out.getContext('2d')!;
+    octx.drawImage(icon, 0, 0);
+    octx.globalCompositeOperation = 'source-atop';
+    octx.globalAlpha = 0.55;
+    octx.fillStyle = color;
+    octx.fillRect(0, 0, icon.width, icon.height);
+    octx.globalAlpha = 1;
+    octx.globalCompositeOperation = 'source-over';
+    byColor.set(color, out);
+  }
+  return out;
 }
 
 export interface HudButtonOpts {

@@ -19,10 +19,10 @@ const BTN_H = 46;
 
 export class MainMenuScreen implements Screen {
   private buttons: MenuButtonSpec[] = [
-    { label: 'Play A Game', rect: { x: 340, y: 148, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new BattleSetupScreen()) },
-    { label: 'Boot Camp (Training)', rect: { x: 360, y: 236, w: BTN_W, h: BTN_H }, disabled: true },
-    { label: 'Operation', rect: { x: 380, y: 324, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OperationScreen()) },
-    { label: 'Options', rect: { x: 400, y: 412, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OptionsScreen(this)) },
+    { label: 'Play A Game', rect: { x: 336, y: 148, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new BattleSetupScreen()) },
+    { label: 'Boot Camp (Training)', rect: { x: 364, y: 236, w: BTN_W, h: BTN_H }, disabled: true },
+    { label: 'Operation', rect: { x: 392, y: 324, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OperationScreen()) },
+    { label: 'Options', rect: { x: 420, y: 412, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OptionsScreen(this)) },
   ];
   private hotIndex = -1;
   private strip = new BottomStrip({ showBack: false, nextEnabled: false });
@@ -71,8 +71,8 @@ export class MainMenuScreen implements Screen {
     ctx.font = '11px Arial, Helvetica, sans-serif';
     ctx.fillStyle = 'rgba(232,232,224,0.7)';
     ctx.textAlign = 'left';
-    ctx.fillText('Microsoft(R) Close Combat(TM) III: The Russian Front (tribute) - all art procedural', 16, 522);
-    ctx.fillText('(c) 1998-1999 Atomic Games, Inc. -- fan-made clone, no affiliation.', 16, 536);
+    ctx.fillText('Fan-made tribute to Close Combat III - all art and code original', 16, 522);
+    ctx.fillText('Not affiliated with Microsoft or Atomic Games.', 16, 536);
 
     this.strip.draw(ctx);
     ctx.restore();

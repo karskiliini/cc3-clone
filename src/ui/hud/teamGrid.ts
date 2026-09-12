@@ -6,7 +6,7 @@
 import type { Rect, InputState, Team, BattleState, Soldier } from '@/shared/types';
 import { HUD } from '@/render/palette';
 import { getTeamIcon } from '@/render/sprites';
-import { drawHudBevel, hitRect, setHudFont, clipTextToWidth, teamBarColor, teamStatusLabel } from './hudChrome';
+import { drawHudBevel, hitRect, setHudFont, clipTextToWidth, teamBarColor, teamStatusLabel, teamStatusTextColor, tintedTeamIcon } from './hudChrome';
 
 const COLS = 5;
 const ROWS = 3;
@@ -62,14 +62,16 @@ export class TeamGrid {
     selected: boolean,
     hot: boolean,
   ): void {
-    drawHudBevel(ctx, r, true, HUD.base);
+    // Raised 1px bevel per cell (light top/left, dark bottom/right) for the
+    // console's slight 3D panel feel, rather than a flat rectangle.
+    drawHudBevel(ctx, r, false, HUD.base);
     if (!team) return;
 
     const iconAreaW = 30;
     const iconRect: Rect = { x: r.x + 1, y: r.y + 1, w: iconAreaW - 2, h: r.h - 2 };
     ctx.fillStyle = '#241009';
     ctx.fillRect(Math.round(iconRect.x), Math.round(iconRect.y), Math.round(iconRect.w), Math.round(iconRect.h));
-    const icon = getTeamIcon(team.type);
+    const icon = tintedTeamIcon(getTeamIcon(team.type), team.type);
     const iconScale = 2;
     const iw = icon.width * iconScale, ih = icon.height * iconScale;
     ctx.imageSmoothingEnabled = false;
@@ -77,17 +79,18 @@ export class TeamGrid {
 
     const barX = r.x + iconAreaW + 2;
     const barW = r.w - iconAreaW - 4;
-    const barColor = teamBarColor(team.status);
+    const barColor = teamBarColor(team);
     const barRect: Rect = { x: barX, y: r.y + 2, w: barW, h: 12 };
     ctx.fillStyle = barColor;
     ctx.fillRect(Math.round(barRect.x), Math.round(barRect.y), Math.round(barRect.w), Math.round(barRect.h));
 
+    const nameOnDark = barColor === HUD.darkRed || barColor === HUD.red;
     setHudFont(ctx, 'tiny');
-    ctx.fillStyle = HUD.black;
+    ctx.fillStyle = nameOnDark ? HUD.text : HUD.black;
     ctx.fillText(clipTextToWidth(ctx, team.name, barW - 4), Math.round(barX + 2), Math.round(barRect.y + 1));
 
     setHudFont(ctx, 'small');
-    ctx.fillStyle = HUD.text;
+    ctx.fillStyle = teamStatusTextColor(team.status);
     const label = teamStatusLabel(team.status);
     ctx.fillText(clipTextToWidth(ctx, label, barW - 2), Math.round(barX + 1), Math.round(r.y + 16));
 

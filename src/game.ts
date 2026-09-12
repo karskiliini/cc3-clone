@@ -8,7 +8,9 @@ const SETTINGS_KEY = 'cc3.settings';
 
 const DEFAULT_SETTINGS: GameSettings = {
   volume: 0.7,
-  unitLabels: true,
+  // The original shows no floating team-name labels by default (they are an
+  // optional overlay); keep the 'L' hotkey / options toggle available.
+  unitLabels: false,
   losLines: true,
   speed: 1,
 };
