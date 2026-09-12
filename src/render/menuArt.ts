@@ -146,11 +146,14 @@ function drawMarchingSoldierShape(ctx: CanvasRenderingContext2D, gx: number, gro
   const neckH = H * 0.08;
   const helmetRX = H * 0.21;
   const helmetRY = H * 0.13;
-  const shoulderHalfW = H * 0.18;
-  const waistHalfW = H * 0.12;
+  // near-rectangular torso: shoulders only slightly wider than the waist
+  // (a boxy body reads as human at this scale far better than a cone)
+  const shoulderHalfW = H * 0.155;
+  const waistHalfW = H * 0.135;
   const legW = H * 0.1;
   const stride = H * 0.14 + (hash2(seed, 1, 41) - 0.5) * H * 0.08;
   const frontLeg = seed % 2 === 0 ? 1 : -1;
+  const rifleAcrossBody = seed % 2 === 1;
 
   const torsoBottomY = groundY - legH;
   const torsoTopY = torsoBottomY - torsoH;
@@ -169,10 +172,22 @@ function drawMarchingSoldierShape(ctx: CanvasRenderingContext2D, gx: number, gro
   ctx.fillRect(-legW / 2, 0, legW, legH);
   ctx.restore();
 
-  // torso trapezoid (wider at the shoulders)
+  // small backpack bump on the trailing (back) side, tucked slightly behind
+  // the torso's upper silhouette so it fuses rather than floats
+  const backSide = -frontLeg;
+  ctx.fillRect(
+    gx + backSide * waistHalfW * 0.55 - H * 0.05,
+    torsoTopY + torsoH * 0.1,
+    H * 0.12,
+    torsoH * 0.55,
+  );
+
+  // torso: a rectangle with gently sloped shoulders and a narrower waist
   ctx.beginPath();
-  ctx.moveTo(gx - shoulderHalfW, torsoTopY);
-  ctx.lineTo(gx + shoulderHalfW, torsoTopY);
+  ctx.moveTo(gx - shoulderHalfW, torsoTopY + torsoH * 0.1);
+  ctx.lineTo(gx - waistHalfW * 0.6, torsoTopY);
+  ctx.lineTo(gx + waistHalfW * 0.6, torsoTopY);
+  ctx.lineTo(gx + shoulderHalfW, torsoTopY + torsoH * 0.1);
   ctx.lineTo(gx + waistHalfW, torsoBottomY);
   ctx.lineTo(gx - waistHalfW, torsoBottomY);
   ctx.closePath();
@@ -189,11 +204,18 @@ function drawMarchingSoldierShape(ctx: CanvasRenderingContext2D, gx: number, gro
   ctx.ellipse(gx, headCY, helmetRX, helmetRY, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // rifle slung diagonally over the shoulder
+  // rifle: half the figures carry it slung diagonally over the shoulder,
+  // half hold it diagonally across the body (port arms) for pose variety
   ctx.save();
-  ctx.translate(gx + shoulderHalfW * 0.4, torsoTopY + torsoH * 0.3);
-  ctx.rotate(-0.62 - (hash2(seed, 2, 41) - 0.5) * 0.3);
-  ctx.fillRect(-H * 0.03, -H * 0.5, H * 0.06, H * 0.62);
+  if (rifleAcrossBody) {
+    ctx.translate(gx - shoulderHalfW * 0.5, torsoBottomY - torsoH * 0.15);
+    ctx.rotate(0.5 + (hash2(seed, 2, 41) - 0.5) * 0.2);
+    ctx.fillRect(-H * 0.03, -H * 0.32, H * 0.06, H * 0.6);
+  } else {
+    ctx.translate(gx + shoulderHalfW * 0.4, torsoTopY + torsoH * 0.3);
+    ctx.rotate(-0.62 - (hash2(seed, 2, 41) - 0.5) * 0.3);
+    ctx.fillRect(-H * 0.03, -H * 0.5, H * 0.06, H * 0.62);
+  }
   ctx.restore();
 }
 
@@ -258,23 +280,37 @@ function drawTank(ctx: CanvasRenderingContext2D, x0: number, groundY: number, wP
   drawTankShape(ctx, x0, groundY, wPx);
 }
 
-/** One wavering column of smoke: stacked translucent ellipses that widen and
- * fade as they rise toward the fire glow, with a per-level horizontal wobble
- * so the column doesn't read as a rigid straight line. */
+/** One wavering column of smoke: overlapping soft radial-gradient puffs
+ * (rather than discrete hard-edged circles) that grow and fade as they rise
+ * toward the fire glow, spaced closely enough (~0.4x their own radius) to
+ * merge into a continuous plume, with a smooth lateral drift so the column
+ * leans rather than reading as a rigid vertical stack. */
 function drawSmokeColumn(ctx: CanvasRenderingContext2D, x: number, baseY: number, topY: number, seed: number): void {
   ctx.save();
-  const steps = 16;
-  for (let i = 0; i < steps; i++) {
-    const t = i / (steps - 1);
-    const y = baseY + (topY - baseY) * t;
-    const wobble = (hash2(seed, i, 53) - 0.5) * 46 * t;
-    const rx = 9 + 30 * t;
-    const ry = 12 + 9 * t;
-    const alpha = 0.4 - 0.18 * t;
-    ctx.fillStyle = `rgba(18,12,10,${Math.max(0.06, alpha).toFixed(3)})`;
+  const totalRise = baseY - topY;
+  const startR = 10;
+  const endR = 44;
+  // walk upward in steps sized to the *current* radius so puffs overlap by
+  // a consistent fraction regardless of how fast the column widens
+  let y = baseY;
+  let i = 0;
+  const drift = (hash2(seed, 0, 59) - 0.5) * 0.6; // per-column drift direction/strength
+  while (y > topY) {
+    const t = Math.min(1, (baseY - y) / totalRise);
+    const r = startR + (endR - startR) * t;
+    const sway = Math.sin(t * 3.1 + hash2(seed, 1, 59) * 6) * 26 * t;
+    const dx = x + drift * (baseY - y) * 0.55 + sway;
+    const alpha = 0.36 * (1 - t) + 0.04;
+    const grad = ctx.createRadialGradient(dx, y, 0, dx, y, r);
+    grad.addColorStop(0, `rgba(20,8,6,${alpha.toFixed(3)})`);
+    grad.addColorStop(1, 'rgba(20,8,6,0)');
+    ctx.fillStyle = grad;
     ctx.beginPath();
-    ctx.ellipse(x + wobble, y, rx, ry, 0, 0, Math.PI * 2);
+    ctx.arc(dx, y, r, 0, Math.PI * 2);
     ctx.fill();
+    y -= Math.max(6, r * 0.4);
+    i++;
+    if (i > 60) break; // safety
   }
   ctx.restore();
 }
