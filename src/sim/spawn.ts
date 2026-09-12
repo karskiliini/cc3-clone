@@ -88,7 +88,7 @@ export function spawnTeam(state: BattleState, def: TeamDef, side: Side, pos: Vec
       id: state.nextId++,
       teamId,
       side,
-      name: `${sd.rank}. ${randomName(side, rng)}`,
+      name: randomName(side, rng),
       rank: sd.rank,
       weaponId: sd.weaponId,
       ammo,

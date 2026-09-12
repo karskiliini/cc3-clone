@@ -60,6 +60,12 @@ export interface VictoryLocation {
   capturingSide: Side | null;
 }
 
+export type DecorKind =
+  | 'haystack' | 'well' | 'cart' | 'bush' | 'stump' | 'pole' | 'rocks' | 'log'
+  | 'shellhole' | 'grave' | 'sign' | 'barrel' | 'crate' | 'wreck' | 'woodpile' | 'puddle' | 'flowers' | 'tramwire';
+/** Purely visual map dressing (no sim effect). Position in tile coords (may be fractional). */
+export interface DecorItem { kind: DecorKind; x: number; y: number; variant?: number }
+
 export interface MapDef {
   id: string;
   name: string;
@@ -73,6 +79,8 @@ export interface MapDef {
   deployZones: Record<Side, Rect>;   // tile rects
   /** Which side attacks (starts owning fewer VLs). Defender owns all VLs at start. */
   attacker: Side;
+  /** optional visual dressing */
+  decor?: DecorItem[];
 }
 
 export interface GameMap {
@@ -129,7 +137,7 @@ export interface Soldier {
   id: number;
   teamId: number;
   side: Side;
-  name: string;               // "Sgt. Müller"
+  name: string;               // surname only, e.g. "Müller"; display as `${rank}. ${name}`
   rank: string;               // "Gefr", "Sgt", "Ryad"
   weaponId: string;
   ammo: number;

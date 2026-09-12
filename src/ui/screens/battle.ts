@@ -117,6 +117,7 @@ export class BattleScreen implements Screen {
     }
 
     // command menu
+    const menuWasOpen = this.commandMenu.isOpen;
     if (this.commandMenu.isOpen) {
       const r = this.commandMenu.update(input);
       if (r === 'cancel') {
@@ -135,7 +136,7 @@ export class BattleScreen implements Screen {
     // left click: issue pending order, or select
     for (const c of input.clicks) {
       if (c.button !== 0 || c.y >= VIEW_H) continue;
-      if (this.commandMenu.isOpen) continue;
+      if (this.commandMenu.isOpen || menuWasOpen) continue;
       const world = screenToWorld(cam, { x: c.x, y: c.y });
       if (this.pendingOrder && this.selectedTeamId != null) {
         const enemy = battle.teamAt(world, otherSide(battle.playerSide()));
