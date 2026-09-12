@@ -372,3 +372,22 @@ export interface OperationState {
   forcePool: { defId: string; experience: number; alive: number }[];
   requisition: number;
 }
+
+// ------------------------------------------------------------- screens
+/** A full-screen UI state (main menu, battle, debrief...). Implemented in src/ui/screens/*. */
+export interface Screen {
+  onEnter?(): void;
+  onExit?(): void;
+  /** dt in seconds of real time */
+  update(dt: number, input: InputState): void;
+  draw(ctx: CanvasRenderingContext2D): void;
+  /** cursor to draw this frame */
+  cursor?(): CursorKind;
+}
+
+export interface GameSettings {
+  volume: number;             // 0..1
+  unitLabels: boolean;
+  losLines: boolean;
+  speed: 1 | 2 | 4;
+}
