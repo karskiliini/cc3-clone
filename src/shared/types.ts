@@ -89,6 +89,8 @@ export interface GameMap {
   smoke: Float32Array;
   /** crater decals: tile indexes */
   craters: number[];
+  /** tile indexes changed since last render bake (e.g. vehicle crushing terrain); renderer clears this */
+  dirtyTiles?: number[];
 }
 
 // ------------------------------------------------------------------ weapons

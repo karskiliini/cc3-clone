@@ -1,0 +1,154 @@
+import type { BattleState, Soldier, Vec2 } from '@/shared/types';
+import { TILE_M } from '@/shared/types';
+import type { Rng } from '@/shared/rng';
+import { angleTo, dist, facingFromAngle, pointInRect, vadd, vnorm, vscale, vsub } from '@/shared/math';
+import { coverAt, tileAt } from './map';
+import { TERRAIN_PROPS } from './terrain';
+import { findPath } from './path';
+
+const SPEEDS: Record<string, number> = {
+  moving: 1.4,
+  movingFast: 3.0,
+  sneaking: 0.5,
+  panicked: 3.2,
+  routed: 3.0,
+};
+
+const REPATH_INTERVAL_S = 3;
+const NEAR_ENEMY_RADIUS_TILES = 15;
+
+/** Advances all soldiers along their current paths, drives panicked/routed flight behaviour,
+ * updates facing/animation/fatigue/cover, and gently separates overlapping soldiers. */
+export function stepMovement(state: BattleState, rng: Rng, dt: number): void {
+  for (const s of state.soldiers.values()) {
+    if (s.health === 'dead' || s.health === 'incapacitated') continue;
+
+    if (s.vehicleId != null) {
+      const veh = state.vehicles.get(s.vehicleId);
+      if (veh) s.pos = { x: veh.pos.x, y: veh.pos.y };
+      continue;
+    }
+
+    s.cover = coverAt(state.map, s.pos);
+
+    if (s.activity === 'panicked') handleFleeing(state, s, dt);
+    else if (s.activity === 'routed') handleRouting(state, s, dt);
+
+    const speed = SPEEDS[s.activity];
+    if (speed != null && s.path.length > 0) {
+      moveAlongPath(state, s, speed, dt);
+      if (Math.floor(state.time / 0.3) % 2 === 0) s.animFrame = 0; else s.animFrame = 1;
+    }
+
+    if (s.activity === 'movingFast') s.fatigue = Math.min(100, s.fatigue + 2 * dt);
+    else if (s.activity === 'moving') s.fatigue = Math.min(100, s.fatigue + 0.5 * dt);
+    else if (s.activity === 'idle') s.fatigue = Math.max(0, s.fatigue - 1 * dt);
+  }
+  separateSoldiers(state);
+}
+
+function moveAlongPath(state: BattleState, s: Soldier, speedMs: number, dt: number): void {
+  const tile = tileAt(state.map, Math.floor(s.pos.x), Math.floor(s.pos.y));
+  let mul = TERRAIN_PROPS[tile].speedMul;
+  if (s.fatigue > 70) mul *= 0.5;
+  if (s.health === 'wounded') mul *= 0.7;
+  let remaining = (speedMs * mul * dt) / TILE_M;
+
+  while (remaining > 0 && s.path.length > 0) {
+    const wp = s.path[0];
+    const d = dist(s.pos, wp);
+    s.facing = facingFromAngle(angleTo(s.pos, wp));
+    if (d <= remaining || d < 1e-4) {
+      s.pos = { x: wp.x, y: wp.y };
+      remaining -= d;
+      s.path.shift();
+    } else {
+      const dir = vnorm(vsub(wp, s.pos));
+      s.pos = vadd(s.pos, vscale(dir, remaining));
+      remaining = 0;
+    }
+  }
+
+  if (s.path.length === 0) onArrive(state, s);
+}
+
+function onArrive(state: BattleState, s: Soldier): void {
+  const team = state.teams.get(s.teamId);
+  const orderType = team?.order?.type;
+  if (orderType === 'defend') {
+    s.activity = 'defending';
+    s.stance = s.cover < 0.2 ? 'prone' : 'crouching';
+  } else {
+    s.activity = 'idle';
+    s.stance = isEnemyNear(state, s) ? 'crouching' : 'standing';
+  }
+}
+
+function isEnemyNear(state: BattleState, s: Soldier): boolean {
+  const spotted = state.spotted[s.side];
+  for (const eid of spotted) {
+    const e = state.soldiers.get(eid);
+    if (e && dist(e.pos, s.pos) < NEAR_ENEMY_RADIUS_TILES) return true;
+  }
+  return false;
+}
+
+/** Panicked soldiers flee directly away from the nearest spotted enemy, repathing every 3 s. */
+function handleFleeing(state: BattleState, s: Soldier, dt: number): void {
+  s.reloadTimer -= dt;
+  if (s.path.length === 0 || s.reloadTimer <= 0) {
+    s.reloadTimer = REPATH_INTERVAL_S;
+    let nearest: Vec2 | null = null;
+    let nd = Infinity;
+    for (const eid of state.spotted[s.side]) {
+      const e = state.soldiers.get(eid);
+      if (!e) continue;
+      const d = dist(s.pos, e.pos);
+      if (d < nd) { nd = d; nearest = e.pos; }
+    }
+    const dir = nearest ? vnorm(vsub(s.pos, nearest)) : { x: s.side === 'german' ? -1 : 1, y: 0 };
+    const dest = vadd(s.pos, vscale(dir, 20));
+    s.path = findPath(state.map, s.pos, dest, 'infantry');
+  }
+}
+
+/** Routed soldiers run for their own deploy-zone edge; once inside, they hide prone. */
+function handleRouting(state: BattleState, s: Soldier, dt: number): void {
+  const zone = state.map.def.deployZones[s.side];
+  if (pointInRect(s.pos, zone)) {
+    s.activity = 'hiding';
+    s.stance = 'prone';
+    s.path = [];
+    return;
+  }
+  s.reloadTimer -= dt;
+  if (s.path.length === 0 || s.reloadTimer <= 0) {
+    s.reloadTimer = REPATH_INTERVAL_S;
+    const centre = { x: zone.x + zone.w / 2, y: zone.y + zone.h / 2 };
+    s.path = findPath(state.map, s.pos, centre, 'infantry');
+  }
+}
+
+function separateSoldiers(state: BattleState): void {
+  const buckets = new Map<string, Soldier[]>();
+  for (const s of state.soldiers.values()) {
+    if (s.health === 'dead' || s.health === 'incapacitated' || s.vehicleId != null) continue;
+    const key = `${Math.floor(s.pos.x)},${Math.floor(s.pos.y)}`;
+    let arr = buckets.get(key);
+    if (!arr) { arr = []; buckets.set(key, arr); }
+    arr.push(s);
+  }
+  for (const arr of buckets.values()) {
+    for (let i = 0; i < arr.length; i++) {
+      for (let j = i + 1; j < arr.length; j++) {
+        const a = arr[i], b = arr[j];
+        const d = dist(a.pos, b.pos);
+        if (d < 0.3) {
+          const dir = d > 1e-4 ? vnorm(vsub(b.pos, a.pos)) : { x: 1, y: 0 };
+          a.pos = vsub(a.pos, vscale(dir, 0.05));
+          b.pos = vadd(b.pos, vscale(dir, 0.05));
+        }
+      }
+    }
+  }
+}

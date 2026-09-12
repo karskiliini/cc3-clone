@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Map Preview</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: #14150f;
+        color: #e8e8e0;
+        font: 12px monospace;
+      }
+      h1 {
+        font-size: 14px;
+        margin: 12px 16px 4px;
+        color: #d8b448;
+      }
+      .map-block {
+        margin: 8px 16px 24px;
+        padding: 8px;
+        background: #1c1f1a;
+        border: 1px solid #3a3f36;
+      }
+      .map-title {
+        margin: 0 0 6px;
+        color: #e8e8e0;
+      }
+      .map-title small {
+        color: #9a9c94;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: flex-start;
+      }
+      .thumb-wrap canvas, .viewport-wrap canvas {
+        display: block;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+        background: #000;
+        border: 1px solid #6b7064;
+      }
+      .caption {
+        color: #9a9c94;
+        margin-top: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>CC3 Clone — Map Preview</h1>
+    <div id="root"></div>
+    <script type="module" src="/tools/mapPreview.ts"></script>
+  </body>
+</html>

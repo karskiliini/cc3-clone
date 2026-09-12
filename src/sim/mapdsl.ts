@@ -1,0 +1,189 @@
+import type { Terrain, Vec2 } from '@/shared/types';
+import { hash2 } from '@/shared/rng';
+
+/** Deterministic terrain painter DSL used by map definitions. */
+export class MapPainter {
+  tiles: Terrain[];
+  w: number;
+  h: number;
+  seed: number;
+
+  constructor(tiles: Terrain[], w: number, h: number, seed = 0) {
+    this.tiles = tiles;
+    this.w = w;
+    this.h = h;
+    this.seed = seed;
+  }
+
+  private set(x: number, y: number, t: Terrain): void {
+    const xi = Math.round(x), yi = Math.round(y);
+    if (xi < 0 || yi < 0 || xi >= this.w || yi >= this.h) return;
+    this.tiles[yi * this.w + xi] = t;
+  }
+
+  private get(x: number, y: number): Terrain | null {
+    if (x < 0 || y < 0 || x >= this.w || y >= this.h) return null;
+    return this.tiles[y * this.w + x];
+  }
+
+  fill(t: Terrain): void {
+    for (let i = 0; i < this.tiles.length; i++) this.tiles[i] = t;
+  }
+
+  rect(x: number, y: number, w: number, h: number, t: Terrain): void {
+    const x0 = Math.floor(x), y0 = Math.floor(y);
+    const x1 = Math.floor(x + w), y1 = Math.floor(y + h);
+    for (let yy = y0; yy < y1; yy++) {
+      for (let xx = x0; xx < x1; xx++) this.set(xx, yy, t);
+    }
+  }
+
+  /** Blobby irregular disc: radius modulated by hash noise over angle, +-25%. */
+  patch(cx: number, cy: number, r: number, t: Terrain): void {
+    const steps = Math.max(16, Math.round(r * 6));
+    const x0 = Math.floor(cx - r * 1.3), x1 = Math.ceil(cx + r * 1.3);
+    const y0 = Math.floor(cy - r * 1.3), y1 = Math.ceil(cy + r * 1.3);
+    for (let yy = y0; yy <= y1; yy++) {
+      for (let xx = x0; xx <= x1; xx++) {
+        const dx = xx + 0.5 - cx, dy = yy + 0.5 - cy;
+        const dist = Math.hypot(dx, dy);
+        if (dist > r * 1.3) continue;
+        const angle = Math.atan2(dy, dx);
+        const angleBucket = Math.round(((angle + Math.PI) / (2 * Math.PI)) * steps);
+        const noise = hash2(angleBucket, Math.round(r * 100), this.seed);
+        const localR = r * (0.75 + noise * 0.5); // +-25%
+        if (dist <= localR) this.set(xx, yy, t);
+      }
+    }
+  }
+
+  /** Scatters clumps of `t` over the map (optionally restricted to `onlyOver` tiles). */
+  noiseFill(t: Terrain, density: number, onlyOver?: Terrain[]): void {
+    const restrict = onlyOver ? new Set(onlyOver) : null;
+    const mask = new Uint8Array(this.w * this.h);
+    for (let y = 0; y < this.h; y++) {
+      for (let x = 0; x < this.w; x++) {
+        const i = y * this.w + x;
+        if (restrict && !restrict.has(this.tiles[i])) continue;
+        const n = hash2(x, y, this.seed + 101);
+        if (n > 1 - density) mask[i] = 1;
+      }
+    }
+    // dilate once for clumping, using a second hash so clumps look natural
+    const dilated = new Uint8Array(this.w * this.h);
+    for (let y = 0; y < this.h; y++) {
+      for (let x = 0; x < this.w; x++) {
+        const i = y * this.w + x;
+        if (mask[i]) { dilated[i] = 1; continue; }
+        let touching = false;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= this.w || ny >= this.h) continue;
+          if (mask[ny * this.w + nx]) { touching = true; break; }
+        }
+        if (touching && hash2(x, y, this.seed + 202) > 0.5) dilated[i] = 1;
+      }
+    }
+    for (let y = 0; y < this.h; y++) {
+      for (let x = 0; x < this.w; x++) {
+        const i = y * this.w + x;
+        if (!dilated[i]) continue;
+        if (restrict && !restrict.has(this.tiles[i])) continue;
+        this.tiles[i] = t;
+      }
+    }
+  }
+
+  private distToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    let t = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    const cx = ax + t * dx, cy = ay + t * dy;
+    return Math.hypot(px - cx, py - cy);
+  }
+
+  private rasterizeLine(points: Vec2[], width: number, t: Terrain): void {
+    if (points.length < 2) {
+      if (points.length === 1) this.patch(points[0].x, points[0].y, width / 2, t);
+      return;
+    }
+    const half = width / 2;
+    for (let s = 0; s < points.length - 1; s++) {
+      const a = points[s], b = points[s + 1];
+      const x0 = Math.floor(Math.min(a.x, b.x) - half - 1);
+      const x1 = Math.ceil(Math.max(a.x, b.x) + half + 1);
+      const y0 = Math.floor(Math.min(a.y, b.y) - half - 1);
+      const y1 = Math.ceil(Math.max(a.y, b.y) + half + 1);
+      for (let yy = y0; yy <= y1; yy++) {
+        for (let xx = x0; xx <= x1; xx++) {
+          const d = this.distToSegment(xx + 0.5, yy + 0.5, a.x, a.y, b.x, b.y);
+          if (d <= half) this.set(xx, yy, t);
+        }
+      }
+    }
+  }
+
+  road(points: Vec2[], width: number, t: 'dirtroad' | 'pavedroad'): void {
+    this.rasterizeLine(points, width, t);
+  }
+
+  river(points: Vec2[], width: number): void {
+    this.rasterizeLine(points, width, 'water');
+  }
+
+  line(points: Vec2[], t: Terrain): void {
+    this.rasterizeLine(points, 1, t);
+  }
+
+  bridge(x: number, y: number, w: number, h: number): void {
+    this.rect(x, y, w, h, 'bridge');
+  }
+
+  building(x: number, y: number, w: number, h: number, kind: 'wood' | 'stone'): void {
+    const wallT: Terrain = kind === 'wood' ? 'buildingWood' : 'buildingStone';
+    const x0 = Math.floor(x), y0 = Math.floor(y);
+    const x1 = Math.floor(x + w), y1 = Math.floor(y + h);
+    for (let yy = y0; yy < y1; yy++) {
+      for (let xx = x0; xx < x1; xx++) {
+        const onWall = xx === x0 || xx === x1 - 1 || yy === y0 || yy === y1 - 1;
+        this.set(xx, yy, onWall ? wallT : 'floor');
+      }
+    }
+  }
+
+  /** Irregular ellipse of 'woods' with a 1-tile 'scatteredtrees' fringe ring. */
+  woods(cx: number, cy: number, rx: number, ry: number): void {
+    const r = Math.max(rx, ry);
+    const steps = Math.max(16, Math.round(r * 6));
+    const woodsMask = new Set<string>();
+    const x0 = Math.floor(cx - rx * 1.3 - 1), x1 = Math.ceil(cx + rx * 1.3 + 1);
+    const y0 = Math.floor(cy - ry * 1.3 - 1), y1 = Math.ceil(cy + ry * 1.3 + 1);
+    for (let yy = y0; yy <= y1; yy++) {
+      for (let xx = x0; xx <= x1; xx++) {
+        const dx = (xx + 0.5 - cx) / rx, dy = (yy + 0.5 - cy) / ry;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 1.3) continue;
+        const angle = Math.atan2(dy, dx);
+        const angleBucket = Math.round(((angle + Math.PI) / (2 * Math.PI)) * steps);
+        const noise = hash2(angleBucket, Math.round((rx + ry) * 100), this.seed + 303);
+        const localR = 0.75 + noise * 0.5;
+        if (dist <= localR) {
+          this.set(xx, yy, 'woods');
+          woodsMask.add(`${xx},${yy}`);
+        }
+      }
+    }
+    // fringe: 1-tile ring of scatteredtrees around the woods blob
+    for (const key of woodsMask) {
+      const [xs, ys] = key.split(',').map(Number);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+        const nx = xs + dx, ny = ys + dy;
+        if (woodsMask.has(`${nx},${ny}`)) continue;
+        if (nx < 0 || ny < 0 || nx >= this.w || ny >= this.h) continue;
+        const cur = this.get(nx, ny);
+        if (cur !== 'woods') this.set(nx, ny, 'scatteredtrees');
+      }
+    }
+  }
+}

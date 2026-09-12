@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UI Preview</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: #14150f;
+        color: #e8e8e0;
+        font: 12px monospace;
+      }
+      h1 {
+        font-size: 14px;
+        margin: 12px 16px 4px;
+        color: #d8b448;
+      }
+      p {
+        margin: 0 16px 10px;
+        color: #9a9c94;
+        max-width: 800px;
+      }
+      #canvas-wrap {
+        margin: 8px 16px 24px;
+        padding: 8px;
+        background: #1c1f1a;
+        border: 1px solid #3a3f36;
+        display: inline-block;
+      }
+      #game {
+        display: block;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+        background: #000;
+        border: 1px solid #6b7064;
+        cursor: default;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>CC3 Clone — In-Battle UI Preview</h1>
+    <p>
+      Left-click a row in TEAMS to select. Wheel/arrows scroll the team list. Right-click on a
+      selected team's row (or anywhere in the map area above) opens the command menu — click a
+      row or press its hotkey (M, F, S, I, K, D, A) to pick an order, Esc/outside-click cancels.
+      Hold Shift and move the mouse over the map area to test the LOS tool. Click PAUSE/OPTIONS/
+      OVERVIEW/TRUCE in the message panel to see button feedback in the log.
+    </p>
+    <div id="canvas-wrap">
+      <canvas id="game" width="800" height="600"></canvas>
+    </div>
+    <script type="module" src="/tools/uiPreview.ts"></script>
+  </body>
+</html>

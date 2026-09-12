@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Sprite Preview — cc3_clone</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 16px;
+        background: #202018;
+        color: #e8e8e0;
+        font: 12px monospace;
+      }
+      h1 { font-size: 16px; margin: 0 0 4px; }
+      h2 { font-size: 13px; margin: 18px 0 6px; color: #d8b448; }
+      .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+      .cell {
+        background: #2c2c24;
+        border: 1px solid #444;
+        padding: 4px;
+        text-align: center;
+      }
+      .cell canvas { image-rendering: pixelated; display: block; margin: 0 auto 4px; background: #6a7d52; }
+      .cell span { display: block; font-size: 10px; color: #9a9c94; }
+    </style>
+  </head>
+  <body>
+    <h1>cc3_clone — sprite preview (4x)</h1>
+    <div id="root"></div>
+    <script type="module" src="./spritePreview.ts"></script>
+  </body>
+</html>

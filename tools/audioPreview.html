@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>CC3 Clone — Audio Preview</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      background: #1b1b1b;
+      color: #eee;
+      padding: 24px;
+    }
+    h1 { font-size: 18px; margin-bottom: 4px; }
+    p.hint { color: #999; margin-top: 0; }
+    #buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 16px 0;
+    }
+    .sfx-btn {
+      background: #333;
+      color: #eee;
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 8px 14px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .sfx-btn:hover { background: #444; }
+    section {
+      border-top: 1px solid #444;
+      padding-top: 16px;
+      margin-top: 16px;
+    }
+    label { display: inline-block; min-width: 140px; }
+    input[type="range"] { width: 240px; vertical-align: middle; }
+  </style>
+</head>
+<body>
+  <h1>CC3 Clone — Audio Preview</h1>
+  <p class="hint">Click anywhere once to unlock audio, then click a sound.</p>
+
+  <div id="buttons"></div>
+
+  <section>
+    <div>
+      <label for="volume">Master volume</label>
+      <input type="range" id="volume" min="0" max="100" value="70" />
+    </div>
+  </section>
+
+  <section>
+    <div>
+      <label for="engineOn">Engine (vehicle 1)</label>
+      <input type="checkbox" id="engineOn" />
+    </div>
+    <div>
+      <label for="engine">Engine speed</label>
+      <input type="range" id="engine" min="0" max="100" value="0" />
+    </div>
+    <div>
+      <button id="spawnEngines">Spawn 7 more engines (test cap of 6)</button>
+      <button id="stopEngines">Stop all engines</button>
+    </div>
+  </section>
+
+  <section>
+    <div>
+      <label for="ambient">Ambient wind</label>
+      <input type="checkbox" id="ambient" />
+    </div>
+  </section>
+
+  <script type="module" src="./audioPreview.ts"></script>
+</body>
+</html>
