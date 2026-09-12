@@ -109,6 +109,34 @@ for (const id of VEHICLE_IDS) {
   cellPair(vehKoRow, `${id} hull KO`, getVehicleSprite(id, 'hull', 'knockedOut'));
 }
 
+/** Compose hull + turret onto one canvas the way unitRender does: both
+ * centred on the same pivot point (their own canvas centre), turret drawn
+ * on top of the hull, no rotation (north-facing). */
+function composeVehicle(hull: HTMLCanvasElement, turret: HTMLCanvasElement | null): HTMLCanvasElement {
+  const w = Math.max(hull.width, turret ? turret.width : 0);
+  const h = Math.max(hull.height, turret ? turret.height : 0);
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d')!;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(hull, (w - hull.width) / 2, (h - hull.height) / 2);
+  if (turret && turret.width > 1) ctx.drawImage(turret, (w - turret.width) / 2, (h - turret.height) / 2);
+  return c;
+}
+
+const vehComposedRow = section('Vehicles — composed hull+turret (ok)');
+for (const id of VEHICLE_IDS) {
+  const hull = getVehicleSprite(id, 'hull', 'ok');
+  const turret = getVehicleSprite(id, 'turret', 'ok');
+  cellPair(vehComposedRow, `${id}`, composeVehicle(hull, turret));
+}
+const vehComposedKoRow = section('Vehicles — composed hull+turret (knocked out)');
+for (const id of VEHICLE_IDS) {
+  const hull = getVehicleSprite(id, 'hull', 'knockedOut');
+  const turret = getVehicleSprite(id, 'turret', 'knockedOut');
+  cellPair(vehComposedKoRow, `${id} KO`, composeVehicle(hull, turret));
+}
+
 // ------------------------------------------------------------------ flags --
 const flagRow = section('Flags');
 cellPair(flagRow, 'german', getFlagSprite('german'));

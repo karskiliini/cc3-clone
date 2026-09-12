@@ -38,7 +38,10 @@ const LOWRES_PX_PER_TILE = 2;
 
 const BUILDING_TERRAINS = new Set<Terrain>(['buildingWood', 'buildingStone', 'floor']);
 /** Terrain a pixel "falls back to" when the tile itself is a feature (road/water/crops/rubble/wall). */
-const SOFT_GROUND = new Set<Terrain>(['open', 'grass', 'tallgrass', 'snow', 'mud']);
+// 'tallgrass' and 'mud' are deliberately NOT soft-ground seeds: they're rendered as blurred
+// coverage overlays (see mudGrid/tallgrassGrid in paintGroundAndFeatures) so their macro shape
+// can be smoothed independently of the tile-corner ground blend, same as crops/rubble.
+const SOFT_GROUND = new Set<Terrain>(['open', 'grass', 'snow']);
 
 function hashStr(s: string): number {
   let h = 0;
@@ -76,8 +79,8 @@ const ICE_RAMP = ['#b8c4cc', '#c8d2d9', '#d6dee4'];
 
 const LOCAL_RAMPS: Partial<Record<Season, Partial<Record<Terrain, string[]>>>> = {
   summer: {
-    open: ['#7d7250', '#928660', '#a3976c', '#b0a479'],
-    grass: ['#4f5e2b', '#66743a', '#7a8748', '#8d9a56'],
+    open: ['#7d7250', '#928660', '#a3976c', '#b0a479', '#c2b686'],
+    grass: ['#4f5e2b', '#66743a', '#7a8748', '#8d9a56', '#a8b06a'],
     tallgrass: ['#6f7d3a', '#8a9648', '#a1ac57', '#b5bd66'],
     crops: CROPS_RAMP,
     mud: MUD_RAMP,
@@ -86,8 +89,8 @@ const LOCAL_RAMPS: Partial<Record<Season, Partial<Record<Terrain, string[]>>>> =
     water: WATER_RAMP,
   },
   autumn: {
-    open: ['#8a7a48', '#93844f', '#847338', '#9c8c52'],
-    grass: ['#6b6a32', '#847f3c', '#9a9348', '#ada55a'],
+    open: ['#8a7a48', '#93844f', '#847338', '#9c8c52', '#b8a850'],
+    grass: ['#6b6a32', '#847f3c', '#9a9348', '#ada55a', '#c0b862'],
     tallgrass: ['#847a34', '#948a3e', '#726a2a', '#a4993f'],
     crops: CROPS_RAMP,
     mud: MUD_RAMP,
@@ -157,13 +160,16 @@ function rampLerp(ramp: RGB[], t: number): RGB {
  * fbm octave-bands (large ~6m mottling + medium) plus per-pixel grain pick a
  * fractional position along the terrain's dark->light ramp.
  */
+/** grass/open get a bright 5th "sunlit crest" ramp stop; bias the centre of the distribution
+ * up a little so more of the NW-facing high ground actually reaches it (see fix #7). */
 function groundColorFbm(t: Terrain, season: Season, X: number, Y: number, seed: number): RGB {
   const ramp = rampRgb(season, t);
   const th = hashStrCached(t);
   const f64 = fbm64(X, Y, seed + th);
   const f14 = fbm14(X, Y, seed + th);
   const g = hash2(X, Y, seed + 31);
-  const tt = clamp01(0.5 + 0.9 * (f64 - 0.5) + 0.5 * (f14 - 0.5) + 0.18 * (g - 0.5));
+  const bias = (t === 'grass' || t === 'open') ? 0.08 : 0;
+  const tt = clamp01(0.5 + bias + 0.9 * (f64 - 0.5) + 0.5 * (f14 - 0.5) + 0.18 * (g - 0.5));
   return rampLerp(ramp, tt);
 }
 
@@ -201,17 +207,60 @@ function setPixel(data: Uint8ClampedArray, w: number, x: number, y: number, c: R
 // ============================================================================
 interface Grid { data: Float32Array; size: number; any: boolean }
 
-function buildGrid(map: GameMap, x0: number, y0: number, tiles: number, classify: (t: Terrain) => boolean): Grid {
+/**
+ * Builds a coverage grid at tile-centre resolution (1 tile of padding either side, as before).
+ * `blurR` > 0 pre-blurs the boolean classification with a box filter of that tile radius before
+ * it's handed to `sampleGrid`'s bilinear+hash pass, so the underlying macro silhouette itself
+ * loses its tile-stepped corners (not just the ~1-tile-wide edge band) — this is what makes
+ * crops/mud/tallgrass/rubble patches read as soft amoeba blobs instead of staircases (fix #6).
+ */
+function buildGrid(map: GameMap, x0: number, y0: number, tiles: number, classify: (t: Terrain) => boolean, blurR = 0): Grid {
   const size = tiles + 3;
   const data = new Float32Array(size * size);
   let any = false;
-  for (let gy = 0; gy < size; gy++) {
-    const ty = y0 - 1 + gy;
+  if (blurR <= 0) {
+    for (let gy = 0; gy < size; gy++) {
+      const ty = y0 - 1 + gy;
+      for (let gx = 0; gx < size; gx++) {
+        const tx = x0 - 1 + gx;
+        const v = classify(tileAt(map, tx, ty)) ? 1 : 0;
+        data[gy * size + gx] = v;
+        if (v) any = true;
+      }
+    }
+    return { data, size, any };
+  }
+  // raw classification over a padded window so the box blur has real neighbours at every
+  // output cell (including the +-1 tile sampling margin `sampleGrid` itself needs).
+  const rawPad = blurR;
+  const rawSize = size + 2 * rawPad;
+  const raw = new Float32Array(rawSize * rawSize);
+  for (let gy = 0; gy < rawSize; gy++) {
+    const ty = y0 - 1 - rawPad + gy;
+    for (let gx = 0; gx < rawSize; gx++) {
+      const tx = x0 - 1 - rawPad + gx;
+      raw[gy * rawSize + gx] = classify(tileAt(map, tx, ty)) ? 1 : 0;
+    }
+  }
+  // separable box blur (horizontal pass, then vertical) — O(n*(2R+1)) instead of O(n*(2R+1)^2).
+  const norm1 = 2 * blurR + 1;
+  const tmp = new Float32Array(rawSize * size);
+  for (let gy = 0; gy < rawSize; gy++) {
+    const rowIn = gy * rawSize, rowOut = gy * size;
     for (let gx = 0; gx < size; gx++) {
-      const tx = x0 - 1 + gx;
-      const v = classify(tileAt(map, tx, ty)) ? 1 : 0;
+      let sum = 0;
+      const rcx = gx + rawPad;
+      for (let dx = -blurR; dx <= blurR; dx++) sum += raw[rowIn + rcx + dx];
+      tmp[rowOut + gx] = sum / norm1;
+    }
+  }
+  for (let gy = 0; gy < size; gy++) {
+    for (let gx = 0; gx < size; gx++) {
+      let sum = 0;
+      for (let dy = -blurR; dy <= blurR; dy++) sum += tmp[(gy + rawPad + dy) * size + gx];
+      const v = sum / norm1;
       data[gy * size + gx] = v;
-      if (v) any = true;
+      if (v > 0) any = true;
     }
   }
   return { data, size, any };
@@ -321,6 +370,8 @@ function sampleVecArea(field: VecAreaField, wpx: number, wpy: number, seed: numb
 }
 
 const isCrops = (t: Terrain) => t === 'crops';
+const isMud = (t: Terrain) => t === 'mud';
+const isTallgrass = (t: Terrain) => t === 'tallgrass';
 const isPaved = (t: Terrain) => t === 'pavedroad';
 const isDirtRoad = (t: Terrain) => t === 'dirtroad';
 const isWater = (t: Terrain) => t === 'water';
@@ -334,7 +385,7 @@ function paintGroundAndFeatures(
   x0: number, y0: number, tilesW: number, tilesH: number,
   groundUnder: Terrain[], mapW: number, mapH: number,
   fieldId: Int32Array, fieldAxis: Map<number, FieldInfo>,
-  cropsGrid: Grid, pavedGrid: Grid, dirtGrid: Grid, waterGrid: Grid, rubbleGrid: Grid, dirtyGrid: Grid,
+  cropsGrid: Grid, mudGrid: Grid, tallgrassGrid: Grid, pavedGrid: Grid, dirtGrid: Grid, waterGrid: Grid, rubbleGrid: Grid, dirtyGrid: Grid,
   pavedVec: VecAreaField | null, dirtVec: VecAreaField | null, waterVec: VecAreaField | null,
 ): void {
   const groundAt = (tx: number, ty: number): Terrain => {
@@ -363,6 +414,8 @@ function paintGroundAndFeatures(
           // distance field when the map declares one (see MapDef.vectors); tile-grid coverage
           // is the fallback (and always used for crops/rubble, which aren't vectorized).
           const covCrop = sampleGrid(cropsGrid, tx, px, ty, py, wpx, wpy, seed + 3001);
+          const covMud = sampleGrid(mudGrid, tx, px, ty, py, wpx, wpy, seed + 3011, 0.05);
+          const covTallgrass = sampleGrid(tallgrassGrid, tx, px, ty, py, wpx, wpy, seed + 3021, 0.05);
           const pavedRes = pavedVec ? sampleVecArea(pavedVec, wpx, wpy, seed + 3101) : null;
           const covPaved = pavedRes ? pavedRes.cov : sampleGrid(pavedGrid, tx, px, ty, py, wpx, wpy, seed + 3101);
           const dirtRes = dirtVec ? sampleVecArea(dirtVec, wpx, wpy, seed + 3201) : null;
@@ -370,7 +423,7 @@ function paintGroundAndFeatures(
           const waterRes = waterVec ? sampleVecArea(waterVec, wpx, wpy, seed + 3301) : null;
           const covWater = waterRes ? waterRes.cov : sampleGrid(waterGrid, tx, px, ty, py, wpx, wpy, seed + 3301);
           const covRubble = sampleGrid(rubbleGrid, tx, px, ty, py, wpx, wpy, seed + 3401);
-          const deepFeature = covCrop > 0.85 || covPaved > 0.85 || covDirt > 0.85 || covWater > 0.85 || covRubble > 0.85;
+          const deepFeature = covCrop > 0.85 || covMud > 0.85 || covTallgrass > 0.85 || covPaved > 0.85 || covDirt > 0.85 || covWater > 0.85 || covRubble > 0.85;
 
           // -------------------------------------------------- smoothed ground (feathered blend)
           let groundT: Terrain = 'grass';
@@ -408,12 +461,28 @@ function paintGroundAndFeatures(
           }
 
           // ------------------------------------------------- wear: worn shoulders near roads
-          if (!deepFeature && (groundT === 'grass' || groundT === 'open' || groundT === 'tallgrass') && covCrop <= 0.5 && covWater <= 0.5) {
+          if (!deepFeature && (groundT === 'grass' || groundT === 'open') && covCrop <= 0.5 && covMud <= 0.5 && covTallgrass <= 0.5 && covWater <= 0.5) {
             const roadProx = Math.max(covDirt, covPaved * 0.7);
             if (roadProx > 0.02 && roadProx < 0.55) {
               const wearAmt = clamp01(roadProx / 0.55) * 0.4;
               color = lerpRGB(color, groundColorFbm('dirtroad', season, wpx, wpy, seed), wearAmt);
             }
+          }
+
+          // ------------------------------------------------ tallgrass / mud (blurred coverage
+          // overlays — see buildGrid's blurR — so their macro silhouette is a soft blob, not a
+          // tile-stepped stamp; mud takes priority since it's usually the smaller, later detail)
+          if (covTallgrass > 0.5) {
+            let tg = groundColorFbm('tallgrass', season, wpx, wpy, seed);
+            if (covTallgrass < 0.62) tg = shade(tg, -0.08); // feathered inner edge, slightly duller
+            color = tg;
+            groundT = 'tallgrass';
+          }
+          if (covMud > 0.5) {
+            let mc = groundColorFbm('mud', season, wpx, wpy, seed);
+            if (covMud < 0.62) mc = shade(mc, -0.1);
+            color = mc;
+            groundT = 'mud';
           }
 
           // -------------------------------------------------------- crops
@@ -431,22 +500,35 @@ function paintGroundAndFeatures(
           // -------------------------------------------------------- roads
           if (covPaved > 0.5) {
             let rc = groundColorFbm('pavedroad', season, wpx, wpy, seed);
+            // cobble/sett texture: a per-cell brightness step every 3-4px so the surface reads
+            // as individually laid stones rather than a flat tinted band.
+            const cobbleX = Math.floor(wpx / 4), cobbleY = Math.floor(wpy / 4);
+            const cobble = hash2(cobbleX, cobbleY, seed + 4520);
+            rc = shade(rc, (cobble - 0.5) * 0.16);
             const nearEdge = pavedRes ? pavedRes.dist > pavedRes.halfW * 0.82 : covPaved < 0.58;
-            if (nearEdge) rc = shade(rc, -0.16); // kerb
+            const atGutter = pavedRes ? pavedRes.dist > pavedRes.halfW * 0.9 : covPaved < 0.55;
+            if (atGutter) rc = shade(rc, -0.32); // dark gutter line right at the edge
+            else if (nearEdge) rc = shade(rc, -0.16); // kerb
             const crackBlockX = Math.floor(wpx / 3), crackBlockY = Math.floor(wpy / 3);
             if (hash2(crackBlockX, crackBlockY, seed + 4501) < 0.02) rc = shade(rc, -0.24);
             color = rc;
           } else if (covDirt > 0.5) {
             let rc = groundColorFbm('dirtroad', season, wpx, wpy, seed);
-            // softened, worn ruts: two shallow bands either side of the centreline, with hash
-            // breaks so they read as worn, not painted-on. From vector geometry this is a
-            // proper distance iso-band at +-0.35*halfwidth; from the tile-grid fallback it's
-            // an approximation via the coverage value itself.
-            if (dirtRes) {
-              const rutBand = Math.abs(dirtRes.dist - 0.35 * dirtRes.halfW);
-              if (rutBand < 1.6 && hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4602) > 0.2) rc = shade(rc, -0.1);
-            } else if (covDirt >= 0.6 && covDirt <= 0.72 && hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4602) > 0.2) {
-              rc = shade(rc, -0.1);
+            // worn ruts: two darker bands either side of the centreline, with hash breaks so
+            // they read as worn wheel tracks, plus occasional puddle flecks along them (every
+            // ~40-60px) for wetter contrast. From vector geometry this is a proper distance
+            // iso-band at +-0.35*halfwidth; from the tile-grid fallback it's an approximation
+            // via the coverage value itself.
+            const inRutBand = dirtRes
+              ? Math.abs(dirtRes.dist - 0.35 * dirtRes.halfW) < 1.6
+              : covDirt >= 0.6 && covDirt <= 0.72;
+            if (inRutBand && hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4602) > 0.2) {
+              const puddleBucketX = Math.floor(wpx / 45), puddleBucketY = Math.floor(wpy / 45);
+              if (hash2(puddleBucketX, puddleBucketY, seed + 4603) < 0.15) {
+                rc = lerpRGB(rc, { r: 66, g: 80, b: 86 }, 0.55); // wet puddle fleck in the rut
+              } else {
+                rc = shade(rc, -0.18);
+              }
             }
             if (hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4610) < 0.02) rc = shade(rc, -0.2); // sparse stones
             color = rc;
@@ -537,6 +619,32 @@ function paintCraterAt(ctx: CanvasRenderingContext2D, cx: number, cy: number, r:
   ctx.beginPath(); ctx.ellipse(cx + r * 0.3, cy + r * 0.3, r * 0.55, r * 0.4, 0, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
   ctx.globalAlpha = 1;
+
+  // splash/spoil rays radiating a short way beyond the rim, and occasional grass regrowth at
+  // the outer lip — matches the reference's craters, which never read as an isolated clean disc.
+  const rayN = 4 + Math.floor(hash2(Math.round(cx), Math.round(cy), seed + 71) * 3);
+  ctx.strokeStyle = craterRimColor(season);
+  ctx.lineWidth = 1;
+  ctx.globalAlpha = 0.35;
+  for (let i = 0; i < rayN; i++) {
+    const ang = hash2(Math.round(cx) + i, Math.round(cy) + i, seed + 72) * Math.PI * 2;
+    const r0 = r * (1.0 + hash2(i, Math.round(cx), seed + 73) * 0.1);
+    const r1 = r * (1.15 + hash2(i, Math.round(cy), seed + 74) * 0.25);
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(ang) * r0, cy + Math.sin(ang) * r0);
+    ctx.lineTo(cx + Math.cos(ang) * r1, cy + Math.sin(ang) * r1);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  if (season !== 'winter' && hash2(Math.round(cx), Math.round(cy), seed + 75) < 0.15) {
+    ctx.globalAlpha = 0.25;
+    ctx.strokeStyle = '#7a8748';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 1.05, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
 }
 
 function paintCraterTile(ctx: CanvasRenderingContext2D, ox: number, oy: number, seed: number, season: Season): void {
@@ -550,6 +658,45 @@ function paintMud(ctx: CanvasRenderingContext2D, wx: number, wy: number, ox: num
     const py = Math.floor(hash2(wx * 9 + i + 4, wy * 9 + i + 4, seed + 63) * TILE_PX);
     ctx.fillStyle = 'rgba(60,55,30,0.35)';
     ctx.fillRect(ox + px, oy + py, 1, 1);
+  }
+}
+
+/** Debris pass for a rubble tile: a handful of rotated wall-fragment blocks with a highlight
+ * edge and their own offset drop shadow, plus a scatter of small masonry chips — so a rubble
+ * tile reads as a collapsed structure, not just a tinted-noise ground colour. */
+function paintRubbleDebris(ctx: CanvasRenderingContext2D, wx: number, wy: number, ox: number, oy: number, seed: number): void {
+  const nFrag = 2 + Math.floor(hash2(wx, wy, seed + 5201) * 3); // 2..4
+  for (let i = 0; i < nFrag; i++) {
+    const fx = ox + 2 + hash2(wx * 7 + i, wy * 7 + i, seed + 5202) * (TILE_PX - 10);
+    const fy = oy + 2 + hash2(wx * 11 + i, wy * 11 + i, seed + 5203) * (TILE_PX - 10);
+    const w = 4 + hash2(wx * 13 + i, wy * 13 + i, seed + 5204) * 6; // 4..10 px
+    const h = 3 + hash2(wx * 17 + i, wy * 17 + i, seed + 5205) * 4; // 3..7 px
+    const ang = hash2(wx * 19 + i, wy * 19 + i, seed + 5206) * Math.PI;
+    const brick = hash2(wx * 23 + i, wy * 23 + i, seed + 5207) < 0.4;
+    ctx.save();
+    ctx.translate(fx, fy);
+    ctx.rotate(ang);
+    // cast shadow
+    ctx.fillStyle = 'rgba(10,8,6,0.4)';
+    ctx.fillRect(-w / 2 + 1.2, -h / 2 + 1.2, w, h);
+    // fragment body
+    ctx.fillStyle = brick ? '#6e4238' : '#5c5850';
+    ctx.fillRect(-w / 2, -h / 2, w, h);
+    // lit top-left edge
+    ctx.fillStyle = brick ? '#8a5a4a' : '#7a766e';
+    ctx.fillRect(-w / 2, -h / 2, w, 1);
+    ctx.fillRect(-w / 2, -h / 2, 1, h);
+    // dark crack/mortar line
+    ctx.fillStyle = 'rgba(20,16,12,0.5)';
+    ctx.fillRect(-w / 2, h / 2 - 1, w, 1);
+    ctx.restore();
+  }
+  // fine masonry dust/chips scattered between the fragments
+  for (let i = 0; i < 6; i++) {
+    const px_ = ox + hash2(wx * 29 + i, wy * 29 + i, seed + 5208) * TILE_PX;
+    const py_ = oy + hash2(wx * 31 + i, wy * 31 + i, seed + 5209) * TILE_PX;
+    ctx.fillStyle = hash2(wx * 37 + i, wy * 37 + i, seed + 5210) < 0.5 ? 'rgba(150,140,130,0.6)' : 'rgba(40,34,28,0.5)';
+    ctx.fillRect(px_, py_, 1, 1);
   }
 }
 
@@ -674,10 +821,16 @@ const WOOD_ROOF_VARIANTS = [
   { base: '#6f4a2c', light: '#89613c', dark: '#4c3018' },
   { base: '#7a3f2c', light: '#96543c', dark: '#54281a' },
   { base: '#63432c', light: '#7d5b3c', dark: '#42291a' },
+  { base: '#5e4a30', light: '#786240', dark: '#3c2e1c' },
+  { base: '#7c5228', light: '#966a38', dark: '#523418' },
+  { base: '#4c3c2a', light: '#665238', dark: '#2e2416' },
 ];
 const STONE_ROOF_VARIANTS = [
   { base: '#6d6d68', light: '#87877e', dark: '#454541' },
   { base: '#743832', light: '#8f4d44', dark: '#4a221e' },
+  { base: '#5a5c56', light: '#74766e', dark: '#3a3c36' },
+  { base: '#665048', light: '#80685e', dark: '#42322c' },
+  { base: '#6a6258', light: '#847a6e', dark: '#443e36' },
 ];
 const BLOCK_FLAT_VARIANTS = ['#5a5a54', '#6a4c3e', '#3e4a3a', '#524848', '#454c40'];
 
@@ -695,7 +848,7 @@ function paintRoofWeathering(ctx: CanvasRenderingContext2D, left: number, top: n
   ctx.globalAlpha = 1;
 }
 
-function paintRoof(ctx: CanvasRenderingContext2D, bb: BuildingBBox, x0: number, y0: number): void {
+function paintRoof(ctx: CanvasRenderingContext2D, bb: BuildingBBox, x0: number, y0: number, seed: number): void {
   const left = (bb.minX - x0) * TILE_PX;
   const top = (bb.minY - y0) * TILE_PX;
   const wTiles = bb.maxX - bb.minX + 1;
@@ -705,16 +858,31 @@ function paintRoof(ctx: CanvasRenderingContext2D, bb: BuildingBBox, x0: number, 
   const stone = bb.kind === 'stone';
   const big = Math.max(wTiles, hTiles) > 12;
 
-  // soft shadow cast onto the ground on the S and E sides (two alpha steps), drawn first.
+  // Wall/base course, just outside the roof footprint on the S and E sides, so the roof reads
+  // as sitting on a structure rather than floating directly on the ground texture. Darker than
+  // the roof itself; a lit sliver against the eave and a dark mortar/base line at ground level.
+  const WALL_PX = 3;
+  const wallColor = stone ? '#4a4a46' : '#3e2c1c';
+  ctx.fillStyle = wallColor;
+  ctx.fillRect(left + w, top + 2, WALL_PX, h - 2 + WALL_PX);
+  ctx.fillRect(left + 2, top + h, w - 2 + WALL_PX, WALL_PX);
+  ctx.fillStyle = shadeHex(wallColor, 0.28);
+  ctx.fillRect(left + w, top + 2, 1, h - 2 + WALL_PX);
+  ctx.fillRect(left + 2, top + h, w - 2 + WALL_PX, 1);
+  ctx.fillStyle = shadeHex(wallColor, -0.32);
+  ctx.fillRect(left + w + WALL_PX - 1, top + 2, 1, h - 2 + WALL_PX);
+  ctx.fillRect(left + 2, top + h + WALL_PX - 1, w - 2 + WALL_PX, 1);
+
+  // soft shadow cast onto the ground beyond the wall (two alpha steps), drawn first.
   ctx.fillStyle = 'rgba(8,8,6,0.35)';
-  ctx.fillRect(left + w, top + 3, 1, h - 3);
-  ctx.fillRect(left + 3, top + h, w - 3, 1);
+  ctx.fillRect(left + w + WALL_PX, top + 3, 1, h - 3 + WALL_PX);
+  ctx.fillRect(left + 3, top + h + WALL_PX, w - 3 + WALL_PX, 1);
   ctx.fillStyle = 'rgba(8,8,6,0.16)';
-  ctx.fillRect(left + w + 1, top + 3, 2, h - 3);
-  ctx.fillRect(left + 3, top + h + 1, w - 3, 2);
+  ctx.fillRect(left + w + WALL_PX + 1, top + 3, 2, h - 3 + WALL_PX);
+  ctx.fillRect(left + 3, top + h + WALL_PX + 1, w - 3 + WALL_PX, 2);
 
   if (big) {
-    const flat = BLOCK_FLAT_VARIANTS[bb.id % BLOCK_FLAT_VARIANTS.length];
+    const flat = BLOCK_FLAT_VARIANTS[Math.floor(hash2(bb.id, bb.minX + bb.minY, seed + 601) * BLOCK_FLAT_VARIANTS.length)];
     ctx.fillStyle = flat;
     ctx.fillRect(left, top, w, h);
     // lighter parapet inset by 1px
@@ -750,7 +918,7 @@ function paintRoof(ctx: CanvasRenderingContext2D, bb: BuildingBBox, x0: number, 
   }
 
   const variants = stone ? STONE_ROOF_VARIANTS : WOOD_ROOF_VARIANTS;
-  const v = variants[bb.id % variants.length];
+  const v = variants[Math.floor(hash2(bb.id, bb.minX + bb.minY, seed + 602) * variants.length)];
   const ridgeHoriz = wTiles >= hTiles; // ridge runs along the longer axis
 
   // shaded (unlit) slope first, full footprint
@@ -803,14 +971,14 @@ function paintEaveNotches(ctx: CanvasRenderingContext2D, map: GameMap, wx: numbe
   if (!map.windows[i]) return;
   const bid = map.buildingId[i];
   const dirs: [number, number, 'l' | 'r' | 't' | 'b'][] = [[-1, 0, 'l'], [1, 0, 'r'], [0, -1, 't'], [0, 1, 'b']];
-  ctx.fillStyle = 'rgba(224,214,164,0.7)';
+  ctx.fillStyle = 'rgba(230,220,170,0.85)';
   for (const [dx, dy, side] of dirs) {
     const outer = !inBounds(map, wx + dx, wy + dy) || map.buildingId[idx(map, wx + dx, wy + dy)] !== bid;
     if (!outer) continue;
-    if (side === 'l') ctx.fillRect(ox, oy + 4, 1, 2);
-    else if (side === 'r') ctx.fillRect(ox + TILE_PX - 1, oy + 4, 1, 2);
-    else if (side === 't') ctx.fillRect(ox + 4, oy, 2, 1);
-    else ctx.fillRect(ox + 4, oy + TILE_PX - 1, 2, 1);
+    if (side === 'l') ctx.fillRect(ox, oy + 4, 2, 3);
+    else if (side === 'r') ctx.fillRect(ox + TILE_PX - 2, oy + 4, 2, 3);
+    else if (side === 't') ctx.fillRect(ox + 4, oy, 3, 2);
+    else ctx.fillRect(ox + 4, oy + TILE_PX - 2, 3, 2);
   }
 }
 
@@ -891,10 +1059,6 @@ function paintTrees(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy:
         }
       }
     }
-    // occasional bush near the edge of scattered trees / woods
-    if (hash2(wx, wy, seed + 131) < 0.18) {
-      drawDecorItem(ctx, 'bush', ox + TILE_PX / 2 + (hash2(wx * 37, wy * 37, seed + 133) - 0.5) * 6, oy + TILE_PX / 2 + (hash2(wx * 41, wy * 41, seed + 137) - 0.5) * 6);
-    }
   }
   // (no per-tile bush roll on plain grass/hedge tiles — bushes come only from each map's
   // explicit scatterDecor('bush', …) placements, matching the original's sparse, deliberate
@@ -907,6 +1071,7 @@ function paintDetail(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy
   const t = tileAt(map, wx, wy);
   switch (t) {
     case 'mud': paintMud(ctx, wx, wy, ox, oy, seed); break;
+    case 'rubble': paintRubbleDebris(ctx, wx, wy, ox, oy, seed); break;
     case 'crater': paintCraterTile(ctx, ox, oy, seed, season); break;
     case 'trench': if (!vectorLineTerrains.has('trench')) paintTrench(ctx, map, wx, wy, ox, oy, seed); break;
     case 'hedge': if (!vectorLineTerrains.has('hedge')) paintHedge(ctx, map, wx, wy, ox, oy, seed); break;
@@ -1135,12 +1300,18 @@ export class TerrainRenderer {
     const map = this.map;
 
     // ------------------------------------------------------ coverage grids (fallback when a
-    // road/river has no vector geometry, and always for crops/rubble which aren't vectorized)
-    const cropsGrid = buildGrid(map, x0, y0, CHUNK_TILES, isCrops);
+    // road/river has no vector geometry, and always for crops/mud/tallgrass/rubble which aren't
+    // vectorized). blurR=2 pre-smooths the area classes so their macro silhouette is a soft
+    // blob rather than a tile-stepped stamp (fix #6); road/paved/water grids stay unblurred
+    // since they're only a rare fallback when a map lacks vector geometry for that feature.
+    const AREA_BLUR = 2;
+    const cropsGrid = buildGrid(map, x0, y0, CHUNK_TILES, isCrops, AREA_BLUR);
+    const mudGrid = buildGrid(map, x0, y0, CHUNK_TILES, isMud, AREA_BLUR);
+    const tallgrassGrid = buildGrid(map, x0, y0, CHUNK_TILES, isTallgrass, AREA_BLUR);
     const pavedGrid = buildGrid(map, x0, y0, CHUNK_TILES, isPaved);
     const dirtGrid = buildGrid(map, x0, y0, CHUNK_TILES, isDirtRoad);
     const waterGrid = buildGrid(map, x0, y0, CHUNK_TILES, isWater);
-    const rubbleGrid = buildGrid(map, x0, y0, CHUNK_TILES, isRubble);
+    const rubbleGrid = buildGrid(map, x0, y0, CHUNK_TILES, isRubble, AREA_BLUR);
     const dirtyGrid = season === 'winter' ? buildGrid(map, x0, y0, CHUNK_TILES, isDirtySource) : cropsGrid;
 
     // ------------------------------------------------------ vector geometry (smooth roads/rivers)
@@ -1154,7 +1325,7 @@ export class TerrainRenderer {
     paintGroundAndFeatures(
       img.data, CHUNK_PX, map, season, this.seed, x0, y0, CHUNK_TILES, CHUNK_TILES,
       this.groundUnder, map.width, map.height, this.fieldId, this.fieldAxis,
-      cropsGrid, pavedGrid, dirtGrid, waterGrid, rubbleGrid, dirtyGrid,
+      cropsGrid, mudGrid, tallgrassGrid, pavedGrid, dirtGrid, waterGrid, rubbleGrid, dirtyGrid,
       pavedVec, dirtVec, waterVec,
     );
     reliefCache = null;
@@ -1185,7 +1356,7 @@ export class TerrainRenderer {
     // ------------------------------------------------------------ buildings
     for (const bb of this.buildingBBoxes.values()) {
       if (bb.maxX < x0 || bb.minX >= x0 + CHUNK_TILES || bb.maxY < y0 || bb.minY >= y0 + CHUNK_TILES) continue;
-      paintRoof(ctx, bb, x0, y0);
+      paintRoof(ctx, bb, x0, y0, this.seed);
     }
     for (let ty = 0; ty < CHUNK_TILES; ty++) {
       const wy = y0 + ty;

@@ -12,6 +12,13 @@ import { VIEW_W, VIEW_H } from '@/shared/types';
 const THUMB_W = 480;
 const THUMB_H = 360;
 
+// Optional camera override for art QA passes: ?cx=100&cy=60 centres every map's 1:1 viewport on
+// that tile instead of the map midpoint, so a specific woods/hedge/farmstead cluster can be
+// screenshotted directly instead of whatever happens to sit at the exact centre of each map.
+const qs = new URLSearchParams(location.search);
+const cxOverride = qs.has('cx') ? Number(qs.get('cx')) : null;
+const cyOverride = qs.has('cy') ? Number(qs.get('cy')) : null;
+
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
   if (className) e.className = className;
@@ -60,7 +67,9 @@ function renderMap(root: HTMLElement, mapId: string): void {
   const vctx = viewCanvas.getContext('2d')!;
   vctx.imageSmoothingEnabled = false;
   const cam = createCamera();
-  centerCamera(cam, { x: map.width / 2, y: map.height / 2 });
+  const centerX = cxOverride !== null && !Number.isNaN(cxOverride) ? cxOverride : map.width / 2;
+  const centerY = cyOverride !== null && !Number.isNaN(cyOverride) ? cyOverride : map.height / 2;
+  centerCamera(cam, { x: centerX, y: centerY });
   clampCamera(cam, map.width, map.height);
   vctx.fillStyle = '#000';
   vctx.fillRect(0, 0, VIEW_W, VIEW_H);
@@ -70,7 +79,9 @@ function renderMap(root: HTMLElement, mapId: string): void {
   for (let i = 0; i < 40; i++) renderer.draw(vctx, cam);
   viewWrap.appendChild(viewCanvas);
   const viewCaption = el('div', 'caption');
-  viewCaption.textContent = `1:1 viewport ${VIEW_W}x${VIEW_H} @ zoom 1, centred on map`;
+  viewCaption.textContent = cxOverride !== null || cyOverride !== null
+    ? `1:1 viewport ${VIEW_W}x${VIEW_H} @ zoom 1, centred on (${centerX}, ${centerY})`
+    : `1:1 viewport ${VIEW_W}x${VIEW_H} @ zoom 1, centred on map`;
   viewWrap.appendChild(viewCaption);
   row.appendChild(viewWrap);
 
