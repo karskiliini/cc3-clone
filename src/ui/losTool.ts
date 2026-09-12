@@ -8,7 +8,6 @@ import { dist } from '@/shared/math';
 import { worldToScreen } from '@/engine/camera';
 import { losTrace } from '@/sim/los';
 import { PALETTE } from '@/render/palette';
-import { drawText, FONT_SMALL_H } from '@/render/pixelfont';
 
 function drawLine(ctx: CanvasRenderingContext2D, a: Vec2, b: Vec2, color: string): void {
   ctx.strokeStyle = color;
@@ -37,5 +36,8 @@ export function drawLOSLine(ctx: CanvasRenderingContext2D, cam: Camera, map: Gam
   const distM = Math.round(dist(from, to) * TILE_M);
   const label = `${trace.clear ? 'CLEAR' : 'BLOCKED'} ${distM} m`;
   const color = trace.clear ? PALETTE.green : PALETTE.red;
-  drawText(ctx, label, Math.round(toPx.x) + 6, Math.round(toPx.y) - FONT_SMALL_H - 2, color, 'small');
+  ctx.font = 'bold 11px Arial, Helvetica, sans-serif';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = color;
+  ctx.fillText(label, Math.round(toPx.x) + 6, Math.round(toPx.y) - 12);
 }

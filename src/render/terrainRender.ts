@@ -3,26 +3,38 @@
 // canvases and blits them each frame. Also draws craters/blood/smoke overlays.
 //
 // Technique: ground + crops + roads + water + rubble are all resolved in one
-// per-pixel ImageData pass. Every one of those classes is represented as a
-// coverage field sampled at TILE CENTRES (1 inside / 0 outside); each pixel
-// bilinearly interpolates that field from its four nearest tile centres and
-// thresholds at 0.5 (+ small hash noise for organic edges). This turns the
-// stepped tile-aligned polygons the map DSL paints into smooth, ragged,
-// hand-painted-looking borders, with no diagonal hatch patterns anywhere.
-// Walls/hedges/fences/trenches/buildings/trees/decor are then drawn with
-// ordinary canvas ops on top, in that fixed order.
+// per-pixel ImageData pass, using fractal value noise (see noise.ts) sampled
+// in world PIXEL space so texture is continuous across chunk boundaries. Every
+// ground terrain has a 4-shade ramp (dark -> light); a per-pixel noise value
+// picks a fractional position along that ramp and RGB-interpolates, giving
+// soft mottled hand-painted colour instead of flat vector fills. A low-
+// frequency height field adds gentle relief shading (NW light). Coverage
+// fields (roads/crops/water/rubble, sampled at tile centres, bilinearly
+// interpolated at pixel resolution) are blended across a feathered band
+// rather than hard-thresholded, so borders look brushed.
+//
+// Memory/perf: chunks are 16x16 tiles (320x320 px) and are LAZILY baked on
+// first use, kept in an LRU cache capped at 48 canvases. `draw()` bakes at
+// most 2 new chunks per call (each bake is budgeted to stay under ~25ms);
+// chunks not yet baked are filled in from a cheap whole-map low-res (2px per
+// tile) canvas scaled up, so scrolling never stalls. `thumbnail()` never
+// bakes full-res chunks at all — it only ever scales that low-res canvas.
 // ============================================================================
 import type { Camera, GameMap, BattleState, Terrain, Season } from '@/shared/types';
 import { TILE_PX, VIEW_W, VIEW_H } from '@/shared/types';
 import { hash2 } from '@/shared/rng';
+import { fbm64, fbm14, heightField } from '@/render/noise';
 import { idx, tileAt, inBounds } from '@/sim/map';
 import { TERRAIN_COLORS } from '@/render/palette';
 import { getTreeSprite, getSmokePuff } from '@/render/sprites';
 import { drawDecorItem } from '@/render/decorSprites';
 import { worldToScreen } from '@/engine/camera';
 
-const CHUNK_TILES = 26;
-const CHUNK_PX = CHUNK_TILES * TILE_PX; // 260
+const CHUNK_TILES = 16;
+const CHUNK_PX = CHUNK_TILES * TILE_PX; // 320
+const MAX_CACHED_CHUNKS = 48;
+const BAKES_PER_DRAW = 2;
+const LOWRES_PX_PER_TILE = 2;
 
 const BUILDING_TERRAINS = new Set<Terrain>(['buildingWood', 'buildingStone', 'floor']);
 /** Terrain a pixel "falls back to" when the tile itself is a feature (road/water/crops/rubble/wall). */
@@ -43,24 +55,45 @@ interface BuildingBBox {
 interface FieldInfo { horiz: boolean }
 
 // ============================================================================
-// color ramp overrides — kept local to the renderer (palette.ts is owned by
-// another agent) so 'open'/'grass'/'tallgrass' read as olive-tan/olive-green
-// rather than the palette's dark chocolate brown, and winter 'snow' reads
-// clean off-white.
+// color ramps — 4-shade dark->light ramps for the painterly ground pass.
+// Overrides live here (palette.ts is owned by another agent); anything not
+// listed falls back to palette.ts's TERRAIN_COLORS (still ramp-lerped, so it
+// still gets the fbm mottling treatment even without a bespoke ramp).
 // ============================================================================
+const ROAD_RAMP = ['#8b7b56', '#a08e62', '#b09e6f', '#bdab7b'];
+const PAVED_RAMP = ['#4f4f4a', '#5f5f58', '#6f6f66', '#7c7b70'];
+const MUD_RAMP = ['#4b3d2b', '#5b4a33', '#6b593d', '#78664a'];
+const CROPS_RAMP = ['#8f7d3a', '#b09a47', '#c9b255', '#d9c465'];
+const WATER_RAMP = ['#3c5566', '#4a6578', '#5a7688', '#6a8698'];
+const ICE_RAMP = ['#b8c4cc', '#c8d2d9', '#d6dee4'];
+
 const LOCAL_RAMPS: Partial<Record<Season, Partial<Record<Terrain, string[]>>>> = {
   summer: {
-    open: ['#8f8a5e', '#9a9366', '#857f55'],
-    grass: ['#6e7a3f', '#778445', '#66713a'],
-    tallgrass: ['#7c8a46', '#84914e', '#6f7c3c'],
+    open: ['#7d7250', '#928660', '#a3976c', '#b0a479'],
+    grass: ['#4f5e2b', '#66743a', '#7a8748', '#8d9a56'],
+    tallgrass: ['#6f7d3a', '#8a9648', '#a1ac57', '#b5bd66'],
+    crops: CROPS_RAMP,
+    mud: MUD_RAMP,
+    dirtroad: ROAD_RAMP,
+    pavedroad: PAVED_RAMP,
+    water: WATER_RAMP,
   },
   autumn: {
-    open: ['#a0904a', '#a89a52', '#93843e'],
-    grass: ['#94893c', '#9c9244', '#867c34'],
-    tallgrass: ['#a08a34', '#a8943c', '#8e7a2c'],
+    open: ['#8a7a48', '#93844f', '#847338', '#9c8c52'],
+    grass: ['#6b6a32', '#847f3c', '#9a9348', '#ada55a'],
+    tallgrass: ['#847a34', '#948a3e', '#726a2a', '#a4993f'],
+    crops: CROPS_RAMP,
+    mud: MUD_RAMP,
+    dirtroad: ROAD_RAMP,
+    pavedroad: PAVED_RAMP,
+    water: WATER_RAMP,
   },
   winter: {
-    snow: ['#e6e8ec', '#d9dde3', '#e0e3e8'],
+    snow: ['#c4c9d1', '#d6dae0', '#e6e9ee', '#f2f4f7'],
+    dirtroad: ['#7c7264', '#8c8072', '#98897a', '#a49484'],
+    pavedroad: ['#48484a', '#585858', '#666664', '#727068'],
+    mud: ['#3a352e', '#4a4238', '#585044', '#635a4c'],
+    water: ICE_RAMP,
   },
 };
 function rampFor(season: Season, t: Terrain): string[] {
@@ -68,24 +101,8 @@ function rampFor(season: Season, t: Terrain): string[] {
 }
 
 // ============================================================================
-// noise + color helpers
+// color helpers
 // ============================================================================
-function fade(t: number): number { return t * t * (3 - 2 * t); }
-
-/** Bilinear-interpolated hash2 lattice noise, 0..1, at world-tile-fractional coords. */
-function latticeNoise(x: number, y: number, seed: number, cell: number): number {
-  const gx = x / cell, gy = y / cell;
-  const x0 = Math.floor(gx), y0 = Math.floor(gy);
-  const fx = fade(gx - x0), fy = fade(gy - y0);
-  const v00 = hash2(x0, y0, seed);
-  const v10 = hash2(x0 + 1, y0, seed);
-  const v01 = hash2(x0, y0 + 1, seed);
-  const v11 = hash2(x0 + 1, y0 + 1, seed);
-  const a = v00 + (v10 - v00) * fx;
-  const b = v01 + (v11 - v01) * fx;
-  return a + (b - a) * fy;
-}
-
 interface RGB { r: number; g: number; b: number }
 const hexCache = new Map<string, RGB>();
 function hexToRgb(hex: string): RGB {
@@ -105,25 +122,49 @@ function lerpRGB(a: RGB, b: RGB, t: number): RGB {
 function shade(c: RGB, amt: number): RGB { // amt: -1..1, fraction of brightness to add/remove
   return { r: clamp255(c.r * (1 + amt)), g: clamp255(c.g * (1 + amt)), b: clamp255(c.b * (1 + amt)) };
 }
+function shadeHex(hex: string, amt: number): string {
+  const s = shade(hexToRgb(hex), amt);
+  const h = (n: number) => Math.round(n).toString(16).padStart(2, '0');
+  return `#${h(s.r)}${h(s.g)}${h(s.b)}`;
+}
+
+const rampRgbCache = new Map<string, RGB[]>();
+function rampRgb(season: Season, t: Terrain): RGB[] {
+  const key = season + '|' + t;
+  let r = rampRgbCache.get(key);
+  if (!r) { r = rampFor(season, t).map(hexToRgb); rampRgbCache.set(key, r); }
+  return r;
+}
+/** RGB-interpolate across an N-colour ramp at fractional position t (0..1). */
+function rampLerp(ramp: RGB[], t: number): RGB {
+  const n = ramp.length - 1;
+  if (n <= 0) return ramp[0];
+  const tt = clamp01(t) * n;
+  let i = Math.floor(tt);
+  if (i >= n) i = n - 1;
+  return lerpRGB(ramp[i], ramp[i + 1], tt - i);
+}
 
 /**
- * Smooth low-frequency ground color for terrain `t` at fractional world-tile
- * coords (wxf,wyf): two octaves of value noise blend between the terrain's
- * 2-4 ramp shades so tonal variation reads as patches metres across, not
- * per-pixel camo noise. Adds a very small per-pixel grain on top.
+ * Painterly ground colour for terrain `t` at world PIXEL coords (X,Y): two
+ * fbm octave-bands (large ~6m mottling + medium) plus per-pixel grain pick a
+ * fractional position along the terrain's dark->light ramp.
  */
-function groundColor(t: Terrain, season: Season, wxf: number, wyf: number, wpx: number, wpy: number, seed: number): RGB {
-  const ramp = rampFor(season, t);
-  const c0 = hexToRgb(ramp[0]);
-  const c1 = hexToRgb(ramp[1 % ramp.length]);
-  const c2 = hexToRgb(ramp[2 % ramp.length]);
-  const n1 = latticeNoise(wxf, wyf, seed + 1, 6);
-  const n2 = latticeNoise(wxf, wyf, seed + 2, 1.5);
-  let r = lerp(c0.r, c1.r, n1), g = lerp(c0.g, c1.g, n1), b = lerp(c0.b, c1.b, n1);
-  const w2 = n2 * 0.35;
-  r = lerp(r, c2.r, w2); g = lerp(g, c2.g, w2); b = lerp(b, c2.b, w2);
-  const grain = (hash2(wpx, wpy, seed + 9) - 0.5) * 6; // +-3 levels
-  return { r: clamp255(r + grain), g: clamp255(g + grain), b: clamp255(b + grain) };
+function groundColorFbm(t: Terrain, season: Season, X: number, Y: number, seed: number): RGB {
+  const ramp = rampRgb(season, t);
+  const f64 = fbm64(X, Y, seed + hashStr(t));
+  const f14 = fbm14(X, Y, seed + hashStr(t));
+  const g = hash2(X, Y, seed + 31);
+  const tt = clamp01(0.5 + 0.9 * (f64 - 0.5) + 0.5 * (f14 - 0.5) + 0.18 * (g - 0.5));
+  return rampLerp(ramp, tt);
+}
+
+/** Smooth low-frequency relief shading factor (NW light), 0.85..1.15. */
+function reliefFactor(X: number, Y: number, seed: number): number {
+  const h1 = heightField(X - 4, Y - 4, seed);
+  const h2 = heightField(X + 4, Y + 4, seed);
+  const f = 1 + 0.18 * (h1 - h2) * 8;
+  return f < 0.85 ? 0.85 : f > 1.15 ? 1.15 : f;
 }
 
 function setPixel(data: Uint8ClampedArray, w: number, x: number, y: number, c: RGB): void {
@@ -217,13 +258,10 @@ function paintGroundAndFeatures(
 
       for (let py = 0; py < TILE_PX; py++) {
         const wpy = wy * TILE_PX + py;
-        const gy0 = ty + (py < 5 ? 0 : 1);
-        const fy = py < 5 ? 0.5 + py / TILE_PX : py / TILE_PX - 0.5;
         for (let px = 0; px < TILE_PX; px++) {
           const wpx = wx * TILE_PX + px;
-          const wxf = wpx / TILE_PX, wyf = wpy / TILE_PX;
 
-          // -------------------------------------------------- smoothed ground
+          // -------------------------------------------------- smoothed ground (feathered blend)
           const cx0 = px < 5 ? wx - 1 : wx, cx1 = cx0 + 1;
           const cy0 = py < 5 ? wy - 1 : wy, cy1 = cy0 + 1;
           const tA = groundAt(cx0, cy0), tB = groundAt(cx1, cy0), tC = groundAt(cx0, cy1), tD = groundAt(cx1, cy1);
@@ -234,32 +272,42 @@ function paintGroundAndFeatures(
           scores.set(tB, (scores.get(tB) || 0) + fxx * (1 - fyy));
           scores.set(tC, (scores.get(tC) || 0) + (1 - fxx) * fyy);
           scores.set(tD, (scores.get(tD) || 0) + fxx * fyy);
-          let groundT: Terrain = tA, bestScore = -1;
+          let bestT: Terrain = tA, bestS = -1, secondT: Terrain | null = null, secondS = -1;
           for (const [t, s] of scores) {
             const noisy = s + (hash2(wpx, wpy, seed + hashStr(t)) - 0.5) * 0.16;
-            if (noisy > bestScore) { bestScore = noisy; groundT = t; }
+            if (noisy > bestS) { secondT = bestT; secondS = bestS; bestT = t; bestS = noisy; }
+            else if (noisy > secondS) { secondT = t; secondS = noisy; }
+          }
+          let groundT: Terrain = bestT;
+          let color = groundColorFbm(bestT, season, wpx, wpy, seed);
+          // feathered 6px-ish blend band near borders (only pay for a second sample when close)
+          if (secondT && bestS - secondS < 0.3) {
+            const blend = clamp01(0.5 - (bestS - secondS) / 0.6) * 0.85;
+            color = lerpRGB(color, groundColorFbm(secondT, season, wpx, wpy, seed), blend);
           }
 
-          let color = groundColor(groundT, season, wxf, wyf, wpx, wpy, seed);
+          // -------------------------------------------------------- coverage samples
+          const covCrop = sampleGrid(cropsGrid, tx, px, ty, py, wpx, wpy, seed + 3001);
+          const covPaved = sampleGrid(pavedGrid, tx, px, ty, py, wpx, wpy, seed + 3101);
+          const covDirt = sampleGrid(dirtGrid, tx, px, ty, py, wpx, wpy, seed + 3201);
+          const covWater = sampleGrid(waterGrid, tx, px, ty, py, wpx, wpy, seed + 3301);
+          const covRubble = sampleGrid(rubbleGrid, tx, px, ty, py, wpx, wpy, seed + 3401);
 
-          // tallgrass tuft strokes: thin vertical lighter runs
-          if (groundT === 'tallgrass' && hash2(wpx, Math.floor(wpy / 3), seed + 555) < 0.1) {
-            color = shade(color, 0.16);
-          } else if ((groundT === 'grass' || groundT === 'open') && hash2(wpx, wpy, seed + 4477) > 0.996) {
-            color = shade(color, 0.14);
-          } else if ((groundT === 'grass' || groundT === 'open') && hash2(wpx, wpy, seed + 4478) < 0.004) {
-            color = shade(color, -0.14);
-          } else if (groundT === 'snow' && hash2(wpx, wpy, seed + 991) > 0.998) {
-            color = shade(color, -0.1);
+          // ------------------------------------------------- wear: worn shoulders near roads
+          if ((groundT === 'grass' || groundT === 'open' || groundT === 'tallgrass') && covCrop <= 0.5 && covWater <= 0.5) {
+            const roadProx = Math.max(covDirt, covPaved * 0.7);
+            if (roadProx > 0.02 && roadProx < 0.55) {
+              const wearAmt = clamp01(roadProx / 0.55) * 0.4;
+              color = lerpRGB(color, groundColorFbm('dirtroad', season, wpx, wpy, seed), wearAmt);
+            }
           }
 
           // -------------------------------------------------------- crops
-          const covCrop = sampleGrid(cropsGrid, tx, px, ty, py, wpx, wpy, seed + 3001);
           if (covCrop > 0.5) {
             const fid = fieldId[wy * mapW + wx];
             const info = fid >= 0 ? fieldAxis.get(fid) : undefined;
             const horiz = info ? info.horiz : true;
-            const cropBase = groundColor('crops', season, wxf, wyf, wpx, wpy, seed);
+            const cropBase = groundColorFbm('crops', season, wpx, wpy, seed);
             const stripe = horiz ? Math.floor(wpy / 2) % 2 : Math.floor(wpx / 2) % 2;
             const ragged = hash2(wpx, wpy, seed + 909) < 0.1;
             color = ragged ? cropBase : shade(cropBase, stripe === 0 ? 0.1 : -0.1);
@@ -267,34 +315,39 @@ function paintGroundAndFeatures(
           }
 
           // -------------------------------------------------------- roads
-          const covPaved = sampleGrid(pavedGrid, tx, px, ty, py, wpx, wpy, seed + 3101);
-          const covDirt = sampleGrid(dirtGrid, tx, px, ty, py, wpx, wpy, seed + 3201);
           if (covPaved > 0.5) {
-            let rc = groundColor('pavedroad', season, wxf, wyf, wpx, wpy, seed);
+            let rc = groundColorFbm('pavedroad', season, wpx, wpy, seed);
             if (covPaved < 0.58) rc = shade(rc, -0.16); // kerb
             const crackBlockX = Math.floor(wpx / 3), crackBlockY = Math.floor(wpy / 3);
-            if (hash2(crackBlockX, crackBlockY, seed + 4501) < 0.025) rc = shade(rc, -0.22);
-            if (latticeNoise(wxf, wyf, seed + 4601, 8) > 0.86) rc = shade(rc, 0.12); // worn patch
+            if (hash2(crackBlockX, crackBlockY, seed + 4501) < 0.02) rc = shade(rc, -0.24);
             color = rc;
           } else if (covDirt > 0.5) {
-            let rc = groundColor('dirtroad', season, wxf, wyf, wpx, wpy, seed);
-            if (covDirt >= 0.62 && covDirt <= 0.70) rc = shade(rc, -0.12); // rut iso-contour
+            let rc = groundColorFbm('dirtroad', season, wpx, wpy, seed);
+            // softened, worn ruts: two shallow iso-bands with hash breaks so they read as worn, not painted-on
+            if (covDirt >= 0.6 && covDirt <= 0.72 && hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4602) > 0.2) {
+              rc = shade(rc, -0.1);
+            }
+            if (hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4610) < 0.02) rc = shade(rc, -0.2); // sparse stones
             color = rc;
           }
 
           // -------------------------------------------------------- water
-          const covWater = sampleGrid(waterGrid, tx, px, ty, py, wpx, wpy, seed + 3301);
           if (covWater > 0.5) {
-            let wc = groundColor('water', season, wxf, wyf, wpx, wpy, seed);
-            if (covWater < 0.62) wc = shade(wc, -0.3); // dark bank line
-            else if (covWater < 0.72) wc = shade(wc, 0.18); // bank highlight
+            let wc = groundColorFbm('water', season, wpx, wpy, seed);
+            if (season === 'winter') {
+              const crackBlockX = Math.floor(wpx / 5), crackBlockY = Math.floor(wpy / 5);
+              if (hash2(crackBlockX, crackBlockY, seed + 4801) < 0.03) wc = shade(wc, -0.18);
+              if (covWater < 0.66) wc = lerpRGB(wc, { r: 236, g: 240, b: 244 }, 0.5); // snow drift at the bank
+            } else {
+              if (covWater < 0.62) wc = shade(wc, -0.3); // dark bank line
+              else if (covWater < 0.72) wc = shade(wc, 0.18); // bank highlight
+            }
             color = wc;
           }
 
           // -------------------------------------------------------- rubble
-          const covRubble = sampleGrid(rubbleGrid, tx, px, ty, py, wpx, wpy, seed + 3401);
           if (covRubble > 0.5) {
-            let rb = groundColor('rubble', season, wxf, wyf, wpx, wpy, seed);
+            let rb = groundColorFbm('rubble', season, wpx, wpy, seed);
             const bx = Math.floor(wpx / 2), by = Math.floor(wpy / 2);
             const fragH = hash2(bx, by, seed + 3501);
             if (fragH < 0.08) {
@@ -305,14 +358,20 @@ function paintGroundAndFeatures(
             color = rb;
           }
 
-          // ---------------------------------------------------- dirty snow
-          if (season === 'winter' && groundT === 'snow') {
+          // ---------------------------------------------------- dirty snow near roads/rubble
+          if (season === 'winter' && groundT === 'snow' && covPaved <= 0.5 && covDirt <= 0.5 && covRubble <= 0.5) {
             const covDirty = sampleGrid(dirtyGrid, tx, px, ty, py, wpx, wpy, seed + 3601, 0.05);
             const blend = clamp01(covDirty) * 0.55;
-            if (blend > 0.01 && covPaved <= 0.5 && covDirt <= 0.5 && covRubble <= 0.5) {
-              color = lerpRGB(color, { r: 118, g: 110, b: 96 }, blend);
-            }
+            if (blend > 0.01) color = lerpRGB(color, groundColorFbm('mud', season, wpx, wpy, seed), blend);
           }
+
+          // -------------------------------------------------------- relief + grain + brush
+          const rf = reliefFactor(wpx, wpy, seed);
+          color = shade(color, rf - 1);
+          const grain = (hash2(wpx, wpy, seed + 9001) - 0.5) * 8;
+          color = { r: clamp255(color.r + grain), g: clamp255(color.g + grain), b: clamp255(color.b + grain) };
+          const brush = 0.97 + 0.06 * hash2(Math.floor(wpx / 2), Math.floor(wpy / 3), seed + 9002);
+          color = { r: clamp255(color.r * brush), g: clamp255(color.g * brush), b: clamp255(color.b * brush) };
 
           setPixel(data, bufW, tx * TILE_PX + px, ty * TILE_PX + py, color);
         }
@@ -322,22 +381,41 @@ function paintGroundAndFeatures(
 }
 
 // ------------------------------------------------------------------ crater
-function paintCraterTile(ctx: CanvasRenderingContext2D, ox: number, oy: number, seed: number): void {
-  const cx = ox + TILE_PX / 2, cy = oy + TILE_PX / 2, r = TILE_PX / 2 - 1;
-  ctx.globalAlpha = 0.6;
-  ctx.beginPath(); ctx.fillStyle = '#1e1c18'; ctx.arc(cx, cy, r * 0.7, 0, Math.PI * 2); ctx.fill();
+function craterRimColor(season: Season): string { return season === 'winter' ? '#8a8f92' : '#a08f68'; }
+
+function paintCraterAt(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, seed: number, season: Season): void {
+  const steps = 10;
+  ctx.save();
   ctx.beginPath();
-  for (let a = 0; a <= 8; a++) {
-    const ang = (a / 8) * Math.PI * 2;
-    const rr = r * (0.85 + hash2(a, Math.round(cx), seed) * 0.3);
+  for (let a = 0; a <= steps; a++) {
+    const ang = (a / steps) * Math.PI * 2;
+    const rr = r * (0.85 + hash2(a, Math.round(cx * 3), seed) * 0.3);
     const x = cx + Math.cos(ang) * rr, y = cy + Math.sin(ang) * rr;
     if (a === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }
   ctx.closePath();
-  ctx.strokeStyle = '#6a6252';
-  ctx.lineWidth = 1;
-  ctx.stroke();
+  ctx.clip();
+  const grad = ctx.createRadialGradient(cx - r * 0.15, cy - r * 0.15, r * 0.08, cx, cy, r);
+  grad.addColorStop(0, '#221d16');
+  grad.addColorStop(0.55, '#3a2f22');
+  grad.addColorStop(0.85, craterRimColor(season));
+  ctx.globalAlpha = 0.72;
+  ctx.fillStyle = grad;
+  ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+  // NW highlight / SE shadow for a raised-rim look
+  ctx.globalAlpha = 0.22;
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath(); ctx.ellipse(cx - r * 0.3, cy - r * 0.3, r * 0.55, r * 0.4, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 0.28;
+  ctx.fillStyle = '#000000';
+  ctx.beginPath(); ctx.ellipse(cx + r * 0.3, cy + r * 0.3, r * 0.55, r * 0.4, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
   ctx.globalAlpha = 1;
+}
+
+function paintCraterTile(ctx: CanvasRenderingContext2D, ox: number, oy: number, seed: number, season: Season): void {
+  const cx = ox + TILE_PX / 2, cy = oy + TILE_PX / 2, r = TILE_PX / 2 - 1;
+  paintCraterAt(ctx, cx, cy, r, seed, season);
 }
 
 function paintMud(ctx: CanvasRenderingContext2D, wx: number, wy: number, ox: number, oy: number, seed: number): void {
@@ -355,6 +433,36 @@ function paintBridge(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy
     for (let px = 0; px < TILE_PX; px += 3) { ctx.fillStyle = px % 6 === 0 ? '#7a5f3a' : '#5a4626'; ctx.fillRect(ox + px, oy, 2, TILE_PX); }
   } else {
     for (let py = 0; py < TILE_PX; py += 3) { ctx.fillStyle = py % 6 === 0 ? '#7a5f3a' : '#5a4626'; ctx.fillRect(ox, oy + py, TILE_PX, 2); }
+  }
+}
+
+// ---------------------------------------------- ground texture (tufts/pebbles)
+function paintGroundTexture(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number, season: Season, seed: number): void {
+  const t = tileAt(map, wx, wy);
+  if (season !== 'winter' && (t === 'grass' || t === 'tallgrass')) {
+    const n = t === 'tallgrass' ? 4 : 2;
+    for (let i = 0; i < n; i++) {
+      if (hash2(wx * 7 + i, wy * 7 + i, seed + 7001) > 0.55) continue; // sparsify to ~6% of area overall
+      const sx = ox + hash2(wx * 11 + i, wy * 11 + i, seed + 7002) * TILE_PX;
+      const sy = oy + hash2(wx * 13 + i, wy * 13 + i, seed + 7003) * TILE_PX;
+      const len = 2 + hash2(wx * 17 + i, wy * 17 + i, seed + 7004) * 3;
+      const ang = -Math.PI / 2 + (hash2(wx * 19 + i, wy * 19 + i, seed + 7005) - 0.5) * (Math.PI / 3);
+      const lighter = hash2(wx * 23 + i, wy * 23 + i, seed + 7006) > 0.4;
+      ctx.strokeStyle = lighter ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx + Math.cos(ang) * len, sy + Math.sin(ang) * len);
+      ctx.stroke();
+    }
+  } else if (season !== 'winter' && t === 'open') {
+    if (hash2(wx, wy, seed + 7101) < 0.3) {
+      const sx = ox + hash2(wx * 29, wy * 29, seed + 7102) * TILE_PX;
+      const sy = oy + hash2(wx * 31, wy * 31, seed + 7103) * TILE_PX;
+      const lighter = hash2(wx * 37, wy * 37, seed + 7104) > 0.5;
+      ctx.fillStyle = lighter ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.25)';
+      ctx.fillRect(sx, sy, 1, 1);
+    }
   }
 }
 
@@ -447,6 +555,20 @@ const STONE_ROOF_VARIANTS = [
 ];
 const BLOCK_FLAT_VARIANTS = ['#5a5a54', '#6a4c3e', '#3e4a3a', '#524848', '#454c40'];
 
+function paintRoofWeathering(ctx: CanvasRenderingContext2D, left: number, top: number, w: number, h: number, id: number): void {
+  const n = Math.max(2, Math.min(24, Math.floor((w * h) / 500)));
+  for (let i = 0; i < n; i++) {
+    const rx = left + hash2(id * 13 + i, i, 601) * w;
+    const ry = top + hash2(id * 17 + i, i, 602) * h;
+    const sz = 2 + Math.floor(hash2(id * 19 + i, i, 603) * 3);
+    const lighter = hash2(id * 23 + i, i, 604) > 0.5;
+    ctx.globalAlpha = 0.12;
+    ctx.fillStyle = lighter ? '#ffffff' : '#000000';
+    ctx.fillRect(rx, ry, sz, sz);
+  }
+  ctx.globalAlpha = 1;
+}
+
 function paintRoof(ctx: CanvasRenderingContext2D, bb: BuildingBBox, x0: number, y0: number): void {
   const left = (bb.minX - x0) * TILE_PX;
   const top = (bb.minY - y0) * TILE_PX;
@@ -457,10 +579,13 @@ function paintRoof(ctx: CanvasRenderingContext2D, bb: BuildingBBox, x0: number, 
   const stone = bb.kind === 'stone';
   const big = Math.max(wTiles, hTiles) > 12;
 
-  // shadow cast onto the ground on the S and E sides (35% darken), drawn first.
+  // soft shadow cast onto the ground on the S and E sides (two alpha steps), drawn first.
   ctx.fillStyle = 'rgba(8,8,6,0.35)';
-  ctx.fillRect(left + w, top + 2, 2, h - 2);
-  ctx.fillRect(left + 2, top + h, w - 2, 2);
+  ctx.fillRect(left + w, top + 3, 1, h - 3);
+  ctx.fillRect(left + 3, top + h, w - 3, 1);
+  ctx.fillStyle = 'rgba(8,8,6,0.16)';
+  ctx.fillRect(left + w + 1, top + 3, 2, h - 3);
+  ctx.fillRect(left + 3, top + h + 1, w - 3, 2);
 
   if (big) {
     const flat = BLOCK_FLAT_VARIANTS[bb.id % BLOCK_FLAT_VARIANTS.length];
@@ -487,6 +612,13 @@ function paintRoof(ctx: CanvasRenderingContext2D, bb: BuildingBBox, x0: number, 
       const sx = left + 3 + Math.floor(hash2(bb.id * 7 + i, i, 55) * Math.max(1, w - 6));
       const sy = top + 3 + Math.floor(hash2(bb.id * 11 + i, i, 56) * Math.max(1, h - 6));
       ctx.fillRect(sx, sy, 2, 2);
+    }
+    paintRoofWeathering(ctx, left, top, w, h, bb.id);
+    if (stone) {
+      ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+      ctx.lineWidth = 1;
+      for (let gx = 5; gx < w; gx += 6) { ctx.beginPath(); ctx.moveTo(left + gx + 0.5, top); ctx.lineTo(left + gx + 0.5, top + h); ctx.stroke(); }
+      for (let gy = 5; gy < h; gy += 6) { ctx.beginPath(); ctx.moveTo(left, top + gy + 0.5); ctx.lineTo(left + w, top + gy + 0.5); ctx.stroke(); }
     }
     return;
   }
@@ -518,6 +650,14 @@ function paintRoof(ctx: CanvasRenderingContext2D, bb: BuildingBBox, x0: number, 
   ctx.lineWidth = 1;
   ctx.strokeRect(left + 0.5, top + 0.5, Math.max(0, w - 1), Math.max(0, h - 1));
 
+  // faint stone-coursing mortar lines
+  if (stone) {
+    ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+    ctx.lineWidth = 1;
+    for (let gx = 4; gx < w; gx += 5) { ctx.beginPath(); ctx.moveTo(left + gx + 0.5, top); ctx.lineTo(left + gx + 0.5, top + h); ctx.stroke(); }
+    for (let gy = 4; gy < h; gy += 5) { ctx.beginPath(); ctx.moveTo(left, top + gy + 0.5); ctx.lineTo(left + w, top + gy + 0.5); ctx.stroke(); }
+  }
+
   // chimney on buildings >= 5x5 tiles, with a highlight
   if (wTiles >= 5 && hTiles >= 5) {
     const chimSize = 3;
@@ -528,13 +668,8 @@ function paintRoof(ctx: CanvasRenderingContext2D, bb: BuildingBBox, x0: number, 
     ctx.fillRect(cx, cy, chimSize, 1);
     ctx.fillRect(cx, cy, 1, chimSize);
   }
-}
 
-function shadeHex(hex: string, amt: number): string {
-  const c = hexToRgb(hex);
-  const s = shade(c, amt);
-  const h = (n: number) => Math.round(n).toString(16).padStart(2, '0');
-  return `#${h(s.r)}${h(s.g)}${h(s.b)}`;
+  paintRoofWeathering(ctx, left, top, w, h, bb.id);
 }
 
 function paintEaveNotches(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number): void {
@@ -554,6 +689,43 @@ function paintEaveNotches(ctx: CanvasRenderingContext2D, map: GameMap, wx: numbe
 }
 
 // --------------------------------------------------------------------- trees
+function paintTreeShadow(ctx: CanvasRenderingContext2D, cx: number, cy: number, rx: number, ry: number): void {
+  ctx.save();
+  ctx.translate(cx + 4, cy + 6);
+  for (let i = 0; i < 3; i++) {
+    ctx.globalAlpha = 0.12;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, rx * (1 - i * 0.15), ry * (1 - i * 0.15), 0, 0, Math.PI * 2);
+    ctx.fillStyle = '#000000';
+    ctx.fill();
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+/** Winter leafless scrub tree: a spiky brown starburst with a small dark centre. */
+function paintScrubTree(ctx: CanvasRenderingContext2D, cx: number, cy: number, seed: number, size: number): void {
+  ctx.globalAlpha = 0.2;
+  ctx.beginPath();
+  ctx.ellipse(cx + 3, cy + 4, size * 0.5, size * 0.2, 0, 0, Math.PI * 2);
+  ctx.fillStyle = '#000000';
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  const n = 6 + Math.floor(hash2(Math.round(cx), Math.round(cy), seed) * 5);
+  ctx.strokeStyle = '#5a4530';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < n; i++) {
+    const ang = (i / n) * Math.PI * 2 + hash2(Math.round(cx) + i, Math.round(cy), seed + 1) * 0.6;
+    const len = size * (0.4 + hash2(Math.round(cx), Math.round(cy) + i, seed + 2) * 0.6);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(ang) * len, cy + Math.sin(ang) * len * 0.6 - len * 0.25);
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#2c2418';
+  ctx.beginPath(); ctx.arc(cx, cy, 1.5, 0, Math.PI * 2); ctx.fill();
+}
+
 function paintTrees(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number, season: Season, seed: number): void {
   const t = tileAt(map, wx, wy);
   if (t === 'woods') {
@@ -563,24 +735,36 @@ function paintTrees(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy:
       const jyT = (hash2(wx * 13 + i + 5, wy * 13 + i + 5, seed + 107) - 0.5) * 1.4;
       // ragged canopy edge: reject candidates that fall outside the smoothed woody field
       if (coverageAt(map, isWoody, wx + 0.5 + jxT, wy + 0.5 + jyT, seed + 8801) < 0.5) continue;
-      const variant = Math.floor(hash2(wx * 17 + i, wy * 17 + i, seed + 109) * 3);
-      const scale = 0.8 + hash2(wx * 23 + i, wy * 23 + i, seed + 121) * 0.5;
-      const sprite = getTreeSprite(variant, season);
-      const dw = sprite.width * scale, dh = sprite.height * scale;
       const cx = ox + (0.5 + jxT) * TILE_PX, cy = oy + (0.5 + jyT) * TILE_PX;
-      ctx.drawImage(sprite, Math.round(cx - dw / 2), Math.round(cy - dh / 2), dw, dh);
+      if (season === 'winter') {
+        const size = 12 + hash2(wx * 23 + i, wy * 23 + i, seed + 121) * 10;
+        paintScrubTree(ctx, cx, cy, seed + 121, size);
+      } else {
+        const variant = Math.floor(hash2(wx * 17 + i, wy * 17 + i, seed + 109) * 3);
+        const scale = 0.8 + hash2(wx * 23 + i, wy * 23 + i, seed + 121) * 0.5;
+        const sprite = getTreeSprite(variant, season);
+        const dw = sprite.width * scale, dh = sprite.height * scale;
+        paintTreeShadow(ctx, cx, cy, dw * 0.45, dh * 0.25);
+        ctx.drawImage(sprite, Math.round(cx - dw / 2), Math.round(cy - dh / 2), dw, dh);
+      }
     }
   } else if (t === 'scatteredtrees') {
     if (hash2(wx, wy, seed + 111) < 0.55) {
       const jxT = (hash2(wx * 19, wy * 19, seed + 113) - 0.5) * 0.4;
       const jyT = (hash2(wx * 23, wy * 23, seed + 117) - 0.5) * 0.4;
       if (coverageAt(map, isWoody, wx + 0.5 + jxT, wy + 0.5 + jyT, seed + 8802) >= 0.5) {
-        const variant = Math.floor(hash2(wx * 29, wy * 29, seed + 119) * 3);
-        const scale = 0.85 + hash2(wx * 31, wy * 31, seed + 123) * 0.4;
-        const sprite = getTreeSprite(variant, season);
-        const dw = sprite.width * scale, dh = sprite.height * scale;
         const cx = ox + (0.5 + jxT) * TILE_PX, cy = oy + (0.5 + jyT) * TILE_PX;
-        ctx.drawImage(sprite, Math.round(cx - dw / 2), Math.round(cy - dh / 2), dw, dh);
+        if (season === 'winter') {
+          const size = 12 + hash2(wx * 31, wy * 31, seed + 123) * 10;
+          paintScrubTree(ctx, cx, cy, seed + 123, size);
+        } else {
+          const variant = Math.floor(hash2(wx * 29, wy * 29, seed + 119) * 3);
+          const scale = 0.85 + hash2(wx * 31, wy * 31, seed + 123) * 0.4;
+          const sprite = getTreeSprite(variant, season);
+          const dw = sprite.width * scale, dh = sprite.height * scale;
+          paintTreeShadow(ctx, cx, cy, dw * 0.45, dh * 0.25);
+          ctx.drawImage(sprite, Math.round(cx - dw / 2), Math.round(cy - dh / 2), dw, dh);
+        }
       }
     }
     // occasional bush near the edge of scattered trees / woods
@@ -594,17 +778,17 @@ function paintTrees(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy:
   }
 }
 
-function paintDetail(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number, seed: number): void {
+function paintDetail(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number, season: Season, seed: number): void {
   const t = tileAt(map, wx, wy);
   switch (t) {
     case 'mud': paintMud(ctx, wx, wy, ox, oy, seed); break;
-    case 'crater': paintCraterTile(ctx, ox, oy, seed); break;
+    case 'crater': paintCraterTile(ctx, ox, oy, seed, season); break;
     case 'trench': paintTrench(ctx, map, wx, wy, ox, oy, seed); break;
     case 'hedge': paintHedge(ctx, map, wx, wy, ox, oy, seed); break;
     case 'fence': paintFence(ctx, map, wx, wy, ox, oy); break;
     case 'stonewall': paintStonewall(ctx, map, wx, wy, ox, oy); break;
     case 'bridge': paintBridge(ctx, map, wx, wy, ox, oy); break;
-    default: break;
+    default: paintGroundTexture(ctx, map, wx, wy, ox, oy, season, seed); break;
   }
 }
 
@@ -614,12 +798,13 @@ export class TerrainRenderer {
   private seed: number;
   private chunksX: number;
   private chunksY: number;
+  /** Insertion-ordered LRU cache: oldest-used key is first. */
   private chunks = new Map<string, HTMLCanvasElement>();
-  private dirty = new Set<string>();
   private buildingBBoxes = new Map<number, BuildingBBox>();
   private fieldId: Int32Array;
   private fieldAxis = new Map<number, FieldInfo>();
   private groundUnder: Terrain[];
+  private lowRes: HTMLCanvasElement | null = null;
 
   constructor(map: GameMap) {
     this.map = map;
@@ -721,21 +906,22 @@ export class TerrainRenderer {
   invalidateTile(x: number, y: number): void {
     const cx = Math.floor(x / CHUNK_TILES);
     const cy = Math.floor(y / CHUNK_TILES);
-    this.dirty.add(this.chunkKey(cx, cy));
+    this.chunks.delete(this.chunkKey(cx, cy));
+    this.updateLowResTile(x, y);
   }
 
-  private getChunk(cx: number, cy: number): HTMLCanvasElement {
-    const key = this.chunkKey(cx, cy);
-    let c = this.chunks.get(key);
-    if (!c || this.dirty.has(key)) {
-      c = this.bakeChunk(cx, cy);
-      this.chunks.set(key, c);
-      this.dirty.delete(key);
+  /** Move `key` to the most-recently-used end; evict the oldest entry past the cap. */
+  private touchChunk(key: string, canvas: HTMLCanvasElement): void {
+    if (this.chunks.has(key)) this.chunks.delete(key);
+    this.chunks.set(key, canvas);
+    if (this.chunks.size > MAX_CACHED_CHUNKS) {
+      const oldest = this.chunks.keys().next().value;
+      if (oldest !== undefined) this.chunks.delete(oldest);
     }
-    return c;
   }
 
   private bakeChunk(cx: number, cy: number): HTMLCanvasElement {
+    const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
     const canvas = document.createElement('canvas');
     canvas.width = CHUNK_PX;
     canvas.height = CHUNK_PX;
@@ -762,7 +948,7 @@ export class TerrainRenderer {
     );
     ctx.putImageData(img, 0, 0);
 
-    // ------------------------------------------------------------ detail pass (walls/hedges/etc)
+    // ------------------------------------------------------------ detail pass (walls/hedges/etc + ground texture)
     for (let ty = 0; ty < CHUNK_TILES; ty++) {
       const wy = y0 + ty;
       if (wy >= map.height) continue;
@@ -770,7 +956,7 @@ export class TerrainRenderer {
         const wx = x0 + tx;
         if (wx >= map.width) continue;
         if (BUILDING_TERRAINS.has(tileAt(map, wx, wy))) continue;
-        paintDetail(ctx, map, wx, wy, tx * TILE_PX, ty * TILE_PX, this.seed);
+        paintDetail(ctx, map, wx, wy, tx * TILE_PX, ty * TILE_PX, season, this.seed);
       }
     }
 
@@ -804,6 +990,11 @@ export class TerrainRenderer {
     // ------------------------------------------------------------ decor
     this.drawDecor(ctx, x0, y0);
 
+    const dt = t0 ? performance.now() - t0 : 0;
+    if (typeof console !== 'undefined' && dt) {
+      // eslint-disable-next-line no-console
+      console.log(`[terrain] baked chunk (${cx},${cy}) in ${dt.toFixed(1)}ms`);
+    }
     return canvas;
   }
 
@@ -818,6 +1009,60 @@ export class TerrainRenderer {
     }
   }
 
+  // -------------------------------------------------------------- low-res
+  /** Cheap flat-colour whole-map painter at 2px/tile, used for the thumbnail and as a
+   * placeholder for chunks that haven't been baked yet. Never touches per-tile ImageData
+   * loops or fbm — just one flat (lightly hash-tinted) fill per tile. */
+  private ensureLowRes(): HTMLCanvasElement {
+    if (this.lowRes) return this.lowRes;
+    const map = this.map;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, map.width * LOWRES_PX_PER_TILE);
+    canvas.height = Math.max(1, map.height * LOWRES_PX_PER_TILE);
+    const ctx = canvas.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    for (let y = 0; y < map.height; y++) {
+      for (let x = 0; x < map.width; x++) this.paintLowResTile(ctx, x, y);
+    }
+    this.lowRes = canvas;
+    return canvas;
+  }
+
+  private paintLowResTile(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+    const map = this.map;
+    const season = map.def.season;
+    const t = tileAt(map, x, y);
+    const i = idx(map, x, y);
+    let color: RGB;
+    if (t === 'buildingWood' || t === 'buildingStone' || t === 'floor') {
+      const bid = map.buildingId[i];
+      const bb = bid >= 0 ? this.buildingBBoxes.get(bid) : undefined;
+      const stone = bb ? bb.kind === 'stone' : t === 'buildingStone';
+      color = hexToRgb(stone ? '#6d6d68' : '#6f4a2c');
+    } else if (t === 'woods') {
+      color = hexToRgb(season === 'winter' ? '#7a7468' : '#33502a');
+    } else if (t === 'scatteredtrees') {
+      color = hexToRgb(season === 'winter' ? '#8a8478' : '#43602f');
+    } else if (t === 'water') {
+      color = hexToRgb(season === 'winter' ? '#c8d2d9' : '#4a6578');
+    } else if (t === 'crater' || t === 'bridge') {
+      color = rampLerp(rampRgb(season, this.groundUnder[i]), 0.5);
+    } else {
+      color = rampLerp(rampRgb(season, t), 0.5);
+    }
+    const tint = (hash2(x, y, this.seed + 8811) - 0.5) * 10;
+    color = { r: clamp255(color.r + tint), g: clamp255(color.g + tint), b: clamp255(color.b + tint) };
+    ctx.fillStyle = `rgb(${color.r | 0},${color.g | 0},${color.b | 0})`;
+    ctx.fillRect(x * LOWRES_PX_PER_TILE, y * LOWRES_PX_PER_TILE, LOWRES_PX_PER_TILE, LOWRES_PX_PER_TILE);
+  }
+
+  private updateLowResTile(x: number, y: number): void {
+    if (!this.lowRes) return;
+    if (x < 0 || y < 0 || x >= this.map.width || y >= this.map.height) return;
+    this.paintLowResTile(this.lowRes.getContext('2d')!, x, y);
+  }
+
+  // -------------------------------------------------------------- draw / thumbnail
   draw(ctx: CanvasRenderingContext2D, cam: Camera): void {
     ctx.save();
     ctx.beginPath();
@@ -831,12 +1076,31 @@ export class TerrainRenderer {
     const endCx = Math.min(this.chunksX - 1, Math.floor((cam.x + viewTilesW) / CHUNK_TILES));
     const startCy = Math.max(0, Math.floor(cam.y / CHUNK_TILES));
     const endCy = Math.min(this.chunksY - 1, Math.floor((cam.y + viewTilesH) / CHUNK_TILES));
+    let bakeBudget = BAKES_PER_DRAW;
+    const lowRes = this.ensureLowRes();
     for (let cy = startCy; cy <= endCy; cy++) {
       for (let cx = startCx; cx <= endCx; cx++) {
-        const chunk = this.getChunk(cx, cy);
+        const key = this.chunkKey(cx, cy);
+        let chunk = this.chunks.get(key);
+        if (chunk) {
+          this.touchChunk(key, chunk);
+        } else if (bakeBudget > 0) {
+          chunk = this.bakeChunk(cx, cy);
+          this.touchChunk(key, chunk);
+          bakeBudget--;
+        }
         const s = worldToScreen(cam, { x: cx * CHUNK_TILES, y: cy * CHUNK_TILES });
         const size = CHUNK_PX * cam.zoom;
-        ctx.drawImage(chunk, s.x, s.y, size, size);
+        if (chunk) {
+          ctx.drawImage(chunk, s.x, s.y, size, size);
+        } else {
+          // not yet baked this session — fall back to the cheap low-res whole-map painter
+          const sx = cx * CHUNK_TILES * LOWRES_PX_PER_TILE;
+          const sy = cy * CHUNK_TILES * LOWRES_PX_PER_TILE;
+          const sw = Math.min(CHUNK_TILES * LOWRES_PX_PER_TILE, lowRes.width - sx);
+          const sh = Math.min(CHUNK_TILES * LOWRES_PX_PER_TILE, lowRes.height - sy);
+          if (sw > 0 && sh > 0) ctx.drawImage(lowRes, sx, sy, sw, sh, s.x, s.y, size, size);
+        }
       }
     }
     ctx.restore();
@@ -847,20 +1111,14 @@ export class TerrainRenderer {
     canvas.width = w;
     canvas.height = h;
     const ctx = canvas.getContext('2d')!;
-    ctx.imageSmoothingEnabled = false;
-    const mapPxW = this.map.width * TILE_PX;
-    const mapPxH = this.map.height * TILE_PX;
+    const lowRes = this.ensureLowRes();
+    const mapPxW = this.map.width * LOWRES_PX_PER_TILE;
+    const mapPxH = this.map.height * LOWRES_PX_PER_TILE;
     const scale = Math.min(w / mapPxW, h / mapPxH);
-    const offX = (w - mapPxW * scale) / 2;
-    const offY = (h - mapPxH * scale) / 2;
-    for (let cy = 0; cy < this.chunksY; cy++) {
-      for (let cx = 0; cx < this.chunksX; cx++) {
-        const chunk = this.getChunk(cx, cy);
-        const dx = offX + cx * CHUNK_TILES * TILE_PX * scale;
-        const dy = offY + cy * CHUNK_TILES * TILE_PX * scale;
-        ctx.drawImage(chunk, dx, dy, CHUNK_PX * scale, CHUNK_PX * scale);
-      }
-    }
+    const dw = mapPxW * scale, dh = mapPxH * scale;
+    const offX = (w - dw) / 2, offY = (h - dh) / 2;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(lowRes, 0, 0, mapPxW, mapPxH, offX, offY, dw, dh);
     return canvas;
   }
 
@@ -871,6 +1129,7 @@ export class TerrainRenderer {
     ctx.clip();
     ctx.imageSmoothingEnabled = false;
     const map = state.map;
+    const season = map.def.season;
     const px = TILE_PX * cam.zoom;
 
     if (map.dirtyTiles && map.dirtyTiles.length) {
@@ -883,10 +1142,7 @@ export class TerrainRenderer {
       const s = worldToScreen(cam, { x: cx + 0.5, y: cy + 0.5 });
       if (s.x < -px || s.x > VIEW_W + px || s.y < -px || s.y > VIEW_H + px) continue;
       const r = px / 2 - 1;
-      ctx.globalAlpha = 0.6;
-      ctx.beginPath(); ctx.fillStyle = '#1e1c18'; ctx.arc(s.x, s.y, r * 0.7, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.strokeStyle = '#6a6252'; ctx.lineWidth = 1; ctx.arc(s.x, s.y, r, 0, Math.PI * 2); ctx.stroke();
-      ctx.globalAlpha = 1;
+      paintCraterAt(ctx, s.x, s.y, r, this.seed + ti, season);
     }
 
     ctx.globalAlpha = 0.6;

@@ -6,7 +6,7 @@
 import type { Side, Season, Stance, Facing8, CursorKind } from '@/shared/types';
 import { TILE_PX, TILE_M } from '@/shared/types';
 import { hash2 } from '@/shared/rng';
-import { createCanvas, ctx2d, putPixelArt, rotate90, rotateSprite, darken } from '@/render/pixelUtil';
+import { createCanvas, ctx2d, putPixelArt, rotate90, rotateSprite, darken, scaleArt, setArtPixel } from '@/render/pixelUtil';
 
 const PX_PER_M = TILE_PX / TILE_M; // 5 px/m
 
@@ -59,13 +59,21 @@ function soldierColors(side: Side, season: Season, dead: boolean): Record<string
     skin = darkenHex(skin, 0.65);
   }
   const rim = darkenHex(h, 0.6);
-  return { O: rim, h: hi, H: h, U: u, S: s, W: weapon, K: stock, G: skin, B: blood };
+  const specular = lightenHex(hi, 0.55);
+  return { O: rim, h: hi, H: h, P: specular, U: u, S: s, W: weapon, K: stock, G: skin, B: blood };
 }
 
 /** Cheap hex darken used for the small color-map entries above. */
 function darkenHex(hex: string, factor: number): string {
   const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
   const f = (v: number) => Math.round(v * factor).toString(16).padStart(2, '0');
+  return '#' + f(r) + f(g) + f(b);
+}
+
+/** Cheap hex lighten (mixes toward white) used for the helmet specular pixel. */
+function lightenHex(hex: string, factor: number): string {
+  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  const f = (v: number) => Math.round(v + (255 - v) * factor).toString(16).padStart(2, '0');
   return '#' + f(r) + f(g) + f(b);
 }
 
@@ -76,9 +84,12 @@ function helmetColors(colors: Record<string, string>): Record<string, string> {
   return colors;
 }
 
-// 12x12 art, base "north" (facing up) orientation. Occupies roughly cols3-9,
-// rows1-10 (~7 wide x 9-10 tall) per the readability target.
-const STAND_F0 = [
+// Base "north" (facing up) art, hand-authored at 12x12 / 8x14 and scaled 2x
+// (to 24x24 / 16x28) to match the doubled map scale (10 px/m, TILE_PX 20),
+// then hand-touched-up (helmet specular pixel; a dedicated splayed-limb dead
+// pose distinct from prone). 'P' = specular highlight pixel (4th helmet tone,
+// brightest, placed at the NW rim per the reference screenshots).
+const STAND_F0_BASE = [
   '............',
   '....OOO..W..',
   '...OhHHO.W..',
@@ -92,7 +103,7 @@ const STAND_F0 = [
   '....US......',
   '............',
 ];
-const STAND_F1 = [
+const STAND_F1_BASE = [
   '............',
   '....OOO..W..',
   '...OhHHO.W..',
@@ -106,7 +117,7 @@ const STAND_F1 = [
   '....SU......',
   '............',
 ];
-const CROUCH_F0 = [
+const CROUCH_F0_BASE = [
   '............',
   '............',
   '............',
@@ -120,7 +131,7 @@ const CROUCH_F0 = [
   '............',
   '............',
 ];
-const CROUCH_F1 = [
+const CROUCH_F1_BASE = [
   '............',
   '............',
   '............',
@@ -136,7 +147,7 @@ const CROUCH_F1 = [
 ];
 // 8 wide x 14 tall, lying along the north-south axis (base orientation, head
 // north). Weapon tip pokes 2px beyond the helmet at the top of the canvas.
-const PRONE_ART = [
+const PRONE_ART_BASE = [
   '....W...',
   '....W...',
   '..OOOO..',
@@ -152,6 +163,40 @@ const PRONE_ART = [
   '..UUUU..',
   '..SUUS..',
 ];
+// Dead: distinct splayed-limb pose (no weapon, legs apart, arms out) rather
+// than a recolored prone — matches the reference's dead soldiers, which read
+// visibly different from a crawling/prone figure.
+const DEAD_ART_BASE = [
+  '........',
+  '..OOOO..',
+  '.OhHHHO.',
+  '.OHHHHO.',
+  '.SSUUSS.',
+  'GSUUUUSG',
+  '.SUUUUS.',
+  '.SUUUUS.',
+  '.SUUUUS.',
+  '.UU..UU.',
+  '.UU..UU.',
+  '.U....U.',
+  '.U....U.',
+  '........',
+];
+
+const ART_SCALE = 2;
+function scaled(art: string[]): string[] {
+  return scaleArt(art, ART_SCALE);
+}
+// Specular pixel: the top-left-most helmet rim pixel, per art layout above.
+const STAND_F0 = setArtPixel(scaled(STAND_F0_BASE), 8, 2, 'P');
+const STAND_F1 = setArtPixel(scaled(STAND_F1_BASE), 8, 2, 'P');
+const CROUCH_F0 = setArtPixel(scaled(CROUCH_F0_BASE), 8, 6, 'P');
+const CROUCH_F1 = setArtPixel(scaled(CROUCH_F1_BASE), 8, 6, 'P');
+const PRONE_ART = setArtPixel(scaled(PRONE_ART_BASE), 4, 4, 'P');
+const DEAD_ART = setArtPixel(scaled(DEAD_ART_BASE), 4, 2, 'P');
+const STAND_W = STAND_F0[0].length, STAND_H = STAND_F0.length;
+const CROUCH_W = CROUCH_F0[0].length, CROUCH_H = CROUCH_F0.length;
+const PRONE_W = PRONE_ART[0].length, PRONE_H = PRONE_ART.length;
 
 function fixWidth(rows: string[], w: number): string[] {
   return rows.map((r) => (r.length === w ? r : r.length < w ? r.padEnd(w, '.') : r.slice(0, w)));
@@ -174,18 +219,17 @@ function artCanvas(art: string[], colors: Record<string, string>, w: number, h: 
 function buildSoldierBase(side: Side, season: Season, stance: Stance | 'dead', frame: 0 | 1): HTMLCanvasElement {
   const dead = stance === 'dead';
   const colors = helmetColors(soldierColors(side, season, dead));
-  if (stance === 'prone' || dead) {
-    const c = artCanvas(PRONE_ART, colors, 8, 14);
-    if (dead) {
-      const ctx = ctx2d(c);
-      ctx.fillStyle = colors.B;
-      ctx.fillRect(2, 8, 3, 1);
-      ctx.fillRect(3, 9, 2, 1);
-    }
+  if (dead) {
+    const c = artCanvas(DEAD_ART, colors, PRONE_W, PRONE_H);
+    const ctx = ctx2d(c);
+    ctx.fillStyle = colors.B;
+    ctx.fillRect(PRONE_W / 2 - 3, PRONE_H * 0.58, 6, 2);
+    ctx.fillRect(PRONE_W / 2 - 2, PRONE_H * 0.68, 4, 2);
     return c;
   }
-  if (stance === 'crouching') return artCanvas(frame === 0 ? CROUCH_F0 : CROUCH_F1, colors, 12, 12);
-  return artCanvas(frame === 0 ? STAND_F0 : STAND_F1, colors, 12, 12);
+  if (stance === 'prone') return artCanvas(PRONE_ART, colors, PRONE_W, PRONE_H);
+  if (stance === 'crouching') return artCanvas(frame === 0 ? CROUCH_F0 : CROUCH_F1, colors, CROUCH_W, CROUCH_H);
+  return artCanvas(frame === 0 ? STAND_F0 : STAND_F1, colors, STAND_W, STAND_H);
 }
 
 function orientSprite(base: HTMLCanvasElement, facing: Facing8): HTMLCanvasElement {
@@ -539,24 +583,24 @@ export function getVehicleSprite(defId: string, part: 'hull' | 'turret', state: 
 export function getFlagSprite(owner: Side | null): HTMLCanvasElement {
   const key = `flag|${owner ?? 'neutral'}`;
   return cached(key, () => {
-    const c = createCanvas(10, 14);
+    const c = createCanvas(12, 18);
     const ctx = ctx2d(c);
     // Pole shadow, then pole.
     ctx.fillStyle = 'rgba(10,10,8,0.3)';
-    ctx.fillRect(2, 1, 1, 12);
+    ctx.fillRect(2, 1, 1, 15);
     ctx.fillStyle = '#3a3020';
-    ctx.fillRect(1, 1, 1, 12);
-    const fx = 2, fy = 1, fw = 8, fh = 6;
+    ctx.fillRect(1, 1, 1, 15);
+    const fx = 2, fy = 1, fw = 9, fh = 8;
     if (owner === 'german') {
-      ctx.fillStyle = '#100f0c'; ctx.fillRect(fx, fy, fw, 2);
-      ctx.fillStyle = '#e8e8e0'; ctx.fillRect(fx, fy + 2, fw, 2);
-      ctx.fillStyle = '#c8402c'; ctx.fillRect(fx, fy + 4, fw, 2);
+      ctx.fillStyle = '#100f0c'; ctx.fillRect(fx, fy, fw, 3);
+      ctx.fillStyle = '#e8e8e0'; ctx.fillRect(fx, fy + 3, fw, 2);
+      ctx.fillStyle = '#c8402c'; ctx.fillRect(fx, fy + 5, fw, 3);
       ctx.fillStyle = '#100f0c';
-      ctx.fillRect(fx + 3, fy + 2, 2, 2);
-      ctx.fillRect(fx + 2, fy + 3, 4, 1);
+      ctx.fillRect(fx + 3, fy + 3, 3, 2);
+      ctx.fillRect(fx + 2, fy + 3.5, 5, 1);
     } else if (owner === 'soviet') {
       ctx.fillStyle = '#c8402c'; ctx.fillRect(fx, fy, fw, fh);
-      ctx.fillStyle = '#e0c04a'; ctx.fillRect(fx + 1, fy + 2, 2, 2);
+      ctx.fillStyle = '#e0c04a'; ctx.fillRect(fx + 1, fy + 3, 3, 3);
     } else {
       ctx.fillStyle = '#e8e8e0'; ctx.fillRect(fx, fy, fw, fh);
       ctx.strokeStyle = '#8a8a82'; ctx.lineWidth = 1; ctx.strokeRect(fx + 0.5, fy + 0.5, fw - 1, fh - 1);
@@ -570,107 +614,165 @@ export function getFlagSprite(owner: Side | null): HTMLCanvasElement {
 }
 
 // ============================================================================
-// TEAM ICONS — 12x12, transparent bg, gray/white glyph with dark outline.
+// TEAM ICONS — 40x26, transparent bg. Side-view silhouettes (dark grey with a
+// thin white highlight edge so they read on the dark-maroon HUD panel), per
+// the force-pool rows in the original game (ref_cc3_1478.png / 1482.png).
 // ============================================================================
-const ICON_FILL = '#e8e8e2';
-const ICON_OUTLINE = '#1a1a14';
+const ICON_W = 40, ICON_H = 26;
+const ICON_FILL = '#302f2a';
+const ICON_EDGE = '#eceae2';
+const ICON_GROUND = 22; // baseline y that figures/vehicles stand on
 
-function iconStroke(ctx: CanvasRenderingContext2D): void {
-  ctx.strokeStyle = ICON_OUTLINE;
-  ctx.lineWidth = 1;
-}
-
-function buildIcon(id: string): HTMLCanvasElement {
-  const c = createCanvas(12, 12);
-  const ctx = ctx2d(c);
-  ctx.fillStyle = ICON_FILL;
-  iconStroke(ctx);
-  switch (id) {
-    case 'rifle':
-      ctx.beginPath(); ctx.moveTo(2, 9); ctx.lineTo(10, 3); ctx.stroke();
-      ctx.fillRect(2, 8, 2, 2); // stock
-      ctx.fillRect(8, 2, 1, 2); // barrel tip
-      break;
-    case 'smg':
-      ctx.beginPath(); ctx.moveTo(3, 8); ctx.lineTo(9, 4); ctx.stroke();
-      ctx.fillRect(3, 7, 2, 2);
-      ctx.fillRect(6, 5, 1, 3); // magazine
-      break;
-    case 'mg':
-      ctx.beginPath(); ctx.moveTo(2, 8); ctx.lineTo(10, 5); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(4, 10); ctx.lineTo(6, 8); ctx.moveTo(8, 10); ctx.lineTo(6, 8); ctx.stroke(); // bipod
-      break;
-    case 'mortar':
-      ctx.beginPath(); ctx.moveTo(4, 10); ctx.lineTo(8, 2); ctx.lineTo(9, 3); ctx.lineTo(5, 11); ctx.closePath(); ctx.fill(); ctx.stroke();
-      ctx.fillRect(2, 9, 6, 2); // baseplate
-      break;
-    case 'atgun':
-      ctx.fillRect(2, 8, 3, 3); // shield
-      ctx.strokeRect(2.5, 8.5, 2, 2);
-      ctx.beginPath(); ctx.moveTo(4, 8); ctx.lineTo(10, 3); ctx.stroke();
-      break;
-    case 'sniper':
-      ctx.beginPath(); ctx.moveTo(2, 9); ctx.lineTo(10, 3); ctx.stroke();
-      ctx.beginPath(); ctx.arc(6, 5, 1.6, 0, Math.PI * 2); ctx.stroke(); // scope
-      ctx.fillRect(5, 5, 1, 1);
-      break;
-    case 'atteam':
-      ctx.fillRect(2, 6, 8, 2); // launch tube
-      ctx.beginPath(); ctx.moveTo(9, 5); ctx.lineTo(11, 7); ctx.lineTo(9, 9); ctx.closePath(); ctx.fill(); ctx.stroke();
-      break;
-    case 'tank':
-      ctx.fillRect(1, 4, 10, 5); // hull, side view
-      ctx.strokeRect(1.5, 4.5, 9, 4);
-      ctx.fillRect(3, 2, 5, 3); // turret
-      ctx.strokeRect(3.5, 2.5, 4, 2);
-      ctx.beginPath(); ctx.moveTo(8, 3); ctx.lineTo(11, 2); ctx.stroke(); // barrel
-      ctx.beginPath(); ctx.arc(3, 9.5, 1, 0, Math.PI * 2); ctx.fill(); // road wheel dots
-      ctx.beginPath(); ctx.arc(6, 9.5, 1, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(9, 9.5, 1, 0, Math.PI * 2); ctx.fill();
-      break;
-    case 'spg':
-      ctx.fillRect(1, 4, 10, 5); // low hull, side view, no turret
-      ctx.strokeRect(1.5, 4.5, 9, 4);
-      ctx.fillRect(3, 2.5, 5, 2.5); // casemate box, front-biased
-      ctx.strokeRect(3.5, 3, 4, 2);
-      ctx.beginPath(); ctx.moveTo(8, 3.5); ctx.lineTo(11, 2.5); ctx.stroke();
-      ctx.beginPath(); ctx.arc(3, 9.5, 1, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(8, 9.5, 1, 0, Math.PI * 2); ctx.fill();
-      break;
-    case 'halftrack':
-      ctx.fillRect(2, 4, 8, 5);
-      ctx.strokeRect(2.5, 4.5, 7, 4);
-      ctx.beginPath(); ctx.arc(4, 9, 1.2, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(8, 9, 1.2, 0, Math.PI * 2); ctx.fill();
-      break;
-    case 'command':
-      drawStarIcon(ctx, 6, 6, 4);
-      break;
-    case 'engineer':
-      ctx.beginPath(); ctx.moveTo(2, 3); ctx.lineTo(9, 10); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(9, 3); ctx.lineTo(2, 10); ctx.stroke();
-      ctx.fillRect(1, 2, 2, 2);
-      ctx.fillRect(8, 2, 2, 2);
-      break;
-    default:
-      ctx.strokeRect(2.5, 2.5, 7, 7);
-  }
-  return c;
-}
-
-function drawStarIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
+function iconPath(ctx: CanvasRenderingContext2D, pts: [number, number][]): void {
   ctx.beginPath();
-  for (let i = 0; i < 5; i++) {
-    const a = -Math.PI / 2 + (i * 2 * Math.PI) / 5;
-    const a2 = a + Math.PI / 5;
-    const x1 = cx + Math.cos(a) * r, y1 = cy + Math.sin(a) * r;
-    const x2 = cx + Math.cos(a2) * (r * 0.42), y2 = cy + Math.sin(a2) * (r * 0.42);
-    if (i === 0) ctx.moveTo(x1, y1); else ctx.lineTo(x1, y1);
-    ctx.lineTo(x2, y2);
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.closePath();
+  ctx.fillStyle = ICON_FILL;
+  ctx.fill();
+  ctx.strokeStyle = ICON_EDGE;
+  ctx.lineWidth = 0.8;
+  ctx.stroke();
+}
+
+/** A small side-view soldier silhouette: helmet, tunic, two legs, standing on
+ * `groundY` with its horizontal centre at `x`. `armForward` extends a thin
+ * weapon line toward +x; `crouch` shortens/bends the pose for prone/MG use. */
+function drawManSide(ctx: CanvasRenderingContext2D, x: number, groundY: number, opts: { crouch?: boolean; prone?: boolean } = {}): void {
+  const { crouch, prone } = opts;
+  if (prone) {
+    // Lying flat, facing +x: helmet bump, long low body.
+    const y = groundY - 2;
+    iconPath(ctx, [[x - 5, y], [x - 5, y - 2], [x - 2, y - 3.5], [x + 6, y - 2.5], [x + 7, y - 1.5], [x + 7, y]]);
+    return;
   }
+  const bodyTop = groundY - (crouch ? 8 : 12);
+  const bodyBot = groundY - (crouch ? 3 : 4);
+  // Helmet: small dome above the body.
+  ctx.fillStyle = ICON_FILL;
+  ctx.strokeStyle = ICON_EDGE;
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.arc(x, bodyTop - 1.6, 2.1, Math.PI, 0);
+  ctx.lineTo(x + 2.1, bodyTop + 0.4);
+  ctx.lineTo(x - 2.1, bodyTop + 0.4);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
+  // Tunic (slightly tapered torso).
+  iconPath(ctx, [[x - 1.8, bodyTop], [x + 1.8, bodyTop], [x + 2.4, bodyBot], [x - 2.4, bodyBot]]);
+  // Legs: a walking stride, one forward one back.
+  iconPath(ctx, [[x - 2.2, bodyBot - 0.5], [x - 0.4, bodyBot - 0.5], [x - 1.6, groundY], [x - 3.2, groundY]]);
+  iconPath(ctx, [[x + 0.4, bodyBot - 0.5], [x + 2.2, bodyBot - 0.5], [x + 3.4, groundY], [x + 1.8, groundY]]);
+}
+
+function drawWeaponLine(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, w = 1.3): void {
+  ctx.strokeStyle = ICON_FILL;
+  ctx.lineWidth = w;
+  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  ctx.strokeStyle = ICON_EDGE;
+  ctx.lineWidth = 0.5;
+  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+}
+
+function drawTankSide(ctx: CanvasRenderingContext2D, cx: number, groundY: number, hasTurret: boolean): void {
+  const hullW = 26, hullH = 7, hullX = cx - hullW / 2, hullY = groundY - hullH;
+  iconPath(ctx, [[hullX, hullY], [hullX + hullW, hullY], [hullX + hullW, groundY], [hullX, groundY]]);
+  // Road wheels along the bottom of the hull.
+  ctx.fillStyle = ICON_EDGE;
+  for (let i = 0; i < 5; i++) {
+    ctx.beginPath();
+    ctx.arc(hullX + 3 + i * ((hullW - 6) / 4), groundY - 1.2, 1, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  if (hasTurret) {
+    const tw = 11, th = 5;
+    iconPath(ctx, [[cx - tw / 2, hullY - th], [cx + tw / 2 - 2, hullY - th], [cx + tw / 2, hullY], [cx - tw / 2, hullY]]);
+    drawWeaponLine(ctx, cx + tw / 2 - 2, hullY - th + 1.5, hullX + hullW + 6, hullY - th - 1, 1.6);
+  } else {
+    // Casemate: superstructure biased to the front, gun straight out.
+    const bw = 13, bh = 6;
+    iconPath(ctx, [[hullX + 3, hullY - bh], [hullX + 3 + bw, hullY - bh + 1], [hullX + 3 + bw, hullY], [hullX + 3, hullY]]);
+    drawWeaponLine(ctx, hullX + 3 + bw, hullY - bh + 2, hullX + hullW + 7, hullY - bh + 1.5, 1.6);
+  }
+}
+
+function buildIcon(id: string): HTMLCanvasElement {
+  const c = createCanvas(ICON_W, ICON_H);
+  const ctx = ctx2d(c);
+  const gy = ICON_GROUND;
+  switch (id) {
+    case 'rifle':
+      drawManSide(ctx, 10, gy); drawWeaponLine(ctx, 12, gy - 13, 20, gy - 17);
+      drawManSide(ctx, 21, gy); drawWeaponLine(ctx, 23, gy - 13, 31, gy - 17);
+      drawManSide(ctx, 32, gy); drawWeaponLine(ctx, 34, gy - 13, 40, gy - 16);
+      break;
+    case 'smg':
+      drawManSide(ctx, 11, gy); drawWeaponLine(ctx, 13, gy - 12, 19, gy - 14, 1.8);
+      drawManSide(ctx, 24, gy); drawWeaponLine(ctx, 26, gy - 12, 32, gy - 14, 1.8);
+      break;
+    case 'mg':
+      drawManSide(ctx, 14, gy, { crouch: true });
+      drawWeaponLine(ctx, 16, gy - 9, 30, gy - 10, 1.6);
+      // Bipod legs under the muzzle.
+      drawWeaponLine(ctx, 28, gy - 10, 26, gy - 2, 1);
+      drawWeaponLine(ctx, 28, gy - 10, 31, gy - 2, 1);
+      break;
+    case 'mortar': {
+      const bx = 14;
+      drawWeaponLine(ctx, bx, gy, bx + 10, gy - 16, 2.4);
+      iconPath(ctx, [[bx - 4, gy], [bx + 6, gy], [bx + 4, gy - 2], [bx - 2, gy - 2]]); // baseplate
+      drawManSide(ctx, 27, gy, { crouch: true });
+      break;
+    }
+    case 'atgun':
+      iconPath(ctx, [[10, gy - 8], [14, gy - 8], [14, gy - 1], [10, gy - 1]]); // shield
+      ctx.fillStyle = ICON_EDGE; ctx.fillRect(11, gy - 6, 2, 4);
+      drawWeaponLine(ctx, 14, gy - 6, 30, gy - 10, 1.8);
+      ctx.fillStyle = ICON_FILL; ctx.strokeStyle = ICON_EDGE; ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.arc(12, gy, 2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      drawManSide(ctx, 22, gy, { crouch: true });
+      break;
+    case 'sniper':
+      drawManSide(ctx, 20, gy, { prone: true });
+      drawWeaponLine(ctx, 22, gy - 4, 34, gy - 6, 1.4);
+      break;
+    case 'atteam':
+      drawManSide(ctx, 12, gy, { crouch: true });
+      drawWeaponLine(ctx, 14, gy - 9, 34, gy - 11, 2.6); // rocket tube on the shoulder
+      iconPath(ctx, [[33, gy - 13], [37, gy - 11], [33, gy - 9]]); // warhead tip
+      break;
+    case 'tank':
+      drawTankSide(ctx, ICON_W / 2, gy, true);
+      break;
+    case 'spg':
+      drawTankSide(ctx, ICON_W / 2, gy, false);
+      break;
+    case 'halftrack': {
+      const hullX = 6, hullW = 28, hullY = gy - 7;
+      iconPath(ctx, [[hullX, gy - 2], [hullX, hullY], [hullX + 8, hullY - 3], [hullX + hullW, hullY - 3], [hullX + hullW, gy]]);
+      ctx.fillStyle = ICON_EDGE;
+      // Two rows of tiny helmets in the open crew compartment.
+      for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(hullX + 12 + i * 5, hullY - 4, 1, 0, Math.PI * 2); ctx.fill(); }
+      // Front road wheel + rear tracks.
+      ctx.beginPath(); ctx.arc(hullX + 4, gy - 1.5, 2, 0, Math.PI * 2); ctx.fill();
+      for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(hullX + 18 + i * 4, gy - 1.2, 1, 0, Math.PI * 2); ctx.fill(); }
+      break;
+    }
+    case 'command':
+      drawManSide(ctx, 18, gy);
+      drawWeaponLine(ctx, 20, gy - 13, 25, gy - 20, 1.4); // raised arm
+      break;
+    case 'engineer':
+      drawManSide(ctx, 18, gy, { crouch: true });
+      drawWeaponLine(ctx, 20, gy - 9, 28, gy - 15, 1.6); // shovel handle
+      iconPath(ctx, [[27, gy - 17], [31, gy - 16], [29, gy - 12]]); // shovel blade
+      break;
+    default:
+      ctx.strokeStyle = ICON_EDGE;
+      ctx.strokeRect(4.5, 4.5, ICON_W - 9, ICON_H - 9);
+  }
+  return c;
 }
 
 export function getTeamIcon(iconId: string): HTMLCanvasElement {
@@ -797,50 +899,62 @@ export function getSmokePuff(size: number): HTMLCanvasElement {
 }
 
 // ============================================================================
-// TREES — 14x14 canopy with shadow, 4 variants x season.
+// TREES — 28x28 canopy with shadow (summer/autumn), 18-26px bare "starburst"
+// scrub (winter), 4 variants x season, matching the doubled map scale.
 // ============================================================================
 const TREE_COLORS: Record<Season, { canopy: string[]; hi: string; branch: string }> = {
   summer: { canopy: ['#2f4a26', '#355230', '#2a4020'], hi: '#5a7a48', branch: '#4a3a24' },
   autumn: { canopy: ['#8a5a26', '#a06e2a', '#c08a2c'], hi: '#d8a840', branch: '#5a3f20' },
-  winter: { canopy: ['#5a5850', '#635f56', '#4e4c46'], hi: '#8a8880', branch: '#4a4640' },
+  winter: { canopy: ['#6a6156', '#736a5e', '#5c554c'], hi: '#9a9184', branch: '#5c5248' },
 };
 
 function buildTree(variant: number, season: Season): HTMLCanvasElement {
-  const c = createCanvas(14, 14);
+  const c = createCanvas(28, 28);
   const ctx = ctx2d(c);
   const colors = TREE_COLORS[season];
-  const cx = 7, cy = 6;
+  const cx = 14, cy = 13;
 
   // Shadow, offset below-right.
   ctx.fillStyle = 'rgba(20,20,16,0.25)';
   ctx.beginPath();
-  ctx.ellipse(cx + 2, cy + 3, 5, 3, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx + 3, cy + 6, 9, 5, 0, 0, Math.PI * 2);
   ctx.fill();
 
   if (season === 'winter') {
-    // Bare branches: a few sparse dark strokes over a thin crown.
+    // Bare leafless scrub: 6-10 thin branches radiating from a dark centre,
+    // each with a couple of thinner twigs branching off partway along.
+    const branchCount = 6 + Math.floor(hash2(variant, 0, 3) * 5); // 6-10
     ctx.strokeStyle = colors.branch;
-    ctx.lineWidth = 1;
-    for (let i = 0; i < 5; i++) {
-      const a = -Math.PI / 2 + (hash2(variant, i, 7) - 0.5) * 2.2;
-      const len = 3 + hash2(variant, i, 11) * 3;
+    for (let i = 0; i < branchCount; i++) {
+      const a = (i / branchCount) * Math.PI * 2 + hash2(variant, i, 7) * 0.5;
+      const len = 9 + hash2(variant, i, 11) * 4; // 9-13 (18-26 span across)
+      const ex = cx + Math.cos(a) * len, ey = cy + Math.sin(a) * len * 0.9;
+      ctx.lineWidth = 1.4;
       ctx.beginPath();
-      ctx.moveTo(cx, cy + 2);
-      ctx.lineTo(cx + Math.cos(a) * len, cy + 2 + Math.sin(a) * len);
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+      // A couple of shorter twigs off the main branch.
+      const mx = cx + (ex - cx) * 0.6, my = cy + (ey - cy) * 0.6;
+      const ta = a + 0.6, tb = a - 0.6, tl = len * 0.35;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(mx, my); ctx.lineTo(mx + Math.cos(ta) * tl, my + Math.sin(ta) * tl * 0.9);
+      ctx.moveTo(mx, my); ctx.lineTo(mx + Math.cos(tb) * tl, my + Math.sin(tb) * tl * 0.9);
       ctx.stroke();
     }
-    ctx.fillStyle = colors.canopy[0];
+    ctx.fillStyle = colors.branch;
     ctx.beginPath();
-    ctx.arc(cx, cy, 2, 0, Math.PI * 2);
+    ctx.arc(cx, cy, 2.4, 0, Math.PI * 2);
     ctx.fill();
     return c;
   }
 
-  // Irregular canopy blob: several overlapping circles seeded per-variant.
-  for (let i = 0; i < 6; i++) {
-    const ang = (i / 6) * Math.PI * 2 + hash2(variant, i, 1) * 0.6;
-    const dist = 1.5 + hash2(variant, i, 2) * 2;
-    const rad = 2.5 + hash2(variant, i, 3) * 1.8;
+  // Irregular lobed canopy: several overlapping circles seeded per-variant.
+  for (let i = 0; i < 7; i++) {
+    const ang = (i / 7) * Math.PI * 2 + hash2(variant, i, 1) * 0.6;
+    const dist = 3 + hash2(variant, i, 2) * 4;
+    const rad = 5 + hash2(variant, i, 3) * 3.2;
     const x = cx + Math.cos(ang) * dist;
     const y = cy + Math.sin(ang) * dist * 0.8;
     ctx.fillStyle = colors.canopy[i % colors.canopy.length];
@@ -850,18 +964,21 @@ function buildTree(variant: number, season: Season): HTMLCanvasElement {
   }
   ctx.fillStyle = colors.canopy[0];
   ctx.beginPath();
-  ctx.arc(cx, cy, 4.5, 0, Math.PI * 2);
+  ctx.arc(cx, cy, 9, 0, Math.PI * 2);
   ctx.fill();
 
-  // Two highlight pixels.
+  // NW highlight blob (light 3rd tone) plus a couple of bright fleck pixels.
   ctx.fillStyle = colors.hi;
-  ctx.fillRect(cx - 2, cy - 3, 1, 1);
-  ctx.fillRect(cx + 1, cy - 2, 1, 1);
+  ctx.beginPath();
+  ctx.arc(cx - 4, cy - 5, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillRect(cx - 5, cy - 7, 1, 1);
+  ctx.fillRect(cx - 1, cy - 8, 1, 1);
 
   ctx.strokeStyle = 'rgba(20,20,16,0.4)';
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.arc(cx, cy, 4.7, 0, Math.PI * 2);
+  ctx.arc(cx, cy, 9.4, 0, Math.PI * 2);
   ctx.stroke();
   return c;
 }

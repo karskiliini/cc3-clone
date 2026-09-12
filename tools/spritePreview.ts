@@ -15,6 +15,8 @@ import { PALETTE, TERRAIN_COLORS, SIDE_COLOR, ORDER_COLOR } from '@/render/palet
 
 const root = document.getElementById('root')!;
 const SCALE = 4;
+const SCALE_1X = 1;
+const SCALE_3X = 3;
 
 function section(title: string): HTMLElement {
   const h = document.createElement('h2');
@@ -42,6 +44,30 @@ function cell(row: HTMLElement, label: string, src: HTMLCanvasElement, scale = S
   row.appendChild(c);
 }
 
+/** Show a sprite at 1x (true in-game size) AND 3x (for eyeballing detail),
+ * stacked in one cell, per the sprite-scale verification requirement. */
+function cellPair(row: HTMLElement, label: string, src: HTMLCanvasElement): void {
+  const c = document.createElement('div');
+  c.className = 'cell';
+  const mk = (scale: number) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, src.width * scale);
+    canvas.height = Math.max(1, src.height * scale);
+    const ctx = canvas.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
+    canvas.style.display = 'block';
+    canvas.style.margin = '0 auto 2px';
+    return canvas;
+  };
+  c.appendChild(mk(SCALE_1X));
+  c.appendChild(mk(SCALE_3X));
+  const span = document.createElement('span');
+  span.textContent = `${label} (1x/3x)`;
+  c.appendChild(span);
+  row.appendChild(c);
+}
+
 // --------------------------------------------------------------- soldiers --
 const SIDES: Side[] = ['german', 'soviet'];
 const SEASONS: Season[] = ['summer', 'autumn', 'winter'];
@@ -54,7 +80,7 @@ for (const side of SIDES) {
     for (const stance of STANCES) {
       for (const facing of FACINGS) {
         const sprite = getSoldierSprite(side, season, stance, facing, 0);
-        cell(row, `${stance} f${facing}`, sprite, 6);
+        cellPair(row, `${stance} f${facing}`, sprite);
       }
     }
   }
@@ -62,8 +88,8 @@ for (const side of SIDES) {
 
 const walkRow = section('Soldier walk frames (standing, german, summer, facing 0/2/4/6)');
 for (const facing of [0, 2, 4, 6] as Facing8[]) {
-  cell(walkRow, `f${facing} frame0`, getSoldierSprite('german', 'summer', 'standing', facing, 0), 8);
-  cell(walkRow, `f${facing} frame1`, getSoldierSprite('german', 'summer', 'standing', facing, 1), 8);
+  cellPair(walkRow, `f${facing} frame0`, getSoldierSprite('german', 'summer', 'standing', facing, 0));
+  cellPair(walkRow, `f${facing} frame1`, getSoldierSprite('german', 'summer', 'standing', facing, 1));
 }
 
 // --------------------------------------------------------------- vehicles --
@@ -74,30 +100,30 @@ const VEHICLE_IDS = [
 const vehRow = section('Vehicles — hull + turret (ok)');
 for (const id of VEHICLE_IDS) {
   const hull = getVehicleSprite(id, 'hull', 'ok');
-  cell(vehRow, `${id} hull`, hull, 4);
+  cellPair(vehRow, `${id} hull`, hull);
   const turret = getVehicleSprite(id, 'turret', 'ok');
-  cell(vehRow, `${id} turret`, turret, 4);
+  cellPair(vehRow, `${id} turret`, turret);
 }
 const vehKoRow = section('Vehicles — knocked out');
 for (const id of VEHICLE_IDS) {
-  cell(vehKoRow, `${id} hull KO`, getVehicleSprite(id, 'hull', 'knockedOut'), 4);
+  cellPair(vehKoRow, `${id} hull KO`, getVehicleSprite(id, 'hull', 'knockedOut'));
 }
 
 // ------------------------------------------------------------------ flags --
 const flagRow = section('Flags');
-cell(flagRow, 'german', getFlagSprite('german'), 8);
-cell(flagRow, 'soviet', getFlagSprite('soviet'), 8);
-cell(flagRow, 'neutral', getFlagSprite(null), 8);
+cellPair(flagRow, 'german', getFlagSprite('german'));
+cellPair(flagRow, 'soviet', getFlagSprite('soviet'));
+cellPair(flagRow, 'neutral', getFlagSprite(null));
 
 // ------------------------------------------------------------------ icons --
 const ICONS = ['rifle', 'smg', 'mg', 'mortar', 'atgun', 'sniper', 'atteam', 'tank', 'spg', 'halftrack', 'command', 'engineer'];
 const iconRow = section('Team icons');
-for (const id of ICONS) cell(iconRow, id, getTeamIcon(id), 6);
+for (const id of ICONS) cellPair(iconRow, id, getTeamIcon(id));
 
 // --------------------------------------------------------------- cursors --
 const CURSORS: CursorKind[] = ['arrow', 'crosshair', 'hand', 'no', 'move', 'wait'];
 const cursorRow = section('Cursors');
-for (const kind of CURSORS) cell(cursorRow, kind, getCursorSprite(kind), 4);
+for (const kind of CURSORS) cellPair(cursorRow, kind, getCursorSprite(kind));
 
 // ----------------------------------------------------------------- smoke --
 const smokeRow = section('Smoke puffs');
@@ -106,7 +132,7 @@ for (const size of [8, 16, 24, 32]) cell(smokeRow, `${size}px`, getSmokePuff(siz
 // ----------------------------------------------------------------- trees --
 for (const season of SEASONS) {
   const row = section(`Trees — ${season}`);
-  for (let v = 0; v < 4; v++) cell(row, `variant ${v}`, getTreeSprite(v, season), 8);
+  for (let v = 0; v < 4; v++) cellPair(row, `variant ${v}`, getTreeSprite(v, season));
 }
 
 // ---------------------------------------------------------------- palette --

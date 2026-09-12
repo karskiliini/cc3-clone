@@ -1,17 +1,20 @@
 import type { CursorKind, InputState, OrderType, Screen, Team } from '@/shared/types';
-import { ORDER_HOTKEYS, ORDER_TYPES, PANEL_H, PANEL_Y, SCREEN_H, SCREEN_W, VIEW_H, VIEW_W, otherSide } from '@/shared/types';
+import { ORDER_HOTKEYS, ORDER_TYPES, PANEL_Y, VIEW_H, VIEW_W, otherSide } from '@/shared/types';
 import { game } from '@/game';
 import type { Battle } from '@/sim/battle';
 import { teamCanFire, teamHasSmoke } from '@/sim/team';
 import { addMessage } from '@/sim/messages';
-import { centerCamera, clampCamera, panCamera, screenToWorld, worldToScreen } from '@/engine/camera';
+import { centerCamera, clampCamera, panCamera, screenToWorld, worldToScreen, zoomIn, zoomOut } from '@/engine/camera';
 import { TerrainRenderer } from '@/render/terrainRender';
 import { drawUnits } from '@/render/unitRender';
 import { drawEffects } from '@/render/effects';
 import { drawLOSLine } from '@/ui/losTool';
-import { TeamListPanel } from '@/ui/teamList';
-import { drawSoldierMonitor } from '@/ui/soldierMonitor';
-import { MessagePanel } from '@/ui/messagePanel';
+import { TeamGrid } from '@/ui/hud/teamGrid';
+import { CombatMessages } from '@/ui/hud/combatMessages';
+import { BottomStrip } from '@/ui/hud/bottomStrip';
+import { SoldierMonitorPopup } from '@/ui/hud/soldierMonitor';
+import { Minimap } from '@/ui/hud/minimap';
+import { drawHudBase } from '@/ui/hud/hudChrome';
 import { CommandMenu } from '@/ui/commandMenu';
 import { drawTextCentered, FONT_BIG_H } from '@/render/pixelfont';
 import { PALETTE, ORDER_COLOR } from '@/render/palette';
@@ -22,8 +25,8 @@ import { OptionsScreen } from './options';
 
 const SPEEDS: (1 | 2 | 4)[] = [1, 2, 4];
 
-/** Big gold word on a 60%-black 200x24 box, centred in the map viewport —
- * used for the PAUSED overlay and the end-of-battle result word. */
+/** Big gold word on a 60%-black box, centred in the map viewport — used for
+ * the PAUSED overlay and the end-of-battle result word. */
 function drawCenteredOverlayBanner(ctx: CanvasRenderingContext2D, word: string): void {
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
@@ -48,8 +51,11 @@ interface RightDrag {
 export class BattleScreen implements Screen {
   private battle: Battle;
   private terrain: TerrainRenderer;
-  private teamList = new TeamListPanel();
-  private messagePanel = new MessagePanel();
+  private teamGrid = new TeamGrid();
+  private combatMessages = new CombatMessages();
+  private bottomStrip = new BottomStrip('battle');
+  private soldierMonitor = new SoldierMonitorPopup();
+  private minimap = new Minimap();
   private commandMenu = new CommandMenu();
   private selectedTeamId: number | null = null;
   private pendingOrder: OrderType | null = null;
@@ -89,13 +95,8 @@ export class BattleScreen implements Screen {
     updateCameraEdgeScrollAndKeys(cam, input, dt, state.map.width, state.map.height);
 
     if (input.wheel !== 0) {
-      const before = screenToWorld(cam, input.mouse);
-      cam.zoom = cam.zoom === 1 ? 2 : 1;
-      clampCamera(cam, state.map.width, state.map.height);
-      const after = screenToWorld(cam, input.mouse);
-      cam.x += before.x - after.x;
-      cam.y += before.y - after.y;
-      clampCamera(cam, state.map.width, state.map.height);
+      if (input.wheel < 0) zoomIn(cam, state.map.width, state.map.height, input.mouse);
+      else zoomOut(cam, state.map.width, state.map.height, input.mouse);
     }
 
     // right mouse: drag = pan, click (no team) = nothing, click (team selected) = command menu
@@ -183,26 +184,48 @@ export class BattleScreen implements Screen {
     }
 
     const teams = battle.selectableTeams(battle.playerSide());
-    const clickedTeamId = this.teamList.update(input, teams, state);
-    if (clickedTeamId != null) {
-      this.selectedTeamId = clickedTeamId;
-      const team = state.teams.get(clickedTeamId);
+    const gridClick = this.teamGrid.update(input, teams);
+    if (gridClick != null) {
+      this.selectedTeamId = gridClick;
+      const team = state.teams.get(gridClick);
       if (team) centerCamera(cam, team.pos);
       clampCamera(cam, state.map.width, state.map.height);
     }
 
-    const action = this.messagePanel.update(input);
+    if (this.minimap.update(input, cam, state.map.width, state.map.height)) {
+      // camera recentred by the minimap itself
+    }
+
+    this.combatMessages.update(input, state);
+    const selTeamForMonitor = this.selectedTeamId != null ? state.teams.get(this.selectedTeamId) ?? null : null;
+    this.soldierMonitor.update(input, state, selTeamForMonitor);
+
+    const action = this.bottomStrip.update(input);
     if (action === 'truce') {
       battle.offerTruce(battle.playerSide());
       addMessage(state, 'You have offered a truce', 'info');
-    } else if (action === 'overview') {
+    } else if (action === 'flee') {
+      if (this.selectedTeamId != null) {
+        const team = state.teams.get(this.selectedTeamId);
+        const zone = state.map.def.deployZones[battle.playerSide()];
+        if (team) {
+          battle.issueOrder(this.selectedTeamId, {
+            type: 'moveFast',
+            target: { x: zone.x + zone.w / 2, y: zone.y + zone.h / 2 },
+            issuedAt: state.time,
+          });
+        }
+      }
+    } else if (action === 'map') {
       game.setScreen(new OverviewScreen(battle, this));
       return;
     } else if (action === 'options') {
       game.setScreen(new OptionsScreen(this));
       return;
-    } else if (action === 'pause') {
-      this.paused = !this.paused;
+    } else if (action === 'zoomIn') {
+      zoomIn(cam, state.map.width, state.map.height);
+    } else if (action === 'zoomOut') {
+      zoomOut(cam, state.map.width, state.map.height);
     }
 
     if (input.keysPressed.has(' ')) this.paused = !this.paused;
@@ -259,9 +282,15 @@ export class BattleScreen implements Screen {
 
     ctx.restore();
 
-    this.teamList.draw(ctx, battle.selectableTeams(battle.playerSide()), state, this.selectedTeamId);
-    drawSoldierMonitor(ctx, state, selTeam);
-    this.messagePanel.draw(ctx, state, this.paused);
+    // Minimap and soldier monitor sit over the map viewport itself.
+    this.minimap.draw(ctx, this.terrain, state, cam, battle.playerSide());
+    this.soldierMonitor.draw(ctx, state, selTeam);
+
+    drawHudBase(ctx);
+    this.teamGrid.draw(ctx, battle.selectableTeams(battle.playerSide()), state, this.selectedTeamId);
+    this.combatMessages.draw(ctx, state);
+    this.bottomStrip.draw(ctx, state, selTeam);
+
     if (this.commandMenu.isOpen) this.commandMenu.draw(ctx);
 
     if (this.paused) {

@@ -13,6 +13,29 @@ import { getSoldierSprite, getVehicleSprite, getFlagSprite } from '@/render/spri
 import { drawText, textWidth } from '@/render/pixelfont';
 import { VEHICLE_DEFS } from '@/data/units';
 
+function soldierBarColor(s: Soldier): string {
+  if (s.health === 'incapacitated') return PALETTE.red;
+  if (s.health === 'wounded') return PALETTE.yellow;
+  if (s.activity === 'pinned' || s.activity === 'cowering') return PALETTE.yellow;
+  if (s.activity === 'panicked' || s.activity === 'routed' || s.activity === 'berserk') return PALETTE.red;
+  return PALETTE.green;
+}
+
+/** Draws a small 12x3 colour bar 8px above each living soldier of the
+ * selected team — green healthy, yellow pinned/wounded, red broken/incap,
+ * matching CC3's selected-team status ticks. */
+function drawSelectedTeamBars(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, selectedTeamId: number | null): void {
+  if (selectedTeamId == null) return;
+  for (const s of state.soldiers.values()) {
+    if (s.teamId !== selectedTeamId) continue;
+    if (s.health === 'dead' || s.vehicleId != null) continue;
+    if (!visible(s.pos, cam)) continue;
+    const p = worldToScreen(cam, s.pos);
+    ctx.fillStyle = soldierBarColor(s);
+    ctx.fillRect(Math.round(p.x - 6), Math.round(p.y - 12), 12, 3);
+  }
+}
+
 function rotateAndDraw(ctx: CanvasRenderingContext2D, sprite: HTMLCanvasElement, cx: number, cy: number, rad: number): void {
   ctx.save();
   ctx.imageSmoothingEnabled = false;
@@ -110,19 +133,30 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
   }
 }
 
-function drawFlags(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, settings: GameSettings): void {
+/** VL name label: bold white text with a 1px black outline (drawn 4x offset
+ * in black then once in white), the way the original labels its objectives. */
+function drawOutlinedLabel(ctx: CanvasRenderingContext2D, text: string, cx: number, y: number): void {
+  ctx.font = 'bold 11px Arial, Helvetica, sans-serif';
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#0c0c0a';
+  ctx.fillText(text, cx - 1, y);
+  ctx.fillText(text, cx + 1, y);
+  ctx.fillText(text, cx, y - 1);
+  ctx.fillText(text, cx, y + 1);
+  ctx.fillStyle = '#f0f0ec';
+  ctx.fillText(text, cx, y);
+  ctx.textAlign = 'left';
+}
+
+function drawFlags(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
   for (const vl of state.map.victoryLocations) {
     const pos = { x: vl.x, y: vl.y };
     if (!visible(pos, cam)) continue;
     const p = worldToScreen(cam, pos);
     const sprite = getFlagSprite(vl.owner);
     ctx.drawImage(sprite, Math.round(p.x - sprite.width / 2), Math.round(p.y - sprite.height));
-    if (settings.unitLabels) {
-      const w = textWidth(vl.name, 'small');
-      ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillRect(Math.round(p.x - w / 2 - 1), Math.round(p.y + 2), w + 2, 8);
-      drawText(ctx, vl.name, Math.round(p.x - w / 2), Math.round(p.y + 3), PALETTE.white, 'small');
-    }
+    drawOutlinedLabel(ctx, vl.name, Math.round(p.x), Math.round(p.y + 2));
   }
 }
 
@@ -187,7 +221,8 @@ export function drawUnits(
   drawCorpses(ctx, cam, state, playerSide);
   drawVehicles(ctx, cam, state, playerSide);
   drawSoldiers(ctx, cam, state, playerSide, selectedTeamId);
-  drawFlags(ctx, cam, state, settings);
+  drawSelectedTeamBars(ctx, cam, state, selectedTeamId);
+  drawFlags(ctx, cam, state);
   drawTeamLabels(ctx, cam, state, settings);
 
   if (selectedTeamId != null) {

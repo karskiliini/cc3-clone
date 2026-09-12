@@ -45,6 +45,31 @@ export function putPixelArt(
   return canvas;
 }
 
+/** Integer-scale a "pixel art" string grid by `factor` (nearest-neighbour,
+ * i.e. each source pixel becomes a factor x factor block of identical
+ * characters). Used to redraw hand-authored art at a larger map scale while
+ * keeping proportions and the chunky low-res look consistent. */
+export function scaleArt(art: readonly string[], factor: number): string[] {
+  const out: string[] = [];
+  for (const row of art) {
+    let newRow = '';
+    for (const ch of row) newRow += ch.repeat(factor);
+    for (let i = 0; i < factor; i++) out.push(newRow);
+  }
+  return out;
+}
+
+/** Replace a single character in a pixel-art grid (row/col are 0-indexed).
+ * Used to hand-touch-up a scaled grid, e.g. to drop in a specular pixel. */
+export function setArtPixel(art: readonly string[], col: number, row: number, ch: string): string[] {
+  const out = art.slice();
+  if (row < 0 || row >= out.length) return out;
+  const r = out[row];
+  if (col < 0 || col >= r.length) return out;
+  out[row] = r.slice(0, col) + ch + r.slice(col + 1);
+  return out;
+}
+
 /** Draw a single pixel-art string array onto a brand-new canvas sized to fit it. */
 export function canvasFromArt(art: readonly string[], colorMap: Record<string, string>): HTMLCanvasElement {
   const w = art.length ? art[0].length : 0;

@@ -227,9 +227,15 @@ export const ORDER_LABELS: Record<OrderType, string> = {
   move: 'MOVE', moveFast: 'MOVE FAST', sneak: 'SNEAK', fire: 'FIRE',
   smoke: 'SMOKE', defend: 'DEFEND', ambush: 'AMBUSH',
 };
+/** Original CC3 keyboard reference: Z Move, X Move Fast, C Sneak, V Fire, B Smoke, N Defend, M Ambush */
 export const ORDER_HOTKEYS: Record<OrderType, string> = {
-  move: 'm', moveFast: 'f', sneak: 's', fire: 'i', smoke: 'k', defend: 'd', ambush: 'a',
+  move: 'z', moveFast: 'x', sneak: 'c', fire: 'v', smoke: 'b', defend: 'n', ambush: 'm',
 };
+/** Order dot colours from the manual: Move blue, Move Fast purple, Sneak yellow, Fire red (orange = suppression), Smoke gray; Defend blue arc, Ambush green arc */
+export const ORDER_DOT_COLOR: Record<OrderType, string> = {
+  move: '#3c6cff', moveFast: '#b040e0', sneak: '#f0e040', fire: '#e02020', smoke: '#a0a0a0', defend: '#3c6cff', ambush: '#30c030',
+};
+export const AMBUSH_TRIGGER_M = 30;   // manual: ambush launches when enemy within 30 m
 
 export interface Order {
   type: OrderType;

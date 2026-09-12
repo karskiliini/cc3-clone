@@ -24,7 +24,21 @@ Copyright constraint: no original Atomic/Microsoft artwork, sounds, or text are 
 - Seeded RNG (`mulberry32`) so battles are reproducible for tests.
 - Vitest unit tests for sim modules (pathfinding, LOS, ballistics, morale, victory).
 
-## 4. Screen layout (800×600) — matches CC3
+## 4. Screen layout — verified against original screenshots and manual (rev. 2026-09-12 evening)
+
+Reference: `ref/ref_cc3_*.png` (MobyGames screenshots, gitignored) and `docs/reference/cc3-manual-notes.md`.
+The original battle screen runs at 1024×768; menus are an 800×600 poster-style area letterboxed on black.
+Map scale ≈ 10 px per metre (TILE_PX 20). Bottom panel 138 px, dark maroon. Team data = 5×3 grid of team
+boxes (side-view icon, coloured name bar green/yellow/red, status word). Combat Messages lower-right
+(two-line entries: team name / message, numbered). Bottom strip: Chat, Options, zoom −/+, Map, selected-team
+box with soldier health squares, Anti-Pers/Anti-Tank ammo bars, Truce, Flee. Inset map lower-left over the
+map. Soldier monitor is a popup lower-right over the map (name | role | health; activity | weapon | rounds).
+Hotkeys: Z Move, X Move Fast, C Sneak, V Fire, B Smoke, N Defend, M Ambush; F3 pause; F5/F6/F7 toggle team
+data / inset map / soldier monitor; F8 options. Order dots: Move blue, Move Fast purple, Sneak yellow, Fire
+red (orange suppression), Smoke gray; Defend blue arc, Ambush green arc (30 m trigger). LOS line with ALT
+(bright green / dark green / red). Difficulty: Recruit / Veteran / Hero.
+
+### 4.1 Original (superseded) 800×600 layout notes
 
 ```
 +--------------------------------------------------------------+

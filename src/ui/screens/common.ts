@@ -3,13 +3,15 @@
 // a small ListBox widget, word-wrap, camera-control helpers and a BACK button
 // factory. Nothing here owns simulation state.
 // ============================================================================
-import type { Camera, InputState, Rect } from '@/shared/types';
-import { SCREEN_W, SCREEN_H, VIEW_W, VIEW_H } from '@/shared/types';
+import type { Camera, InputState, Rect, Side, TeamType } from '@/shared/types';
+import { SCREEN_W, SCREEN_H, VIEW_W, VIEW_H, MENU_X, MENU_Y, MENU_W, MENU_H } from '@/shared/types';
 import { pointInRect } from '@/shared/math';
 import { panCamera, clampCamera } from '@/engine/camera';
-import { Button } from '@/ui/chrome';
+import { Button, drawDarkPanel, drawBottomStrip, drawSmallMetalButton, drawVerticalStencil, drawShadowText, drawPoster } from '@/ui/chrome';
 import { PALETTE } from '@/render/palette';
 import { drawText, textWidth } from '@/render/pixelfont';
+import { getTeamIcon } from '@/render/sprites';
+import { TEAM_DEFS, teamsForYear } from '@/data/units';
 
 // ------------------------------------------------------------------- noise --
 /** Deterministic 2D hash in [0,1), used for the painted-texture backdrop dither. */
@@ -241,4 +243,406 @@ export function formatClock(seconds: number): string {
   const mm = Math.floor(s / 60);
   const ss = s % 60;
   return `${mm}:${ss < 10 ? '0' : ''}${ss}`;
+}
+
+// ============================================================================
+// POSTER MENU FRAME — the CC3 letterboxed 800x600 menu area centred inside
+// the 1024x768 canvas at (MENU_X, MENU_Y). Every menu screen (mainMenu,
+// battleSetup, options, debrief, operation) works in this MENU-local
+// 800x600 coordinate space for both drawing and input.
+// ============================================================================
+
+/** Returns a copy of `input` with mouse/click/release points translated into
+ * MENU-local (0..800,0..600) space, so existing widgets (Button, ListBox,
+ * BottomStrip, ForcePicker...) can hit-test against MENU-local rects
+ * unmodified. */
+export function toMenuInput(input: InputState): InputState {
+  return {
+    ...input,
+    mouse: { x: input.mouse.x - MENU_X, y: input.mouse.y - MENU_Y },
+    clicks: input.clicks.map((c) => ({ x: c.x - MENU_X, y: c.y - MENU_Y, button: c.button })),
+    releases: input.releases.map((c) => ({ x: c.x - MENU_X, y: c.y - MENU_Y, button: c.button })),
+  };
+}
+
+/** Fills the whole canvas black, then translates the context to MENU-local
+ * origin and paints the poster background. Callers draw their MENU-local
+ * content after this and MUST call `ctx.restore()` once done. */
+export function beginMenuFrame(ctx: CanvasRenderingContext2D): void {
+  ctx.save();
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+  ctx.translate(MENU_X, MENU_Y);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, MENU_W, MENU_H);
+  ctx.clip();
+  drawPoster(ctx);
+  ctx.restore();
+}
+
+// -------------------------------------------------------------- BottomStrip --
+const STRIP_Y = 560;
+const STRIP_H = 20;
+
+export interface BottomStripConfig {
+  /** true: leftmost button reads "< Back"; false (main menu only): "Quit". Both
+   * navigate to the main menu when clicked. */
+  showBack: boolean;
+  nextLabel?: string;
+  nextEnabled?: boolean;
+  helpText?: string;
+}
+
+export interface BottomStripResult {
+  quitOrBack: boolean;
+  main: boolean;
+  options: boolean;
+  next: boolean;
+}
+
+/** The control strip present at the bottom of every menu screen: Quit/Back,
+ * Main, a row of disabled placeholder buttons (Revert/Briefing/History/Map/
+ * Soldiers), Options, and Next, plus a help line underneath. Draw/update
+ * expect MENU-local coordinates (pass the result of `toMenuInput`). */
+export class BottomStrip {
+  private quitBtn: Rect = { x: 16, y: STRIP_Y, w: 74, h: STRIP_H };
+  private mainBtn: Rect = { x: 96, y: STRIP_Y, w: 62, h: STRIP_H };
+  private revertBtn: Rect = { x: 164, y: STRIP_Y, w: 62, h: STRIP_H };
+  private briefingBtn: Rect = { x: 232, y: STRIP_Y, w: 72, h: STRIP_H };
+  private historyBtn: Rect = { x: 310, y: STRIP_Y, w: 64, h: STRIP_H };
+  private mapBtn: Rect = { x: 380, y: STRIP_Y, w: 52, h: STRIP_H };
+  private soldiersBtn: Rect = { x: 438, y: STRIP_Y, w: 74, h: STRIP_H };
+  private optionsBtn: Rect = { x: 604, y: STRIP_Y, w: 72, h: STRIP_H };
+  private nextBtn: Rect = { x: 726, y: STRIP_Y, w: 58, h: STRIP_H };
+
+  showBack: boolean;
+  nextLabel: string;
+  nextEnabled: boolean;
+  helpText: string;
+
+  private hotQuit = false;
+  private hotMain = false;
+  private hotOptions = false;
+  private hotNext = false;
+
+  constructor(cfg: BottomStripConfig) {
+    this.showBack = cfg.showBack;
+    this.nextLabel = cfg.nextLabel ?? 'Next →';
+    this.nextEnabled = cfg.nextEnabled ?? true;
+    this.helpText = cfg.helpText ?? 'Right-click on screen elements to display more detailed help.';
+  }
+
+  /** `input` must already be in MENU-local coordinates (see `toMenuInput`). */
+  update(input: InputState): BottomStripResult {
+    this.hotQuit = pointInRect(input.mouse, this.quitBtn);
+    this.hotMain = pointInRect(input.mouse, this.mainBtn);
+    this.hotOptions = pointInRect(input.mouse, this.optionsBtn);
+    this.hotNext = this.nextEnabled && pointInRect(input.mouse, this.nextBtn);
+    let quitOrBack = false;
+    let main = false;
+    let options = false;
+    let next = false;
+    for (const c of input.clicks) {
+      if (c.button !== 0) continue;
+      const p = { x: c.x, y: c.y };
+      if (pointInRect(p, this.quitBtn)) quitOrBack = true;
+      else if (pointInRect(p, this.mainBtn)) main = true;
+      else if (pointInRect(p, this.optionsBtn)) options = true;
+      else if (this.nextEnabled && pointInRect(p, this.nextBtn)) next = true;
+    }
+    return { quitOrBack, main, options, next };
+  }
+
+  draw(ctx: CanvasRenderingContext2D): void {
+    drawBottomStrip(ctx, [
+      { label: this.showBack ? '← Back' : 'Quit', rect: this.quitBtn, hot: this.hotQuit },
+      { label: 'Main', rect: this.mainBtn, hot: this.hotMain },
+      { label: 'Revert', rect: this.revertBtn, disabled: true },
+      { label: 'Briefing', rect: this.briefingBtn, disabled: true },
+      { label: 'History', rect: this.historyBtn, disabled: true },
+      { label: 'Map', rect: this.mapBtn, disabled: true },
+      { label: 'Soldiers', rect: this.soldiersBtn, disabled: true },
+      { label: 'Options', rect: this.optionsBtn, hot: this.hotOptions },
+      { label: this.nextLabel, rect: this.nextBtn, disabled: !this.nextEnabled, hot: this.hotNext },
+    ]);
+    ctx.save();
+    ctx.font = '11px Arial, Helvetica, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#f0f0ec';
+    ctx.fillText(this.helpText, MENU_W / 2, STRIP_Y + STRIP_H + 14);
+    ctx.restore();
+  }
+}
+
+// -------------------------------------------------------------- ForcePicker --
+/** Short flavour text per team type, shown in the requisition screen's info
+ * panel for the currently-selected pool row. */
+export const TEAM_FLAVOR: Record<TeamType, string> = {
+  rifle: 'The backbone of any infantry force. Riflemen hold ground stubbornly and provide steady, if unspectacular, fire. Cheap and reliable.',
+  smg: 'Short-ranged but devastating up close. Assault squads clear buildings and trenches fast; keep them out of open ground under fire.',
+  mg: 'A dug-in machine gun team pins whole squads in place. Slow to move, murderous when set up with a clear field of fire.',
+  mortar: 'Indirect high-explosive support that reaches over walls and hills. Needs a spotter\'s eyes and time to range in on a target.',
+  atgun: 'A towed anti-tank gun: deadly to armor from ambush, but exposed and slow to reposition once its position is known.',
+  sniper: 'A single sharpshooter who picks off leaders and gunners from long range. Fragile — keep them concealed and patient.',
+  atteam: 'A close-range anti-tank team armed with man-portable rockets. Effective from ambush; suicidal in the open against supported armor.',
+  tank: 'A turreted main battle tank: mobile firepower and armor that can dominate open ground, but vulnerable to close-range ambush.',
+  spg: 'A self-propelled gun on a tank chassis, without a rotating turret. Hard-hitting from a good firing line, clumsy when flanked.',
+  halftrack: 'A lightly armored transport that moves infantry quickly and mounts a machine gun. Not built to trade fire with real armor.',
+  command: 'Commanders provide leadership; command staffs add firepower and make nearby teams more effective. Anchor assaults and defenses.',
+  engineer: 'Combat engineers carry satchel charges for clearing bunkers and fortified buildings, alongside their personal weapons.',
+};
+
+const ARMOR_TYPES: TeamType[] = ['tank', 'spg', 'halftrack'];
+
+function truncateToWidth(ctx: CanvasRenderingContext2D, text: string, maxW: number): string {
+  if (ctx.measureText(text).width <= maxW) return text;
+  let s = text;
+  while (s.length > 1 && ctx.measureText(s + '…').width > maxW) s = s.slice(0, -1);
+  return s + '…';
+}
+
+/** The two-column "force pool / active roster" requisition widget shared by
+ * the Battle-mode requisition step and the Operation screen's briefing step.
+ * Draws/updates in MENU-local coordinates. */
+export class ForcePicker {
+  side: Side;
+  year: number;
+  points: number;
+  rosterIds: string[];
+  category: 'regular' | 'armor' = 'regular';
+
+  private poolIds: string[] = [];
+  private poolSelected = -1;
+  private poolScroll = 0;
+  private rosterSelected = -1;
+  private rosterScroll = 0;
+
+  private regularBtn: Rect = { x: 60, y: 96, w: 110, h: 22 };
+  private armorBtn: Rect = { x: 178, y: 96, w: 110, h: 22 };
+  private poolListRect: Rect = { x: 60, y: 128, w: 330, h: 234 };
+  private infoRect: Rect = { x: 60, y: 368, w: 330, h: 96 };
+
+  private refitBtn: Rect = { x: 440, y: 96, w: 76, h: 20 };
+  private restBtn: Rect = { x: 520, y: 96, w: 76, h: 20 };
+  private renameBtn: Rect = { x: 600, y: 96, w: 76, h: 20 };
+  private retireBtn: Rect = { x: 680, y: 96, w: 76, h: 20 };
+  private rosterListRect: Rect = { x: 440, y: 128, w: 330, h: 234 };
+
+  private readonly poolRowH = 26;
+  private readonly rosterRowH = 26;
+  private readonly maxRosterSlots = 15;
+
+  constructor(side: Side, year: number, points: number, initialRosterIds: string[]) {
+    this.side = side;
+    this.year = year;
+    this.points = points;
+    this.rosterIds = [...initialRosterIds];
+    this.refreshPool();
+  }
+
+  private refreshPool(): void {
+    const armor = new Set(ARMOR_TYPES);
+    this.poolIds = teamsForYear(this.side, this.year)
+      .filter((d) => (this.category === 'armor' ? armor.has(d.type) : !armor.has(d.type)))
+      .map((d) => d.id);
+    this.poolSelected = -1;
+    this.poolScroll = 0;
+  }
+
+  spent(): number {
+    return this.rosterIds.reduce((sum, id) => sum + (TEAM_DEFS[id]?.cost ?? 0), 0);
+  }
+
+  remaining(): number {
+    return this.points - this.spent();
+  }
+
+  update(input: InputState): void {
+    if (pointInRect(input.mouse, this.regularBtn) === false && pointInRect(input.mouse, this.armorBtn) === false) {
+      // no-op branch kept for clarity/hit-order; category clicks handled below
+    }
+    for (const c of input.clicks) {
+      if (c.button !== 0) continue;
+      const p = { x: c.x, y: c.y };
+      if (pointInRect(p, this.regularBtn) && this.category !== 'regular') {
+        this.category = 'regular';
+        this.refreshPool();
+      } else if (pointInRect(p, this.armorBtn) && this.category !== 'armor') {
+        this.category = 'armor';
+        this.refreshPool();
+      } else if (pointInRect(p, this.retireBtn) && this.rosterSelected >= 0) {
+        this.rosterIds.splice(this.rosterSelected, 1);
+        this.rosterSelected = -1;
+      } else if (pointInRect(p, this.poolListRect)) {
+        const row = this.poolScroll + Math.floor((p.y - this.poolListRect.y) / this.poolRowH);
+        if (row >= 0 && row < this.poolIds.length) {
+          this.poolSelected = row;
+          const def = TEAM_DEFS[this.poolIds[row]];
+          if (def && this.rosterIds.length < this.maxRosterSlots && this.remaining() >= def.cost) {
+            this.rosterIds.push(def.id);
+          }
+        }
+      } else if (pointInRect(p, this.rosterListRect)) {
+        const row = this.rosterScroll + Math.floor((p.y - this.rosterListRect.y) / this.rosterRowH);
+        if (row >= 0 && row < this.rosterIds.length) {
+          if (row === this.rosterSelected) {
+            this.rosterIds.splice(row, 1);
+            this.rosterSelected = -1;
+          } else {
+            this.rosterSelected = row;
+          }
+        }
+      }
+    }
+    if (pointInRect(input.mouse, this.poolListRect) && input.wheel !== 0) {
+      const maxScroll = Math.max(0, this.poolIds.length - Math.floor(this.poolListRect.h / this.poolRowH));
+      this.poolScroll = Math.max(0, Math.min(maxScroll, this.poolScroll + (input.wheel > 0 ? 1 : -1)));
+    }
+    if (pointInRect(input.mouse, this.rosterListRect) && input.wheel !== 0) {
+      const maxScroll = Math.max(0, this.rosterIds.length - Math.floor(this.rosterListRect.h / this.rosterRowH));
+      this.rosterScroll = Math.max(0, Math.min(maxScroll, this.rosterScroll + (input.wheel > 0 ? 1 : -1)));
+    }
+  }
+
+  draw(ctx: CanvasRenderingContext2D): void {
+    drawVerticalStencil(ctx, 'FORCE POOL', 30, 372);
+    drawSmallMetalButton(ctx, this.regularBtn, 'Regular', { hot: this.category === 'regular' });
+    drawSmallMetalButton(ctx, this.armorBtn, 'Armor', { hot: this.category === 'armor' });
+
+    drawDarkPanel(ctx, this.poolListRect);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(this.poolListRect.x, this.poolListRect.y, this.poolListRect.w, this.poolListRect.h);
+    ctx.clip();
+    const visiblePool = Math.floor(this.poolListRect.h / this.poolRowH);
+    for (let i = 0; i < visiblePool; i++) {
+      const idx = this.poolScroll + i;
+      if (idx >= this.poolIds.length) break;
+      const def = TEAM_DEFS[this.poolIds[idx]];
+      if (!def) continue;
+      const ry = this.poolListRect.y + i * this.poolRowH;
+      if (idx === this.poolSelected) {
+        ctx.fillStyle = 'rgba(200,50,30,0.35)';
+        ctx.fillRect(this.poolListRect.x, ry, this.poolListRect.w, this.poolRowH);
+      }
+      const icon = getTeamIcon(def.iconId);
+      ctx.save();
+      ctx.translate(this.poolListRect.x + 4, ry + (this.poolRowH - icon.height * 2) / 2);
+      ctx.scale(2, 2);
+      ctx.drawImage(icon, 0, 0);
+      ctx.restore();
+      const textX = this.poolListRect.x + 34;
+      ctx.font = 'bold 12px Arial, Helvetica, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#f0d840';
+      ctx.fillText(String(def.cost), this.poolListRect.x + this.poolListRect.w - 6, ry + 11);
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#f0f0ec';
+      const name = truncateToWidth(ctx, def.name, this.poolListRect.w - 34 - 44);
+      ctx.fillText(name, textX, ry + 11);
+      ctx.font = '10px Arial, Helvetica, sans-serif';
+      ctx.fillStyle = '#e0c04a';
+      const subtype = def.soldiers.map((s) => s.weaponId).filter((v, i2, a) => a.indexOf(v) === i2).slice(0, 2).join(', ');
+      ctx.fillText(truncateToWidth(ctx, subtype, this.poolListRect.w - 34 - 44), textX, ry + 23);
+    }
+    ctx.restore();
+
+    drawDarkPanel(ctx, this.infoRect);
+    const selDef = this.poolSelected >= 0 ? TEAM_DEFS[this.poolIds[this.poolSelected]] : null;
+    if (selDef) {
+      drawShadowText(ctx, selDef.name, this.infoRect.x + 10, this.infoRect.y + 18, 'bold 13px Arial, Helvetica, sans-serif', '#f0d840');
+      const lines = wordWrapCtx(ctx, TEAM_FLAVOR[selDef.type] ?? '', this.infoRect.w - 20, '11px Arial, Helvetica, sans-serif');
+      ctx.font = '11px Arial, Helvetica, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#e8e8e0';
+      let ty = this.infoRect.y + 36;
+      for (const line of lines.slice(0, 4)) {
+        ctx.fillText(line, this.infoRect.x + 10, ty);
+        ty += 14;
+      }
+    } else {
+      ctx.font = '11px Arial, Helvetica, sans-serif';
+      ctx.fillStyle = '#a89890';
+      ctx.textAlign = 'left';
+      ctx.fillText('Select a unit from the force pool to see its description.', this.infoRect.x + 10, this.infoRect.y + 20);
+    }
+
+    drawVerticalStencil(ctx, 'ACTIVE ROSTER', 792, 372);
+    drawSmallMetalButton(ctx, this.refitBtn, 'Refit', { disabled: true });
+    drawSmallMetalButton(ctx, this.restBtn, 'Rest', { disabled: true });
+    drawSmallMetalButton(ctx, this.renameBtn, 'Rename', { disabled: true });
+    drawSmallMetalButton(ctx, this.retireBtn, 'Retire', { disabled: this.rosterSelected < 0 });
+
+    drawDarkPanel(ctx, this.rosterListRect);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(this.rosterListRect.x, this.rosterListRect.y, this.rosterListRect.w, this.rosterListRect.h);
+    ctx.clip();
+    const visibleRoster = Math.floor(this.rosterListRect.h / this.rosterRowH);
+    for (let i = 0; i < visibleRoster; i++) {
+      const idx = this.rosterScroll + i;
+      const ry = this.rosterListRect.y + i * this.rosterRowH;
+      if (idx >= this.rosterIds.length) {
+        ctx.fillStyle = 'rgba(0,0,0,0.25)';
+        ctx.fillRect(this.rosterListRect.x, ry, this.rosterListRect.w, this.rosterRowH - 1);
+        continue;
+      }
+      const def = TEAM_DEFS[this.rosterIds[idx]];
+      if (!def) continue;
+      if (idx === this.rosterSelected) {
+        ctx.fillStyle = 'rgba(200,50,30,0.35)';
+        ctx.fillRect(this.rosterListRect.x, ry, this.rosterListRect.w, this.rosterRowH);
+      }
+      const icon = getTeamIcon(def.iconId);
+      ctx.save();
+      ctx.translate(this.rosterListRect.x + 4, ry + (this.rosterRowH - icon.height * 2) / 2);
+      ctx.scale(2, 2);
+      ctx.drawImage(icon, 0, 0);
+      ctx.restore();
+      const textX = this.rosterListRect.x + 34;
+      ctx.font = 'bold 12px Arial, Helvetica, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#f0f0ec';
+      ctx.fillText(truncateToWidth(ctx, def.name, this.rosterListRect.w - 34 - 90), textX, ry + 11);
+      // small green soldier squares, one per soldier in the squad
+      const sqSize = 6;
+      let sx = this.rosterListRect.x + this.rosterListRect.w - 6 - Math.min(def.soldiers.length, 10) * (sqSize + 2);
+      ctx.fillStyle = '#3fbf3f';
+      for (let s = 0; s < Math.min(def.soldiers.length, 10); s++) {
+        ctx.fillRect(sx, ry + 4, sqSize, sqSize);
+        sx += sqSize + 2;
+      }
+      ctx.font = '10px Arial, Helvetica, sans-serif';
+      ctx.fillStyle = '#e0c04a';
+      ctx.fillText(truncateToWidth(ctx, def.soldiers[0]?.weaponId ?? '', this.rosterListRect.w - 34), textX, ry + 23);
+    }
+    ctx.restore();
+
+    ctx.font = 'bold 13px Arial, Helvetica, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#f0f0ec';
+    ctx.fillText('Requisition Points Remaining', this.rosterListRect.x, 380 + 0); // placeholder, repositioned below
+  }
+}
+
+function wordWrapCtx(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, font: string): string[] {
+  ctx.save();
+  ctx.font = font;
+  const words = text.split(/\s+/).filter((w) => w.length > 0);
+  const lines: string[] = [];
+  let cur = '';
+  for (const word of words) {
+    const test = cur ? cur + ' ' + word : word;
+    if (cur && ctx.measureText(test).width > maxWidth) {
+      lines.push(cur);
+      cur = word;
+    } else {
+      cur = test;
+    }
+  }
+  if (cur) lines.push(cur);
+  ctx.restore();
+  return lines;
 }

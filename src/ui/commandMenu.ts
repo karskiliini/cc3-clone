@@ -1,15 +1,15 @@
 // ============================================================================
-// commandMenu.ts — right-click popup: vertical list of the seven orders.
+// commandMenu.ts — right-click popup: a small vertical maroon menu of orders,
+// bold white text with a red highlight on hover, hotkey underlined.
 // ============================================================================
 import type { Rect, Vec2, InputState, Team, OrderType } from '@/shared/types';
-import { ORDER_TYPES, ORDER_LABELS, ORDER_HOTKEYS } from '@/shared/types';
+import { ORDER_TYPES, ORDER_LABELS, ORDER_HOTKEYS, SCREEN_W, SCREEN_H } from '@/shared/types';
 import { clamp } from '@/shared/math';
-import { PALETTE } from '@/render/palette';
-import { drawText, textWidth, FONT_SMALL_H } from '@/render/pixelfont';
-import { drawBevelBox, hitRect } from '@/ui/chrome';
+import { HUD } from '@/render/palette';
+import { drawHudBevel, hitRect, setHudFont } from '@/ui/hud/hudChrome';
 
-const ROW_W = 90;
-const ROW_H = 14;
+const ROW_W = 96;
+const ROW_H = 16;
 const BORDER = 2;
 const PANEL_W = ROW_W + BORDER * 2;
 const PANEL_H = ROW_H * ORDER_TYPES.length + BORDER * 2;
@@ -19,10 +19,8 @@ export interface CommandMenuOpts {
   canFire: boolean;
 }
 
-/** x-offset (px) at which character `i` of `text` begins when drawn with drawText. */
-function charStartX(text: string, i: number): number {
-  if (i <= 0) return 0;
-  return textWidth(text.slice(0, i)) + 1;
+function titleCase(s: string): string {
+  return s.replace(/\w\S*/g, (w) => w[0].toUpperCase() + w.slice(1).toLowerCase());
 }
 
 export class CommandMenu {
@@ -33,8 +31,8 @@ export class CommandMenu {
   private hoverIndex = -1;
 
   open(at: Vec2, team: Team, opts?: CommandMenuOpts): void {
-    const x = clamp(Math.round(at.x), 0, 800 - PANEL_W);
-    const y = clamp(Math.round(at.y), 0, 480 - PANEL_H);
+    const x = clamp(Math.round(at.x), 0, SCREEN_W - PANEL_W);
+    const y = clamp(Math.round(at.y), 0, SCREEN_H - PANEL_H);
     this.rect = { x, y, w: PANEL_W, h: PANEL_H };
     this.team = team;
     this.disabled = {
@@ -105,7 +103,7 @@ export class CommandMenu {
 
   draw(ctx: CanvasRenderingContext2D): void {
     if (!this.isOpen) return;
-    drawBevelBox(ctx, this.rect, false);
+    drawHudBevel(ctx, this.rect, false);
 
     for (let i = 0; i < ORDER_TYPES.length; i++) {
       const type = ORDER_TYPES[i];
@@ -114,32 +112,26 @@ export class CommandMenu {
       const hot = this.hoverIndex === i && !disabled;
 
       if (hot) {
-        ctx.fillStyle = PALETTE.gold;
+        ctx.fillStyle = HUD.red;
         ctx.fillRect(Math.round(r.x), Math.round(r.y), Math.round(r.w), Math.round(r.h));
       }
 
-      const label = ORDER_LABELS[type];
-      const color = hot ? PALETTE.black : disabled ? PALETTE.dim : PALETTE.text;
-      const tx = Math.round(r.x + 4);
-      const ty = Math.round(r.y + (r.h - FONT_SMALL_H) / 2);
-      drawText(ctx, label, tx, ty, color, 'small');
+      const label = titleCase(ORDER_LABELS[type]);
+      setHudFont(ctx, 'small');
+      const color = disabled ? HUD.dim : HUD.text;
+      const tx = Math.round(r.x + 5);
+      const ty = Math.round(r.y + 3);
+      ctx.fillStyle = color;
+      ctx.fillText(label, tx, ty);
 
       const hotkey = ORDER_HOTKEYS[type];
       const idx = label.toLowerCase().indexOf(hotkey.toLowerCase());
       if (idx >= 0) {
-        // underline drawn 1px BELOW the glyph's baseline so it never cuts
-        // through the letter itself.
-        const ux0 = tx + charStartX(label, idx);
-        const chWidth = textWidth(label[idx]);
+        const before = label.slice(0, idx);
+        const ux0 = tx + ctx.measureText(before).width;
+        const chWidth = ctx.measureText(label[idx]).width;
         ctx.fillStyle = color;
-        ctx.fillRect(Math.round(ux0), Math.round(ty + FONT_SMALL_H), Math.round(chWidth), 1);
-      } else {
-        // label doesn't contain its hotkey letter: show it in brackets,
-        // right-aligned and dimmed, instead of underlining nothing.
-        const hint = `[${hotkey.toUpperCase()}]`;
-        const hw = textWidth(hint);
-        const hx = Math.round(r.x + r.w - 4 - hw);
-        drawText(ctx, hint, hx, ty, hot ? PALETTE.black : PALETTE.dim, 'small');
+        ctx.fillRect(Math.round(ux0), Math.round(ty + 12), Math.round(chWidth), 1);
       }
     }
   }

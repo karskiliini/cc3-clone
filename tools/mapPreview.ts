@@ -64,7 +64,10 @@ function renderMap(root: HTMLElement, mapId: string): void {
   clampCamera(cam, map.width, map.height);
   vctx.fillStyle = '#000';
   vctx.fillRect(0, 0, VIEW_W, VIEW_H);
-  renderer.draw(vctx, cam);
+  // The renderer only bakes a couple of chunks per draw() call (to keep real gameplay
+  // scrolling smooth); repeatedly redraw here so this static preview shows fully-baked,
+  // full-detail chunks rather than the low-res scrolling fallback.
+  for (let i = 0; i < 40; i++) renderer.draw(vctx, cam);
   viewWrap.appendChild(viewCanvas);
   const viewCaption = el('div', 'caption');
   viewCaption.textContent = `1:1 viewport ${VIEW_W}x${VIEW_H} @ zoom 1, centred on map`;

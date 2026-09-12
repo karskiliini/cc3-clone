@@ -1,30 +1,34 @@
-import type { CursorKind, InputState, Screen, Vec2 } from '@/shared/types';
-import { PANEL_H, PANEL_Y, SCREEN_W, VIEW_H, VIEW_W } from '@/shared/types';
+import type { CursorKind, InputState, Screen } from '@/shared/types';
+import { VIEW_H, VIEW_W } from '@/shared/types';
 import { game } from '@/game';
 import type { Battle } from '@/sim/battle';
 import { aiDeploy } from '@/sim/ai';
-import { centerCamera, clampCamera, screenToWorld, worldToScreen } from '@/engine/camera';
+import { centerCamera, clampCamera, screenToWorld, worldToScreen, zoomIn, zoomOut } from '@/engine/camera';
 import { TerrainRenderer } from '@/render/terrainRender';
 import { drawUnits } from '@/render/unitRender';
-import { Button, drawPanel } from '@/ui/chrome';
-import { TeamListPanel } from '@/ui/teamList';
-import { drawSoldierMonitor } from '@/ui/soldierMonitor';
-import { drawText, drawTextCentered } from '@/render/pixelfont';
+import { TeamGrid } from '@/ui/hud/teamGrid';
+import { CombatMessages } from '@/ui/hud/combatMessages';
+import { BottomStrip } from '@/ui/hud/bottomStrip';
+import { SoldierMonitorPopup } from '@/ui/hud/soldierMonitor';
+import { Minimap } from '@/ui/hud/minimap';
+import { drawHudBase } from '@/ui/hud/hudChrome';
+import { drawTextCentered } from '@/render/pixelfont';
 import { PALETTE } from '@/render/palette';
-import { drawWrappedText, updateCameraEdgeScrollAndKeys, makeDragPanState, updateRightDragPan } from './common';
+import { updateCameraEdgeScrollAndKeys, makeDragPanState, updateRightDragPan } from './common';
 import { BattleScreen } from './battle';
 
 export class DeployScreen implements Screen {
   private battle: Battle;
   private terrain: TerrainRenderer;
-  private teamList = new TeamListPanel();
+  private teamGrid = new TeamGrid();
+  private combatMessages = new CombatMessages();
+  private bottomStrip = new BottomStrip('deploy');
+  private soldierMonitor = new SoldierMonitorPopup();
+  private minimap = new Minimap();
   private selectedTeamId: number | null = null;
   private draggingTeamId: number | null = null;
   private dragPan = makeDragPanState();
   private invalidTimer = 0;
-
-  private autoBtn = new Button({ x: 620, y: 512, w: 160, h: 20 }, 'AUTO DEPLOY');
-  private beginBtn = new Button({ x: 620, y: 538, w: 160, h: 20 }, 'BEGIN');
 
   constructor(battle: Battle) {
     this.battle = battle;
@@ -41,11 +45,16 @@ export class DeployScreen implements Screen {
   update(dt: number, input: InputState): void {
     const cam = game.cam;
     const map = this.battle.state.map;
+    const state = this.battle.state;
 
     if (this.invalidTimer > 0) this.invalidTimer -= dt;
 
     updateCameraEdgeScrollAndKeys(cam, input, dt, map.width, map.height);
     updateRightDragPan(cam, input, this.dragPan, map.width, map.height);
+    if (input.wheel !== 0) {
+      if (input.wheel < 0) zoomIn(cam, map.width, map.height, input.mouse);
+      else zoomOut(cam, map.width, map.height, input.mouse);
+    }
 
     // left mouse down on a friendly soldier: select + start drag
     for (const c of input.clicks) {
@@ -72,21 +81,36 @@ export class DeployScreen implements Screen {
     }
 
     const teams = this.battle.selectableTeams(this.battle.playerSide());
-    const clicked = this.teamList.update(input, teams, this.battle.state);
-    if (clicked != null) this.selectedTeamId = clicked;
-
-    if (this.autoBtn.update(input)) {
-      aiDeploy(this.battle.state, this.battle.playerSide(), this.battle.rng, this.battle);
+    const clicked = this.teamGrid.update(input, teams);
+    if (clicked != null) {
+      this.selectedTeamId = clicked;
+      const team = state.teams.get(clicked);
+      if (team) centerCamera(cam, team.pos);
+      clampCamera(cam, map.width, map.height);
     }
-    if (this.beginBtn.update(input)) {
+
+    this.minimap.update(input, cam, map.width, map.height);
+    this.combatMessages.update(input, state);
+    const selTeam = this.selectedTeamId != null ? state.teams.get(this.selectedTeamId) ?? null : null;
+    this.soldierMonitor.update(input, state, selTeam);
+
+    const action = this.bottomStrip.update(input);
+    if (action === 'auto') {
+      aiDeploy(this.battle.state, this.battle.playerSide(), this.battle.rng, this.battle);
+    } else if (action === 'begin') {
       this.battle.start();
       game.setScreen(new BattleScreen(this.battle));
+    } else if (action === 'zoomIn') {
+      zoomIn(cam, map.width, map.height);
+    } else if (action === 'zoomOut') {
+      zoomOut(cam, map.width, map.height);
     }
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
     const cam = game.cam;
     const map = this.battle.state.map;
+    const state = this.battle.state;
 
     ctx.save();
     ctx.beginPath();
@@ -95,7 +119,7 @@ export class DeployScreen implements Screen {
     ctx.fillStyle = PALETTE.black;
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
     this.terrain.draw(ctx, cam);
-    this.terrain.drawOverlays(ctx, cam, this.battle.state);
+    this.terrain.drawOverlays(ctx, cam, state);
 
     // tint the player's deploy zone
     const zone = map.def.deployZones[this.battle.playerSide()];
@@ -110,7 +134,7 @@ export class DeployScreen implements Screen {
     ctx.strokeRect(tl.x + 0.5, tl.y + 0.5, br.x - tl.x - 1, br.y - tl.y - 1);
     ctx.restore();
 
-    drawUnits(ctx, cam, this.battle.state, this.battle.playerSide(), this.selectedTeamId, game.settings);
+    drawUnits(ctx, cam, state, this.battle.playerSide(), this.selectedTeamId, game.settings);
 
     if (this.draggingTeamId != null) {
       const mouse = game.input.state.mouse;
@@ -126,16 +150,15 @@ export class DeployScreen implements Screen {
     }
     ctx.restore();
 
-    drawPanel(ctx, { x: 0, y: PANEL_Y, w: SCREEN_W, h: PANEL_H });
-    const teams = this.battle.selectableTeams(this.battle.playerSide());
-    this.teamList.draw(ctx, teams, this.battle.state, this.selectedTeamId);
-    const selTeam = this.selectedTeamId != null ? this.battle.state.teams.get(this.selectedTeamId) ?? null : null;
-    drawSoldierMonitor(ctx, this.battle.state, selTeam);
+    this.minimap.draw(ctx, this.terrain, state, cam, this.battle.playerSide());
+    const selTeam = this.selectedTeamId != null ? state.teams.get(this.selectedTeamId) ?? null : null;
+    this.soldierMonitor.draw(ctx, state, selTeam);
 
-    drawText(ctx, 'DEPLOYMENT', 610, 486, PALETTE.gold, 'small');
-    drawWrappedText(ctx, 'Drag teams into blue zone.', 610, 498, 178, PALETTE.dim, 9, 'small');
-    this.autoBtn.draw(ctx);
-    this.beginBtn.draw(ctx);
+    drawHudBase(ctx);
+    const teams = this.battle.selectableTeams(this.battle.playerSide());
+    this.teamGrid.draw(ctx, teams, state, this.selectedTeamId);
+    this.combatMessages.draw(ctx, state);
+    this.bottomStrip.draw(ctx, state, selTeam);
   }
 
   cursor(): CursorKind {

@@ -11,7 +11,7 @@ import { SIM_DT } from '@/shared/types';
 import { Battle } from '@/sim/battle';
 import { DEFAULT_FORCES } from '@/data/operation';
 import { DebriefScreen } from '@/ui/screens/debrief';
-import { MessagePanel } from '@/ui/messagePanel';
+import { CombatMessages } from '@/ui/hud/combatMessages';
 
 declare global {
   interface Window {
@@ -64,9 +64,8 @@ debrief.draw(ctx);
 
 // -----------------------------------------------------------------------
 // Second check, drawn below the debrief (canvas is taller than 600px here
-// only in this dev harness): the message panel with deliberately long
-// messages, to verify truncation/2-line wrapping never spills past the
-// panel's right edge (item 3 of the UI polish pass).
+// only in this dev harness): the combat-messages HUD panel with deliberately
+// long messages, to verify truncation never spills past the panel's edge.
 // -----------------------------------------------------------------------
 battle.state.messages = [
   { time: 1, text: 'Battle begins.', kind: 'info' },
@@ -75,11 +74,11 @@ battle.state.messages = [
   { time: 30, text: 'Rifle Squad has captured North Farm and is now defending the position.', kind: 'good' },
   { time: 40, text: 'Short one.', kind: 'info' },
 ];
-const panel = new MessagePanel();
+const panel = new CombatMessages();
 ctx.save();
-ctx.translate(0, 620 - 480);
-panel.draw(ctx, battle.state, false, 1);
+ctx.translate(0, 700 - 632);
+panel.draw(ctx, battle.state);
 ctx.restore();
 
-status.textContent = `Battle ended after ${steps} steps (phase=${battle.state.phase}, result=${battle.state.result ?? 'n/a'}). DebriefScreen rendered above; MessagePanel wrap test rendered below with synthetic long messages.`;
+status.textContent = `Battle ended after ${steps} steps (phase=${battle.state.phase}, result=${battle.state.result ?? 'n/a'}). DebriefScreen rendered above; CombatMessages wrap test rendered below with synthetic long messages.`;
 window.__uiScreensReady = true;

@@ -1,7 +1,7 @@
 import type {
   BattleEvent, BattleState, Health, Side, Soldier, Team, Vec2, Vehicle, WeaponDef,
 } from '@/shared/types';
-import { TILE_M, otherSide } from '@/shared/types';
+import { AMBUSH_TRIGGER_M, TILE_M, otherSide } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { clamp, dist, facingAngle, facingTo, angleTo, turnTowards, wrapAngle } from '@/shared/math';
 import { hitChance, penetrates, armorFacingFor, damageRoll } from './ballistics';
@@ -99,7 +99,7 @@ function pickTarget(state: BattleState, soldier: Soldier, team: Team | undefined
   else if (soldier.activity === 'moving') maxRangeM = Math.min(maxRangeM, 60);
 
   const order = team?.order;
-  if (order?.type === 'ambush') maxRangeM = Math.min(maxRangeM, 40);
+  if (order?.type === 'ambush') maxRangeM = Math.min(maxRangeM, AMBUSH_TRIGGER_M);
   if (order?.type === 'smoke') return null;
 
   const inRangeLOS = (pos: Vec2): boolean => {
