@@ -862,17 +862,15 @@ function paintTrees(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy:
       // ragged canopy edge: reject candidates that fall outside the smoothed woody field
       if (coverageAt(map, isWoody, wx + 0.5 + jxT, wy + 0.5 + jyT, seed + 8801) < 0.5) continue;
       const cx = ox + (0.5 + jxT) * TILE_PX, cy = oy + (0.5 + jyT) * TILE_PX;
-      if (season === 'winter') {
-        const size = 12 + hash2(wx * 23 + i, wy * 23 + i, seed + 121) * 10;
-        paintScrubTree(ctx, cx, cy, seed + 121, size);
-      } else {
-        const variant = Math.floor(hash2(wx * 17 + i, wy * 17 + i, seed + 109) * 3);
-        const scale = 0.8 + hash2(wx * 23 + i, wy * 23 + i, seed + 121) * 0.5;
-        const sprite = getTreeSprite(variant, season);
-        const dw = sprite.width * scale, dh = sprite.height * scale;
-        paintTreeShadow(ctx, cx, cy, dw * 0.45, dh * 0.25);
-        ctx.drawImage(sprite, Math.round(cx - dw / 2), Math.round(cy - dh / 2), dw, dh);
-      }
+      // 'woods' (dense tree mass) always uses the round canopy sprite — including the
+      // snow-crusted winter variant already built in sprites.ts — so it reads as a mass of
+      // trees; only the sparser 'scatteredtrees' fringe uses the leafless scrub look.
+      const variant = Math.floor(hash2(wx * 17 + i, wy * 17 + i, seed + 109) * 3);
+      const scale = 0.8 + hash2(wx * 23 + i, wy * 23 + i, seed + 121) * 0.5;
+      const sprite = getTreeSprite(variant, season);
+      const dw = sprite.width * scale, dh = sprite.height * scale;
+      paintTreeShadow(ctx, cx, cy, dw * 0.45, dh * 0.25);
+      ctx.drawImage(sprite, Math.round(cx - dw / 2), Math.round(cy - dh / 2), dw, dh);
     }
   } else if (t === 'scatteredtrees') {
     if (hash2(wx, wy, seed + 111) < 0.55) {
@@ -897,11 +895,10 @@ function paintTrees(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy:
     if (hash2(wx, wy, seed + 131) < 0.18) {
       drawDecorItem(ctx, 'bush', ox + TILE_PX / 2 + (hash2(wx * 37, wy * 37, seed + 133) - 0.5) * 6, oy + TILE_PX / 2 + (hash2(wx * 41, wy * 41, seed + 137) - 0.5) * 6);
     }
-  } else if (t === 'grass' || t === 'hedge') {
-    if (hash2(wx, wy, seed + 141) < 0.02) {
-      drawDecorItem(ctx, 'bush', ox + TILE_PX / 2, oy + TILE_PX / 2);
-    }
   }
+  // (no per-tile bush roll on plain grass/hedge tiles — bushes come only from each map's
+  // explicit scatterDecor('bush', …) placements, matching the original's sparse, deliberate
+  // look instead of a uniform per-tile scatter.)
 }
 
 /** Tiles whose terrain is in `vectorLineTerrains` are rendered by `paintLineVector` as one

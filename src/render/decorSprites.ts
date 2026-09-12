@@ -57,13 +57,23 @@ function buildCart(): HTMLCanvasElement {
   return c;
 }
 
+/** Soft 3-tone lobed green blob, sized with a transparent margin so its shadow (drawn separately
+ * in drawDecorItem) never visually fuses with the fill into a near-black square at small scale. */
 function buildBush(): HTMLCanvasElement {
-  const c = createCanvas(5, 5);
+  const c = createCanvas(8, 8);
   const ctx = ctx2d(c);
-  ctx.fillStyle = '#2c3d22';
-  ctx.beginPath(); ctx.ellipse(2.5, 2.8, 2.2, 1.8, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#405c30';
-  ctx.beginPath(); ctx.ellipse(1.8, 1.8, 1.1, 0.9, 0, 0, Math.PI * 2); ctx.fill();
+  // base lobe (mid green, never near-black)
+  ctx.fillStyle = '#5a7a3c';
+  ctx.beginPath(); ctx.ellipse(4, 4.6, 2.6, 2.1, 0, 0, Math.PI * 2); ctx.fill();
+  // a couple of secondary lobes for a bumpy, non-perfect-ellipse silhouette
+  ctx.beginPath(); ctx.ellipse(2.4, 3.6, 1.6, 1.4, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(5.6, 3.9, 1.6, 1.4, 0, 0, Math.PI * 2); ctx.fill();
+  // mid highlight lobe
+  ctx.fillStyle = '#7fa356';
+  ctx.beginPath(); ctx.ellipse(3.3, 3.1, 1.4, 1.1, 0, 0, Math.PI * 2); ctx.fill();
+  // small rim-light fleck, near-white but low alpha so it reads as a highlight, not a hole
+  ctx.fillStyle = 'rgba(226,232,190,0.55)';
+  ctx.beginPath(); ctx.ellipse(2.7, 2.4, 0.6, 0.45, 0, 0, Math.PI * 2); ctx.fill();
   return c;
 }
 
@@ -82,6 +92,25 @@ function buildPole(): HTMLCanvasElement {
   px(ctx, 1, 0, 1, 5, '#3a3228');
   px(ctx, 0, 0, 3, 1, '#2c2620'); // cross-arm
   px(ctx, 2, 4, 1, 1, 'rgba(0,0,0,0.3)'); // shadow
+  return c;
+}
+
+/** Tram overhead-wire support: a taller pole with a crossbar and insulator studs, plus a short
+ * stub of wire either side so a row of these (via decorLine) reads as a continuous line down the
+ * street rather than invisible dots. */
+function buildTramwire(): HTMLCanvasElement {
+  const c = createCanvas(9, 8);
+  const ctx = ctx2d(c);
+  px(ctx, 3, 7, 3, 1, 'rgba(0,0,0,0.3)'); // shadow
+  px(ctx, 3, 0, 1, 7, '#2a261f'); // pole
+  px(ctx, 2, 0, 3, 1, '#1c1913'); // crossbar
+  px(ctx, 2, 1, 1, 1, '#4a4238'); // insulator
+  px(ctx, 4, 1, 1, 1, '#4a4238');
+  ctx.strokeStyle = 'rgba(20,18,14,0.55)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, 1.5); ctx.lineTo(9, 1.5);
+  ctx.stroke();
   return c;
 }
 
@@ -219,7 +248,7 @@ function build(kind: DecorKind, variant: number): HTMLCanvasElement {
     case 'woodpile': return buildWoodpile();
     case 'puddle': return buildPuddle();
     case 'flowers': return buildFlowers(variant);
-    case 'tramwire': return createCanvas(1, 1); // intentionally invisible
+    case 'tramwire': return buildTramwire();
     default: return createCanvas(1, 1);
   }
 }
@@ -240,9 +269,14 @@ export function drawDecorItem(ctx: CanvasRenderingContext2D, kind: DecorKind, cx
   const dx = Math.round(cx - sprite.width / 2);
   const dy = Math.round(cy - sprite.height / 2);
   if (decorHasShadow(kind)) {
-    ctx.globalAlpha = 0.4;
-    ctx.fillStyle = '#0a0806';
-    ctx.fillRect(dx + 1, dy + 1, sprite.width, sprite.height);
+    // a soft, translucent ellipse matching the sprite's rough footprint rather than an opaque
+    // full-bbox rect — a full-bbox near-black shadow behind small sprites (bush, flowers, rocks)
+    // used to visually fuse with the fill into one solid near-black square at small scale.
+    ctx.globalAlpha = 0.28;
+    ctx.fillStyle = '#141008';
+    ctx.beginPath();
+    ctx.ellipse(dx + sprite.width / 2 + 1, dy + sprite.height / 2 + 1, sprite.width / 2.4, sprite.height / 3.2, 0, 0, Math.PI * 2);
+    ctx.fill();
     ctx.globalAlpha = 1;
   }
   ctx.drawImage(sprite, dx, dy);
