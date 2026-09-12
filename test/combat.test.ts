@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import type { Soldier, WeaponDef } from '@/shared/types';
 import { Rng } from '@/shared/rng';
-import { hitChance, penetrates } from '@/sim/combat';
+import { hitChance, penetrates, applyHESplash } from '@/sim/combat';
+import type { BattleConfig, BattleState, GameMap, MapDef, Terrain } from '@/shared/types';
 
 function makeSoldier(overrides: Partial<Soldier> = {}): Soldier {
   return {
@@ -89,5 +90,65 @@ describe('penetrates', () => {
   it('kwk40_75 does not penetrate 100mm at 1000m', () => {
     const rng = new Rng(42);
     expect(penetrates(kwk40_75, 1000, 100, rng)).toBe(false);
+  });
+});
+
+describe('applyHESplash', () => {
+  const heWeapon: WeaponDef = { ...kwk40_75, heRadiusM: 4 };
+
+  function makeState(): BattleState {
+    const W = 20, H = 20;
+    const tiles: Terrain[] = new Array(W * H).fill('open');
+    const def: MapDef = {
+      id: 'test', name: 'Test', description: '', width: W, height: H, season: 'summer',
+      paint: () => {}, victoryLocations: [],
+      deployZones: { german: { x: 0, y: 0, w: 5, h: 5 }, soviet: { x: 15, y: 15, w: 5, h: 5 } },
+      attacker: 'german',
+    };
+    const map: GameMap = {
+      def, width: W, height: H, tiles,
+      buildingId: new Int16Array(W * H).fill(-1), windows: new Uint8Array(W * H),
+      victoryLocations: [], smoke: new Float32Array(W * H), craters: [],
+    };
+    const config: BattleConfig = {
+      mapId: 'test', playerSide: 'german', year: 1943, seed: 1, durationS: 1200,
+      difficulty: 'normal', forces: { german: [], soviet: [] },
+    };
+    return {
+      config, map, phase: 'running', time: 0,
+      soldiers: new Map(), teams: new Map(), vehicles: new Map(),
+      sides: {
+        german: { side: 'german', morale: 80, truceOffered: false, truceAccepted: false, kills: 0, losses: 0, score: 0 },
+        soviet: { side: 'soviet', morale: 80, truceOffered: false, truceAccepted: false, kills: 0, losses: 0, score: 0 },
+      },
+      spotted: { german: new Set(), soviet: new Set() },
+      spottedVehicles: { german: new Set(), soviet: new Set() },
+      messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [],
+      result: null, events: [], nextId: 10,
+    };
+  }
+
+  it('does not roll casualties/suppression against vehicle crew at the impact point (armor protects them)', () => {
+    // Regression: fireAtVehicle used to call applyHESplash unconditionally, even when the shell
+    // failed to penetrate — and applyHESplash treated crew (whose pos == the vehicle's pos, with
+    // cover effectively 0) exactly like exposed infantry, giving free casualty rolls and heavy
+    // suppression on every non-penetrating hit against the vehicle they were riding in.
+    const state = makeState();
+    const crew = makeSoldier({ id: 1, side: 'soviet', pos: { x: 10, y: 10 }, vehicleId: 42 });
+    state.soldiers.set(crew.id, crew);
+    const rng = new Rng(7);
+    applyHESplash(state, rng, { x: 10, y: 10 }, heWeapon, 'german');
+    expect(crew.health).toBe('healthy');
+    expect(crew.suppression).toBe(0);
+  });
+
+  it('still rolls casualties/suppression against exposed infantry near the impact point', () => {
+    const state = makeState();
+    const infantry = makeSoldier({ id: 2, side: 'soviet', pos: { x: 10, y: 10 }, vehicleId: null });
+    state.soldiers.set(infantry.id, infantry);
+    const rng = new Rng(7);
+    applyHESplash(state, rng, { x: 10, y: 10 }, heWeapon, 'german');
+    // With this seed/weapon at distance 0 the soldier must be hit or at least suppressed.
+    expect(infantry.health !== 'healthy' || infantry.suppression > 0).toBe(true);
   });
 });

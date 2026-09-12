@@ -146,3 +146,25 @@ export const SIDE_COLOR: Record<Side, string> = {
   german: '#7b8aa0',
   soviet: '#c04030',
 };
+
+// ============================================================================
+// HUD palette — the dark-maroon in-battle chrome (bottom panel, team grid,
+// combat messages, soldier monitor, minimap frame, command menu). Owned by
+// the HUD agent; kept separate from the olive PALETTE above which the menu
+// screens still use.
+// ============================================================================
+export const HUD = {
+  base: '#3b1410',
+  face: '#4a1a14',
+  bevelLight: '#7a3a2e',
+  bevelDark: '#1e0806',
+  frame: '#1e0806',
+  text: '#f0f0ec',
+  gold: '#e8d83c',
+  green: '#3fbf3f',
+  yellow: '#e8d83c',
+  red: '#d02020',
+  dim: '#a89088',
+  titleRed: '#d64b3c',
+  black: '#0c0402',
+} as const;

@@ -152,6 +152,13 @@ export function drawTitleBanner(ctx: CanvasRenderingContext2D, text: string, y: 
   drawTextCentered(ctx, text, cx, y, PALETTE.gold, 'big');
 }
 
+/** Draws a huge 'title'-size gold heading with a 2px dark drop shadow, used
+ * only by the main menu's marquee title. */
+export function drawMarqueeTitle(ctx: CanvasRenderingContext2D, text: string, cx: number, y: number): void {
+  drawTextCentered(ctx, text, cx + 2, y + 2, PALETTE.black, 'title');
+  drawTextCentered(ctx, text, cx, y, PALETTE.gold, 'title');
+}
+
 // Re-exported so callers of chrome.ts have everything they need without an
 // extra import for simple label-fitting logic.
 export { textWidth, FONT_BIG_H, FONT_SMALL_H };

@@ -2,3 +2,7 @@ node_modules
 dist
 .remember
 *.log
+ref/
+.playwright-mcp/
+tools/uiScreens_shots/
+*.png

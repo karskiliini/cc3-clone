@@ -9,8 +9,11 @@ export const FONT_SMALL_W = 5;
 export const FONT_SMALL_H = 7;
 export const FONT_BIG_W = 7;
 export const FONT_BIG_H = 11;
+export const FONT_TITLE_W = 11;
+export const FONT_TITLE_H = 17;
 
 type Glyph = readonly string[];
+type FontSize = 'small' | 'big' | 'title';
 
 // -------------------------------------------------------------- small 5x7 --
 // '.' = off, '#' = on. Every row MUST be exactly 5 characters and every
@@ -184,16 +187,56 @@ function bigGlyph(ch: string): Glyph {
   return BIG['?'];
 }
 
+// ------------------------------------------------------------- title 11x17 --
+// Derived from BIG (7x11) by nearest-neighbour upscaling ×1.5 (7*1.5=10.5→11,
+// 11*1.5=16.5→17), then a 1px darker "shadow" is added by the caller (see
+// drawTitleText in chrome.ts) rather than baked into the glyph itself — the
+// spec permits deriving this size mechanically from the hand-authored BIG set.
+function scaleGlyph(src: Glyph, outW: number, outH: number): Glyph {
+  const srcW = src[0].length;
+  const srcH = src.length;
+  const rows: string[] = [];
+  for (let y = 0; y < outH; y++) {
+    const sy = Math.min(srcH - 1, Math.floor((y * srcH) / outH));
+    let row = '';
+    for (let x = 0; x < outW; x++) {
+      const sx = Math.min(srcW - 1, Math.floor((x * srcW) / outW));
+      row += src[sy][sx];
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+const TITLE: Record<string, Glyph> = {};
+for (const key of Object.keys(BIG)) {
+  TITLE[key] = scaleGlyph(BIG[key], FONT_TITLE_W, FONT_TITLE_H);
+}
+
+function titleGlyph(ch: string): Glyph {
+  if (TITLE[ch]) return TITLE[ch];
+  const upper = ch.toUpperCase();
+  if (TITLE[upper]) return TITLE[upper];
+  if (FALLBACK[ch] && TITLE[FALLBACK[ch].toUpperCase()]) return TITLE[FALLBACK[ch].toUpperCase()];
+  return TITLE['?'];
+}
+
 // -------------------------------------------------------------- rendering --
 const ADVANCE_GAP = 1; // px between glyphs
 
 const glyphCache = new Map<string, HTMLCanvasElement>();
 
-function glyphCanvas(ch: string, color: string, size: 'small' | 'big'): HTMLCanvasElement {
+function glyphForSize(ch: string, size: FontSize): Glyph {
+  if (size === 'small') return smallGlyph(ch);
+  if (size === 'title') return titleGlyph(ch);
+  return bigGlyph(ch);
+}
+
+function glyphCanvas(ch: string, color: string, size: FontSize): HTMLCanvasElement {
   const key = size + '|' + color + '|' + ch;
   let c = glyphCache.get(key);
   if (c) return c;
-  const art = size === 'small' ? smallGlyph(ch) : bigGlyph(ch);
+  const art = glyphForSize(ch, size);
   const w = art[0].length;
   const h = art.length;
   c = createCanvas(w, h);
@@ -202,12 +245,12 @@ function glyphCanvas(ch: string, color: string, size: 'small' | 'big'): HTMLCanv
   return c;
 }
 
-function glyphWidth(ch: string, size: 'small' | 'big'): number {
-  return size === 'small' ? smallGlyph(ch)[0].length : bigGlyph(ch)[0].length;
+function glyphWidth(ch: string, size: FontSize): number {
+  return glyphForSize(ch, size)[0].length;
 }
 
 /** Exact pixel width `text` would occupy when drawn at the given size. */
-export function textWidth(text: string, size: 'small' | 'big' = 'small'): number {
+export function textWidth(text: string, size: FontSize = 'small'): number {
   if (text.length === 0) return 0;
   let w = 0;
   for (const ch of text) w += glyphWidth(ch, size) + ADVANCE_GAP;
@@ -221,7 +264,7 @@ export function drawText(
   x: number,
   y: number,
   color: string,
-  size: 'small' | 'big' = 'small',
+  size: FontSize = 'small',
 ): void {
   let cx = Math.round(x);
   const iy = Math.round(y);
@@ -239,7 +282,7 @@ export function drawTextCentered(
   cx: number,
   y: number,
   color: string,
-  size: 'small' | 'big' = 'small',
+  size: FontSize = 'small',
 ): void {
   const w = textWidth(text, size);
   drawText(ctx, text, cx - w / 2, y, color, size);
@@ -248,3 +291,4 @@ export function drawTextCentered(
 // Exported for the unit test (pure data, no DOM needed to inspect it).
 export const __SMALL_GLYPHS__ = SMALL;
 export const __BIG_GLYPHS__ = BIG;
+export const __TITLE_GLYPHS__ = TITLE;

@@ -3,7 +3,7 @@
 // labels and order lines/arcs for the battle viewport.
 // ============================================================================
 import type {
-  Camera, BattleState, Side, GameSettings, Soldier, Team,
+  Camera, BattleState, Side, GameSettings, Soldier, Team, Facing8,
 } from '@/shared/types';
 import { VIEW_W, VIEW_H } from '@/shared/types';
 import { facingAngle } from '@/shared/math';
@@ -76,6 +76,22 @@ function drawSelectionRing(ctx: CanvasRenderingContext2D, p: { x: number; y: num
   ctx.restore();
 }
 
+function drawFacingTick(ctx: CanvasRenderingContext2D, p: { x: number; y: number }, facing: Facing8): void {
+  const rad = facingAngle(facing);
+  const dx = Math.sin(rad);
+  const dy = -Math.cos(rad);
+  const r0 = 6;
+  const r1 = 8;
+  ctx.save();
+  ctx.strokeStyle = PALETTE.white;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(p.x + dx * r0, p.y + dy * r0);
+  ctx.lineTo(p.x + dx * r1, p.y + dy * r1);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side, selectedTeamId: number | null): void {
   const season = state.map.def.season;
   for (const s of state.soldiers.values()) {
@@ -84,10 +100,13 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
     if (!isEnemyVisible(state, playerSide, s.side, s.id, false)) continue;
     if (!visible(s.pos, cam)) continue;
     const p = worldToScreen(cam, s.pos);
-    if (s.teamId === selectedTeamId) drawSelectionRing(ctx, p);
+    const selected = s.teamId === selectedTeamId;
+    if (selected) drawSelectionRing(ctx, p);
     const stance = s.health === 'incapacitated' ? 'prone' : s.stance;
     const sprite = getSoldierSprite(s.side, season, stance, s.facing, frameOf(s));
     ctx.drawImage(sprite, Math.round(p.x - sprite.width / 2), Math.round(p.y - sprite.height / 2));
+    // 2px facing tick in front of the soldier, only for the selected team.
+    if (selected) drawFacingTick(ctx, p, s.facing);
   }
 }
 
@@ -133,6 +152,7 @@ function drawOrderLine(ctx: CanvasRenderingContext2D, cam: Camera, team: Team): 
     ctx.save();
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;
+    ctx.setLineDash([3, 2]);
     ctx.beginPath();
     ctx.arc(from.x, from.y, 20 * cam.zoom, rad - spread, rad + spread);
     ctx.stroke();
@@ -143,10 +163,12 @@ function drawOrderLine(ctx: CanvasRenderingContext2D, cam: Camera, team: Team): 
   ctx.save();
   ctx.strokeStyle = color;
   ctx.lineWidth = 1;
+  ctx.setLineDash([3, 2]); // CC3-style dashed order line
   ctx.beginPath();
   ctx.moveTo(from.x, from.y);
   ctx.lineTo(to.x, to.y);
   ctx.stroke();
+  ctx.setLineDash([]);
   ctx.fillStyle = color;
   ctx.fillRect(Math.round(to.x - 1), Math.round(to.y - 1), 3, 3);
   ctx.restore();

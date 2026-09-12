@@ -1,0 +1,254 @@
+// ============================================================================
+// decorSprites.ts — small procedural sprites for purely visual map dressing
+// (DecorItem/DecorKind from shared/types). Cached by kind+variant, drawn onto
+// baked terrain chunks by terrainRender.ts's drawDecor().
+// ============================================================================
+import type { DecorKind } from '@/shared/types';
+import { createCanvas, ctx2d } from '@/render/pixelUtil';
+import { hash2 } from '@/shared/rng';
+
+const cache = new Map<string, HTMLCanvasElement>();
+function cached(key: string, build: () => HTMLCanvasElement): HTMLCanvasElement {
+  let c = cache.get(key);
+  if (!c) { c = build(); cache.set(key, c); }
+  return c;
+}
+
+function px(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string): void {
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, w, h);
+}
+
+function buildHaystack(variant: number): HTMLCanvasElement {
+  const c = createCanvas(8, 8);
+  const ctx = ctx2d(c);
+  px(ctx, 1, 6, 6, 1, 'rgba(20,16,8,0.35)'); // shadow/base
+  ctx.fillStyle = '#8a6f2a';
+  ctx.beginPath();
+  ctx.ellipse(4, 4, 3.2, 2.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#a68638';
+  ctx.beginPath();
+  ctx.ellipse(3.4, 3, 2, 1.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  px(ctx, 2, 6, 4, 1, '#5f4a1e');
+  return c;
+}
+
+function buildWell(): HTMLCanvasElement {
+  const c = createCanvas(4, 5);
+  const ctx = ctx2d(c);
+  px(ctx, 0, 4, 4, 1, 'rgba(20,16,8,0.3)');
+  px(ctx, 0, 1, 4, 3, '#8a8a82');
+  px(ctx, 1, 2, 2, 2, '#26241f');
+  px(ctx, 0, 1, 4, 1, '#a4a49a');
+  px(ctx, 0, 0, 4, 1, '#5f4226'); // roof
+  return c;
+}
+
+function buildCart(): HTMLCanvasElement {
+  const c = createCanvas(7, 5);
+  const ctx = ctx2d(c);
+  px(ctx, 1, 1, 5, 2, '#6b4a28');
+  px(ctx, 1, 1, 5, 1, '#7d5a32');
+  ctx.fillStyle = '#2c2418';
+  ctx.beginPath(); ctx.arc(2, 3.5, 1, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(5, 3.5, 1, 0, Math.PI * 2); ctx.fill();
+  return c;
+}
+
+function buildBush(): HTMLCanvasElement {
+  const c = createCanvas(5, 5);
+  const ctx = ctx2d(c);
+  ctx.fillStyle = '#2c3d22';
+  ctx.beginPath(); ctx.ellipse(2.5, 2.8, 2.2, 1.8, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#405c30';
+  ctx.beginPath(); ctx.ellipse(1.8, 1.8, 1.1, 0.9, 0, 0, Math.PI * 2); ctx.fill();
+  return c;
+}
+
+function buildStump(): HTMLCanvasElement {
+  const c = createCanvas(3, 3);
+  const ctx = ctx2d(c);
+  px(ctx, 0, 0, 3, 3, '#5a4126');
+  px(ctx, 0, 0, 3, 1, '#8a6f42');
+  px(ctx, 2, 1, 1, 2, '#3a2a18');
+  return c;
+}
+
+function buildPole(): HTMLCanvasElement {
+  const c = createCanvas(3, 6);
+  const ctx = ctx2d(c);
+  px(ctx, 1, 0, 1, 5, '#3a3228');
+  px(ctx, 0, 0, 3, 1, '#2c2620'); // cross-arm
+  px(ctx, 2, 4, 1, 1, 'rgba(0,0,0,0.3)'); // shadow
+  return c;
+}
+
+function buildRocks(): HTMLCanvasElement {
+  const c = createCanvas(4, 3);
+  const ctx = ctx2d(c);
+  px(ctx, 0, 1, 1, 1, '#8a8a82');
+  px(ctx, 1, 0, 1, 2, '#9a9a90');
+  px(ctx, 2, 1, 2, 1, '#7a7a70');
+  px(ctx, 3, 2, 1, 1, '#6a6a60');
+  return c;
+}
+
+function buildLog(): HTMLCanvasElement {
+  const c = createCanvas(5, 2);
+  const ctx = ctx2d(c);
+  px(ctx, 0, 0, 5, 2, '#5a4128');
+  px(ctx, 0, 0, 5, 1, '#6f5334');
+  px(ctx, 0, 0, 1, 2, '#4a3a26');
+  px(ctx, 4, 0, 1, 2, '#4a3a26');
+  return c;
+}
+
+function buildShellhole(): HTMLCanvasElement {
+  const c = createCanvas(5, 5);
+  const ctx = ctx2d(c);
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = '#2a2620';
+  ctx.beginPath(); ctx.ellipse(2.5, 2.5, 2.3, 1.9, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 0.4;
+  ctx.strokeStyle = '#6a6050';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.ellipse(2.5, 2.5, 2.1, 1.7, 0, 0, Math.PI * 2); ctx.stroke();
+  ctx.globalAlpha = 1;
+  return c;
+}
+
+function buildGrave(): HTMLCanvasElement {
+  const c = createCanvas(3, 4);
+  const ctx = ctx2d(c);
+  px(ctx, 1, 1, 1, 3, '#5a4530');
+  px(ctx, 0, 1, 3, 1, '#6f5638');
+  return c;
+}
+
+function buildSign(): HTMLCanvasElement {
+  const c = createCanvas(4, 4);
+  const ctx = ctx2d(c);
+  px(ctx, 1, 1, 1, 3, '#4a3a24');
+  px(ctx, 0, 0, 4, 2, '#d8d2b8');
+  px(ctx, 0, 0, 4, 1, '#c4be9e');
+  return c;
+}
+
+function buildBarrel(): HTMLCanvasElement {
+  const c = createCanvas(3, 3);
+  const ctx = ctx2d(c);
+  px(ctx, 0, 0, 3, 3, '#3a3a38');
+  px(ctx, 0, 0, 3, 1, '#4c4c48');
+  px(ctx, 0, 1, 3, 1, '#28281f');
+  return c;
+}
+
+function buildCrate(): HTMLCanvasElement {
+  const c = createCanvas(3, 3);
+  const ctx = ctx2d(c);
+  px(ctx, 0, 0, 3, 3, '#8a713f');
+  px(ctx, 0, 0, 3, 1, '#a08a52');
+  px(ctx, 0, 2, 3, 1, '#6a5530');
+  return c;
+}
+
+function buildWreck(): HTMLCanvasElement {
+  const c = createCanvas(8, 4);
+  const ctx = ctx2d(c);
+  px(ctx, 1, 1, 6, 2, '#2c2a26');
+  px(ctx, 0, 2, 8, 1, '#1a1815');
+  px(ctx, 2, 0, 3, 1, '#3a352e');
+  ctx.fillStyle = '#c8602c';
+  ctx.globalAlpha = 0.5;
+  px(ctx, 4, 0, 1, 1, '#c8602c');
+  ctx.globalAlpha = 1;
+  return c;
+}
+
+function buildWoodpile(): HTMLCanvasElement {
+  const c = createCanvas(5, 3);
+  const ctx = ctx2d(c);
+  px(ctx, 0, 1, 5, 2, '#5a4128');
+  px(ctx, 0, 0, 5, 1, '#6f5334');
+  px(ctx, 1, 1, 1, 2, '#4a3a26');
+  px(ctx, 3, 1, 1, 2, '#4a3a26');
+  return c;
+}
+
+function buildPuddle(): HTMLCanvasElement {
+  const c = createCanvas(6, 4);
+  const ctx = ctx2d(c);
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = '#3a4650';
+  ctx.beginPath(); ctx.ellipse(3, 2, 2.8, 1.6, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 0.3;
+  ctx.fillStyle = '#8fa8b4';
+  ctx.beginPath(); ctx.ellipse(2.3, 1.5, 0.8, 0.4, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 1;
+  return c;
+}
+
+function buildFlowers(variant: number): HTMLCanvasElement {
+  const c = createCanvas(3, 3);
+  const ctx = ctx2d(c);
+  const colors = ['#e8e4c8', '#e0c84a', '#e8e4c8'];
+  px(ctx, 0, 1, 1, 1, colors[variant % colors.length]);
+  px(ctx, 2, 0, 1, 1, colors[(variant + 1) % colors.length]);
+  px(ctx, 1, 2, 1, 1, colors[(variant + 2) % colors.length]);
+  return c;
+}
+
+function build(kind: DecorKind, variant: number): HTMLCanvasElement {
+  switch (kind) {
+    case 'haystack': return buildHaystack(variant);
+    case 'well': return buildWell();
+    case 'cart': return buildCart();
+    case 'bush': return buildBush();
+    case 'stump': return buildStump();
+    case 'pole': return buildPole();
+    case 'rocks': return buildRocks();
+    case 'log': return buildLog();
+    case 'shellhole': return buildShellhole();
+    case 'grave': return buildGrave();
+    case 'sign': return buildSign();
+    case 'barrel': return buildBarrel();
+    case 'crate': return buildCrate();
+    case 'wreck': return buildWreck();
+    case 'woodpile': return buildWoodpile();
+    case 'puddle': return buildPuddle();
+    case 'flowers': return buildFlowers(variant);
+    case 'tramwire': return createCanvas(1, 1); // intentionally invisible
+    default: return createCanvas(1, 1);
+  }
+}
+
+/** Cached small decor sprite (transparent canvas), keyed by kind+variant. */
+export function getDecorSprite(kind: DecorKind, variant = 0): HTMLCanvasElement {
+  return cached(`decor|${kind}|${variant}`, () => build(kind, variant));
+}
+
+/** True if this decor kind casts a visible 1px dark shadow when drawn. */
+export function decorHasShadow(kind: DecorKind): boolean {
+  return kind !== 'tramwire' && kind !== 'puddle' && kind !== 'shellhole';
+}
+
+/** Draw one decor item centred at world pixel (cx, cy) with its shadow. */
+export function drawDecorItem(ctx: CanvasRenderingContext2D, kind: DecorKind, cx: number, cy: number, variant = 0): void {
+  const sprite = getDecorSprite(kind, variant);
+  const dx = Math.round(cx - sprite.width / 2);
+  const dy = Math.round(cy - sprite.height / 2);
+  if (decorHasShadow(kind)) {
+    ctx.globalAlpha = 0.4;
+    ctx.fillStyle = '#0a0806';
+    ctx.fillRect(dx + 1, dy + 1, sprite.width, sprite.height);
+    ctx.globalAlpha = 1;
+  }
+  ctx.drawImage(sprite, dx, dy);
+}
+
+/** Deterministic 0..1 hash helper re-exported for terrainRender's decor placement jitter. */
+export function decorHash(x: number, y: number, seed: number): number {
+  return hash2(x, y, seed);
+}

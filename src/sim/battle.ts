@@ -152,6 +152,7 @@ export class Battle {
       this.aiAccum -= AI_INTERVAL;
       const aiSide = otherSide(state.config.playerSide);
       stepAI(state, this.rng, this, aiSide);
+      if (state.config.aiBothSides) stepAI(state, this.rng, this, state.config.playerSide);
     }
 
     this.ageEffects(dt);

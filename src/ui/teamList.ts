@@ -128,8 +128,9 @@ export class TeamListPanel {
     const name = truncateToWidth(team.name, 90);
     drawText(ctx, name, Math.round(r.x + 16), Math.round(r.y + (r.h - FONT_SMALL_H) / 2), nameColor, 'small');
 
-    // up to 10 tiny 3x5 soldier figures colored by health
-    const figX0 = r.x + 110;
+    // up to 10 tiny 2x5 soldier figures colored by health (2px wide, 1px gap
+    // => 10 figures span 30px: x=104..134), leaving room for the status word.
+    const figX0 = r.x + 104;
     const figY = Math.round(r.y + (r.h - 5) / 2);
     const soldiers: Soldier[] = team.soldierIds
       .map((id) => state.soldiers.get(id))
@@ -137,18 +138,16 @@ export class TeamListPanel {
       .slice(0, 10);
     for (let i = 0; i < soldiers.length; i++) {
       const s = soldiers[i];
-      const fx = Math.round(figX0 + i * 4);
+      const fx = Math.round(figX0 + i * 3);
       ctx.fillStyle = HEALTH_COLOR[s.health];
-      ctx.fillRect(fx, figY, 3, 5);
+      ctx.fillRect(fx, figY, 2, 5);
     }
 
     if (dim) ctx.globalAlpha = prevAlpha;
 
-    // status word, right-aligned at x=198 (relative to rect x=0; offset by rect.x)
+    // status word starts at x=140 (relative to rect.x), clear of the figures.
     const statusText = abbreviateStatus(team.status);
     const color = dim ? PALETTE.dim : STATUS_COLOR(team.status);
-    const rightX = this.rect.x + 198;
-    const w = textWidth(statusText);
-    drawText(ctx, statusText, Math.round(rightX - w), Math.round(r.y + (r.h - FONT_SMALL_H) / 2), color, 'small');
+    drawText(ctx, statusText, Math.round(this.rect.x + 140), Math.round(r.y + (r.h - FONT_SMALL_H) / 2), color, 'small');
   }
 }

@@ -13,7 +13,7 @@ import { TeamListPanel } from '@/ui/teamList';
 import { drawSoldierMonitor } from '@/ui/soldierMonitor';
 import { MessagePanel } from '@/ui/messagePanel';
 import { CommandMenu } from '@/ui/commandMenu';
-import { drawTextCentered } from '@/render/pixelfont';
+import { drawTextCentered, FONT_BIG_H } from '@/render/pixelfont';
 import { PALETTE, ORDER_COLOR } from '@/render/palette';
 import { updateCameraEdgeScrollAndKeys } from './common';
 import { DebriefScreen } from './debrief';
@@ -21,6 +21,20 @@ import { OverviewScreen } from './overview';
 import { OptionsScreen } from './options';
 
 const SPEEDS: (1 | 2 | 4)[] = [1, 2, 4];
+
+/** Big gold word on a 60%-black 200x24 box, centred in the map viewport —
+ * used for the PAUSED overlay and the end-of-battle result word. */
+function drawCenteredOverlayBanner(ctx: CanvasRenderingContext2D, word: string): void {
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  const boxW = 200;
+  const boxH = 24;
+  const boxX = Math.round(VIEW_W / 2 - boxW / 2);
+  const boxY = Math.round(VIEW_H / 2 - boxH / 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(boxX, boxY, boxW, boxH);
+  drawTextCentered(ctx, word, VIEW_W / 2, boxY + Math.round((boxH - FONT_BIG_H) / 2), PALETTE.gold, 'big');
+}
 
 interface RightDrag {
   active: boolean;
@@ -251,15 +265,11 @@ export class BattleScreen implements Screen {
     if (this.commandMenu.isOpen) this.commandMenu.draw(ctx);
 
     if (this.paused) {
-      ctx.fillStyle = 'rgba(0,0,0,0.5)';
-      ctx.fillRect(0, 0, VIEW_W, VIEW_H);
-      drawTextCentered(ctx, 'PAUSED', VIEW_W / 2, VIEW_H / 2 - 6, PALETTE.gold, 'big');
+      drawCenteredOverlayBanner(ctx, 'PAUSED');
     }
     if (state.phase === 'ended') {
-      ctx.fillStyle = 'rgba(0,0,0,0.5)';
-      ctx.fillRect(0, 0, VIEW_W, VIEW_H);
       const word = (state.result ?? 'draw').toUpperCase();
-      drawTextCentered(ctx, word, VIEW_W / 2, VIEW_H / 2 - 6, PALETTE.gold, 'big');
+      drawCenteredOverlayBanner(ctx, word);
     }
   }
 

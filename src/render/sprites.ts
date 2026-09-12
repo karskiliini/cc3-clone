@@ -26,26 +26,40 @@ function cached(key: string, build: () => HTMLCanvasElement): HTMLCanvasElement 
 // ============================================================================
 const OUTLINE = '#1a1a14';
 const BLOOD = '#5a1a16';
-const WINTER_SMOCK = '#d8d8d2';
-const WINTER_SMOCK_SHADE = '#c2c2bc';
+const WEAPON = '#3a3a38';
+const STOCK = '#6b4a2c';
+const SKIN = '#c9a37c';
+const WINTER_SMOCK = '#e0e0d8';
+const WINTER_SMOCK_SHADE = '#a9aaa2';
+const WINTER_HELMET_COVER = '#d0d0c8';
 
+// u = tunic, s = tunic edge, h = helmet base, hi = helmet highlight.
 const SIDE_UNIFORM: Record<Side, { u: string; s: string; h: string; hi: string }> = {
-  german: { u: '#5b6349', s: '#4a5139', h: '#4b5342', hi: '#9a9f94' },
-  soviet: { u: '#7a6f3f', s: '#655c34', h: '#66603a', hi: '#8f8760' },
+  german: { u: '#6a7256', s: '#4d5440', h: '#555c48', hi: '#7d8570' },
+  soviet: { u: '#8b7d4a', s: '#655a33', h: '#6d6540', hi: '#8f875a' },
 };
 
 function soldierColors(side: Side, season: Season, dead: boolean): Record<string, string> {
   const base = SIDE_UNIFORM[side];
   let u = base.u, s = base.s;
-  if (season === 'winter') { u = WINTER_SMOCK; s = WINTER_SMOCK_SHADE; }
-  let h = base.h, hi = base.hi, o = OUTLINE;
+  let h = base.h, hi = base.hi;
+  if (season === 'winter') {
+    u = WINTER_SMOCK;
+    s = WINTER_SMOCK_SHADE;
+    if (side === 'soviet') { h = WINTER_HELMET_COVER; hi = '#e8e8e0'; }
+  }
+  let weapon = WEAPON, stock = STOCK, skin = SKIN, blood = BLOOD;
   if (dead) {
     u = darkenHex(u, 0.55);
     s = darkenHex(s, 0.55);
     h = darkenHex(h, 0.55);
-    hi = darkenHex(hi, 0.6);
+    hi = darkenHex(hi, 0.55);
+    weapon = darkenHex(weapon, 0.7);
+    stock = darkenHex(stock, 0.6);
+    skin = darkenHex(skin, 0.65);
   }
-  return { O: o, H: h, h: hi, U: u, S: s, B: BLOOD };
+  const rim = darkenHex(h, 0.6);
+  return { O: rim, h: hi, H: h, U: u, S: s, W: weapon, K: stock, G: skin, B: blood };
 }
 
 /** Cheap hex darken used for the small color-map entries above. */
@@ -55,103 +69,118 @@ function darkenHex(hex: string, factor: number): string {
   return '#' + f(r) + f(g) + f(b);
 }
 
-// 12x12, base "north" (facing up) orientation.
+// Helmet rim color map key 'O' is intentionally set to the darker helmet
+// color itself (helmets read darker than the tunic per spec), while the
+// highlight lives on 'h' and the flat mid-tone on 'H'.
+function helmetColors(colors: Record<string, string>): Record<string, string> {
+  return colors;
+}
+
+// 12x12 art, base "north" (facing up) orientation. Occupies roughly cols3-9,
+// rows1-10 (~7 wide x 9-10 tall) per the readability target.
 const STAND_F0 = [
-  '....OOOO....',
-  '...OHHHHO...',
-  '...OHhHHO...',
-  '...OHHHHOOW.',
-  '..OOSUUSOW..',
-  '..OS.UU.SO..',
-  '..O..UU..O..',
-  '..O..UU..O..',
-  '..OSUUUUSO..',
-  '..OOSUUSOO..',
-  '...O.UU.O...',
-  '....OOOO....',
+  '............',
+  '....OOO..W..',
+  '...OhHHO.W..',
+  '...OHHHO.W..',
+  '....OOO..W..',
+  '...SUUUS.W..',
+  '...SUUUSKG..',
+  '....UUU.....',
+  '...SUUUS....',
+  '....US......',
+  '....US......',
+  '............',
 ];
 const STAND_F1 = [
-  '....OOOO....',
-  '...OHHHHO...',
-  '...OHhHHO...',
-  '...OHHHHOOW.',
-  '..OOSUUSOW..',
-  '..OS.UU.SO..',
-  '..O..UU..O..',
-  '..O..UU..O..',
-  '..OSUUUUSO..',
-  '..OOSUUSOO..',
-  '..O..UU..O..',
-  '...OO..OO...',
+  '............',
+  '....OOO..W..',
+  '...OhHHO.W..',
+  '...OHHHO.W..',
+  '....OOO..W..',
+  '...SUUUS.W..',
+  '...SUUUSKG..',
+  '....UUU.....',
+  '...SUUUS....',
+  '....SU......',
+  '....SU......',
+  '............',
 ];
 const CROUCH_F0 = [
-  '....OOOO....',
-  '...OHHHHO...',
-  '..OHhHHHHO..',
-  '..OHHHHHHO..',
-  '..OOSUUSOO..',
-  '..OSUUUUSO..',
-  '..O.UUUU.O..',
-  '..OOUUUUOO..',
-  '...O.UU.O...',
-  '...OOOOOO...',
+  '............',
+  '............',
+  '............',
+  '....OOOOO...',
+  '...OhHHHHO..',
+  '...OHHHHHO..',
+  '...SUUUUUS..',
+  '....SUUUS...',
+  '....UUUUU...',
+  '.....UU.....',
   '............',
   '............',
 ];
 const CROUCH_F1 = [
-  '....OOOO....',
-  '...OHHHHO...',
-  '..OHhHHHHO..',
-  '..OHHHHHHO..',
-  '..OOSUUSOO..',
-  '..OSUUUUSO..',
-  '..O.UUUU.O..',
-  '..OOUUUUOO..',
-  '....O.UU.O..',
-  '....OOOOOO..',
+  '............',
+  '............',
+  '............',
+  '....OOOOO...',
+  '...OhHHHHO..',
+  '...OHHHHHO..',
+  '...SUUUUUS..',
+  '....SUUUS...',
+  '....UUUUU...',
+  '....U.U.....',
   '............',
   '............',
 ];
-// 8 wide x 14 tall, lying along the north-south axis (base orientation).
+// 8 wide x 14 tall, lying along the north-south axis (base orientation, head
+// north). Weapon tip pokes 2px beyond the helmet at the top of the canvas.
 const PRONE_ART = [
+  '....W...',
+  '....W...',
   '..OOOO..',
-  '.OHhHHO.',
+  '.OhHHHO.',
   '.OHHHHO.',
-  '..OSSO..',
-  '.OSUUSO.',
-  '.OSUUSO.',
-  '.OSUUSO.',
-  '.OSUUSO.',
-  '.OSUUSO.',
-  '.OSUUSO.',
-  '.OSUUSO.',
-  '..OUUO..',
-  '..OUUO..',
-  '...OO...',
+  '.SSUUSS.',
+  '.SUUUUS.',
+  'GSUUUSG.',
+  '.SUUUUS.',
+  '.SUUUUS.',
+  '.SUUUUS.',
+  '..UUUU..',
+  '..UUUU..',
+  '..SUUS..',
 ];
 
 function fixWidth(rows: string[], w: number): string[] {
   return rows.map((r) => (r.length === w ? r : r.length < w ? r.padEnd(w, '.') : r.slice(0, w)));
 }
 
+/** Paint pixel art onto a fresh canvas with a soft 30%-alpha drop shadow baked
+ * in, offset (+1,+1) from the figure — cheaper and more consistent than an
+ * outline around the whole silhouette. */
 function artCanvas(art: string[], colors: Record<string, string>, w: number, h: number): HTMLCanvasElement {
   const rows = fixWidth(art, w).slice(0, h);
   while (rows.length < h) rows.push('.'.repeat(w));
   const c = createCanvas(w, h);
-  putPixelArt(c, rows, colors);
+  const shadowColors: Record<string, string> = {};
+  for (const k of Object.keys(colors)) shadowColors[k] = 'rgba(10,10,8,0.3)';
+  putPixelArt(c, rows, shadowColors, 1, 1);
+  putPixelArt(c, rows, colors, 0, 0);
   return c;
 }
 
 function buildSoldierBase(side: Side, season: Season, stance: Stance | 'dead', frame: 0 | 1): HTMLCanvasElement {
   const dead = stance === 'dead';
-  const colors = soldierColors(side, season, dead);
+  const colors = helmetColors(soldierColors(side, season, dead));
   if (stance === 'prone' || dead) {
     const c = artCanvas(PRONE_ART, colors, 8, 14);
     if (dead) {
       const ctx = ctx2d(c);
-      ctx.fillStyle = BLOOD;
-      ctx.fillRect(3, 6, 1, 1);
-      ctx.fillRect(4, 8, 1, 1);
+      ctx.fillStyle = colors.B;
+      ctx.fillRect(2, 8, 3, 1);
+      ctx.fillRect(3, 9, 2, 1);
     }
     return c;
   }
@@ -178,17 +207,19 @@ export function getSoldierSprite(
 // ============================================================================
 // VEHICLES
 // ============================================================================
+// Dimensions must mirror src/data/units.ts VEHICLE_DEFS exactly (setVehicleDims
+// pushes the real values in at startup; this table is the fallback/default).
 const DIMENSIONS: Record<string, { lengthM: number; widthM: number }> = {
-  pziii_j: { lengthM: 5.5, widthM: 2.9 },
-  pziv_f1: { lengthM: 5.9, widthM: 2.9 },
-  pziv_h: { lengthM: 5.9, widthM: 2.9 },
-  stug_iii_g: { lengthM: 5.4, widthM: 2.9 },
-  panther_g: { lengthM: 6.9, widthM: 3.4 },
-  tiger_i: { lengthM: 6.3, widthM: 3.6 },
-  sdkfz_251: { lengthM: 5.8, widthM: 2.1 },
-  marder_iii: { lengthM: 5.8, widthM: 2.2 },
+  pz3j: { lengthM: 5.6, widthM: 2.9 },
+  pz4f1: { lengthM: 5.9, widthM: 2.9 },
+  pz4gh: { lengthM: 5.9, widthM: 2.9 },
+  stug3g: { lengthM: 5.4, widthM: 2.9 },
+  panther: { lengthM: 6.9, widthM: 3.4 },
+  tiger: { lengthM: 6.3, widthM: 3.6 },
+  sdkfz251: { lengthM: 5.8, widthM: 2.1 },
+  marder3: { lengthM: 4.65, widthM: 2.95 },
   t26: { lengthM: 4.6, widthM: 2.4 },
-  bt7: { lengthM: 5.7, widthM: 2.2 },
+  bt7: { lengthM: 5.7, widthM: 2.3 },
   t34_76: { lengthM: 6.7, widthM: 3.0 },
   t34_85: { lengthM: 6.7, widthM: 3.0 },
   kv1: { lengthM: 6.8, widthM: 3.3 },
@@ -208,9 +239,44 @@ function getDims(defId: string): { lengthM: number; widthM: number } {
   return vehicleDims[defId] ?? { lengthM: 6, widthM: 3 };
 }
 
-const NO_TURRET = new Set(['stug_iii_g', 'marder_iii', 'su76', 'su85']);
-const GERMAN_IDS = new Set(['pziii_j', 'pziv_f1', 'pziv_h', 'stug_iii_g', 'panther_g', 'tiger_i', 'sdkfz_251', 'marder_iii']);
-const EARLY_GERMAN = new Set(['pziii_j', 'pziv_f1', 'sdkfz_251']);
+type Family = 'boxy' | 'sloped' | 'casemate' | 'halftrack';
+interface VehProfile {
+  family: Family;
+  barrelFrac: number;
+  muzzleBrake?: boolean;
+  mantletW?: number;
+  skirts?: boolean;
+  cupola?: boolean;
+  fuelDrums?: boolean;
+  wideTracks?: boolean;
+  turretWFrac?: number;
+  bustleFrac?: number;
+}
+
+const VEH_PROFILE: Record<string, VehProfile> = {
+  pz3j: { family: 'boxy', barrelFrac: 0.45, cupola: true },
+  pz4f1: { family: 'boxy', barrelFrac: 0.3, cupola: true },
+  pz4gh: { family: 'boxy', barrelFrac: 0.55, muzzleBrake: true, cupola: true, skirts: true },
+  stug3g: { family: 'casemate', barrelFrac: 0 },
+  panther: { family: 'sloped', barrelFrac: 0.65, mantletW: 3, cupola: true },
+  tiger: { family: 'boxy', barrelFrac: 0.6, muzzleBrake: true, cupola: true, wideTracks: true, turretWFrac: 0.5 },
+  sdkfz251: { family: 'halftrack', barrelFrac: 0 },
+  marder3: { family: 'casemate', barrelFrac: 0 },
+  t26: { family: 'sloped', barrelFrac: 0.4, turretWFrac: 0.42 },
+  bt7: { family: 'sloped', barrelFrac: 0.45, wideTracks: true },
+  t34_76: { family: 'sloped', barrelFrac: 0.55 },
+  t34_85: { family: 'sloped', barrelFrac: 0.6, bustleFrac: 0.16, turretWFrac: 0.62 },
+  kv1: { family: 'boxy', barrelFrac: 0.5, fuelDrums: true, cupola: true },
+  is2: { family: 'sloped', barrelFrac: 0.75, muzzleBrake: true, cupola: true },
+  t70: { family: 'boxy', barrelFrac: 0.4, turretWFrac: 0.4 },
+  su76: { family: 'casemate', barrelFrac: 0 },
+  su85: { family: 'casemate', barrelFrac: 0 },
+};
+const DEFAULT_PROFILE: VehProfile = { family: 'boxy', barrelFrac: 0.5 };
+
+const NO_TURRET = new Set(['stug3g', 'marder3', 'su76', 'su85', 'sdkfz251']);
+const GERMAN_IDS = new Set(['pz3j', 'pz4f1', 'pz4gh', 'stug3g', 'panther', 'tiger', 'sdkfz251', 'marder3']);
+const EARLY_GERMAN = new Set(['pz3j', 'pz4f1', 'sdkfz251', 'marder3']);
 const SOVIET_IDS = new Set(['t26', 'bt7', 't34_76', 't34_85', 'kv1', 'is2', 't70', 'su76', 'su85']);
 
 function vehicleSide(defId: string): Side | null {
@@ -219,42 +285,81 @@ function vehicleSide(defId: string): Side | null {
   return null;
 }
 
+function profileOf(defId: string): VehProfile {
+  return VEH_PROFILE[defId] ?? DEFAULT_PROFILE;
+}
+
 function hullColor(defId: string): { base: string; dark: string; light: string } {
   const side = vehicleSide(defId);
-  if (side === 'soviet') return { base: '#4f5b34', dark: '#3d4728', light: '#5f6d40' };
+  if (side === 'soviet') return { base: '#55613a', dark: '#3d4728', light: '#66734a' };
   if (side === 'german') {
-    if (EARLY_GERMAN.has(defId)) return { base: '#4c5057', dark: '#3a3d42', light: '#5c6068' };
-    return { base: '#a08c5a', dark: '#8a7849', light: '#b09c68' };
+    if (EARLY_GERMAN.has(defId)) return { base: '#4f545c', dark: '#3a3d42', light: '#5f6570' };
+    return { base: '#a4905e', dark: '#8a7849', light: '#b8a473' };
   }
   return { base: '#6a6a62', dark: '#54544e', light: '#7a7a70' };
 }
 
-function drawTracks(ctx: CanvasRenderingContext2D, w: number, h: number, dark: string, tread: string): void {
-  const stripW = Math.max(2, Math.round(w * 0.14));
+function drawTracks(ctx: CanvasRenderingContext2D, w: number, h: number, dark: string, light: string, wide: boolean): void {
+  const stripW = Math.max(2, Math.round(w * (wide ? 0.22 : 0.16)));
   ctx.fillStyle = dark;
   ctx.fillRect(0, 0, stripW, h);
   ctx.fillRect(w - stripW, 0, stripW, h);
-  ctx.fillStyle = tread;
-  for (let y = 1; y < h - 1; y += 3) {
+  // Alternating tread dashes.
+  ctx.fillStyle = light;
+  for (let y = 0; y < h; y += 2) {
     ctx.fillRect(0, y, stripW, 1);
     ctx.fillRect(w - stripW, y + 1, stripW, 1);
   }
+  // Round road-wheel dots, 3-5 per side depending on hull length.
+  const wheelCount = Math.max(3, Math.min(5, Math.round(h / (wide ? 9 : 7))));
+  const r = Math.max(1, stripW * 0.32);
+  ctx.fillStyle = light;
+  for (let i = 0; i < wheelCount; i++) {
+    const cy = (i + 0.5) * (h / wheelCount);
+    ctx.beginPath(); ctx.arc(stripW / 2, cy, r, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(w - stripW / 2, cy, r, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function drawEngineDeck(ctx: CanvasRenderingContext2D, w: number, h: number, colors: { dark: string; light: string }): void {
+  const y0 = h - Math.round(h * 0.24);
+  ctx.strokeStyle = colors.dark;
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 3; i++) {
+    const y = y0 + i * 2;
+    if (y >= h - 1) break;
+    ctx.beginPath();
+    ctx.moveTo(Math.round(w * 0.22), y);
+    ctx.lineTo(Math.round(w * 0.78), y);
+    ctx.stroke();
+  }
+  const hatchW = Math.max(1, Math.round(w * 0.18));
+  ctx.fillStyle = colors.light;
+  ctx.fillRect(Math.round(w / 2 - hatchW / 2), h - Math.round(h * 0.09), hatchW, Math.max(1, Math.round(h * 0.05)));
+}
+
+function drawCamoBands(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  ctx.save();
+  ctx.strokeStyle = '#6c7a4a';
+  ctx.lineWidth = Math.max(1, Math.round(w * 0.16));
+  ctx.beginPath(); ctx.moveTo(w * 0.08, h * 0.28); ctx.lineTo(w * 0.55, h * 0.02); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(w * 0.18, h * 0.78); ctx.lineTo(w * 0.88, h * 0.42); ctx.stroke();
+  ctx.restore();
 }
 
 function drawCross(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
+  ctx.fillStyle = '#100f0c';
+  ctx.fillRect(cx - 2, cy - 0.5, 4, 1);
+  ctx.fillRect(cx - 0.5, cy - 2, 1, 4);
   ctx.strokeStyle = '#e8e8e0';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(cx - 2, cy - 2); ctx.lineTo(cx + 2, cy + 2);
-  ctx.moveTo(cx + 2, cy - 2); ctx.lineTo(cx - 2, cy + 2);
-  ctx.stroke();
+  ctx.lineWidth = 0.6;
   ctx.strokeRect(cx - 2.5, cy - 2.5, 5, 5);
 }
 
 function drawStar(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
   ctx.fillStyle = '#c8402c';
   ctx.strokeStyle = '#e8e8e0';
-  ctx.lineWidth = 1;
+  ctx.lineWidth = 0.6;
   ctx.beginPath();
   for (let i = 0; i < 5; i++) {
     const a = -Math.PI / 2 + (i * 2 * Math.PI) / 5;
@@ -273,54 +378,90 @@ function buildHull(defId: string, state: 'ok' | 'knockedOut'): HTMLCanvasElement
   const { lengthM, widthM } = getDims(defId);
   const w = Math.max(6, Math.round(widthM * PX_PER_M));
   const h = Math.max(10, Math.round(lengthM * PX_PER_M));
+  const profile = profileOf(defId);
   const colors = hullColor(defId);
+  const side = vehicleSide(defId);
   const c = createCanvas(w, h);
   const ctx = ctx2d(c);
-  const isHalftrack = defId === 'sdkfz_251';
 
-  // Base hull.
   ctx.fillStyle = colors.base;
   ctx.fillRect(1, 1, w - 2, h - 2);
 
-  drawTracks(ctx, w, h, colors.dark, colors.light);
+  drawTracks(ctx, w, h, colors.dark, colors.light, !!profile.wideTracks);
 
-  if (isHalftrack) {
-    // Open top hull: only rear half has tracks; front has 2 road wheels.
+  if (profile.family === 'halftrack') {
+    // Open-top compartment: rear tracks (already drawn), 2 front road wheels,
+    // and a darker interior with a couple of lighter seat pixels.
     ctx.fillStyle = colors.dark;
-    ctx.fillRect(Math.round(w * 0.2), 1, Math.round(w * 0.6), Math.round(h * 0.4));
+    ctx.fillRect(Math.round(w * 0.18), 1, Math.round(w * 0.64), Math.round(h * 0.44));
     ctx.fillStyle = colors.base;
-    const wheelR = Math.max(1, Math.round(w * 0.14));
-    ctx.beginPath(); ctx.arc(Math.round(w * 0.28), Math.round(h * 0.18), wheelR, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(Math.round(w * 0.72), Math.round(h * 0.18), wheelR, 0, Math.PI * 2); ctx.fill();
+    const wheelR = Math.max(1, Math.round(w * 0.16));
+    ctx.beginPath(); ctx.arc(Math.round(w * 0.28), Math.round(h * 0.16), wheelR, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(Math.round(w * 0.72), Math.round(h * 0.16), wheelR, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = colors.light;
+    ctx.fillRect(Math.round(w * 0.3), Math.round(h * 0.24), 1, 1);
+    ctx.fillRect(Math.round(w * 0.5), Math.round(h * 0.24), 1, 1);
+    ctx.fillRect(Math.round(w * 0.68), Math.round(h * 0.24), 1, 1);
+  } else if (profile.family === 'casemate') {
+    // Low, open-top (or lightly armoured) superstructure with the gun poking
+    // out the front; no turret sprite is drawn for this family.
+    const boxH = Math.round(h * 0.5);
+    ctx.fillStyle = colors.light;
+    ctx.fillRect(Math.round(w * 0.16), 1, Math.round(w * 0.68), boxH);
+    ctx.strokeStyle = colors.dark;
+    ctx.strokeRect(Math.round(w * 0.16) + 0.5, 1.5, Math.round(w * 0.68) - 1, boxH - 1);
+    const bLen = Math.max(2, Math.round(h * 0.4));
+    ctx.strokeStyle = colors.dark;
+    ctx.lineWidth = Math.max(1, Math.round(w * 0.09));
+    ctx.beginPath();
+    ctx.moveTo(w / 2, 3);
+    ctx.lineTo(w / 2, -bLen);
+    ctx.stroke();
+    drawEngineDeck(ctx, w, h, colors);
   } else {
-    // Glacis: lighter shading toward the front (top, north).
+    const glacisH = Math.round(h * 0.22);
     ctx.fillStyle = colors.light;
-    ctx.fillRect(Math.round(w * 0.18), 1, Math.round(w * 0.64), Math.round(h * 0.22));
-    // Engine deck hatches near the rear (bottom).
-    const hatchW = Math.max(1, Math.round(w * 0.16));
-    const hatchY = h - Math.round(h * 0.16);
-    ctx.fillStyle = colors.light;
-    ctx.fillRect(Math.round(w * 0.28), hatchY, hatchW, 2);
-    ctx.fillRect(w - Math.round(w * 0.28) - hatchW, hatchY, hatchW, 2);
+    ctx.fillRect(Math.round(w * 0.14), 1, Math.round(w * 0.72), glacisH);
+    if (profile.family === 'sloped') {
+      ctx.fillStyle = colors.dark;
+      ctx.beginPath(); ctx.moveTo(1, 1); ctx.lineTo(1, glacisH + 1); ctx.lineTo(Math.round(w * 0.14), 1); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(w - 1, 1); ctx.lineTo(w - 1, glacisH + 1); ctx.lineTo(w - Math.round(w * 0.14), 1); ctx.closePath(); ctx.fill();
+    }
+    drawEngineDeck(ctx, w, h, colors);
   }
 
-  // Markings, centred on the hull side.
-  const side = vehicleSide(defId);
-  if (side === 'german') drawCross(ctx, w / 2, Math.round(h * 0.55));
-  else if (side === 'soviet') drawStar(ctx, w / 2, Math.round(h * 0.55));
+  if (profile.skirts) {
+    ctx.strokeStyle = colors.light;
+    ctx.lineWidth = 1;
+    const sx = Math.max(2, Math.round(w * 0.16));
+    ctx.beginPath();
+    ctx.moveTo(sx, 2); ctx.lineTo(sx, h - 2);
+    ctx.moveTo(w - sx, 2); ctx.lineTo(w - sx, h - 2);
+    ctx.stroke();
+  }
+  if (profile.fuelDrums) {
+    ctx.fillStyle = colors.light;
+    ctx.fillRect(Math.round(w * 0.26), h - Math.round(h * 0.16), 2, 3);
+    ctx.fillRect(Math.round(w * 0.6), h - Math.round(h * 0.16), 2, 3);
+    ctx.strokeStyle = colors.dark;
+    ctx.strokeRect(Math.round(w * 0.26) + 0.5, h - Math.round(h * 0.16) + 0.5, 1, 2);
+    ctx.strokeRect(Math.round(w * 0.6) + 0.5, h - Math.round(h * 0.16) + 0.5, 1, 2);
+  }
 
-  // Outline.
+  if (side === 'german' && !EARLY_GERMAN.has(defId)) drawCamoBands(ctx, w, h);
+
+  if (side === 'german') { drawCross(ctx, w * 0.28, h * 0.44); drawCross(ctx, w / 2, h * 0.88); }
+  else if (side === 'soviet') drawStar(ctx, w * 0.72, h * 0.44);
+
   ctx.strokeStyle = OUTLINE;
   ctx.lineWidth = 1;
   ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
 
   if (state === 'knockedOut') {
-    let out = darken(c, 0.45);
+    const out = darken(c, 0.45);
     const octx = ctx2d(out);
-    octx.fillStyle = '#100f0c';
-    octx.beginPath();
-    octx.ellipse(w * 0.55, h * 0.4, Math.max(2, w * 0.22), Math.max(2, h * 0.14), 0.4, 0, Math.PI * 2);
-    octx.fill();
+    octx.fillStyle = '#0c0b09';
+    octx.fillRect(Math.round(w * 0.35), Math.round(h * 0.35), Math.max(3, Math.round(w * 0.3)), Math.max(3, Math.round(h * 0.2)));
     return out;
   }
   return c;
@@ -331,22 +472,30 @@ function buildTurret(defId: string, state: 'ok' | 'knockedOut'): HTMLCanvasEleme
   const { lengthM, widthM } = getDims(defId);
   const hullW = Math.max(6, Math.round(widthM * PX_PER_M));
   const hullH = Math.max(10, Math.round(lengthM * PX_PER_M));
-  const tw = Math.max(5, Math.round(hullW * 0.62));
-  const barrelLen = Math.max(4, Math.round(hullH * 0.6));
-  const th = Math.max(6, Math.round(hullH * 0.34)) + barrelLen;
+  const profile = profileOf(defId);
+  const colors = hullColor(defId);
+  const side = vehicleSide(defId);
+  const tw = Math.max(5, Math.round(hullW * (profile.turretWFrac ?? 0.62)));
+  const barrelLen = Math.max(3, Math.round(hullH * profile.barrelFrac));
+  const bustle = profile.bustleFrac ? Math.round(hullH * profile.bustleFrac) : 0;
+  const bodyH = Math.max(6, Math.round(hullH * 0.32)) + bustle;
+  const th = bodyH + barrelLen;
   const c = createCanvas(tw, th);
   const ctx = ctx2d(c);
-  const colors = hullColor(defId);
-  const bodyH = th - barrelLen;
   const bodyCy = th - bodyH / 2;
 
   // Barrel, extending "north" from the turret body toward the top of the canvas.
   ctx.strokeStyle = colors.dark;
-  ctx.lineWidth = Math.max(1, Math.round(tw * 0.14));
+  ctx.lineWidth = Math.max(1, Math.round(tw * 0.13));
   ctx.beginPath();
   ctx.moveTo(tw / 2, th - bodyH * 0.4);
   ctx.lineTo(tw / 2, 0);
   ctx.stroke();
+
+  if (profile.muzzleBrake) {
+    ctx.fillStyle = colors.dark;
+    ctx.fillRect(tw / 2 - 1, 0, 2, 2);
+  }
 
   // Turret body (oval).
   ctx.fillStyle = colors.base;
@@ -357,11 +506,23 @@ function buildTurret(defId: string, state: 'ok' | 'knockedOut'): HTMLCanvasEleme
   ctx.lineWidth = 1;
   ctx.stroke();
 
-  // Cupola.
-  ctx.fillStyle = colors.light;
-  ctx.beginPath();
-  ctx.arc(tw / 2 + tw * 0.18, bodyCy + bodyH * 0.15, Math.max(1, tw * 0.14), 0, Math.PI * 2);
-  ctx.fill();
+  if (profile.mantletW) {
+    ctx.fillStyle = colors.light;
+    ctx.fillRect(tw / 2 - profile.mantletW / 2, th - bodyH * 0.62, profile.mantletW, Math.max(2, bodyH * 0.32));
+    ctx.strokeStyle = OUTLINE;
+    ctx.strokeRect(tw / 2 - profile.mantletW / 2 + 0.5, th - bodyH * 0.62 + 0.5, profile.mantletW - 1, Math.max(1, bodyH * 0.32 - 1));
+  }
+
+  if (profile.cupola) {
+    ctx.fillStyle = colors.light;
+    ctx.beginPath();
+    ctx.arc(tw / 2 + tw * 0.18, bodyCy + bodyH * 0.15, Math.max(1, tw * 0.14), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (side === 'german' && !EARLY_GERMAN.has(defId)) drawCamoBands(ctx, tw, th);
+  if (side === 'german') drawCross(ctx, tw / 2, bodyCy);
+  else if (side === 'soviet') drawStar(ctx, tw / 2, bodyCy - bodyH * 0.1);
 
   if (state === 'knockedOut') return darken(c, 0.45);
   return c;
@@ -380,6 +541,9 @@ export function getFlagSprite(owner: Side | null): HTMLCanvasElement {
   return cached(key, () => {
     const c = createCanvas(10, 14);
     const ctx = ctx2d(c);
+    // Pole shadow, then pole.
+    ctx.fillStyle = 'rgba(10,10,8,0.3)';
+    ctx.fillRect(2, 1, 1, 12);
     ctx.fillStyle = '#3a3020';
     ctx.fillRect(1, 1, 1, 12);
     const fx = 2, fy = 1, fw = 8, fh = 6;
@@ -397,6 +561,8 @@ export function getFlagSprite(owner: Side | null): HTMLCanvasElement {
       ctx.fillStyle = '#e8e8e0'; ctx.fillRect(fx, fy, fw, fh);
       ctx.strokeStyle = '#8a8a82'; ctx.lineWidth = 1; ctx.strokeRect(fx + 0.5, fy + 0.5, fw - 1, fh - 1);
     }
+    // Waving notch cut from the trailing edge.
+    ctx.clearRect(fx + fw - 1, fy + fh / 2 - 1, 1, 2);
     ctx.strokeStyle = OUTLINE;
     ctx.strokeRect(fx + 0.5, fy + 0.5, fw - 1, fh - 1);
     return c;
@@ -406,7 +572,7 @@ export function getFlagSprite(owner: Side | null): HTMLCanvasElement {
 // ============================================================================
 // TEAM ICONS — 12x12, transparent bg, gray/white glyph with dark outline.
 // ============================================================================
-const ICON_FILL = '#d8d8d2';
+const ICON_FILL = '#e8e8e2';
 const ICON_OUTLINE = '#1a1a14';
 
 function iconStroke(ctx: CanvasRenderingContext2D): void {
@@ -440,26 +606,36 @@ function buildIcon(id: string): HTMLCanvasElement {
       break;
     case 'atgun':
       ctx.fillRect(2, 8, 3, 3); // shield
+      ctx.strokeRect(2.5, 8.5, 2, 2);
       ctx.beginPath(); ctx.moveTo(4, 8); ctx.lineTo(10, 3); ctx.stroke();
       break;
     case 'sniper':
       ctx.beginPath(); ctx.moveTo(2, 9); ctx.lineTo(10, 3); ctx.stroke();
       ctx.beginPath(); ctx.arc(6, 5, 1.6, 0, Math.PI * 2); ctx.stroke(); // scope
+      ctx.fillRect(5, 5, 1, 1);
       break;
     case 'atteam':
-      ctx.fillRect(2, 6, 8, 2);
-      ctx.beginPath(); ctx.moveTo(9, 5); ctx.lineTo(11, 7); ctx.lineTo(9, 9); ctx.closePath(); ctx.fill();
+      ctx.fillRect(2, 6, 8, 2); // launch tube
+      ctx.beginPath(); ctx.moveTo(9, 5); ctx.lineTo(11, 7); ctx.lineTo(9, 9); ctx.closePath(); ctx.fill(); ctx.stroke();
       break;
     case 'tank':
-      ctx.fillRect(2, 3, 8, 6); // hull
-      ctx.strokeRect(2.5, 3.5, 7, 5);
-      ctx.beginPath(); ctx.arc(6, 6, 1.6, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); // turret
-      ctx.beginPath(); ctx.moveTo(6, 6); ctx.lineTo(6, 1); ctx.stroke(); // barrel
+      ctx.fillRect(1, 4, 10, 5); // hull, side view
+      ctx.strokeRect(1.5, 4.5, 9, 4);
+      ctx.fillRect(3, 2, 5, 3); // turret
+      ctx.strokeRect(3.5, 2.5, 4, 2);
+      ctx.beginPath(); ctx.moveTo(8, 3); ctx.lineTo(11, 2); ctx.stroke(); // barrel
+      ctx.beginPath(); ctx.arc(3, 9.5, 1, 0, Math.PI * 2); ctx.fill(); // road wheel dots
+      ctx.beginPath(); ctx.arc(6, 9.5, 1, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(9, 9.5, 1, 0, Math.PI * 2); ctx.fill();
       break;
     case 'spg':
-      ctx.fillRect(2, 3, 8, 6);
-      ctx.strokeRect(2.5, 3.5, 7, 5);
-      ctx.beginPath(); ctx.moveTo(6, 3); ctx.lineTo(6, 0.5); ctx.stroke();
+      ctx.fillRect(1, 4, 10, 5); // low hull, side view, no turret
+      ctx.strokeRect(1.5, 4.5, 9, 4);
+      ctx.fillRect(3, 2.5, 5, 2.5); // casemate box, front-biased
+      ctx.strokeRect(3.5, 3, 4, 2);
+      ctx.beginPath(); ctx.moveTo(8, 3.5); ctx.lineTo(11, 2.5); ctx.stroke();
+      ctx.beginPath(); ctx.arc(3, 9.5, 1, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(8, 9.5, 1, 0, Math.PI * 2); ctx.fill();
       break;
     case 'halftrack':
       ctx.fillRect(2, 4, 8, 5);
@@ -473,6 +649,8 @@ function buildIcon(id: string): HTMLCanvasElement {
     case 'engineer':
       ctx.beginPath(); ctx.moveTo(2, 3); ctx.lineTo(9, 10); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(9, 3); ctx.lineTo(2, 10); ctx.stroke();
+      ctx.fillRect(1, 2, 2, 2);
+      ctx.fillRect(8, 2, 2, 2);
       break;
     default:
       ctx.strokeRect(2.5, 2.5, 7, 7);
@@ -508,7 +686,8 @@ function buildCursor(kind: CursorKind): HTMLCanvasElement {
   ctx.lineWidth = 1;
   switch (kind) {
     case 'arrow': {
-      const pts: [number, number][] = [[0, 0], [0, 12], [3, 9], [5, 14], [7, 13], [5, 8], [10, 8]];
+      // Classic 11px arrow silhouette, white fill, black outline.
+      const pts: [number, number][] = [[0, 0], [0, 11], [3, 8], [5, 12], [7, 11], [5, 7], [9, 7]];
       ctx.fillStyle = '#f0f0ec';
       ctx.strokeStyle = OUTLINE;
       ctx.beginPath();
@@ -520,22 +699,23 @@ function buildCursor(kind: CursorKind): HTMLCanvasElement {
       break;
     }
     case 'crosshair': {
+      // 15px crosshair with a 3px centre gap.
       ctx.strokeStyle = OUTLINE;
       ctx.beginPath();
-      ctx.moveTo(8, 0); ctx.lineTo(8, 5);
-      ctx.moveTo(8, 11); ctx.lineTo(8, 16);
-      ctx.moveTo(0, 8); ctx.lineTo(5, 8);
-      ctx.moveTo(11, 8); ctx.lineTo(16, 8);
+      ctx.moveTo(7.5, 0.5); ctx.lineTo(7.5, 6);
+      ctx.moveTo(7.5, 9); ctx.lineTo(7.5, 14.5);
+      ctx.moveTo(0.5, 7.5); ctx.lineTo(6, 7.5);
+      ctx.moveTo(9, 7.5); ctx.lineTo(14.5, 7.5);
       ctx.stroke();
       ctx.strokeStyle = '#f0f0ec';
       ctx.beginPath();
-      ctx.moveTo(8, 1); ctx.lineTo(8, 5);
-      ctx.moveTo(8, 11); ctx.lineTo(8, 15);
-      ctx.moveTo(1, 8); ctx.lineTo(5, 8);
-      ctx.moveTo(11, 8); ctx.lineTo(15, 8);
+      ctx.moveTo(7.5, 1); ctx.lineTo(7.5, 6);
+      ctx.moveTo(7.5, 9); ctx.lineTo(7.5, 14);
+      ctx.moveTo(1, 7.5); ctx.lineTo(6, 7.5);
+      ctx.moveTo(9, 7.5); ctx.lineTo(14, 7.5);
       ctx.stroke();
       ctx.beginPath();
-      ctx.arc(8, 8, 1, 0, Math.PI * 2);
+      ctx.arc(7.5, 7.5, 1, 0, Math.PI * 2);
       ctx.strokeStyle = OUTLINE;
       ctx.stroke();
       break;

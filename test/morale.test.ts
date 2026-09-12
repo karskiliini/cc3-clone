@@ -103,6 +103,25 @@ describe('stepMorale', () => {
     expect(s.activity).toBe('pinned');
   });
 
+  it('does not break vehicle crew from suppression/morale alone (armor protects them)', () => {
+    // Regression: crew soldiers (soldier.vehicleId set) share the vehicle's position, so any near
+    // miss/HE splash landing on the vehicle used to suppress and morale-break them exactly like
+    // exposed infantry — observed in playtesting as e.g. "PzKw III J has broken" seconds into a
+    // battle. Crew should only lose morale via an actual crew casualty (handled elsewhere), not via
+    // the suppression/pinned/cowering/panicked/routed cascade.
+    const state = makeState();
+    const rng = new Rng(1);
+    const s = state.soldiers.get(1)!;
+    s.vehicleId = 42;
+    s.suppression = 95;
+    s.morale = 5;
+    stepMorale(state, rng, 0.1);
+    expect(s.activity).not.toBe('cowering');
+    expect(s.activity).not.toBe('pinned');
+    expect(s.activity).not.toBe('routed');
+    expect(s.activity).not.toBe('panicked');
+  });
+
   it('caches team morale and status', () => {
     const state = makeState();
     const rng = new Rng(1);

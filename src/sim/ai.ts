@@ -1,9 +1,9 @@
 import type {
-  BattleState, Order, OrderType, Rect, Side, Soldier, Team, Vec2, Vehicle,
+  BattleState, Order, OrderType, Rect, Side, Soldier, Team, Vec2, Vehicle, VictoryLocation,
 } from '@/shared/types';
 import { otherSide, TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
-import { dist } from '@/shared/math';
+import { angleTo, dist } from '@/shared/math';
 import { inBounds, coverAt } from './map';
 import { isPassable } from './path';
 import { hasLOS } from './los';
@@ -25,8 +25,8 @@ function teamsCentre(state: BattleState, side: Side): Vec2 {
   return { x: sum.x / teams.length, y: sum.y / teams.length };
 }
 
-function nearestSpottedVehicle(state: BattleState, side: Side, rangeM: number): Vehicle | null {
-  const centre = teamsCentre(state, side);
+function nearestSpottedVehicle(state: BattleState, side: Side, rangeM: number, from?: Vec2): Vehicle | null {
+  const centre = from ?? teamsCentre(state, side);
   let best: Vehicle | null = null;
   let bestD = Infinity;
   for (const id of state.spottedVehicles[side]) {
@@ -39,8 +39,8 @@ function nearestSpottedVehicle(state: BattleState, side: Side, rangeM: number): 
   return best;
 }
 
-function nearestSpottedSoldier(state: BattleState, side: Side): Soldier | null {
-  const centre = teamsCentre(state, side);
+function nearestSpottedSoldier(state: BattleState, side: Side, from?: Vec2): Soldier | null {
+  const centre = from ?? teamsCentre(state, side);
   let best: Soldier | null = null;
   let bestD = Infinity;
   for (const id of state.spotted[side]) {
@@ -126,11 +126,24 @@ function goodCoverNearRoad(state: BattleState, centre: Vec2, rng: Rng): Vec2 {
 }
 
 function chooseWaypoint(state: BattleState, from: Vec2, objective: Vec2, rng: Rng): Vec2 {
+  // Sample within a forward cone toward the objective (not a full 0..2pi circle) and weight net
+  // progress far more heavily than cover. The old formula (cover*2 - dObj/50) let a ~1.0 cover
+  // bonus at a random nearby tile outweigh tens of tiles of distance-to-objective difference, so
+  // "best of 30 random points anywhere nearby" almost always just picked whichever nearby tile had
+  // the best cover, regardless of direction — teams cover-hopped in place instead of advancing, so
+  // opposing infantry never closed to engagement range (see harness.test.ts: smallArmsFired stuck
+  // at 0 on several maps). Biasing the sample cone toward the objective and re-weighting so
+  // progress dominates (cover only breaks ties among similarly-forward tiles) fixes that while
+  // still preferring covered ground when the forward options are comparable.
+  const toObjective = dist(from, objective);
+  if (toObjective < 1) return objective;
+  const bearing = angleTo(from, objective);
+  const maxR = Math.min(25, Math.max(4, toObjective));
   let best: Vec2 | null = null;
   let bestScore = -Infinity;
   for (let i = 0; i < 30; i++) {
-    const ang = rng.range(0, Math.PI * 2);
-    const r = rng.range(2, 25);
+    const ang = bearing + (rng.next() - 0.5) * (Math.PI / 2); // +/- 45 deg cone toward the objective
+    const r = rng.range(3, maxR);
     const x = Math.floor(from.x + Math.cos(ang) * r);
     const y = Math.floor(from.y + Math.sin(ang) * r);
     if (!inBounds(state.map, x, y)) continue;
@@ -138,7 +151,8 @@ function chooseWaypoint(state: BattleState, from: Vec2, objective: Vec2, rng: Rn
     const pos = { x: x + 0.5, y: y + 0.5 };
     const cover = coverAt(state.map, pos);
     const dObj = dist(pos, objective);
-    const score = cover * 2 - dObj / 50;
+    const progress = toObjective - dObj; // positive = closer to objective than `from`
+    const score = progress + cover * 0.5;
     if (score > bestScore) { bestScore = score; best = pos; }
   }
   return best ?? objective;
@@ -231,14 +245,29 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
   const enemyZoneCentre = zoneCentre(state.map.def.deployZones[enemy]);
   const ownZoneCentre = zoneCentre(state.map.def.deployZones[side]);
 
-  const vls = state.map.victoryLocations
-    .filter((vl) => vl.owner !== side)
-    .slice()
-    .sort((a, b) => {
-      if (b.value !== a.value) return b.value - a.value;
-      return dist(ownZoneCentre, { x: a.x, y: a.y }) - dist(ownZoneCentre, { x: b.x, y: b.y });
-    });
-  const ownedVLs = state.map.victoryLocations.filter((vl) => vl.owner === side);
+  // Sorted over ALL VLs (never filtered by current ownership) so the order is a pure function of
+  // static value/distance and therefore invariant across ticks — unlike a list filtered by
+  // ownership, whose length/contents change every time any VL flips hands anywhere on the map,
+  // which used to reshuffle every attacking team's assigned index (see the note above `vlIdx`).
+  const allVLsSorted = state.map.victoryLocations.slice().sort((a, b) => {
+    if (b.value !== a.value) return b.value - a.value;
+    return dist(ownZoneCentre, { x: a.x, y: a.y }) - dist(ownZoneCentre, { x: b.x, y: b.y });
+  });
+  const ownedVLs = allVLsSorted.filter((vl) => vl.owner === side);
+
+  /** Team `preferredIdx` picks its primary target at a fixed slot in the invariant `allVLsSorted`
+   * list, then walks forward (wrapping) to the nearest slot matching `wantOwnedBySide` — so a
+   * team's objective only moves when ITS OWN target's ownership changes, not whenever some other
+   * VL elsewhere on the map is captured/lost. */
+  function pickVL(preferredIdx: number, wantOwnedBySide: boolean): VictoryLocation | null {
+    const n = allVLsSorted.length;
+    if (n === 0) return null;
+    for (let i = 0; i < n; i++) {
+      const vl = allVLsSorted[(preferredIdx + i) % n];
+      if ((vl.owner === side) === wantOwnedBySide) return vl;
+    }
+    return null;
+  }
 
   const defendersCount = Math.max(1, Math.round(myTeams.length / 3));
   const priorityDefend = myTeams.filter((t) => t.type === 'mg' || t.type === 'atgun' || t.type === 'mortar');
@@ -246,7 +275,18 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
   for (const t of priorityDefend) { if (defenders.size < defendersCount) defenders.add(t.id); }
   for (const t of myTeams) { if (defenders.size < defendersCount) defenders.add(t.id); }
 
-  let vlIdx = 0;
+  // Stable, order-independent VL-objective assignment per team. This used to be a single mutable
+  // `vlIdx` counter incremented while iterating myTeams — but it was skipped for mortar/atgun teams
+  // and for any team that happened to be pinned/cowering *this tick*, so a given team's assigned
+  // index (and therefore its target VL) drifted almost every 5s AI tick. Since tryIssueOrder's
+  // dedup key includes the target position, a drifting objective meant a brand-new moveFast order
+  // toward a different VL every tick — infantry walked in circles and never converged into contact,
+  // so small-arms combat almost never happened (see harness.test.ts: smallArmsFired stuck at 0).
+  // Indexing into a list keyed by team.id instead keeps each team's assignment fixed across ticks.
+  const defenderTeams = myTeams.filter((t) => defenders.has(t.id)).sort((a, b) => a.id - b.id);
+  const attackerTeams = myTeams
+    .filter((t) => t.vehicleId == null && t.type !== 'atgun' && t.type !== 'atteam' && t.type !== 'mortar' && !defenders.has(t.id))
+    .sort((a, b) => a.id - b.id);
   const vehicleTeams: Team[] = [];
 
   for (const team of myTeams) {
@@ -258,7 +298,7 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
     }
 
     if (team.type === 'atgun' || team.type === 'atteam') {
-      const vehicle = nearestSpottedVehicle(state, side, 9999);
+      const vehicle = nearestSpottedVehicle(state, side, 9999, team.pos);
       if (vehicle) {
         tryIssueOrder(state, battle, track, team, { type: 'fire', target: { ...vehicle.pos }, issuedAt: state.time });
       } else {
@@ -287,20 +327,25 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
 
     // infantry: defenders vs attackers
     if (defenders.has(team.id)) {
-      const vl = ownedVLs.length ? ownedVLs[vlIdx % ownedVLs.length] : null;
-      vlIdx++;
+      const dIdx = defenderTeams.indexOf(team);
+      const vl = pickVL(dIdx, true);
       const pos = vl ? bestCoverWithin(state, { x: vl.x, y: vl.y }, 8, rng) : team.pos;
       team.aiObjective = pos;
       tryIssueOrder(state, battle, track, team, { type: 'defend', target: enemyZoneCentre, issuedAt: state.time });
       continue;
     }
 
-    const objective = vls.length ? { x: vls[vlIdx % vls.length].x, y: vls[vlIdx % vls.length].y } : enemyZoneCentre;
-    vlIdx++;
+    const aIdx = attackerTeams.indexOf(team);
+    const targetVL = pickVL(aIdx, false);
+    const objective = targetVL ? { x: targetVL.x, y: targetVL.y } : enemyZoneCentre;
     team.aiObjective = objective;
 
-    const nearestEnemy = nearestSpottedSoldier(state, side);
-    const nearestEnemyDistM = nearestEnemy ? dist(teamsCentre(state, side), nearestEnemy.pos) * TILE_M : Infinity;
+    // Use THIS team's own position, not the side-wide average of every team's position — on a
+    // spread-out map the side centroid can be far from any given team, which made the 120 m
+    // engagement gate below almost never fire and left infantry marching past each other with
+    // only tanks/mortars actually fighting (see harness: smallArmsFired stayed at 0 in most runs).
+    const nearestEnemy = nearestSpottedSoldier(state, side, team.pos);
+    const nearestEnemyDistM = nearestEnemy ? dist(team.pos, nearestEnemy.pos) * TILE_M : Infinity;
 
     if (nearestEnemy && nearestEnemyDistM <= 120 && teamHasLOSToEnemy(state, team, nearestEnemy.pos)) {
       if (rng.chance(0.3)) {
@@ -324,8 +369,8 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
     const vehicle = state.vehicles.get(team.vehicleId!);
     if (!vehicle || vehicle.state === 'knockedOut' || vehicle.state === 'burning' || vehicle.state === 'abandoned') continue;
 
-    const enemyVehicle = nearestSpottedVehicle(state, side, 300);
-    const enemySoldier = nearestSpottedSoldier(state, side);
+    const enemyVehicle = nearestSpottedVehicle(state, side, 300, vehicle.pos);
+    const enemySoldier = nearestSpottedSoldier(state, side, vehicle.pos);
     const target = enemyVehicle ?? enemySoldier;
 
     if (vehicle.state === 'immobilized') {

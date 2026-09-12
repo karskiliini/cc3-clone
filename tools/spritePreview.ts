@@ -68,7 +68,7 @@ for (const facing of [0, 2, 4, 6] as Facing8[]) {
 
 // --------------------------------------------------------------- vehicles --
 const VEHICLE_IDS = [
-  'pziii_j', 'pziv_f1', 'pziv_h', 'stug_iii_g', 'panther_g', 'tiger_i', 'sdkfz_251', 'marder_iii',
+  'pz3j', 'pz4f1', 'pz4gh', 'stug3g', 'panther', 'tiger', 'sdkfz251', 'marder3',
   't26', 'bt7', 't34_76', 't34_85', 'kv1', 'is2', 't70', 'su76', 'su85',
 ];
 const vehRow = section('Vehicles — hull + turret (ok)');

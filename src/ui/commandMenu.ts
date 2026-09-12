@@ -127,10 +127,19 @@ export class CommandMenu {
       const hotkey = ORDER_HOTKEYS[type];
       const idx = label.toLowerCase().indexOf(hotkey.toLowerCase());
       if (idx >= 0) {
+        // underline drawn 1px BELOW the glyph's baseline so it never cuts
+        // through the letter itself.
         const ux0 = tx + charStartX(label, idx);
         const chWidth = textWidth(label[idx]);
         ctx.fillStyle = color;
         ctx.fillRect(Math.round(ux0), Math.round(ty + FONT_SMALL_H), Math.round(chWidth), 1);
+      } else {
+        // label doesn't contain its hotkey letter: show it in brackets,
+        // right-aligned and dimmed, instead of underlining nothing.
+        const hint = `[${hotkey.toUpperCase()}]`;
+        const hw = textWidth(hint);
+        const hx = Math.round(r.x + r.w - 4 - hw);
+        drawText(ctx, hint, hx, ty, hot ? PALETTE.black : PALETTE.dim, 'small');
       }
     }
   }

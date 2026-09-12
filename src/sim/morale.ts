@@ -131,6 +131,17 @@ function resumeSoldier(state: BattleState, s: Soldier, team: Team | undefined): 
 }
 
 function stepSoldierState(state: BattleState, s: Soldier, dt: number, track: MoraleTrack): void {
+  // Vehicle crew are shielded by armor: they must not break from mere spotting or near-miss
+  // suppression the way exposed infantry do. They only lose morale via the casualty morale hit
+  // in detectCasualtiesAndApply (a crewmate killed/incapacitated when the vehicle is penetrated)
+  // and a light tank-scare tick below; suppression/pinned/cowering/panicked/routed cascades and
+  // grenade/surrender logic are skipped for them entirely.
+  if (s.vehicleId != null) {
+    s.suppression = clamp(s.suppression - 20 * dt, 0, 100);
+    s.morale = clamp(s.morale + 0.3 * dt, 0, 100);
+    return;
+  }
+
   const team = state.teams.get(s.teamId);
   const leader = team ? state.soldiers.get(team.leaderId) : undefined;
   const leaderAlive = !!leader && leader.health !== 'dead' && leader.health !== 'incapacitated';

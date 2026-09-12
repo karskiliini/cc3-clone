@@ -6,7 +6,7 @@ import { buildMap } from '@/sim/map';
 import { TerrainRenderer } from '@/render/terrainRender';
 import { getTeamIcon } from '@/render/sprites';
 import { Button, drawButton, drawPanel, drawTitleBanner, hitRect } from '@/ui/chrome';
-import { drawText } from '@/render/pixelfont';
+import { drawText, drawTextCentered, textWidth } from '@/render/pixelfont';
 import { PALETTE } from '@/render/palette';
 import { MAPS } from '@/data/maps';
 import { TEAM_DEFS } from '@/data/units';
@@ -39,13 +39,16 @@ export class BattleSetupScreen implements Screen {
   private difficulty: 'easy' | 'normal' | 'hard' = 'normal';
   private durationMin = 20;
 
-  private sideGerR: Rect = { x: 400, y: 70, w: 160, h: 20 };
-  private sideSovR: Rect = { x: 570, y: 70, w: 160, h: 20 };
-  private yearMinusR: Rect = { x: 400, y: 100, w: 20, h: 20 };
-  private yearPlusR: Rect = { x: 460, y: 100, w: 20, h: 20 };
-  private diffR: Rect = { x: 400, y: 130, w: 120, h: 20 };
-  private durR: Rect = { x: 400, y: 160, w: 120, h: 20 };
-  private forcesList = new ListBox({ x: 400, y: 200, w: 380, h: 300 }, 16);
+  // FORCE panel is { x: 400, y: 40, w: 380, h: 500 }; controls are inset 8px
+  // from the panel's left/right edges (400+8=408 .. 400+380-8=772), and each
+  // control sits below its own 12px label line.
+  private sideGerR: Rect = { x: 408, y: 68, w: 180, h: 20 };
+  private sideSovR: Rect = { x: 592, y: 68, w: 180, h: 20 };
+  private yearMinusR: Rect = { x: 408, y: 104, w: 24, h: 20 };
+  private yearPlusR: Rect = { x: 748, y: 104, w: 24, h: 20 };
+  private diffR: Rect = { x: 408, y: 140, w: 364, h: 20 };
+  private durR: Rect = { x: 408, y: 176, w: 364, h: 20 };
+  private forcesList = new ListBox({ x: 408, y: 212, w: 364, h: 320 }, 16);
 
   private backBtn = createBackButton('BACK', 400, 556);
   private startBtn: Button = new Button({ x: 700, y: 556, w: 80, h: 20 }, 'START');
@@ -144,36 +147,71 @@ export class BattleSetupScreen implements Screen {
     }
 
     drawPanel(ctx, { x: 400, y: 40, w: 380, h: 500 }, { title: 'FORCE' });
-    drawText(ctx, 'SIDE', 400, 56, PALETTE.gold, 'small');
+    drawText(ctx, 'SIDE', 408, 56, PALETTE.gold, 'small');
     drawButton(ctx, this.sideGerR, 'GERMAN', { pressed: this.playerSide === 'german' });
     drawButton(ctx, this.sideSovR, 'SOVIET', { pressed: this.playerSide === 'soviet' });
 
-    drawText(ctx, 'YEAR', 400, 86, PALETTE.gold, 'small');
+    drawText(ctx, 'YEAR', 408, 92, PALETTE.gold, 'small');
     drawButton(ctx, this.yearMinusR, '-', {});
-    drawText(ctx, String(this.year), 430, 106, PALETTE.text, 'small');
+    drawTextCentered(ctx, String(this.year), 590, 111, PALETTE.text, 'small');
     drawButton(ctx, this.yearPlusR, '+', {});
 
-    drawText(ctx, 'DIFFICULTY', 400, 116, PALETTE.gold, 'small');
+    drawText(ctx, 'DIFFICULTY', 408, 128, PALETTE.gold, 'small');
     drawButton(ctx, this.diffR, this.difficulty.toUpperCase(), {});
 
-    drawText(ctx, 'DURATION', 400, 146, PALETTE.gold, 'small');
+    drawText(ctx, 'DURATION', 408, 164, PALETTE.gold, 'small');
     drawButton(ctx, this.durR, `${this.durationMin} MIN`, {});
 
-    drawText(ctx, 'YOUR FORCES', 400, 186, PALETTE.gold, 'small');
-    this.forcesList.draw(ctx);
-    const ids = DEFAULT_FORCES[this.year]?.[this.playerSide] ?? [];
-    for (let i = 0; i < Math.min(ids.length, this.forcesList.visibleRows()); i++) {
-      const def2 = TEAM_DEFS[ids[i]];
-      if (!def2) continue;
-      const icon = getTeamIcon(def2.iconId);
-      ctx.drawImage(icon, this.forcesList.rect.x + this.forcesList.rect.w - 16, this.forcesList.rect.y + i * 16 + 2);
-    }
+    drawText(ctx, 'YOUR FORCES', 408, 200, PALETTE.gold, 'small');
+    this.drawForcesList(ctx);
 
     this.backBtn.draw(ctx);
     this.startBtn.draw(ctx);
   }
 
+  /** Custom row rendering for the forces list: icon at the row's left, name
+   * after it, cost right-aligned — the default ListBox.draw only draws text. */
+  private drawForcesList(ctx: CanvasRenderingContext2D): void {
+    const rect = this.forcesList.rect;
+    const rowH = this.forcesList.rowH;
+    const ids = DEFAULT_FORCES[this.year]?.[this.playerSide] ?? [];
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(rect.x, rect.y, rect.w, rect.h);
+    ctx.clip();
+    const visible = this.forcesList.visibleRows();
+    for (let i = 0; i < visible; i++) {
+      const idx = this.forcesList.scroll + i;
+      if (idx >= ids.length) break;
+      const def = TEAM_DEFS[ids[idx]];
+      if (!def) continue;
+      const ry = rect.y + i * rowH;
+      if (idx === this.forcesList.selected) {
+        ctx.fillStyle = 'rgba(216,180,72,0.22)';
+        ctx.fillRect(rect.x, ry, rect.w, rowH);
+      }
+      const icon = getTeamIcon(def.iconId);
+      ctx.drawImage(icon, rect.x + 2, ry + Math.round((rowH - icon.height) / 2));
+      const nameX = rect.x + 20;
+      const costText = `${def.cost}`;
+      const costW = textWidth(costText);
+      const nameMaxW = rect.w - 20 - costW - 8;
+      const name = truncateName(def.name, nameMaxW);
+      const ty = ry + Math.round((rowH - 7) / 2);
+      drawText(ctx, name, nameX, ty, idx === this.forcesList.selected ? PALETTE.gold : PALETTE.text, 'small');
+      drawText(ctx, costText, rect.x + rect.w - 4 - costW, ty, PALETTE.dim, 'small');
+    }
+    ctx.restore();
+  }
+
   cursor(): CursorKind {
     return 'arrow';
   }
+}
+
+function truncateName(text: string, maxW: number): string {
+  if (textWidth(text) <= maxW) return text;
+  let s = text;
+  while (s.length > 0 && textWidth(s) > maxW) s = s.slice(0, -1);
+  return s;
 }

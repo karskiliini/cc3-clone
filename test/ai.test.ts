@@ -100,6 +100,73 @@ describe('stepAI', () => {
   });
 });
 
+describe('stepAI per-team engagement distance (regression)', () => {
+  it('lets a team close to a spotted enemy engage even when other friendly teams are far away', () => {
+    // Regression for a bug where the "is an enemy close enough to fight" check used the side-wide
+    // average position of every friendly team instead of this team's own position. On a map where
+    // one team is right next to a spotted enemy but a sibling team is far away, the side average
+    // sat well outside the 120 m engagement range, so the near team kept marching toward its VL
+    // instead of switching to defend/fire — infantry never actually traded shots (see harness.test.ts,
+    // which caught this as smallArmsFired staying at 0 across most AI-vs-AI runs).
+    const W = 200, H = 200;
+    const tiles: Terrain[] = new Array(W * H).fill('open');
+    const def: MapDef = {
+      id: 'test-wide', name: 'Wide Test', description: '', width: W, height: H, season: 'summer',
+      paint: () => {},
+      victoryLocations: [{ id: 1, name: 'VL1', x: 190, y: 190, value: 2 }],
+      deployZones: { german: { x: 0, y: 0, w: 5, h: 5 }, soviet: { x: 190, y: 190, w: 5, h: 5 } },
+      attacker: 'german',
+    };
+    const map: GameMap = {
+      def, width: W, height: H, tiles,
+      buildingId: new Int16Array(W * H).fill(-1),
+      windows: new Uint8Array(W * H),
+      victoryLocations: [{ id: 1, name: 'VL1', x: 190, y: 190, value: 2, owner: 'soviet', captureTimer: 0, capturingSide: null }],
+      smoke: new Float32Array(W * H),
+      craters: [],
+    };
+
+    // Team 1 (far from the enemy) is inserted first, so the AI's "keep 1/3 defending" quota picks
+    // it as the default defender — team 2 (the near team, id=2) must reach its own defend/fire
+    // decision purely via the distance-gate branch under test, not the defender-quota branch.
+    const farTeamSoldiers = [1, 2, 3].map((id) => ({ ...makeSoldier(id, 1), pos: { x: 150, y: 150 } }));
+    const nearTeamSoldiers = [4, 5, 6].map((id) => ({ ...makeSoldier(id, 2), pos: { x: 10, y: 10 } }));
+    const enemy: Soldier = { ...makeSoldier(99, 3), id: 99, side: 'soviet', pos: { x: 14, y: 10 } };
+
+    const soldiers = new Map<number, Soldier>();
+    for (const s of [...nearTeamSoldiers, ...farTeamSoldiers, enemy]) soldiers.set(s.id, s);
+
+    const farTeam: Team = { ...makeTeam(1, [1, 2, 3]), pos: { x: 150, y: 150 } };
+    const nearTeam: Team = { ...makeTeam(2, [4, 5, 6]), pos: { x: 10, y: 10 } };
+    const teams = new Map<number, Team>([[1, farTeam], [2, nearTeam]]);
+
+    const state: BattleState = {
+      config: {
+        mapId: 'test-wide', playerSide: 'soviet', year: 1943, seed: 1, durationS: 1200,
+        difficulty: 'normal', forces: { german: [], soviet: [] },
+      },
+      map, phase: 'running', time: 0,
+      soldiers, teams, vehicles: new Map(),
+      sides: {
+        german: { side: 'german', morale: 80, truceOffered: false, truceAccepted: false, kills: 0, losses: 0, score: 0 },
+        soviet: { side: 'soviet', morale: 80, truceOffered: false, truceAccepted: false, kills: 0, losses: 0, score: 0 },
+      },
+      spotted: { german: new Set([99]), soviet: new Set() },
+      spottedVehicles: { german: new Set(), soviet: new Set() },
+      messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [],
+      result: null, events: [], nextId: 100,
+    };
+
+    const rng = new Rng(1);
+    const battle = new FakeBattle();
+    stepAI(state, rng, battle, 'german');
+
+    const nearTeamOrder = battle.orders.find((o) => o.teamId === 2);
+    expect(nearTeamOrder).toBeDefined();
+    expect(['defend', 'fire']).toContain(nearTeamOrder!.order.type);
+  });
+});
+
 describe('aiDeploy', () => {
   it('places every team inside the deploy zone', () => {
     const state = makeState();

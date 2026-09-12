@@ -19,6 +19,10 @@ interface CombatTrack {
   grenadeTimer: Map<number, number>;
   outOfAmmoMessaged: Set<number>;
   smokeRounds: Map<number, { count: number; lastAt: number }>;
+  /** small-arms (rifle/smg/lmg/hmg/pistol/coaxmg) rounds fired/landed-as-hits vs soldiers,
+   * for the balance harness's "hit rate" metric (see tools/simHarness / test/harness.test.ts). */
+  smallArmsFired: number;
+  smallArmsHit: number;
 }
 
 const tracks = new WeakMap<BattleState, CombatTrack>();
@@ -26,10 +30,21 @@ const tracks = new WeakMap<BattleState, CombatTrack>();
 function getTrack(state: BattleState): CombatTrack {
   let t = tracks.get(state);
   if (!t) {
-    t = { grenadeTimer: new Map(), outOfAmmoMessaged: new Set(), smokeRounds: new Map() };
+    t = {
+      grenadeTimer: new Map(), outOfAmmoMessaged: new Set(), smokeRounds: new Map(),
+      smallArmsFired: 0, smallArmsHit: 0,
+    };
     tracks.set(state, t);
   }
   return t;
+}
+
+const SMALL_ARMS_CLASSES = new Set(['rifle', 'smg', 'lmg', 'hmg', 'pistol', 'coaxmg']);
+
+/** Small-arms shots-fired/hits vs soldiers so far, for balance analysis (see harness). */
+export function getSmallArmsStats(state: BattleState): { fired: number; hit: number } {
+  const t = getTrack(state);
+  return { fired: t.smallArmsFired, hit: t.smallArmsHit };
 }
 
 // ------------------------------------------------------------------ target
@@ -193,12 +208,16 @@ export function applyHit(
   }
 }
 
-function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: WeaponDef, shooterSide: Side): void {
+export function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: WeaponDef, shooterSide: Side): void {
   const map = state.map;
   const radiusTiles = weapon.heRadiusM / TILE_M;
   if (radiusTiles > 0) {
     for (const s of state.soldiers.values()) {
       if (s.health === 'dead' || s.health === 'incapacitated') continue;
+      // Crew inside a vehicle are protected by its armor; HE splash (including a shell that
+      // failed to penetrate the vehicle it hit) must not roll casualties/suppression against
+      // them here. Crew casualties are handled explicitly by koCrew() on penetration.
+      if (s.vehicleId != null) continue;
       const d = dist(s.pos, pos);
       if (d > radiusTiles) continue;
       const cover = coverAt(map, s.pos);
@@ -316,7 +335,13 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
   const moving = victim.activity === 'moving' || victim.activity === 'movingFast' || victim.activity === 'sneaking';
   const p = hitChance(weapon, distM, cover, victim.stance, shooter, moving);
 
+  if (SMALL_ARMS_CLASSES.has(weapon.cls)) {
+    const t = getTrack(state);
+    t.smallArmsFired++;
+  }
+
   if (rng.chance(p)) {
+    if (SMALL_ARMS_CLASSES.has(weapon.cls)) getTrack(state).smallArmsHit++;
     if (wantTracer) state.tracers.push({ from: { ...shooter.pos }, to: { ...victim.pos }, t: 0, hit: true, kind: tracerKindFor(weapon) });
     applyHit(state, victim, weapon, rng, shooter.side, shooter);
   } else {

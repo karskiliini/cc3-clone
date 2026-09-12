@@ -1,5 +1,7 @@
-import type { Terrain, Vec2 } from '@/shared/types';
+import type { DecorItem, DecorKind, Terrain, Vec2 } from '@/shared/types';
 import { hash2 } from '@/shared/rng';
+
+const NON_DECOR_TILES = new Set<Terrain>(['water', 'buildingWood', 'buildingStone', 'floor']);
 
 /** Deterministic terrain painter DSL used by map definitions. */
 export class MapPainter {
@@ -7,6 +9,8 @@ export class MapPainter {
   w: number;
   h: number;
   seed: number;
+  /** Visual dressing collected while painting; filtered against final tiles at the end. */
+  decor: DecorItem[] = [];
 
   constructor(tiles: Terrain[], w: number, h: number, seed = 0) {
     this.tiles = tiles;
@@ -183,6 +187,140 @@ export class MapPainter {
         if (nx < 0 || ny < 0 || nx >= this.w || ny >= this.h) continue;
         const cur = this.get(nx, ny);
         if (cur !== 'woods') this.set(nx, ny, 'scatteredtrees');
+      }
+    }
+  }
+
+  /** Records a decor item; filtered out at map-build time if it lands on water/building tiles. */
+  addDecor(kind: DecorKind, x: number, y: number, variant?: number): void {
+    this.decor.push({ kind, x, y, variant });
+  }
+
+  /** Scatters `count` decor items of `kind` uniformly inside a rect, deterministically, skipping
+   * tiles that are water/building at paint time (a final water/building filter also runs at build). */
+  scatterDecor(kind: DecorKind, x: number, y: number, w: number, h: number, count: number, seedOffset = 0): void {
+    for (let i = 0; i < count; i++) {
+      const nx = hash2(i, 11, this.seed + seedOffset);
+      const ny = hash2(i, 37, this.seed + seedOffset + 1);
+      const px = x + nx * w;
+      const py = y + ny * h;
+      const t = this.get(Math.floor(px), Math.floor(py));
+      if (t !== null && NON_DECOR_TILES.has(t)) continue;
+      this.addDecor(kind, px, py, Math.floor(hash2(i, 71, this.seed + seedOffset) * 4));
+    }
+  }
+
+  /** Irregular elliptical parcel (field), same blobby-edge technique as `patch` but with independent
+   * x/y radii and a seed offset so adjacent parcels don't share the same noise pattern. */
+  field(cx: number, cy: number, rx: number, ry: number, t: Terrain, seedOffset = 0): void {
+    const r = Math.max(rx, ry);
+    const steps = Math.max(16, Math.round(r * 6));
+    const x0 = Math.floor(cx - rx * 1.3 - 1), x1 = Math.ceil(cx + rx * 1.3 + 1);
+    const y0 = Math.floor(cy - ry * 1.3 - 1), y1 = Math.ceil(cy + ry * 1.3 + 1);
+    for (let yy = y0; yy <= y1; yy++) {
+      for (let xx = x0; xx <= x1; xx++) {
+        const dx = (xx + 0.5 - cx) / rx, dy = (yy + 0.5 - cy) / ry;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 1.3) continue;
+        const angle = Math.atan2(dy, dx);
+        const angleBucket = Math.round(((angle + Math.PI) / (2 * Math.PI)) * steps);
+        const noise = hash2(angleBucket, Math.round((rx + ry) * 100), this.seed + seedOffset + 7001);
+        const localR = 0.7 + noise * 0.6;
+        if (dist <= localR) this.set(xx, yy, t);
+      }
+    }
+  }
+
+  /** A ragged single-tile tree line along a polyline: marches 1 tile at a time, leaving
+   * occasional natural gaps rather than a solid wall. */
+  treeLine(points: Vec2[], seedOffset = 0, gapProb = 0.15): void {
+    let n = 0;
+    for (let s = 0; s < points.length - 1; s++) {
+      const a = points[s], b = points[s + 1];
+      const dist = Math.hypot(b.x - a.x, b.y - a.y);
+      const steps = Math.max(1, Math.round(dist));
+      for (let i = 0; i <= steps; i++) {
+        const t = steps === 0 ? 0 : i / steps;
+        const px = a.x + (b.x - a.x) * t, py = a.y + (b.y - a.y) * t;
+        const noise = hash2(n++, 13, this.seed + seedOffset + 8001);
+        if (noise < gapProb) continue;
+        this.set(Math.round(px), Math.round(py), 'scatteredtrees');
+      }
+    }
+  }
+
+  /** A regular grid of scattered trees (orchard), leaving the ground terrain between rows intact. */
+  orchard(x: number, y: number, w: number, h: number, spacing = 2): void {
+    for (let yy = y; yy < y + h; yy += spacing) {
+      for (let xx = x; xx < x + w; xx += spacing) {
+        this.set(Math.round(xx), Math.round(yy), 'scatteredtrees');
+      }
+    }
+  }
+
+  /** Poles (or any decor kind) marching along a polyline every `spacing` tiles - telegraph poles,
+   * fence posts, etc. */
+  decorLine(points: Vec2[], kind: DecorKind, spacing = 6): void {
+    let carry = 0;
+    for (let s = 0; s < points.length - 1; s++) {
+      const a = points[s], b = points[s + 1];
+      const dist = Math.hypot(b.x - a.x, b.y - a.y);
+      let d = carry;
+      while (d < dist) {
+        const t = dist === 0 ? 0 : d / dist;
+        this.addDecor(kind, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
+        d += spacing;
+      }
+      carry = d - dist;
+    }
+  }
+
+  /** A small farmstead: house, barn, shed around a yard, a fence ring with a gap, a track stub,
+   * a well/haystacks/cart/woodpile, a small orchard and a vegetable patch. Footprint ~24x22 tiles
+   * centred on (cx, cy). */
+  farmstead(cx: number, cy: number, seedOffset = 0): void {
+    const jitter = (n: number) => Math.round((hash2(n, 5, this.seed + seedOffset) - 0.5) * 2);
+    this.building(cx - 6 + jitter(1), cy - 8, 6, 4, 'wood'); // house
+    this.building(cx + 2, cy - 3 + jitter(2), 7, 5, 'wood'); // barn
+    this.building(cx - 7, cy + 1, 4, 3, 'wood'); // shed
+    // fence ring around the yard, with a gap facing south for the track
+    this.line([
+      { x: cx - 9, y: cy - 10 }, { x: cx + 10, y: cy - 10 }, { x: cx + 10, y: cy + 8 },
+      { x: cx + 1, y: cy + 8 },
+    ], 'fence');
+    this.line([{ x: cx - 2, y: cy + 8 }, { x: cx - 9, y: cy + 8 }, { x: cx - 9, y: cy - 10 }], 'fence');
+    this.addDecor('well', cx - 1, cy - 1);
+    this.addDecor('haystack', cx + 3, cy + 5);
+    this.addDecor('haystack', cx + 5, cy + 6);
+    this.addDecor('cart', cx - 3, cy + 4);
+    this.addDecor('woodpile', cx - 6, cy + 4);
+    this.orchard(cx - 22, cy - 12, 12, 12, 2);
+    this.field(cx + 12, cy + 2, 4, 4, 'crops', seedOffset + 21);
+  }
+
+  /** A city block: a ring of buildings around an interior courtyard, with a 2-wide paved gateway
+   * through one wall connecting the street to the courtyard. */
+  block(x: number, y: number, w: number, h: number, kind: 'wood' | 'stone', courtyard: Terrain = 'rubble'): void {
+    this.building(x, y, w, h, kind);
+    const ring = 3;
+    const cw = w - 2 * ring, ch = h - 2 * ring;
+    if (cw > 2 && ch > 2) this.rect(x + ring, y + ring, cw, ch, courtyard);
+    const gx = Math.floor(x + w / 2) - 1;
+    this.rect(gx, y + h - ring - 1, 2, ring + 1, 'pavedroad');
+  }
+
+  /** A bombed-out building footprint: rubble with a scatter of standing wall fragments at the edges. */
+  ruin(x: number, y: number, w: number, h: number, seedOffset = 0): void {
+    this.rect(x, y, w, h, 'rubble');
+    const x0 = Math.floor(x), y0 = Math.floor(y), x1 = Math.floor(x + w), y1 = Math.floor(y + h);
+    for (let xx = x0; xx < x1; xx++) {
+      for (const yy of [y0, y1 - 1]) {
+        if (hash2(xx, yy, this.seed + seedOffset + 9001) > 0.55) this.set(xx, yy, 'stonewall');
+      }
+    }
+    for (let yy = y0; yy < y1; yy++) {
+      for (const xx of [x0, x1 - 1]) {
+        if (hash2(xx, yy, this.seed + seedOffset + 9002) > 0.55) this.set(xx, yy, 'stonewall');
       }
     }
   }

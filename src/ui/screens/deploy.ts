@@ -23,8 +23,8 @@ export class DeployScreen implements Screen {
   private dragPan = makeDragPanState();
   private invalidTimer = 0;
 
-  private autoBtn = new Button({ x: 620, y: 500, w: 160, h: 20 }, 'AUTO DEPLOY');
-  private beginBtn = new Button({ x: 620, y: 526, w: 160, h: 20 }, 'BEGIN');
+  private autoBtn = new Button({ x: 620, y: 512, w: 160, h: 20 }, 'AUTO DEPLOY');
+  private beginBtn = new Button({ x: 620, y: 538, w: 160, h: 20 }, 'BEGIN');
 
   constructor(battle: Battle) {
     this.battle = battle;
@@ -103,9 +103,12 @@ export class DeployScreen implements Screen {
     const br = worldToScreen(cam, { x: zone.x + zone.w, y: zone.y + zone.h });
     ctx.fillStyle = 'rgba(90,160,255,0.18)';
     ctx.fillRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
-    ctx.strokeStyle = 'rgba(150,200,255,0.9)';
+    ctx.save();
+    ctx.strokeStyle = 'rgba(170,215,255,0.95)';
     ctx.lineWidth = 1;
+    ctx.setLineDash([4, 2]);
     ctx.strokeRect(tl.x + 0.5, tl.y + 0.5, br.x - tl.x - 1, br.y - tl.y - 1);
+    ctx.restore();
 
     drawUnits(ctx, cam, this.battle.state, this.battle.playerSide(), this.selectedTeamId, game.settings);
 
@@ -130,7 +133,7 @@ export class DeployScreen implements Screen {
     drawSoldierMonitor(ctx, this.battle.state, selTeam);
 
     drawText(ctx, 'DEPLOYMENT', 610, 486, PALETTE.gold, 'small');
-    drawWrappedText(ctx, 'Drag teams into the blue zone.', 610, 500, 180, PALETTE.dim, 9, 'small');
+    drawWrappedText(ctx, 'Drag teams into blue zone.', 610, 498, 178, PALETTE.dim, 9, 'small');
     this.autoBtn.draw(ctx);
     this.beginBtn.draw(ctx);
   }

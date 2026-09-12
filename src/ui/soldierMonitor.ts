@@ -136,7 +136,7 @@ function drawSoldierCard(ctx: CanvasRenderingContext2D, r: Rect, s: Soldier): vo
   }
   const px = r.x + 2;
   const nameW = r.w - 16; // leave room for posture glyph
-  const rankName = truncateToWidth(`${s.rank} ${s.name}`, nameW);
+  const rankName = truncateToWidth(`${s.rank}. ${s.name}`, nameW);
   drawText(ctx, rankName, px, r.y + 2, PALETTE.gold, 'small');
   const weapon = WEAPONS[s.weaponId]?.name ?? s.weaponId;
   drawText(ctx, truncateToWidth(weapon, nameW), px, r.y + 10, PALETTE.text, 'small');
@@ -165,8 +165,11 @@ function drawHeading(ctx: CanvasRenderingContext2D, team: Team): void {
   x += textWidth(team.name) + 6;
 
   const typeLabel = capitalize(team.type);
-  drawText(ctx, `— ${typeLabel}`, x, y, PALETTE.text, 'small');
-  x += textWidth(`— ${typeLabel}`) + 6;
+  if (!team.name.toLowerCase().includes(typeLabel.toLowerCase())) {
+    const label = `- ${typeLabel}`;
+    drawText(ctx, label, x, y, PALETTE.text, 'small');
+    x += textWidth(label) + 6;
+  }
 
   const orderLabel = team.order ? ORDER_LABELS[team.order.type] : 'IDLE';
   const orderColor = team.order ? ORDER_COLOR[team.order.type] : PALETTE.dim;

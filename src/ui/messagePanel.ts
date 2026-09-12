@@ -46,6 +46,31 @@ function truncateToWidth(text: string, maxW: number): string {
   return s;
 }
 
+/** Greedy word-wrap into at most `maxLines` lines no wider than `maxW`; a
+ * single word wider than `maxW` is hard-truncated rather than overflowing. */
+function wrapToLines(text: string, maxW: number, maxLines: number): string[] {
+  const words = text.split(/\s+/).filter((w) => w.length > 0);
+  const lines: string[] = [];
+  let cur = '';
+  for (const word of words) {
+    if (lines.length >= maxLines) break;
+    const test = cur ? cur + ' ' + word : word;
+    if (cur && textWidth(test) > maxW) {
+      lines.push(cur);
+      cur = word;
+      if (lines.length >= maxLines) { cur = ''; break; }
+    } else {
+      cur = test;
+    }
+  }
+  if (cur && lines.length < maxLines) lines.push(cur);
+  if (lines.length > 0) {
+    const last = lines.length - 1;
+    lines[last] = truncateToWidth(lines[last], maxW);
+  }
+  return lines;
+}
+
 function fmtClock(seconds: number): string {
   const s = Math.max(0, Math.ceil(seconds));
   const mm = Math.floor(s / 60);
@@ -70,14 +95,20 @@ export class MessagePanel {
   draw(ctx: CanvasRenderingContext2D, state: BattleState, paused: boolean, speed?: number): void {
     drawPanel(ctx, MESSAGE_PANEL_RECT);
 
-    // message log
+    // message log — each message wraps onto up to 2 lines within the box's
+    // width rather than overflowing the panel's right edge.
     drawBevelBox(ctx, MESSAGES_RECT, true);
-    const msgs = state.messages.slice(-MSG_LINES);
-    const padTop = MSG_LINES - msgs.length;
-    for (let i = 0; i < msgs.length; i++) {
-      const m = msgs[i];
-      const line = truncateToWidth(m.text, MESSAGES_RECT.w - 4);
-      drawText(ctx, line, MESSAGES_RECT.x + 2, MESSAGES_RECT.y + 2 + (padTop + i) * MSG_LINE_H, msgColor(m.kind), 'small');
+    const maxW = MESSAGES_RECT.w - 4;
+    let lines: { text: string; color: string }[] = [];
+    for (const m of state.messages.slice(-MSG_LINES)) {
+      const color = msgColor(m.kind);
+      for (const text of wrapToLines(m.text, maxW, 2)) lines.push({ text, color });
+    }
+    lines = lines.slice(-MSG_LINES);
+    const padTop = MSG_LINES - lines.length;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      drawText(ctx, line.text, MESSAGES_RECT.x + 2, MESSAGES_RECT.y + 2 + (padTop + i) * MSG_LINE_H, line.color, 'small');
     }
 
     // buttons

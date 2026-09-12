@@ -4,14 +4,18 @@
 // ============================================================================
 
 // ----------------------------------------------------------------- constants
-export const SCREEN_W = 800;
-export const SCREEN_H = 600;
-export const VIEW_W = 800;
-export const VIEW_H = 480;          // map viewport height; bottom panel is 120
-export const PANEL_Y = 480;
-export const PANEL_H = 120;
+export const SCREEN_W = 1024;       // CC3 battle screen ran at 1024x768; menus are an 800x600 area centred on black
+export const SCREEN_H = 768;
+export const VIEW_W = 1024;
+export const VIEW_H = 630;          // map viewport height; bottom panel is 138
+export const PANEL_Y = 630;
+export const PANEL_H = 138;
+export const MENU_W = 800;          // menu screens: 800x600 area centred in the 1024x768 canvas
+export const MENU_H = 600;
+export const MENU_X = 112;
+export const MENU_Y = 84;
 export const TILE_M = 2;            // metres per tile
-export const TILE_PX = 10;          // pixels per tile at zoom 1
+export const TILE_PX = 20;          // pixels per tile at zoom 1 (10 px per metre, like CC3 at 1024x768)
 export const SIM_DT = 0.1;          // seconds per sim step (10 Hz)
 export const SPOT_INTERVAL = 0.5;   // seconds between spotting passes
 export const AI_INTERVAL = 5;       // seconds between AI re-planning
@@ -320,6 +324,9 @@ export interface BattleConfig {
   difficulty: 'easy' | 'normal' | 'hard';
   /** team def ids to field per side */
   forces: Record<Side, string[]>;
+  /** Test/harness only: run stepAI for BOTH sides (normally only the non-player side gets AI).
+   * Lets a headless harness simulate AI-vs-AI battles. Never set by UI screens. */
+  aiBothSides?: boolean;
 }
 
 export interface BattleState {
