@@ -97,14 +97,21 @@ const SUMMER_CROPS_RAMP = ['#6e5210', '#8a6a16', '#a27e1e', '#b89226', '#c8a230'
 // grey-brown debris, not the pinkish-brown palette.ts default (that read as a paint spatter,
 // especially over snow) — used for all seasons since rubble is rubble regardless.
 const RUBBLE_RAMP = ['#6e675c', '#7a7266', '#847c70', '#8a8276'];
+// Summer grass patch ramps (same dark->light positions as the grass ramp so the fine/clump
+// texture carries straight across a patch edge): warm ochre dry-grass and darker brown earth.
+const SUMMER_OCHRE_PATCH: RGB[] = [[84, 68, 24], [102, 84, 32], [120, 100, 42], [138, 116, 54], [154, 132, 68]].map(([r, g, b]) => ({ r, g, b }));
+const SUMMER_BROWN_PATCH: RGB[] = [[62, 50, 28], [76, 62, 34], [90, 74, 42], [104, 88, 52], [118, 102, 64]].map(([r, g, b]) => ({ r, g, b }));
 
 const LOCAL_RAMPS: Partial<Record<Season, Partial<Record<Terrain, string[]>>>> = {
   summer: {
     // warm bare earth (ref_cc3_1479 bare ground ~(146,126,46)), not grey concrete
     open: ['#86692e', '#9a7a36', '#ab8a40', '#ba984a', '#c6a656'],
-    // dark warm olive (ref open grass ~(107,99,26), sat ~0.78), not pale cool green
-    grass: ['#4a4c12', '#5c5f1a', '#6b6320', '#7d7726', '#8f8730'],
-    tallgrass: ['#6a6a1e', '#7e7c26', '#928c2e', '#a49a38'],
+    // CC3 mid green (round-4 #1: the old olive ramp read as mustard next to the gold wheat).
+    // Hue ~75-80deg, moderate saturation, brighter stops desaturate like sunlit blades; warm
+    // ochre/brown comes from the separate low-frequency patch layer in groundColorFbm, not
+    // from yellowing the whole ramp.
+    grass: ['#37421a', '#475422', '#55642a', '#637434', '#748644'],
+    tallgrass: ['#62652a', '#767834', '#8a893e', '#9a984a'],
     crops: SUMMER_CROPS_RAMP,
     mud: MUD_RAMP,
     dirtroad: SUMMER_ROAD_RAMP,
@@ -226,9 +233,43 @@ function groundColorFbm(t: Terrain, season: Season, X: number, Y: number, seed: 
     // brightening bias and raises the per-pixel fine term for more luminance contrast.
     const summer = season === 'summer';
     const bias = summer ? 0 : 0.08;
-    const fine = summer ? 0.40 : 0.18;
-    const f3 = fbm(X / 3, Y / 3, 2, seed + th + 77);
-    const tt = clamp01(0.5 + bias + 0.45 * (f64 - 0.5) + 0.6 * (f14 - 0.5) + (summer ? 0.6 : 0.35) * (f3 - 0.5) + fine * (g - 0.5));
+    // round-4 #1: summer fine (per-pixel) and ~3px band amplitudes cut ~40% (0.40->0.24,
+    // 0.6->0.36) — they read as a dithered checkerboard at 1:1.
+    const fine = summer ? 0.24 : 0.18;
+    // 1 octave: the 2nd (1.5px) octave duplicated the per-pixel `g` term; dropping it pays for
+    // the summer patch layer below within the bake budget.
+    const f3 = fbm(X / 3, Y / 3, 1, seed + th + 77);
+    const tt = clamp01(0.5 + bias + 0.45 * (f64 - 0.5) + 0.6 * (f14 - 0.5) + (summer ? 0.36 : 0.35) * (f3 - 0.5) + fine * (g - 0.5));
+    if (summer && t === 'grass' && ramp.length === 5) {
+      // large (~100-200px) ochre and brown patches from low-frequency noise, ref_cc3_1479's warm
+      // dry-grass/earth blotches over mid-green grass (instead of yellowing the whole field).
+      // One value-noise octave each (bake budget), with the already-sampled 64px/14px mottling
+      // bands mixed in so patch edges are ragged and soft rather than smooth ovals.
+      const po = fbm(X / 160, Y / 160, 1, seed + 6101) + 0.35 * (f64 - 0.5) + 0.2 * (f14 - 0.5);
+      const wo = smooth01(po, 0.53, 0.74);
+      const pb = fbm(X / 100, Y / 100, 1, seed + 6203) + 0.3 * (f64 - 0.5) + 0.25 * (f14 - 0.5);
+      const wb = smooth01(pb, 0.6, 0.82) * 0.6;
+      // all three ramps have 5 stops at the same tt: blend inline with one allocation (hot path)
+      const u = tt * 4;
+      let i = Math.floor(u);
+      if (i >= 4) i = 3;
+      const fr = u - i;
+      const g0 = ramp[i], g1 = ramp[i + 1];
+      let r = g0.r + (g1.r - g0.r) * fr, gg = g0.g + (g1.g - g0.g) * fr, bb = g0.b + (g1.b - g0.b) * fr;
+      if (wo > 0.001) {
+        const o0 = SUMMER_OCHRE_PATCH[i], o1 = SUMMER_OCHRE_PATCH[i + 1], k = wo * 0.85;
+        r += (o0.r + (o1.r - o0.r) * fr - r) * k;
+        gg += (o0.g + (o1.g - o0.g) * fr - gg) * k;
+        bb += (o0.b + (o1.b - o0.b) * fr - bb) * k;
+      }
+      if (wb > 0.001) {
+        const b0 = SUMMER_BROWN_PATCH[i], b1 = SUMMER_BROWN_PATCH[i + 1];
+        r += (b0.r + (b1.r - b0.r) * fr - r) * wb;
+        gg += (b0.g + (b1.g - b0.g) * fr - gg) * wb;
+        bb += (b0.b + (b1.b - b0.b) * fr - bb) * wb;
+      }
+      return { r, g: gg, b: bb };
+    }
     return rampLerp(ramp, tt);
   }
   const tt = clamp01(0.5 + 0.9 * (f64 - 0.5) + 0.5 * (f14 - 0.5) + 0.18 * (g - 0.5));
@@ -668,7 +709,8 @@ function paintGroundAndFeatures(
               if (covCrop < 0.65) color2 = shade(color2, -0.04);
             } else {
               const cropBase = groundColorFbm('crops', season, wpx, wpy, seed);
-              color2 = shade(cropBase, (hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4242) - 0.5) * 0.4); // 2px stipple
+              // round-4 #1: 2px stipple 0.4 -> 0.16 plus a 1px term (was a hard 2px checkerboard at 1:1)
+              color2 = shade(cropBase, (hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4242) - 0.5) * 0.16 + (hash2(wpx, wpy, seed + 4243) - 0.5) * 0.14);
               color2 = shade(color2, rowPhase === 0 ? 0.03 : -0.03);
               if (cropEdge < 0.58) color2 = shade(color2, -0.22); // thin dark headland rim
             }
@@ -829,7 +871,8 @@ function paintGroundAndFeatures(
             // summer: dense fine stipple — ref_cc3_1479 grass has ~2x our luminance SD at 1:1.
             // Mostly 1px with a weaker 2px term so it doesn't read as a 2px checkerboard.
             if (season === 'summer' && !isSnowGround) {
-              color = shade(color, (hash2(wpx, wpy, seed + 9111) - 0.5) * 0.34 + (hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 9110) - 0.5) * 0.14);
+              // round-4 #1: ~40% lower (0.34/0.14 -> 0.20/0.07; the 2px term cut harder, it's the checkerboard)
+              color = shade(color, (hash2(wpx, wpy, seed + 9111) - 0.5) * 0.20 + (hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 9110) - 0.5) * 0.07);
             }
           }
 
@@ -1128,6 +1171,8 @@ function paintStonewall(ctx: CanvasRenderingContext2D, map: GameMap, wx: number,
 
 /** Winter hedges are leafless brown scrub lines with snow flecks (ref winter scrub), not green. */
 const HEDGE_WINTER = { core: '#5c4632', shadow: 'rgba(20,14,8,0.45)', lobe: '#8a7256', snow: '#e8ecf0' };
+/** Summer hedges: dark natural olive-green (hue ~75deg), not the old blue-leaning teal-green. */
+const HEDGE_SUMMER = { core: '#343a24', shadow: 'rgba(12,12,4,0.45)', lobe: '#5a6238', bump: '#4c5432' };
 
 function paintHedge(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number, seed: number, season: Season): void {
   const winter = season === 'winter';
@@ -1137,15 +1182,15 @@ function paintHedge(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy:
     drawBand(ctx, ox + 1, oy + 1, 6, stubs, HEDGE_WINTER.shadow);
   } else {
     ctx.globalAlpha = 0.25;
-    drawBand(ctx, ox + 1, oy + 1, 6, stubs, '#0a1408');
+    drawBand(ctx, ox + 1, oy + 1, 6, stubs, '#0e1006');
     ctx.globalAlpha = 1;
   }
-  drawBand(ctx, ox, oy, 6, stubs, winter ? HEDGE_WINTER.core : '#2c3d22');
+  drawBand(ctx, ox, oy, 6, stubs, winter ? HEDGE_WINTER.core : HEDGE_SUMMER.core);
   // lighter bumpy top pixels
   const c = TILE_PX / 2;
   for (let i = 0; i < TILE_PX; i += 2) {
     const bump = hash2(wx * 4 + i, wy * 4 + i, seed + 71) > 0.5 ? 1 : 0;
-    ctx.fillStyle = winter ? HEDGE_WINTER.lobe : '#4c6a34';
+    ctx.fillStyle = winter ? HEDGE_WINTER.lobe : HEDGE_SUMMER.bump;
     if (stubs.r || stubs.l) ctx.fillRect(ox + i, oy + c - 3 + bump, 2, 1);
     else ctx.fillRect(ox + c - 3 + bump, oy + i, 1, 2);
     if (winter && hash2(wx * 5 + i, wy * 5 + i, seed + 72) > 0.6) {
@@ -1929,8 +1974,8 @@ function paintLineVector(ctx: CanvasRenderingContext2D, v: MapVectorFeature, x0:
     // offset to the SE, and lobed lighter blobs every ~6px on the NW side for a leafy silhouette.
     // Winter: leafless brown scrub with snow flecks instead of summer green.
     const winter = season === 'winter';
-    strokePolylineWorld(ctx, pts, x0, y0, 6, winter ? HEDGE_WINTER.core : '#2c3d22');
-    ctx.strokeStyle = winter ? HEDGE_WINTER.shadow : 'rgba(6,10,4,0.45)';
+    strokePolylineWorld(ctx, pts, x0, y0, 6, winter ? HEDGE_WINTER.core : HEDGE_SUMMER.core);
+    ctx.strokeStyle = winter ? HEDGE_WINTER.shadow : HEDGE_SUMMER.shadow;
     ctx.lineWidth = 1;
     walkPolylineWorld(pts, 4, (wx, wy, ux, uy) => {
       const lx = wx - x0 * TILE_PX, ly = wy - y0 * TILE_PX;
@@ -1946,7 +1991,7 @@ function paintLineVector(ctx: CanvasRenderingContext2D, v: MapVectorFeature, x0:
       if (px_ + py_ > 0) { px_ = -px_; py_ = -py_; } // NW-ish perpendicular
       const lx = wx - x0 * TILE_PX + px_ * 2.2, ly = wy - y0 * TILE_PX + py_ * 2.2;
       const r = 1.6 + hash2(Math.round(wx), Math.round(wy), seed + 881) * 1.2;
-      ctx.fillStyle = winter ? HEDGE_WINTER.lobe : '#5c7a3e';
+      ctx.fillStyle = winter ? HEDGE_WINTER.lobe : HEDGE_SUMMER.lobe;
       ctx.beginPath();
       ctx.ellipse(lx, ly, r, r * 0.7, 0, 0, Math.PI * 2);
       ctx.fill();

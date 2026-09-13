@@ -25,8 +25,8 @@ export const PALETTE = {
 export const TERRAIN_COLORS: Record<Season, Record<Terrain, string[]>> = {
   summer: {
     open: ['#8a7a52', '#8f7f58', '#84754c', '#93844f'],
-    grass: ['#6f7d3d', '#75843f', '#6a7838', '#7d8a45'],
-    tallgrass: ['#647536', '#6d7e3c', '#5c6c30'],
+    grass: ['#55642a', '#637434', '#475422', '#748644'],
+    tallgrass: ['#767834', '#8a893e', '#62652a'],
     crops: ['#9a8f3f', '#a39847', '#8f8438'],
     dirtroad: ['#8a7a56', '#8f7f5c', '#7f6f4c'],
     pavedroad: ['#6e6e68', '#75756f', '#65655f'],
@@ -37,7 +37,7 @@ export const TERRAIN_COLORS: Record<Season, Record<Terrain, string[]>> = {
     floor: ['#7a7264', '#82796c', '#726a5c'],
     rubble: ['#7a7670', '#847f78', '#8a5a52', '#6e6a64'],
     stonewall: ['#7a746a', '#847e72', '#6e6862'],
-    hedge: ['#3e5a2a', '#456230', '#365024'],
+    hedge: ['#343a24', '#4c5432', '#5a6238'],
     fence: ['#6b5636', '#75603c', '#5f4c2e'],
     water: ['#3f5f73', '#456a7c', '#38566a'],
     bridge: ['#7a6a4c', '#836f52', '#6f6044'],
