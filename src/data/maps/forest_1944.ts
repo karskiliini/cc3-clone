@@ -87,8 +87,8 @@ function paintMap(p: MapPainter): void {
   p.scatterDecor('flowers', 130, 80, 30, 25, 6, 45);
   p.scatterDecor('barrel', 30, 30, 30, 20, 4, 49);
   p.scatterDecor('crate', 150, 90, 30, 20, 4, 50);
-  p.addDecor('sign', 96, 62);
-  p.addDecor('sign', 87, 116);
+  p.addDecor('sign', 104, 55);
+  p.addDecor('sign', 92, 116);
 }
 
 const { decor, vectors }: { decor: DecorItem[]; vectors: MapVectorFeature[] } = (() => {
@@ -115,10 +115,10 @@ export const forest_1944: MapDef = {
     paintMap(p);
   },
   victoryLocations: [
-    { id: 0, name: 'Bridge', x: 101, y: 60, value: 3 },
+    { id: 0, name: 'Bridge', x: 101, y: 53, value: 3 },
     { id: 1, name: 'Lodge', x: 43, y: 43, value: 2 },
     { id: 2, name: 'Clearing', x: 140, y: 92, value: 1 },
-    { id: 3, name: 'Ford', x: 90, y: 118, value: 2 },
+    { id: 3, name: 'Ford', x: 95, y: 117, value: 2 },
     { id: 4, name: 'Logging Camp', x: 161, y: 97, value: 1 },
   ],
   deployZones: {

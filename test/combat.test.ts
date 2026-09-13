@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import type { Soldier, WeaponDef } from '@/shared/types';
 import { Rng } from '@/shared/rng';
-import { hitChance, penetrates, applyHESplash } from '@/sim/combat';
-import type { BattleConfig, BattleState, GameMap, MapDef, Terrain } from '@/shared/types';
+import { hitChance, penetrates, applyHESplash, getSmallArmsStats, stepCombat } from '@/sim/combat';
+import type { BattleConfig, BattleState, GameMap, MapDef, Team, Terrain } from '@/shared/types';
 
 function makeSoldier(overrides: Partial<Soldier> = {}): Soldier {
   return {
@@ -150,5 +150,51 @@ describe('applyHESplash', () => {
     applyHESplash(state, rng, { x: 10, y: 10 }, heWeapon, 'german');
     // With this seed/weapon at distance 0 the soldier must be hit or at least suppressed.
     expect(infantry.health !== 'healthy' || infantry.suppression > 0).toBe(true);
+  });
+
+  function makeTeam(id: number, side: 'german' | 'soviet', soldierIds: number[]): Team {
+    return {
+      id, defId: 'test', side, name: 'Test Squad', type: 'rifle', soldierIds, leaderId: soldierIds[0],
+      vehicleId: null, order: null, facing: 0, experience: 50, morale: 80, status: 'Idle',
+      pos: { x: 0, y: 0 }, outOfAction: false, kills: 0, aiObjective: null,
+    };
+  }
+
+  it('a heavily suppressed soldier (>85) does not return fire (balance round 4)', () => {
+    const state = makeState();
+    const shooter = makeSoldier({ id: 1, side: 'german', pos: { x: 5, y: 5 }, suppression: 90 });
+    const enemy = makeSoldier({ id: 2, side: 'soviet', pos: { x: 6, y: 5 } });
+    state.soldiers.set(shooter.id, shooter);
+    state.soldiers.set(enemy.id, enemy);
+    state.teams.set(1, makeTeam(1, 'german', [shooter.id]));
+    state.spotted.german.add(enemy.id);
+
+    const rng = new Rng(1);
+    for (let i = 0; i < 50; i++) stepCombat(state, rng, 0.1);
+    expect(getSmallArmsStats(state).fired).toBe(0);
+    expect(shooter.ammo).toBe(5); // unchanged — never fired
+  });
+
+  it('a moderately suppressed soldier (>60) fires at a reduced rate, not the full rate (balance round 4)', () => {
+    const withSuppression = (suppression: number): number => {
+      const state = makeState();
+      const shooter = makeSoldier({ id: 1, side: 'german', pos: { x: 5, y: 5 }, suppression });
+      const enemy = makeSoldier({ id: 2, side: 'soviet', pos: { x: 6, y: 5 } });
+      state.soldiers.set(shooter.id, shooter);
+      state.soldiers.set(enemy.id, enemy);
+      state.teams.set(1, makeTeam(1, 'german', [shooter.id]));
+      state.spotted.german.add(enemy.id);
+      const rng = new Rng(3);
+      let fired = 0;
+      for (let i = 0; i < 200; i++) {
+        const before = getSmallArmsStats(state).fired;
+        stepCombat(state, rng, 0.1);
+        if (getSmallArmsStats(state).fired > before) fired++;
+      }
+      return fired;
+    };
+    const suppressedFires = withSuppression(70);
+    const calmFires = withSuppression(0);
+    expect(suppressedFires).toBeLessThan(calmFires);
   });
 });
