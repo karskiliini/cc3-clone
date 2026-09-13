@@ -4,6 +4,7 @@ import { pointInRect } from '@/shared/math';
 import { game } from '@/game';
 import { Battle } from '@/sim/battle';
 import { OPERATION, initialForcePool } from '@/data/operation';
+import { TEAM_DEFS } from '@/data/units';
 import { getMap } from '@/data/maps';
 import { drawDarkPanel, drawLogo, drawScreenTitle, drawShadowText, drawSmallMetalButton } from '@/ui/chrome';
 import { beginMenuFrame, toMenuInput, BottomStrip, ForcePicker, wordWrap } from './common';
@@ -11,6 +12,15 @@ import { MainMenuScreen } from './mainMenu';
 import { DeployScreen } from './deploy';
 
 const OPERATION_KEY = 'cc3.operation';
+
+/** Short result word for the briefing header's "past results" line — the manual specifies
+ * results carry forward from battle to battle, so the player should be able to see them. */
+const RESULT_SHORT: Record<BattleResult, string> = {
+  decisive: 'Decisive',
+  victory: 'Victory',
+  draw: 'Draw',
+  defeat: 'Defeat',
+};
 
 function saveOperation(op: OperationState): void {
   try {
@@ -92,7 +102,19 @@ export class OperationScreen implements Screen {
     if (!op) return;
     const battleDef = OPERATION[op.index];
     const mapDef = getMap(battleDef.mapId);
-    this.picker = new ForcePicker(op.playerSide, battleDef.year, op.requisition, op.forcePool.map((f) => f.defId), mapDef.season === 'winter');
+    // Seed the starting roster from surviving teams, but only as many as fit this battle's
+    // requisition budget — carrying the whole (pre-casualty) force pool over unconditionally
+    // could put the roster over budget before the player touches anything, showing negative
+    // requisition points remaining.
+    let spent = 0;
+    const startRosterIds: string[] = [];
+    for (const f of op.forcePool) {
+      const cost = TEAM_DEFS[f.defId]?.cost ?? 0;
+      if (spent + cost > op.requisition) continue;
+      spent += cost;
+      startRosterIds.push(f.defId);
+    }
+    this.picker = new ForcePicker(op.playerSide, battleDef.year, op.requisition, startRosterIds, mapDef.season === 'winter');
   }
 
   update(_dt: number, input: InputState): void {
@@ -213,6 +235,13 @@ export class OperationScreen implements Screen {
     ctx.textAlign = 'left';
     ctx.fillStyle = '#f0d840';
     ctx.fillText(`BATTLE ${op.index + 1} OF ${OPERATION.length}: ${battleDef.title}`, 24, 62);
+    if (op.results.length > 0) {
+      ctx.font = '11px Arial, Helvetica, sans-serif';
+      ctx.fillStyle = '#e8e8e0';
+      ctx.textAlign = 'right';
+      ctx.fillText(`Past results: ${op.results.map((r) => RESULT_SHORT[r]).join(', ')}`, 776, 62);
+      ctx.textAlign = 'left';
+    }
     ctx.font = '11px Arial, Helvetica, sans-serif';
     ctx.fillStyle = '#e8e8e0';
     const desc = wordWrap(`${mapDef.name} — ${mapDef.description}`, 740, 'small').slice(0, 1).join(' ');

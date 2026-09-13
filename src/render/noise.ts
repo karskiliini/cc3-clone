@@ -54,4 +54,18 @@ export function heightField(X: number, Y: number, seed: number): number {
   return fbm(X / 400, Y / 400, 2, seed + 9911);
 }
 
+/** Mid-frequency "brush clump" band, ~6-10px wavelength, 3 octaves — this is what makes ground
+ * read as dabbed-on paint patches instead of uniform speckle: `groundColorFbm` posterises this
+ * into a handful of tonal steps and blends it in (see fix #2, round-3 critique). */
+export function fbmClump(X: number, Y: number, seed: number): number {
+  return fbm(X / 8, Y / 8, 3, seed + 4401);
+}
+
+/** Slowly-varying angle field (radians), used to orient sparse directional grass-tuft strokes so
+ * they read as brushed rather than randomly scattered — very low frequency (~48px wavelength) so
+ * neighbouring tufts lean the same way over a patch of ground. */
+export function angleField(X: number, Y: number, seed: number): number {
+  return fbm(X / 48, Y / 48, 2, seed + 4501) * Math.PI * 2;
+}
+
 export { hash2 };

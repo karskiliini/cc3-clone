@@ -23,7 +23,7 @@
 import type { Camera, GameMap, BattleState, MapVectorFeature, Terrain, Season, Vec2 } from '@/shared/types';
 import { TILE_PX, VIEW_W, VIEW_H } from '@/shared/types';
 import { hash2 } from '@/shared/rng';
-import { fbm, fbm64, fbm14, heightField } from '@/render/noise';
+import { fbm, fbm64, fbm14, heightField, fbmClump, angleField } from '@/render/noise';
 import { idx, tileAt, inBounds } from '@/sim/map';
 import { TERRAIN_COLORS } from '@/render/palette';
 import { getTreeSprite, getSmokePuff } from '@/render/sprites';
@@ -221,6 +221,31 @@ function reliefFactor(X: number, Y: number, seed: number): number {
   f = f < 0.85 ? 0.85 : f > 1.15 ? 1.15 : f;
   if (cache) cache.set(key, f);
   return f;
+}
+
+/** Sparse short directional "grass tuft" strokes for the brush-clump ground pass (fix #2c): each
+ * ~10px cell has a ~22% chance of hosting one 3-7px stroke, oriented by the slowly-varying
+ * `angleField` so neighbouring tufts lean together like brushed grass rather than scattering
+ * randomly. Returns a +-0.1 shade delta for pixels within ~0.7px of the stroke, else 0. Anchors
+ * are kept 2px inset from the cell edge so a stroke never needs to be evaluated from a
+ * neighbouring cell — one hash lookup per pixel, no neighbour scan. */
+function tuftShade(wpx: number, wpy: number, seed: number): number {
+  const cellSize = 10;
+  const ccx = Math.floor(wpx / cellSize), ccy = Math.floor(wpy / cellSize);
+  if (hash2(ccx, ccy, seed + 4601) > 0.22) return 0;
+  const ax = ccx * cellSize + 2 + hash2(ccx, ccy, seed + 4602) * (cellSize - 4);
+  const ay = ccy * cellSize + 2 + hash2(ccx, ccy, seed + 4603) * (cellSize - 4);
+  const len = 3 + hash2(ccx, ccy, seed + 4604) * 4;
+  const ang = angleField(ax, ay, seed);
+  const dx = Math.cos(ang) * len * 0.5, dy = Math.sin(ang) * len * 0.5;
+  const ax0 = ax - dx, ay0 = ay - dy, ex = dx * 2, ey = dy * 2;
+  const len2 = ex * ex + ey * ey;
+  let t = len2 > 1e-6 ? ((wpx - ax0) * ex + (wpy - ay0) * ey) / len2 : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const cx2 = ax0 + t * ex, cy2 = ay0 + t * ey;
+  const ddx = wpx - cx2, ddy = wpy - cy2;
+  if (ddx * ddx + ddy * ddy > 0.49) return 0;
+  return hash2(ccx, ccy, seed + 4605) > 0.45 ? 0.1 : -0.1;
 }
 
 function setPixel(data: Uint8ClampedArray, w: number, x: number, y: number, c: RGB): void {
@@ -643,21 +668,35 @@ function paintGroundAndFeatures(
             if (blend > 0.01) color = lerpRGB(color, groundColorFbm('mud', season, wpx, wpy, seed), blend);
           }
 
-          // ------------------------------------------- sparse per-pixel tufts on plain ground
-          // (not crops/mud/tallgrass/roads/water/rubble): ~4% of pixels get a lighter or darker
-          // fleck, on top of everything else, so open ground reads as grainy at 1:1 instead of
-          // a smooth colour wash (round-2 critique #1).
+          // ------------------------------------------- brush-clump texture on plain ground (not
+          // crops/mud/tallgrass/roads/water/rubble): round-3 critique #2 — the old flat 4%-of-
+          // pixels single-pixel fleck read as uniform "TV static" grain, not painted brush-work.
+          // Replaced with a mid-frequency clump layer (dab-like patches) plus sparse short
+          // directional tufts (grass strokes), both of which are strictly cheaper-looking (they
+          // vary over several pixels) than isolated single-pixel noise.
           const plainGround = (groundT === 'grass' || groundT === 'open' || groundT === 'snow')
             && covCrop <= 0.5 && covMud <= 0.5 && covTallgrass <= 0.5
             && covPaved <= 0.5 && covDirt <= 0.5 && covWater <= 0.5 && covRubble <= 0.5;
-          if (plainGround && hash2(wpx, wpy, seed + 9101) < 0.04) {
-            color = shade(color, hash2(wpx, wpy, seed + 9102) > 0.5 ? 0.22 : -0.22);
+          if (plainGround) {
+            // (b) mid-frequency 'clump' layer: fbm at 6-10px wavelength, posterised into 4 tonal
+            // steps then blended 60% with the raw (continuous) value so the clump edges stay soft
+            // rather than razor-stepped — this is what produces visible dab-like patches.
+            const clump = clamp01(fbmClump(wpx, wpy, seed));
+            const posterized = Math.round(clump * 3) / 3;
+            const soft = lerp(clump, posterized, 0.6);
+            color = shade(color, (soft - 0.5) * 0.24);
+            // (c) sparse directional strokes 3-7px long ("grass tufts"), following a slowly
+            // varying angle field, at ~3% area density, +-10% brightness.
+            const tuft = tuftShade(wpx, wpy, seed);
+            if (tuft !== 0) color = shade(color, tuft);
           }
 
           // -------------------------------------------------------- relief + grain + brush
           const rf = reliefFactor(wpx, wpy, seed);
           color = shade(color, rf - 1);
-          const grain = (hash2(wpx, wpy, seed + 9001) - 0.5) * 12; // +-6 RGB
+          // (a) low-amplitude per-pixel grain, +-3 RGB (was +-6 — the round-3 critique's "digital
+          // speckle" complaint was largely this term dominating at full amplitude).
+          const grain = (hash2(wpx, wpy, seed + 9001) - 0.5) * 6;
           color = { r: clamp255(color.r + grain), g: clamp255(color.g + grain), b: clamp255(color.b + grain) };
           const brush = 0.97 + 0.06 * hash2(Math.floor(wpx / 2), Math.floor(wpy / 3), seed + 9002);
           color = { r: clamp255(color.r * brush), g: clamp255(color.g * brush), b: clamp255(color.b * brush) };
@@ -1523,7 +1562,9 @@ function paintTrees(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy:
       paintCanopyHighlight(ctx, cx, cy, dw, dh, season);
     }
   } else if (t === 'scatteredtrees') {
-    if (hash2(wx, wy, seed + 111) < 0.55) {
+    // round-3 fix #3: summer scatteredtrees canopy density was noticeably sparser than the
+    // reference's field-edge tree lines (0.55 chance per tile) — raised to 0.72.
+    if (hash2(wx, wy, seed + 111) < 0.72) {
       const jxT = (hash2(wx * 19, wy * 19, seed + 113) - 0.5) * 0.4;
       const jyT = (hash2(wx * 23, wy * 23, seed + 117) - 0.5) * 0.4;
       if (coverageAt(map, isWoody, wx + 0.5 + jxT, wy + 0.5 + jyT, seed + 8802) >= 0.5) {
@@ -2019,12 +2060,20 @@ export class TerrainRenderer {
     }
 
     // ------------------------------------------------------------ trees/bushes
-    for (let ty = 0; ty < CHUNK_TILES; ty++) {
+    // Padded by 1 tile on every side (matching drawDecor's padding, and buildings' widened
+    // overlap test above): a tree's jittered canopy/shadow can extend up to ~1 tile from its
+    // owning tile, and each tile is only ever "owned" by one chunk for tree purposes, so without
+    // this padding a canopy straddling a chunk boundary was drawn (and clipped by the canvas
+    // edge) in its owning chunk only — never redrawn in the neighbour, leaving a hard clipped
+    // edge right at the seam (round-3 critique #1's "trees near a boundary" case). paintTrees is
+    // a pure function of (wx,wy) via hash2, so redrawing the same source tile from both chunks
+    // reproduces the identical tree in both, harmlessly clipped by each canvas's own bounds.
+    for (let ty = -1; ty <= CHUNK_TILES; ty++) {
       const wy = y0 + ty;
-      if (wy >= map.height) continue;
-      for (let tx = 0; tx < CHUNK_TILES; tx++) {
+      if (wy < 0 || wy >= map.height) continue;
+      for (let tx = -1; tx <= CHUNK_TILES; tx++) {
         const wx = x0 + tx;
-        if (wx >= map.width) continue;
+        if (wx < 0 || wx >= map.width) continue;
         paintTrees(ctx, map, wx, wy, tx * TILE_PX, ty * TILE_PX, season, this.seed);
       }
     }
@@ -2072,30 +2121,40 @@ export class TerrainRenderer {
     return canvas;
   }
 
-  /** Uses the exact same `groundColorFbm` ramp+fbm function the real per-pixel bake uses (just
-   * sampled once at the tile centre instead of per pixel), so the low-res scrolling fallback's
-   * tone actually matches baked chunks at their seam instead of reading as a flatter, greyer
-   * patch next to them. */
+  /** Uses the exact same `groundColorFbm` ramp+fbm function (plus the same relief-shading term)
+   * that the real per-pixel bake uses, sampled at every one of the LOWRES_PX_PER_TILE^2 output
+   * pixels (world pixel coords, not a single tile-centre sample) — this is what makes the
+   * low-res scrolling fallback tone-identical to a baked chunk at the seam between them instead
+   * of reading as a flatter, differently-toned patch next to it (round-3 critique #1/fix #1). */
   private paintLowResTile(ctx: CanvasRenderingContext2D, x: number, y: number): void {
     const map = this.map;
     const season = map.def.season;
     const t = tileAt(map, x, y);
     const i = idx(map, x, y);
-    const cx = (x + 0.5) * TILE_PX, cy = (y + 0.5) * TILE_PX;
-    let color: RGB;
     if (t === 'buildingWood' || t === 'buildingStone' || t === 'floor') {
+      const cx = (x + 0.5) * TILE_PX, cy = (y + 0.5) * TILE_PX;
       const bid = map.buildingId[i];
       const bb = bid >= 0 ? this.buildingBBoxes.get(bid) : undefined;
       const stone = bb ? bb.kind === 'stone' : t === 'buildingStone';
       const base = hexToRgb(stone ? '#6d6d68' : '#6f4a2c');
-      color = shade(base, (fbm(cx / 40, cy / 40, 2, this.seed + 8811) - 0.5) * 0.2);
-    } else if (t === 'crater' || t === 'bridge') {
-      color = groundColorFbm(this.groundUnder[i], season, cx, cy, this.seed);
-    } else {
-      color = groundColorFbm(t, season, cx, cy, this.seed);
+      const color = shade(base, (fbm(cx / 40, cy / 40, 2, this.seed + 8811) - 0.5) * 0.2);
+      ctx.fillStyle = `rgb(${clamp255(color.r) | 0},${clamp255(color.g) | 0},${clamp255(color.b) | 0})`;
+      ctx.fillRect(x * LOWRES_PX_PER_TILE, y * LOWRES_PX_PER_TILE, LOWRES_PX_PER_TILE, LOWRES_PX_PER_TILE);
+      return;
     }
-    ctx.fillStyle = `rgb(${clamp255(color.r) | 0},${clamp255(color.g) | 0},${clamp255(color.b) | 0})`;
-    ctx.fillRect(x * LOWRES_PX_PER_TILE, y * LOWRES_PX_PER_TILE, LOWRES_PX_PER_TILE, LOWRES_PX_PER_TILE);
+    const groundT = (t === 'crater' || t === 'bridge') ? this.groundUnder[i] : t;
+    const subPx = TILE_PX / LOWRES_PX_PER_TILE;
+    for (let sy = 0; sy < LOWRES_PX_PER_TILE; sy++) {
+      for (let sx = 0; sx < LOWRES_PX_PER_TILE; sx++) {
+        const wpx = x * TILE_PX + (sx + 0.5) * subPx;
+        const wpy = y * TILE_PX + (sy + 0.5) * subPx;
+        let color = groundColorFbm(groundT, season, wpx, wpy, this.seed);
+        const rf = reliefFactor(wpx, wpy, this.seed);
+        color = shade(color, rf - 1);
+        ctx.fillStyle = `rgb(${clamp255(color.r) | 0},${clamp255(color.g) | 0},${clamp255(color.b) | 0})`;
+        ctx.fillRect(x * LOWRES_PX_PER_TILE + sx, y * LOWRES_PX_PER_TILE + sy, 1, 1);
+      }
+    }
   }
 
   private updateLowResTile(x: number, y: number): void {
@@ -2125,9 +2184,15 @@ export class TerrainRenderer {
       }
     }
     const isZoom2 = cam.zoom >= 2;
-    let bakeBudget = pending > 2
+    const baseBudget = pending > 2
       ? (isZoom2 ? BAKES_PER_DRAW_BURST_ZOOM2 : BAKES_PER_DRAW_BURST)
       : (isZoom2 ? BAKES_PER_DRAW_ZOOM2 : BAKES_PER_DRAW);
+    // Guarantee every chunk visible after a camera jump (map open, teleport, zoom change) is
+    // baked within at most 3 draw() calls, however many chunks that is, rather than trickling in
+    // at a fixed per-frame rate that could take many frames to catch up on a big viewport — this
+    // is what closes the "seam persists" half of round-3 fix #1 (the tone-matching half is
+    // `paintLowResTile`, above). BAKES_PER_DRAW*_BURST* remain the floor for small scrolls.
+    let bakeBudget = Math.max(baseBudget, Math.ceil(pending / 3));
     const lowRes = this.ensureLowRes();
     for (let cy = startCy; cy <= endCy; cy++) {
       for (let cx = startCx; cx <= endCx; cx++) {
@@ -2145,12 +2210,28 @@ export class TerrainRenderer {
         if (chunk) {
           ctx.drawImage(chunk, s.x, s.y, size, size);
         } else {
-          // not yet baked this session — fall back to the cheap low-res whole-map painter
-          const sx = cx * CHUNK_TILES * LOWRES_PX_PER_TILE;
-          const sy = cy * CHUNK_TILES * LOWRES_PX_PER_TILE;
-          const sw = Math.min(CHUNK_TILES * LOWRES_PX_PER_TILE, lowRes.width - sx);
-          const sh = Math.min(CHUNK_TILES * LOWRES_PX_PER_TILE, lowRes.height - sy);
-          if (sw > 0 && sh > 0) ctx.drawImage(lowRes, sx, sy, sw, sh, s.x, s.y, size, size);
+          // Not yet baked at this zoom level. Prefer scaling a bake of the SAME chunk at a
+          // DIFFERENT zoom level, if one is cached — same ground pass, same seed, same world
+          // pixel coords, just a different output resolution, so it is tonally identical (unlike
+          // the flat-fill low-res painter) and only ever a scale-blur, never a seam. Only fall
+          // back to the cheap whole-map low-res painter when no bake of this chunk exists yet at
+          // any zoom (round-3 critique #1 — "never show a fallback for a chunk baked at another
+          // zoom level").
+          let otherZoomChunk: HTMLCanvasElement | undefined;
+          for (const z of ZOOM_LEVELS) {
+            if (z === cam.zoom) continue;
+            const other = this.chunks.get(this.chunkKey(cx, cy, z));
+            if (other) { otherZoomChunk = other; break; }
+          }
+          if (otherZoomChunk) {
+            ctx.drawImage(otherZoomChunk, s.x, s.y, size, size);
+          } else {
+            const sx = cx * CHUNK_TILES * LOWRES_PX_PER_TILE;
+            const sy = cy * CHUNK_TILES * LOWRES_PX_PER_TILE;
+            const sw = Math.min(CHUNK_TILES * LOWRES_PX_PER_TILE, lowRes.width - sx);
+            const sh = Math.min(CHUNK_TILES * LOWRES_PX_PER_TILE, lowRes.height - sy);
+            if (sw > 0 && sh > 0) ctx.drawImage(lowRes, sx, sy, sw, sh, s.x, s.y, size, size);
+          }
         }
       }
     }

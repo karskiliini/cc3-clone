@@ -29,6 +29,15 @@ function paintMap(p: MapPainter): void {
   p.woods(150, 60, 7, 6);
   p.orchard(158, 46, 12, 10, 2);
 
+  // shelterbelt/windbreak tree lines along field edges, the kolkhoz yard and the farm track —
+  // round-3 critique #4: summer maps read as under-treed vs. the reference's field-edge tree
+  // lines. Kept well clear of the y36-54 open sightline gap above the kolkhoz (see the balance
+  // note on p.woods(97,66,...) — that corridor must stay open).
+  p.treeLine([{ x: 10, y: 58 }, { x: 60, y: 55 }], 97, 0.2); // beside the NW fence line
+  p.treeLine([{ x: 125, y: 91 }, { x: 175, y: 88 }, { x: 225, y: 93 }], 98, 0.15); // beside the E hedge
+  p.treeLine([{ x: 0, y: 106 }, { x: 45, y: 102 }], 99, 0.25); // windbreak along the west track
+  p.treeLine([{ x: 52, y: 96 }, { x: 72, y: 96 }], 100, 0.2); // kolkhoz south fence
+
   // balance: a woods belt blocking the open, flat sightline from the German trench line
   // (y36-54) straight down onto the Kolkhoz (the map's highest-value VL) - harness testing
   // showed the defender's long-range suppression across this gap, not any specific weapon,

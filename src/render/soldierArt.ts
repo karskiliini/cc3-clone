@@ -66,11 +66,22 @@ const BLOOD = '#5a1a12';
 // so white smocks don't vanish against snow) fixes that without changing the
 // authored shapes above.
 const OUTLINE_COLOR = 'rgba(30,31,24,0.85)'; // '#1e1f18' @ 85%
+// Round-3 contrast pass: a second, softer ring one pixel further out than the
+// baked outline above — a dark 40%-alpha halo so the figure separates from
+// noisy grass/snow texture even where the terrain happens to be dark too
+// (the drop shadow, drawn separately by unitRender.ts under each figure,
+// handles the "sits on the ground" cue; this halo handles raw silhouette
+// contrast against any background tone).
+const HALO_COLOR = 'rgba(8,8,6,0.4)';
 const WINTER_SE_SHADE = '#b9bbb4';
 
 interface UniformPalette { u: string; s: string; helmetMid: string; helmetLight: string }
-const GERMAN_SUMMER: UniformPalette = { u: '#6a7256', s: '#4d5440', helmetMid: '#5a604c', helmetLight: '#737a64' };
-const SOVIET_SUMMER: UniformPalette = { u: '#8b7d4a', s: '#655a33', helmetMid: '#6d6540', helmetLight: '#857d52' };
+// Round-3: shift German feldgrau slightly bluer and Soviet khaki slightly
+// warmer (relative to round 2's tones) so the two sides are distinguishable
+// by hue at a glance, not just by value, matching the reference's clearly
+// two-toned opposing uniforms.
+const GERMAN_SUMMER: UniformPalette = { u: '#626f5e', s: '#485144', helmetMid: '#5a6052', helmetLight: '#737a6c' };
+const SOVIET_SUMMER: UniformPalette = { u: '#8f7f44', s: '#695b2e', helmetMid: '#71663a', helmetLight: '#897e4c' };
 const WINTER_SMOCK = { u: '#dcdcd4', s: '#a9aaa2' };
 const SOVIET_WINTER_HELMET_MID = '#d0d0c8';
 
@@ -112,19 +123,26 @@ function paletteFor(side: Side, season: Season): UniformPalette {
 function colorsFor(side: Side, season: Season, dead: boolean): Record<string, string> {
   const pal = paletteFor(side, season);
   let u = pal.u;
-  let s = darkenHex(pal.s, 0.72);
+  // Round-3 contrast pass: push the shoulder/torso dark edge and the helmet
+  // specular ~15% further apart than the round-2 values (0.72 -> 0.61 darken
+  // factor on the shoulder edge; 0.22 -> 0.25 and 0.55 -> 0.63 lighten
+  // factors on the helmet light tone and its specular pixel) so the head and
+  // silhouette edge read as more distinctly lit/shadowed at battle zoom.
+  let s = darkenHex(pal.s, 0.61);
   let helmetMid = pal.helmetMid;
-  let helmetLight = lightenHex(pal.helmetLight, 0.22);
+  let helmetLight = lightenHex(pal.helmetLight, 0.25);
   let weapon = WEAPON, stock = STOCK, skin = SKIN, boot = BOOT;
   let winterShade = WINTER_SE_SHADE;
   if (dead) {
-    const fix = (hex: string) => darkenHex(desaturateHex(hex, 0.4), 0.7);
+    // Dead soldiers read clearly darker than the living: heavier desaturate
+    // + darken than round 2 (0.4/0.7 -> 0.45/0.55).
+    const fix = (hex: string) => darkenHex(desaturateHex(hex, 0.45), 0.55);
     u = fix(u); s = fix(s); helmetMid = fix(helmetMid); helmetLight = fix(helmetLight);
     weapon = fix(weapon); stock = fix(stock); skin = fix(skin); boot = fix(boot);
     winterShade = fix(winterShade);
   }
   const rim = darkenHex(helmetMid, 0.62);
-  const specular = lightenHex(helmetLight, 0.55);
+  const specular = lightenHex(helmetLight, 0.63);
   return {
     O: rim, H: helmetMid, h: helmetLight, P: specular,
     U: u, S: s, V: winterShade,
@@ -132,6 +150,7 @@ function colorsFor(side: Side, season: Season, dead: boolean): Record<string, st
     b: boot, k: darkenHex(boot, 0.55),
     R: 'rgba(90,26,18,0.7)',
     X: OUTLINE_COLOR,
+    Y: HALO_COLOR,
   };
 }
 
@@ -277,15 +296,20 @@ function applyWinterShading(grid: Grid): void {
   }
 }
 
-/** Expand a grid by one empty ring on every side and mark every background
- * cell touching a filled cell as outline ('X') — a baked 1px silhouette
- * outline around the whole figure so it separates from noisy ground/snow
- * texture at battle zoom, independent of whatever's under it. */
+/** Expand a grid by two empty rings on every side: mark every background
+ * cell touching a filled cell as the baked 1px silhouette outline ('X'),
+ * then mark every remaining background cell touching *that* ring (or the
+ * figure) as a second, softer 1px halo ('Y') one pixel further out. Together
+ * these separate the figure from noisy ground/snow texture at battle zoom —
+ * the halo is a round-3 addition on top of round 2's single outline ring, so
+ * the silhouette still reads even where the ground happens to be as dark as
+ * the outline itself. */
 function addOutline(grid: Grid): Grid {
   const h = grid.length, w = grid[0].length;
-  const nw = w + 2, nh = h + 2;
+  const off = 2;
+  const nw = w + off * 2, nh = h + off * 2;
   const out = blank(nw, nh);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) out[y + 1][x + 1] = grid[y][x];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) out[y + off][x + off] = grid[y][x];
   const filled = (x: number, y: number) => x >= 0 && y >= 0 && x < nw && y < nh && out[y][x] !== '.';
   const withOutline = out.map((row) => row.slice());
   for (let y = 0; y < nh; y++) {
@@ -294,11 +318,23 @@ function addOutline(grid: Grid): Grid {
       if (filled(x - 1, y) || filled(x + 1, y) || filled(x, y - 1) || filled(x, y + 1)) withOutline[y][x] = 'X';
     }
   }
-  return withOutline;
+  const filledOrOutline = (x: number, y: number) => x >= 0 && y >= 0 && x < nw && y < nh && withOutline[y][x] !== '.';
+  const withHalo = withOutline.map((row) => row.slice());
+  for (let y = 0; y < nh; y++) {
+    for (let x = 0; x < nw; x++) {
+      if (withOutline[y][x] !== '.') continue;
+      if (filledOrOutline(x - 1, y) || filledOrOutline(x + 1, y) || filledOrOutline(x, y - 1) || filledOrOutline(x, y + 1)) withHalo[y][x] = 'Y';
+    }
+  }
+  return withHalo;
 }
 
 // --------------------------------------------------------- canvas compose -
-const PAD = 3; // room for the baked outline ring + SE drop shadow without clipping
+// Room for the baked outline ring + halo ring (2px) without clipping. The
+// drop shadow is no longer baked into this canvas — it's drawn separately by
+// unitRender.ts, under each figure, so it can be positioned/composited in
+// screen space independent of the sprite's own rotation.
+const PAD = 3;
 
 function gridToCanvas(grid: Grid, colors: Record<string, string>): HTMLCanvasElement {
   const w = grid[0].length, h = grid.length;
@@ -306,17 +342,11 @@ function gridToCanvas(grid: Grid, colors: Record<string, string>): HTMLCanvasEle
   const ew = expanded[0].length, eh = expanded.length;
   const c = createCanvas(w + PAD * 2, h + PAD * 2);
   const ctx = ctx2d(c);
-  // The expanded grid's (0,0) is the original grid's (-1,-1), so it lands at
-  // canvas (PAD-1, PAD-1) to keep the original grid's (0,0) at (PAD, PAD) —
-  // the convention `buildSoldierArt`'s helmet-offset math below relies on.
-  const base = PAD - 1;
-  for (let y = 0; y < eh; y++) {
-    for (let x = 0; x < ew; x++) {
-      if (expanded[y][x] === '.') continue;
-      ctx.fillStyle = 'rgba(10,10,8,0.3)';
-      ctx.fillRect(base + x + 1, base + y + 2, 1, 1);
-    }
-  }
+  // The expanded grid's (0,0) is the original grid's (-2,-2) (outline ring +
+  // halo ring), so it lands at canvas (PAD-2, PAD-2) to keep the original
+  // grid's (0,0) at (PAD, PAD) — the convention `buildSoldierArt`'s
+  // helmet-offset math below relies on.
+  const base = PAD - 2;
   for (let y = 0; y < eh; y++) {
     for (let x = 0; x < ew; x++) {
       const ch = expanded[y][x];

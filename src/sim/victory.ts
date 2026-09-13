@@ -74,6 +74,24 @@ function resultMessage(result: BattleResult): string {
   }
 }
 
+/** Immediately ends the battle: `side` flees the field, ceding every victory location to the
+ * enemy and forcing a result from the player's perspective — per the manual, "Flee ends the
+ * battle immediately with the enemy taking the map." No-op once the battle has already ended. */
+export function flee(state: BattleState, side: Side): void {
+  if (state.phase !== 'running') return;
+  const enemy = otherSide(side);
+  for (const vl of state.map.victoryLocations) {
+    vl.owner = enemy;
+    vl.capturingSide = null;
+    vl.captureTimer = 0;
+  }
+  for (const s of SIDES) state.sides[s].score = sideScore(state, s);
+  state.phase = 'ended';
+  state.result = side === state.config.playerSide ? 'defeat' : 'decisive';
+  state.events.push({ kind: 'ended' });
+  addMessage(state, `${sideName(side)} forces have fled the field — the enemy takes the ground.`, 'warn');
+}
+
 /** VL capture/contest logic, side scoring, and battle end conditions per spec §6.8. */
 export function stepVictory(state: BattleState, dt: number): void {
   for (const vl of state.map.victoryLocations) {

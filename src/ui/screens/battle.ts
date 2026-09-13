@@ -4,6 +4,7 @@ import { game } from '@/game';
 import type { Battle } from '@/sim/battle';
 import { teamCanFire, teamHasSmoke } from '@/sim/team';
 import { addMessage } from '@/sim/messages';
+import { flee } from '@/sim/victory';
 import { centerCamera, clampCamera, panCamera, screenToWorld, worldToScreen, zoomIn, zoomOut } from '@/engine/camera';
 import { TerrainRenderer } from '@/render/terrainRender';
 import { drawUnits } from '@/render/unitRender';
@@ -85,7 +86,9 @@ export class BattleScreen implements Screen {
   private pendingOrder: OrderType | null = null;
   private pendingWaypoints: Vec2[] = [];
   private paused = false;
-  private endedAt: number | null = null;
+  /** Real seconds elapsed since the battle ended, driving the debrief transition below — must be
+   * wall-clock dt, not state.time, since the sim stops advancing state.time once phase !== 'running'. */
+  private endedElapsed = 0;
   private rightDrag: RightDrag = { active: false, startX: 0, startY: 0, lastX: 0, lastY: 0, moved: 0, startTime: 0, menuOpenedOnPress: false };
   private leftDrag: LeftDrag = { active: false, startX: 0, startY: 0, moved: 0 };
   private edgeScroll: EdgeScrollState = makeEdgeScrollState();
@@ -170,8 +173,8 @@ export class BattleScreen implements Screen {
     }
 
     if (state.phase === 'ended') {
-      if (this.endedAt === null) this.endedAt = state.time;
-      if (state.time - this.endedAt > 2) {
+      this.endedElapsed += dt;
+      if (this.endedElapsed > 2) {
         game.setScreen(new DebriefScreen(battle));
         return;
       }
@@ -387,17 +390,9 @@ export class BattleScreen implements Screen {
       battle.offerTruce(battle.playerSide());
       addMessage(state, 'You have offered a truce', 'info');
     } else if (action === 'flee') {
-      if (this.selectedTeamId != null) {
-        const team = state.teams.get(this.selectedTeamId);
-        const zone = state.map.def.deployZones[battle.playerSide()];
-        if (team) {
-          battle.issueOrder(this.selectedTeamId, {
-            type: 'moveFast',
-            target: { x: zone.x + zone.w / 2, y: zone.y + zone.h / 2 },
-            issuedAt: state.time,
-          });
-        }
-      }
+      // Per the manual, Flee ends the battle immediately with the enemy taking the map — it is
+      // not a per-team retreat order.
+      flee(state, battle.playerSide());
     } else if (action === 'map') {
       this.showMinimap = !this.showMinimap;
     } else if (action === 'options') {

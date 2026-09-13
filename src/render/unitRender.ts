@@ -80,6 +80,26 @@ function frameOf(soldier: Soldier): 0 | 1 {
   return (Math.floor(soldier.animFrame) % 2 === 0 ? 0 : 1);
 }
 
+/** Round-3 contrast pass: a small soft drop shadow drawn under every soldier
+ * (live or dead), offset toward the SE like the vehicles' cast shadow, so
+ * figures read as sitting *on* the ground instead of floating on it — the
+ * "1-2 tiny helmet/shoulder pixels" of round 2 read fine as a shape but had
+ * no ground contact cue at all. Kept in unitRender (screen space) rather
+ * than baked into soldierArt's canvas so the offset stays visually
+ * consistent regardless of the sprite's own rotation. */
+function drawSoldierShadow(ctx: CanvasRenderingContext2D, p: { x: number; y: number }, dw: number, dh: number, zoom: number): void {
+  const ox = Math.max(1, zoom);
+  const oy = Math.max(1, zoom * 2);
+  const rw = Math.max(1, dw * 0.5);
+  const rh = Math.max(1, dh * 0.28);
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(p.x + ox, p.y + oy, rw, rh, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 function visible(s: { x: number; y: number }, cam: Camera): boolean {
   const p = worldToScreen(cam, s);
   return p.x > -32 && p.x < VIEW_W + 32 && p.y > -32 && p.y < VIEW_H + 32;
@@ -101,6 +121,7 @@ function drawCorpses(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     if (!visible(s.pos, cam)) continue;
     const sprite = getSoldierSprite(s.side, season, 'dead', s.facing, 0);
     const { dw, dh } = spriteDrawSize(sprite, cam.zoom);
+    drawSoldierShadow(ctx, p, dw, dh, cam.zoom);
     ctx.drawImage(sprite, Math.round(p.x - dw / 2), Math.round(p.y - dh / 2), dw, dh);
   }
 }
@@ -194,6 +215,7 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
     const stance = s.health === 'incapacitated' ? 'prone' : s.stance;
     const sprite = getSoldierSprite(s.side, season, stance, s.facing, frameOf(s));
     const { dw, dh } = spriteDrawSize(sprite, cam.zoom);
+    drawSoldierShadow(ctx, p, dw, dh, cam.zoom);
     ctx.drawImage(sprite, Math.round(p.x - dw / 2), Math.round(p.y - dh / 2), dw, dh);
     // 2px facing tick in front of the soldier, only for the selected team.
     if (selected) drawFacingTick(ctx, p, s.facing);

@@ -187,8 +187,11 @@ function shade(hex: string, pct: number): string {
   return '#' + f(r) + f(g) + f(b);
 }
 
+// Round-3: widen the highlight/shadow swing (+25% brighter highlight, deeper
+// shadow) so the hull reads with a stronger specular pop, matching the
+// reference's more saturated highlight-to-shadow contrast.
 function makePalette(hullMid: string, camoBand?: string): VehPalette {
-  return { hullMid, hullLight: shade(hullMid, 0.2), hullDark: shade(hullMid, -0.25), camoBand };
+  return { hullMid, hullLight: shade(hullMid, 0.25), hullDark: shade(hullMid, -0.3), camoBand };
 }
 
 const EARLY_GERMAN_PALETTE: VehPalette = makePalette('#5e6066');
@@ -196,8 +199,11 @@ const LATE_GERMAN_PALETTE: VehPalette = makePalette('#a9956a', '#6f7a4d');
 const SOVIET_PALETTE: VehPalette = makePalette('#5d6a3f');
 
 const OUTLINE = '#0c0c0a'; // near-black, deliberately darker than any hullDark tone
-const TRACK_DARK = '#23221d';
-const TRACK_LIGHT = '#403e37';
+// Round-3: tracks pushed to near-black (were a dark grey-brown) so the light
+// wheel-rim discs (drawWheel's 'W', below) pop against them the way the
+// reference's tank tracks read as a flat dark band under a lit hull.
+const TRACK_DARK = '#141311';
+const TRACK_LIGHT = '#2b2924';
 const WHEEL_RIM = '#1c1b17';
 const GRILLE = '#201f1c';
 const HATCH = '#d8d2b8';
@@ -210,15 +216,22 @@ const JERRYCAN = '#3a4a30';
 const JERRYCAN_LIGHT = '#526a41';
 
 function colorMapFor(pal: VehPalette): Record<string, string> {
+  // Round-3: an extra-bright "hot" specular tone, 25% brighter again than
+  // the standard hull highlight — used for the barrel's top-edge highlight
+  // line and the NW-quarter hot-spot on the hull glacis / turret roof, so
+  // those specific specular cues pop harder than the general NW-lit hull
+  // face they sit on.
+  const hot = shade(pal.hullLight, 0.25);
   return {
     o: OUTLINE, t: TRACK_DARK, T: TRACK_LIGHT, w: WHEEL_RIM, W: pal.hullLight,
     h: pal.hullMid, H: pal.hullLight, d: pal.hullDark, g: GRILLE, x: HATCH,
-    // Barrel reads as a lit cylinder: light top edge, mid body, dark underside.
-    B: pal.hullLight, b: pal.hullMid, n: pal.hullDark, k: OUTLINE,
+    // Barrel reads as a lit cylinder: bright top edge, mid body, dark underside.
+    B: hot, b: pal.hullMid, n: pal.hullDark, k: OUTLINE,
     m: MARK_WHITE, c: MARK_BLACK, r: MARK_RED,
     a: pal.camoBand ?? pal.hullDark,
     s: 'rgba(6,6,4,0.4)',
     u: MUD_DARK, j: JERRYCAN, J: JERRYCAN_LIGHT,
+    N: hot,
   };
 }
 
@@ -311,6 +324,13 @@ function buildTrackedSkeleton(w: number, h: number, opts: HullOpts): Grid {
     }
   }
   fillRect(g, bx0, 0, bx1, glacisH - 1, 'H');
+  // Round-3: an extra-bright hot-spot on the NW quarter of the glacis plate
+  // (top-plate highlight) — the top-plate is already the NW-lit face via
+  // 'H', this pushes just its own NW corner brighter again for a real
+  // specular pop instead of a flat highlight band.
+  const nwHotW = Math.max(1, Math.round((bx1 - bx0 + 1) * 0.4));
+  const nwHotH = Math.max(1, Math.ceil(glacisH / 2));
+  fillRect(g, bx0, 0, bx0 + nwHotW - 1, nwHotH - 1, 'N');
   put(g, bx0 + 2, glacisH - 1, 'x');
   put(g, bx1 - 2, glacisH - 1, 'x');
   if (opts.side === 'german' && bx1 - bx0 > 8) drawSpareTrackStrip(g, bx0 + 3, bx1 - 3, Math.max(0, glacisH - 2));
@@ -478,7 +498,10 @@ function buildTurretGrid(tw: number, bodyH: number, barrelLenPx: number, barrelW
         : Math.pow(Math.pow(Math.abs(nxAdj), p) + Math.pow(Math.abs(ny * 2 - 1), p), 1 / p);
       if (shapeVal > 1.0) continue;
       const t = ((nx + 1) / 2) * 0.5 + ny * 0.5;
-      g[barrelLenPx + y][x] = t < 0.36 ? 'H' : t > 0.64 ? 'd' : 'h';
+      // Round-3: a tight NW hot-spot inside the general 'H' NW-lit band —
+      // the turret-roof highlight the critique asked for, distinct from the
+      // wider (but now also brighter) NW-lit face.
+      g[barrelLenPx + y][x] = t < 0.16 ? 'N' : t < 0.36 ? 'H' : t > 0.64 ? 'd' : 'h';
     }
   }
   if (bustle > 0) {
@@ -570,8 +593,10 @@ function gridToCanvas(g: Grid, colorMap: Record<string, string>, shadowDx: numbe
   const c = createCanvas(cw, ch);
   const ctx = ctx2d(c);
   // Soft SE cast shadow: the hull's own silhouette, shifted and dimmed.
+  // Round-3: strengthened from 0.4 alpha to 0.45 to match the reference's
+  // stronger cast shadow.
   ctx.save();
-  ctx.globalAlpha = 0.4;
+  ctx.globalAlpha = 0.45;
   ctx.translate(HULL_PAD + shadowDx, HULL_PAD + shadowDy);
   ctx.fillStyle = '#000000';
   for (let y = 0; y < h; y++) {
@@ -681,7 +706,9 @@ export function buildVehicleHull(defId: string, lengthM: number, widthM: number,
     stampMarking(grid, 0.7, 0.32, 'star');
   }
   const colorMap = colorMapFor(pal);
-  let canvas = gridToCanvas(grid, colorMap, 3, 4);
+  // Round-3: SE cast shadow offset pushed from (+3,+4) to (+4,+6) alongside
+  // the alpha bump in gridToCanvas, per the critique's stronger-shadow ask.
+  let canvas = gridToCanvas(grid, colorMap, 4, 6);
   if (state === 'knockedOut') canvas = applyKnockedOut(canvas, grid[0].length, gh);
   return canvas;
 }

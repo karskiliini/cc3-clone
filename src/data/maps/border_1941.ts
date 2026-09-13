@@ -43,6 +43,10 @@ function paintMap(p: MapPainter): void {
   p.treeLine([{ x: 20, y: 55 }, { x: 20, y: 72 }], 14, 0.1);
   p.treeLine([{ x: 165, y: 100 }, { x: 185, y: 100 }], 15, 0.1);
   p.treeLine([{ x: 0, y: 78 }, { x: 40, y: 74 }], 16, 0.35); // sparse trees along the road shoulder
+  // round-3 critique #4: extra field-edge tree lines around the South Farm / crossroads area,
+  // which read visibly sparser than the reference in the captured screenshots.
+  p.treeLine([{ x: 45, y: 95 }, { x: 90, y: 98 }, { x: 130, y: 96 }], 17, 0.2); // beside the SE hedge
+  p.treeLine([{ x: 58, y: 108 }, { x: 90, y: 108 }], 18, 0.2); // south of the second farmstead
 
   // orchard between the two farmsteads
   p.orchard(85, 32, 16, 14, 2);
