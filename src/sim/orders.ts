@@ -10,7 +10,16 @@ const INCAPABLE_ACTIVITIES = new Set(['pinned', 'cowering', 'panicked', 'routed'
 /** Obedience probability (spec §4): clamp(0.5 + motivation/200 + experience/400 - fear/150), with a
  * `brave` bonus and a "who's in charge?" penalty while the team has no living leader (spec §11). On
  * success, sets `mind.anchor` to the ordered position (used by coverSeek.ts). On failure, the
- * soldier hesitates 1-5 s (longer for low experience) before he would retry. */
+ * soldier hesitates 1-3 s before he would retry.
+ *
+ * Balance regression fix: fear/150 alone can crush p to near 0.02 for a soldier under the
+ * sustained fire that's normal for the whole span of an assault — combined with hesitation
+ * lasting up to 5s and orders only being re-rolled when the AI actually reissues one, this could
+ * leave an attacker's soldiers failing to obey moveFast/fire/defend for most of an approach,
+ * collapsing attacker shot volume to a fraction of the defender's (harness: attacker win rate
+ * 41%->0%). Floor raised from 0.02 to 0.15 and hesitation capped at 1-3s uniformly (previously
+ * 2-5s for low-experience troops) so a scared soldier is still slow to respond, never permanently
+ * frozen. */
 function canObey(state: BattleState, rng: Rng, s: Soldier, team: Team, target: Vec2): boolean {
   if (s.health === 'dead' || s.health === 'incapacitated') return false;
   if (INCAPABLE_ACTIVITIES.has(s.activity)) return false;
@@ -20,10 +29,10 @@ function canObey(state: BattleState, rng: Rng, s: Soldier, team: Team, target: V
   let p = 0.5 + s.mind.motivation / 200 + s.experience / 400 - s.mind.fear / 150;
   if (s.mind.trait === 'brave') p += 0.15;
   if (isLeaderless(state, team)) p -= 0.2;
-  p = clamp(p, 0.02, 0.98);
+  p = clamp(p, 0.15, 0.98);
 
   if (!rng.chance(p)) {
-    s.mind.hesitation = s.experience < 30 ? rng.range(2, 5) : rng.range(1, 3);
+    s.mind.hesitation = rng.range(1, 3);
     return false;
   }
   s.mind.anchor = { ...target };

@@ -442,7 +442,15 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
     const nearestEnemy = nearestSpottedSoldier(state, side, team.pos);
     const nearestEnemyDistM = nearestEnemy ? dist(team.pos, nearestEnemy.pos) * TILE_M : Infinity;
 
-    if (nearestEnemy && nearestEnemyDistM <= 120 && teamHasLOSToEnemy(state, team, nearestEnemy.pos)) {
+    // Balance regression fix: this used to permanently lock a team into defend/fire the instant an
+    // enemy came within 120m, with NO way back into advancing — VL capture needs the team within
+    // 10m of the VL, so a team that stops to fight 100m+ short of the objective can win every
+    // firefight and still never capture anything (harness showed attacker VLs held stuck at 0 even
+    // in runs where the attacker out-shot the defender). Only true close-quarters contact (<=30m)
+    // gets an unconditional hold; everything out to 250m uses the SAME bounding-overwatch split as
+    // before (half hold and suppress, half keep pushing toward the objective, not just the enemy).
+    const DANGER_CLOSE_M = 30;
+    if (nearestEnemy && nearestEnemyDistM <= DANGER_CLOSE_M && teamHasLOSToEnemy(state, team, nearestEnemy.pos)) {
       if (rng.chance(0.3)) {
         tryIssueOrder(state, battle, track, team, { type: 'defend', target: { ...nearestEnemy.pos }, issuedAt: state.time });
       } else {
@@ -451,11 +459,11 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
       continue;
     }
 
-    // Bounding overwatch (balance round 3): once an attacker is close enough to see the enemy but
-    // not yet within the 120 m "stop and fight" range above, alternate which half of the attacking
-    // teams advance each 5 s AI tick and which half halts and covers them with fire — instead of
-    // every team always closing the whole distance at once with nobody providing suppression. `n`
-    // (this side's stepAI call count) flips the two halves every tick so they leapfrog each other.
+    // Bounding overwatch: from danger-close out to 250m, alternate which half of the attacking
+    // teams advance toward the OBJECTIVE each 5s AI tick and which half halts and covers them with
+    // fire at the nearest visible enemy — instead of every team either freezing forever or all
+    // closing the whole distance at once with nobody providing suppression. `n` (this side's
+    // stepAI call count) flips the two halves every tick so they leapfrog each other.
     if (nearestEnemy && nearestEnemyDistM <= 250 && teamHasLOSToEnemy(state, team, nearestEnemy.pos)) {
       const bounding = (aIdx + n) % 2 === 0;
       if (!bounding) {

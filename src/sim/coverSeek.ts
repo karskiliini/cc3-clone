@@ -137,17 +137,23 @@ function seekForSoldier(state: BattleState, rng: Rng, s: Soldier): void {
     return;
   }
 
-  // --- Moving/Sneak: bound between cover tiles while threatLevel is high (Move Fast skips this).
+  // --- Moving/Sneak: duck 1 tile aside for cover while threatLevel is high (Move Fast skips
+  // this). Balance regression fix: this used to search a 5-tile radius around the NEXT waypoint
+  // and splice a fresh sub-path in front of the remaining route, re-evaluated every 2s for as long
+  // as threatLevel stayed >0.5 — which is most of an assault. Each re-trigger replaced the path
+  // before the soldier had gone far along the previous detour, so under sustained fire an attacker
+  // would sidestep repeatedly and never net-advance (harness: attacker shot counts collapsed to a
+  // fraction of the defender's, attacker win rate went from ~41% to 0%). A "duck for cover while
+  // still advancing" instinct should cost at most one tile of detour, not repeatedly reroute the
+  // whole approach.
   if ((s.activity === 'moving' || s.activity === 'sneaking') && mind.threatLevel > 0.5 && s.path.length > 0) {
     mind.lastCoverSeekAt = state.time;
-    const nextWp = s.path[0];
-    const found = bestCoverTile(state, s, team, nextWp, 5, threats);
-    if (found) {
-      const cur = coverScore(state.map, s.pos, threats);
-      if (found.score - cur >= 0.15) {
-        const remaining = s.path.slice();
-        s.path = [...findPath(state.map, s.pos, found.tile, 'infantry'), ...remaining];
-      }
+    const cur = coverScore(state.map, s.pos, threats);
+    const found = bestCoverTile(state, s, team, s.pos, 1, threats);
+    if (found && found.score - cur >= 0.25 && dist(s.pos, found.tile) <= 1.5) {
+      // A single-tile sidestep, then resume the existing path from there — never touches the
+      // remaining route beyond this one detour tile.
+      s.path = [found.tile, ...s.path];
     }
   }
 }
