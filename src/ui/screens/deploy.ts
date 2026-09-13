@@ -174,8 +174,11 @@ export class DeployScreen implements Screen {
     const ownZone = map.def.deployZones[this.battle.playerSide()];
     const otl = worldToScreen(cam, { x: ownZone.x, y: ownZone.y });
     const obr = worldToScreen(cam, { x: ownZone.x + ownZone.w, y: ownZone.y + ownZone.h });
+    // Feathered punch-out: blur the own-zone shape so the shading fades over ~12 px
+    // instead of a hard tone step that reads like a terrain seam.
     sctx.save();
     sctx.globalCompositeOperation = 'destination-out';
+    sctx.filter = 'blur(6px)';
     sctx.fillStyle = 'rgba(0,0,0,1)';
     sctx.fillRect(otl.x, otl.y, obr.x - otl.x, obr.y - otl.y);
     sctx.restore();
@@ -183,8 +186,11 @@ export class DeployScreen implements Screen {
     const enemyZone = map.def.deployZones[otherSide(this.battle.playerSide())];
     const etl = worldToScreen(cam, { x: enemyZone.x, y: enemyZone.y });
     const ebr = worldToScreen(cam, { x: enemyZone.x + enemyZone.w, y: enemyZone.y + enemyZone.h });
+    sctx.save();
+    sctx.filter = 'blur(6px)';
     sctx.fillStyle = 'rgba(0,0,0,0.45)';
     sctx.fillRect(etl.x, etl.y, ebr.x - etl.x, ebr.y - etl.y);
+    sctx.restore();
 
     ctx.drawImage(this.shadeCanvas, 0, 0);
   }
