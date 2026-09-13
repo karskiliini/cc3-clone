@@ -71,6 +71,8 @@ const MAX_ROWS = 6;
 const HEADER_H = 14;
 const ARROW_W = 12;
 
+const GUNNER_WEAPON_CLASSES = new Set<WeaponClass>(['lmg', 'hmg', 'mortar', 'atgun', 'atrocket']);
+
 function role(vehicle: Vehicle | undefined, soldiers: Soldier[], index: number, s: Soldier): string {
   if (vehicle) {
     const roles = ['Commander', 'Gunner', 'Loader', 'Driver'];
@@ -78,12 +80,10 @@ function role(vehicle: Vehicle | undefined, soldiers: Soldier[], index: number, 
   }
   if (index === 0) return 'Leader';
   const w = WEAPONS[s.weaponId];
-  if (w && (w.cls === 'lmg' || w.cls === 'hmg')) return 'Gunner';
+  if (w && GUNNER_WEAPON_CLASSES.has(w.cls)) return 'Gunner';
   const prev = soldiers[index - 1];
   const prevW = prev && WEAPONS[prev.weaponId];
-  if (prevW && (prevW.cls === 'lmg' || prevW.cls === 'hmg')) return 'Assist';
-  const w2 = WEAPONS[s.weaponId];
-  if (w2 && (w2.cls === 'mortar' || w2.cls === 'atgun')) return 'Gunner';
+  if (prevW && GUNNER_WEAPON_CLASSES.has(prevW.cls)) return 'Assist';
   return 'Soldat';
 }
 
@@ -103,28 +103,53 @@ function healthColor(s: Soldier): string {
   }
 }
 
-function activityWord(s: Soldier): string {
-  if (s.health === 'dead') return 'Dead';
+/** Vehicle crew, when not actively firing/reloading/moving, read by role
+ * rather than by generic activity (matches the original's Driving/Loading/
+ * Assisting vocabulary for tank/gun crews). */
+function crewFallbackWord(roleName: string): string {
+  if (roleName === 'Driver') return 'Driving';
+  if (roleName === 'Loader') return 'Loading';
+  return 'Assisting';
+}
+
+function activityWord(s: Soldier, team: Team | null, vehicle: Vehicle | undefined, roleName: string): string {
+  if (s.health === 'dead' || s.activity === 'dead') return 'Dead';
+  if (s.health === 'incapacitated' || s.activity === 'incapacitated') return 'Unconscious';
   switch (s.activity) {
-    case 'moving': return 'Running';
+    case 'moving': return vehicle && roleName === 'Driver' ? 'Driving' : 'Moving';
     case 'movingFast': return 'Running';
     case 'sneaking': return 'Crawling';
     case 'firing': return 'Firing';
     case 'reloading': return 'Reloading';
-    case 'defending': return 'Assisting';
-    case 'ambushing': return 'Ambushing';
+    case 'defending': return vehicle ? crewFallbackWord(roleName) : 'Defending';
+    case 'ambushing': return vehicle ? crewFallbackWord(roleName) : 'Ambushing';
+    case 'hiding': return 'Hiding';
+    case 'cowering': return 'Cowering';
     case 'pinned': return 'Pinned';
-    case 'cowering': return "Can't See";
-    case 'hiding': return "Can't See";
-    case 'panicked': return 'Running';
-    case 'routed': return 'Running';
-    default: return 'Assisting';
+    case 'panicked': return 'Panicking';
+    case 'routed': return 'Fleeing';
+    case 'berserk': return 'Berserk';
+    case 'surrendered': return 'Surrendered';
+    case 'idle':
+    default: {
+      if (vehicle) return crewFallbackWord(roleName);
+      const ord = team?.order?.type;
+      if (ord === 'ambush') return 'Ambushing';
+      if (ord === 'defend') return 'Defending';
+      return 'Waiting';
+    }
   }
 }
 function activityColor(s: Soldier): string {
-  if (s.health === 'dead') return HUD.red;
-  if (s.activity === 'pinned') return HUD.yellow;
-  return HUD.green;
+  if (s.health === 'dead' || s.activity === 'dead') return HUD.red;
+  if (s.health === 'incapacitated' || s.activity === 'incapacitated') return HUD.red;
+  switch (s.activity) {
+    case 'pinned': return HUD.yellow;
+    case 'panicked':
+    case 'routed':
+      return HUD.red;
+    default: return HUD.green;
+  }
 }
 
 export class SoldierMonitorPopup {
@@ -196,7 +221,8 @@ export class SoldierMonitorPopup {
       ctx.fillStyle = HUD.text;
       ctx.fillText(clipTextToWidth(ctx, s.name, 70), contentX, rowY + 1);
       ctx.fillStyle = HUD.text;
-      ctx.fillText(role(vehicle, soldiers, this.scroll + i, s), contentX + 76, rowY + 1);
+      const roleName = role(vehicle, soldiers, this.scroll + i, s);
+      ctx.fillText(roleName, contentX + 76, rowY + 1);
       ctx.fillStyle = healthColor(s);
       ctx.textAlign = 'right';
       ctx.fillText(healthWord(s), r.x + r.w - 6, rowY + 1);
@@ -204,7 +230,7 @@ export class SoldierMonitorPopup {
 
       // line 2: activity | weapon | rounds
       ctx.fillStyle = activityColor(s);
-      ctx.fillText(activityWord(s), contentX, rowY + 13);
+      ctx.fillText(activityWord(s, team, vehicle, roleName), contentX, rowY + 13);
       const w = WEAPONS[s.weaponId];
       if (w) drawWeaponGlyph(ctx, contentX + 76, rowY + 11, w.cls);
       ctx.fillStyle = HUD.dim;

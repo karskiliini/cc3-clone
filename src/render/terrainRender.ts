@@ -1322,6 +1322,106 @@ function paintRoof(ctx: CanvasRenderingContext2D, map: GameMap, bb: BuildingBBox
   }
 }
 
+/** Draws a 4px dark wall band (with a small 2px lighter window-gap patch at its middle when the
+ * segment has a window/door) along one edge of a tile. `orient` is the long axis of the band. */
+function drawWallBand(
+  ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number,
+  orient: 'h' | 'v', dark: string, hasWindow: boolean, light: string,
+): void {
+  ctx.fillStyle = dark;
+  ctx.fillRect(x, y, w, h);
+  if (!hasWindow) return;
+  ctx.fillStyle = light;
+  if (orient === 'h') ctx.fillRect(x + w / 2 - 3, y + h / 2 - 1, 6, 2);
+  else ctx.fillRect(x + w / 2 - 1, y + h / 2 - 3, 2, 6);
+}
+
+/** Roof-off interior view for a friendly-occupied building (CC3: "roofs disappear when friendly
+ * troops occupy"). Baked once per building id into an offscreen canvas sized to the building's
+ * bbox (TILE_PX scale, local origin at bb.minX/minY) and cached, so drawOverlays only ever pays
+ * one drawImage per occupied building each frame: a plank/flagstone floor, perimeter interior
+ * walls with window gaps, a few furniture hints, and a soft inner shadow on the N/W walls. */
+function paintInterior(map: GameMap, bb: BuildingBBox, fp: Footprint, seed: number): HTMLCanvasElement {
+  const w = fp.w * TILE_PX, h = fp.h * TILE_PX;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, w);
+  canvas.height = Math.max(1, h);
+  const ctx = canvas.getContext('2d')!;
+  ctx.imageSmoothingEnabled = false;
+  const stone = bb.kind === 'stone';
+
+  // Clip everything to the occupancy mask so an irregular footprint (notch/tower) never paints
+  // interior floor onto ground that isn't actually part of the building.
+  const clip = new Path2D();
+  for (let ty = 0; ty < fp.h; ty++) {
+    for (let tx = 0; tx < fp.w; tx++) {
+      if (fp.occ[ty * fp.w + tx]) clip.rect(tx * TILE_PX, ty * TILE_PX, TILE_PX, TILE_PX);
+    }
+  }
+  ctx.save();
+  ctx.clip(clip);
+
+  // floor: wood planks run along the long axis (4px bands across the short axis); stone gets a
+  // 6px flagstone checker.
+  if (stone) {
+    const c1 = '#8b8880', c2 = '#7a7770';
+    for (let gy = 0; gy < h; gy += 6) {
+      for (let gx = 0; gx < w; gx += 6) {
+        ctx.fillStyle = (((gx / 6) | 0) + ((gy / 6) | 0)) % 2 === 0 ? c1 : c2;
+        ctx.fillRect(gx, gy, 6, 6);
+      }
+    }
+  } else {
+    const c1 = '#8a6a44', c2 = '#75593a';
+    const longAxisHoriz = fp.w >= fp.h;
+    if (longAxisHoriz) {
+      for (let gy = 0; gy < h; gy += 4) { ctx.fillStyle = ((gy / 4) | 0) % 2 === 0 ? c1 : c2; ctx.fillRect(0, gy, w, 4); }
+    } else {
+      for (let gx = 0; gx < w; gx += 4) { ctx.fillStyle = ((gx / 4) | 0) % 2 === 0 ? c1 : c2; ctx.fillRect(gx, 0, 4, h); }
+    }
+  }
+
+  // perimeter interior walls, with a window-gap patch where map.windows marks a door/window.
+  const WALL_BAND = 4;
+  const wallDark = stone ? '#4d4a44' : '#3c3128';
+  const winLight = stone ? 'rgba(205,210,215,0.6)' : 'rgba(225,205,165,0.6)';
+  for (let ty = 0; ty < fp.h; ty++) {
+    for (let tx = 0; tx < fp.w; tx++) {
+      if (!fp.occ[ty * fp.w + tx]) continue;
+      const wx = bb.minX + tx, wy = bb.minY + ty;
+      const i = idx(map, wx, wy);
+      if (map.tiles[i] !== 'buildingWood' && map.tiles[i] !== 'buildingStone') continue;
+      const hasWindow = map.windows[i] === 1;
+      const ox = tx * TILE_PX, oy = ty * TILE_PX;
+      const outer = (dx: number, dy: number) =>
+        !inBounds(map, wx + dx, wy + dy) || map.buildingId[idx(map, wx + dx, wy + dy)] !== bb.id;
+      if (outer(0, -1)) drawWallBand(ctx, ox, oy, TILE_PX, WALL_BAND, 'h', wallDark, hasWindow, winLight);
+      if (outer(0, 1)) drawWallBand(ctx, ox, oy + TILE_PX - WALL_BAND, TILE_PX, WALL_BAND, 'h', wallDark, hasWindow, winLight);
+      if (outer(-1, 0)) drawWallBand(ctx, ox, oy, WALL_BAND, TILE_PX, 'v', wallDark, hasWindow, winLight);
+      if (outer(1, 0)) drawWallBand(ctx, ox + TILE_PX - WALL_BAND, oy, WALL_BAND, TILE_PX, 'v', wallDark, hasWindow, winLight);
+    }
+  }
+
+  // a few furniture hints scattered on the floor
+  const furnN = 2 + Math.floor(hash2(bb.id, 3, seed + 9101) * 2);
+  for (let i = 0; i < furnN; i++) {
+    const fx_ = 6 + hash2(bb.id * 13 + i, i, seed + 9102) * Math.max(1, w - 16);
+    const fy_ = 6 + hash2(bb.id * 17 + i, i, seed + 9103) * Math.max(1, h - 14);
+    ctx.fillStyle = 'rgba(20,16,12,0.55)';
+    ctx.fillRect(fx_ + 1, fy_ + 1, 5, 4);
+    ctx.fillStyle = '#2a241c';
+    ctx.fillRect(fx_, fy_, 5, 4);
+  }
+
+  // subtle inner shadow along the N and W walls
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.fillRect(0, 0, w, 6);
+  ctx.fillRect(0, 0, 6, h);
+
+  ctx.restore();
+  return canvas;
+}
+
 function paintEaveNotches(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number): void {
   const i = idx(map, wx, wy);
   if (!map.windows[i]) return;
@@ -1553,6 +1653,10 @@ export class TerrainRenderer {
   /** Insertion-ordered LRU cache: oldest-used key is first. */
   private chunks = new Map<string, HTMLCanvasElement>();
   private buildingBBoxes = new Map<number, BuildingBBox>();
+  /** Roof-off interior canvases, cached per building id the first time it's occupied by a
+   * friendly soldier (see drawOverlays) — building geometry never changes mid-battle so one
+   * bake per id is enough for the whole battle. */
+  private interiorCache = new Map<number, HTMLCanvasElement>();
   private fieldId: Int32Array;
   private fieldAxis = new Map<number, FieldInfo>();
   /** One row-axis angle (degrees) for every crop field on this map, hashed from the map id —
@@ -2043,6 +2147,33 @@ export class TerrainRenderer {
     if (map.dirtyTiles && map.dirtyTiles.length) {
       for (const ti of map.dirtyTiles) this.invalidateTile(ti % map.width, Math.floor(ti / map.width));
       map.dirtyTiles.length = 0;
+    }
+
+    // Roofs disappear when friendly troops occupy a building (CC3 manual): find every building
+    // id containing at least one living player-side soldier this frame, and blit a cached
+    // roof-off interior over its baked roof. Enemy-occupied and empty buildings are untouched —
+    // their roofs stay baked into the chunk canvas underneath.
+    const playerSide = state.config.playerSide;
+    const occupiedBuildings = new Set<number>();
+    for (const s of state.soldiers.values()) {
+      if (s.health === 'dead' || s.side !== playerSide) continue;
+      const tx = Math.floor(s.pos.x), ty = Math.floor(s.pos.y);
+      if (!inBounds(map, tx, ty)) continue;
+      const bid = map.buildingId[idx(map, tx, ty)];
+      if (bid >= 0) occupiedBuildings.add(bid);
+    }
+    for (const bid of occupiedBuildings) {
+      const bb = this.buildingBBoxes.get(bid);
+      if (!bb) continue;
+      let interior = this.interiorCache.get(bid);
+      if (!interior) {
+        interior = paintInterior(map, bb, analyzeFootprint(map, bb), this.seed);
+        this.interiorCache.set(bid, interior);
+      }
+      const s0 = worldToScreen(cam, { x: bb.minX, y: bb.minY });
+      const dw = interior.width * cam.zoom, dh = interior.height * cam.zoom;
+      if (s0.x > VIEW_W || s0.y > VIEW_H || s0.x + dw < 0 || s0.y + dh < 0) continue;
+      ctx.drawImage(interior, s0.x, s0.y, dw, dh);
     }
 
     for (const ti of map.craters) {

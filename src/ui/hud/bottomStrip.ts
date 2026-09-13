@@ -151,7 +151,14 @@ export class BottomStrip {
       const icon = tintedTeamIcon(getTeamIcon(selectedTeam.type), selectedTeam.type);
       ctx.imageSmoothingEnabled = false;
       const iw = icon.width * 2, ih = icon.height * 2;
+      // Clip to the icon slot so oversized icon art can't bleed into the
+      // name bar / status text that starts just to its right.
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(Math.round(TEAM_ICON_R.x), Math.round(TEAM_ICON_R.y), Math.round(TEAM_ICON_R.w), Math.round(TEAM_ICON_R.h));
+      ctx.clip();
       ctx.drawImage(icon, Math.round(TEAM_ICON_R.x + (TEAM_ICON_R.w - iw) / 2), Math.round(TEAM_ICON_R.y + (TEAM_ICON_R.h - ih) / 2), iw, ih);
+      ctx.restore();
 
       const barColor = teamBarColor(selectedTeam);
       ctx.fillStyle = barColor;

@@ -12,8 +12,9 @@ export const COMBAT_MESSAGES_RECT: Rect = { x: 620, y: 632, w: 168, h: 93 };
 const ARROWS_RECT: Rect = { x: 788, y: 632, w: 12, h: 93 };
 const TITLE_RECT: Rect = { x: 620, y: 730, w: 180, h: 36 };
 
-const ROW_H = 23;
-const VISIBLE_ROWS = 4;
+const ROW_H = 31;
+const VISIBLE_ROWS = 3;
+const BODY_LINE_H = 10;
 
 function msgColor(kind: BattleMessage['kind']): string {
   switch (kind) {
@@ -28,9 +29,13 @@ function msgColor(kind: BattleMessage['kind']): string {
   }
 }
 
-/** If `text` begins with a known team's name, split it into (name, rest);
- * otherwise the speaker is displayed as "Report". */
+/** Messages are stored as `${teamName}\n${body}` at the source (sim/victory,
+ * sim/morale, sim/combat); split on that newline. Older/unstructured
+ * messages fall back to matching a known team's name as a prefix, or
+ * "Report" when no team is identifiable. */
 function splitMessage(text: string, teams: Team[]): { who: string; body: string } {
+  const nl = text.indexOf('\n');
+  if (nl >= 0) return { who: text.slice(0, nl), body: text.slice(nl + 1) };
   let best: Team | null = null;
   for (const t of teams) {
     if (!t.name) continue;
@@ -42,6 +47,29 @@ function splitMessage(text: string, teams: Team[]): { who: string; body: string 
   let body = text.slice(best.name.length);
   if (body.startsWith(':')) body = body.slice(1);
   return { who: best.name, body: body.trim() || text };
+}
+
+/** Greedily word-wraps `text` to fit `maxW`, at most `maxLines` lines; the
+ * final line is hard-trimmed (matching clipTextToWidth's no-ellipsis style)
+ * if content still overflows. */
+function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxW: number, maxLines: number): string[] {
+  const words = text.split(' ');
+  const lines: string[] = [];
+  let cur = '';
+  for (const w of words) {
+    const test = cur ? `${cur} ${w}` : w;
+    if (cur && ctx.measureText(test).width > maxW) {
+      lines.push(cur);
+      cur = w;
+    } else {
+      cur = test;
+    }
+  }
+  if (cur) lines.push(cur);
+  if (lines.length <= maxLines) return lines;
+  const shown = lines.slice(0, maxLines);
+  shown[maxLines - 1] = clipTextToWidth(ctx, shown[maxLines - 1], maxW);
+  return shown;
 }
 
 export class CombatMessages {
@@ -104,7 +132,10 @@ export class CombatMessages {
 
       setHudFont(ctx, 'small');
       ctx.fillStyle = msgColor(m.kind);
-      ctx.fillText(clipTextToWidth(ctx, body, COMBAT_MESSAGES_RECT.w - 6), COMBAT_MESSAGES_RECT.x + 3, y + 12);
+      const bodyLines = wrapLines(ctx, body, COMBAT_MESSAGES_RECT.w - 6, 2);
+      for (let li = 0; li < bodyLines.length; li++) {
+        ctx.fillText(bodyLines[li], COMBAT_MESSAGES_RECT.x + 3, y + 12 + li * BODY_LINE_H);
+      }
     }
     ctx.restore();
 

@@ -89,7 +89,10 @@ export function stepVictory(state: BattleState, dt: number): void {
       vl.capturingSide = null;
       vl.captureTimer = 0;
       state.events.push({ kind: 'vlCaptured', side, pos: { x: vl.x, y: vl.y } });
-      addMessage(state, `${sideName(side)} forces have captured ${vl.name}.`, 'good');
+      const isPlayer = side === state.config.playerSide;
+      const header = isPlayer ? sideName(side) : 'Enemy';
+      const body = isPlayer ? `We have taken ${vl.name}.` : `Enemy has taken ${vl.name}.`;
+      addMessage(state, `${header}\n${body}`, 'good');
     }
   }
 

@@ -303,13 +303,13 @@ function teamCenterPos(state: BattleState, team: Team): Vec2 {
 
 function messageForTransition(side: Side, playerSide: Side, teamName: string, status: TeamStatusWord): string | null {
   if (side === playerSide) {
-    if (status === 'Pinned') return `${teamName} is pinned down`;
-    if (status === 'Broken') return `${teamName} has broken`;
-    if (status === 'Routed') return `${teamName} is routing`;
-    if (status === 'Destroyed') return `${teamName} has been destroyed`;
+    if (status === 'Pinned') return `${teamName}\nWe're pinned down.`;
+    if (status === 'Broken') return `${teamName}\nWe're breaking!`;
+    if (status === 'Routed') return `${teamName}\nWe're running!`;
+    if (status === 'Destroyed') return `${teamName}\n${teamName} has been destroyed.`;
     return null;
   }
-  if (status === 'Routed' || status === 'Destroyed') return 'Enemy team is routing';
+  if (status === 'Routed' || status === 'Destroyed') return 'Enemy\nEnemy team is routing.';
   return null;
 }
 

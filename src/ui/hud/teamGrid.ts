@@ -75,7 +75,14 @@ export class TeamGrid {
     const iconScale = 2;
     const iw = icon.width * iconScale, ih = icon.height * iconScale;
     ctx.imageSmoothingEnabled = false;
+    // Clip the (often wider-than-the-slot) icon art to its icon cell so it
+    // never bleeds into the status-word column to its right.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(Math.round(iconRect.x), Math.round(iconRect.y), Math.round(iconRect.w), Math.round(iconRect.h));
+    ctx.clip();
     ctx.drawImage(icon, Math.round(iconRect.x + (iconRect.w - iw) / 2), Math.round(iconRect.y + (iconRect.h - ih) / 2), iw, ih);
+    ctx.restore();
 
     const barX = r.x + iconAreaW + 2;
     const barW = r.w - iconAreaW - 4;

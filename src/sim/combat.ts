@@ -203,9 +203,11 @@ export function applyHit(
   state.sides[victim.side].losses++;
 
   if (victim.side === state.config.playerSide) {
-    addMessage(state, `${victim.rank}. ${victim.name} has been ${result === 'dead' ? 'killed' : 'incapacitated'}`, 'bad');
+    const victimTeam = state.teams.get(victim.teamId);
+    const verb = result === 'dead' ? 'killed' : 'wounded';
+    addMessage(state, `${victimTeam?.name ?? 'Report'}\n${victim.rank}. ${victim.name} has been ${verb}.`, 'bad');
   } else {
-    addMessage(state, `Enemy soldier killed by ${killerTeam?.name ?? 'friendly forces'}`, 'good');
+    addMessage(state, `${killerTeam?.name ?? 'Report'}\nEnemy soldier killed.`, 'good');
   }
 }
 
