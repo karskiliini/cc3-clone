@@ -13,11 +13,18 @@ npm test           # vitest: sim unit tests + AI-vs-AI balance harness
 npm run build
 ```
 
-## Controls (as in the original)
+## Controls
 
-- Left click a soldier or a team box: select team. Drag a box on the map: group select.
-- Right click: command menu. Hotkeys: **Z** Move, **X** Move Fast, **C** Sneak, **V** Fire,
-  **B** Smoke, **N** Defend, **M** Ambush. Shift-click adds waypoints. Esc cancels.
+Classic (as in the original) and modern controls coexist. There is never a default order: pick the
+order first (hotkey, order bar, or right-click menu), then click the target.
+
+- Select: left click a soldier or a team box; drag a rectangle on the map for group select;
+  Shift adds to the selection; Ctrl+A selects all; double-click a team box to centre on it.
+- Orders: press **Z** Move, **X** Move Fast, **C** Sneak, **V** Fire, **B** Smoke, **N** Defend,
+  **M** Ambush (or click the order bar in the bottom strip, or right-click for the classic menu),
+  then click the target. Shift-click adds waypoints. Esc cancels.
+- Scroll: two-finger scroll / mouse wheel pans; pinch or Ctrl+wheel zooms around the pointer;
+  middle-drag or Space+drag pans; screen edges and arrows/WASD scroll too.
 - Hold **Alt** while placing a Fire order: line of sight (bright green clear, dark green obscured, red blocked).
 - **F3** pause, **F5** team data, **F6** inset map, **F7** soldier monitor, **F8** options, **O** overview map,
   **Ctrl+K** toggle corpses, **+ / −** zoom, arrows or screen edge to scroll.
