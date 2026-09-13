@@ -5,12 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Close Combat III Clone</title>
     <style>
-      html,body{margin:0;padding:0;background:#000;overflow:hidden;height:100%;width:100%}
-      #game{display:block;image-rendering:pixelated;image-rendering:crisp-edges;width:100vw;height:100vh;object-fit:contain;background:#000;cursor:none}
+      html,body{margin:0;padding:0;background:#000;overflow:hidden;height:100%;width:100%;user-select:none;-webkit-user-select:none}
+      #game{display:block;image-rendering:pixelated;image-rendering:crisp-edges;width:100vw;height:100vh;object-fit:contain;background:#000;cursor:default;touch-action:none;user-select:none;-webkit-user-select:none}
     </style>
   </head>
-  <body>
-    <canvas id="game" width="1024" height="768"></canvas>
+  <body oncontextmenu="return false">
+    <canvas id="game" width="1024" height="768" oncontextmenu="return false"></canvas>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

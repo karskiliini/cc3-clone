@@ -31,16 +31,15 @@ function paintMap(p: MapPainter): void {
   p.orchard(40, 35, 8, 8, 2); // remnants of an old homestead orchard gone wild
 
   // river running roughly north-south with meanders, a bridge and a ford, banked with mud
-  p.river([
+  const river = [
     { x: 100, y: 0 }, { x: 104, y: 25 }, { x: 98, y: 45 }, { x: 104, y: 60 },
     { x: 96, y: 80 }, { x: 100, y: 100 }, { x: 94, y: 120 }, { x: 100, y: 140 }, { x: 98, y: 160 },
-  ], 3);
+  ];
+  p.river(river, 3);
   // a few large mud patches along the riverbanks
   p.patch(102, 25, 4, 'mud');
   p.patch(97, 70, 4, 'mud');
   p.patch(97, 130, 4, 'mud');
-  p.bridge(96, 57, 14, 6);
-  p.bridge(87, 117, 14, 2); // ford, narrower crossing off the main road
 
   // forester's lodge with a woodpile and a small fenced garden
   p.building(40, 40, 7, 6, 'wood');
@@ -54,20 +53,40 @@ function paintMap(p: MapPainter): void {
   p.addDecor('log', 165, 101);
 
   // corduroy (dirt) road winding through the woods, crossing the main bridge
-  p.road([
+  const mainRoad = [
     { x: 10, y: 145 }, { x: 40, y: 132 }, { x: 65, y: 118 }, { x: 90, y: 100 },
     { x: 96, y: 88 }, { x: 96, y: 58 }, { x: 110, y: 45 }, { x: 140, y: 32 }, { x: 170, y: 18 }, { x: 190, y: 8 },
-  ], 2, 'dirtroad');
-  p.road([{ x: 60, y: 128 }, { x: 74, y: 122 }, { x: 87, y: 118 }], 2, 'dirtroad'); // spur to the ford
+  ];
+  p.road(mainRoad, 2, 'dirtroad');
+  // bridge rect computed from the actual road/river intersection (round-3 fix: the old
+  // hand-placed rect sat well north of where the road really meets the river)
+  p.bridgeAcross(mainRoad, 2, river, 3, { near: { x: 103, y: 57 } });
+  // spur to the ford — extended so it actually reaches and crosses the river (it used to stop
+  // one bank short, leaving a "ford" bridge tile floating on dry ground)
+  const fordRoad = [{ x: 60, y: 128 }, { x: 74, y: 122 }, { x: 87, y: 118 }, { x: 100, y: 116 }];
+  p.road(fordRoad, 2, 'dirtroad');
+  p.bridgeAcross(fordRoad, 2, river, 3, { near: { x: 96, y: 118 } });
   p.treeLine([{ x: 10, y: 145 }, { x: 40, y: 132 }, { x: 65, y: 118 }], 3, 0.35);
+  p.decorLine(mainRoad, 'pole', 9);
+  p.craterLine(mainRoad, { tStart: 0.3, tEnd: 0.75, seedOffset: 90 });
 
-  // decor: forest scatter
-  p.scatterDecor('stump', 0, 0, WIDTH, HEIGHT, 26, 40);
-  p.scatterDecor('log', 0, 0, WIDTH, HEIGHT, 18, 41);
-  p.scatterDecor('bush', 0, 0, WIDTH, HEIGHT, 20, 42);
-  p.scatterDecor('rocks', 0, 0, WIDTH, HEIGHT, 12, 43);
+  // stumps/log piles ringing the big wood masses where logging has bitten into their edges,
+  // and a wrecked vehicle bogged near the ford
+  p.scatterDecor('stump', 30, 55, 30, 30, 10, 46);
+  p.scatterDecor('stump', 130, 100, 30, 30, 10, 47);
+  p.scatterDecor('log', 55, 90, 26, 26, 8, 48);
+  p.addDecor('wreck', 90, 116);
+  p.addDecor('cart', 44, 45);
+
+  // decor: forest scatter (round-3 density pass)
+  p.scatterDecor('stump', 0, 0, WIDTH, HEIGHT, 30, 40);
+  p.scatterDecor('log', 0, 0, WIDTH, HEIGHT, 24, 41);
+  p.scatterDecor('bush', 0, 0, WIDTH, HEIGHT, 26, 42);
+  p.scatterDecor('rocks', 0, 0, WIDTH, HEIGHT, 16, 43);
   p.scatterDecor('puddle', 60, 70, 90, 60, 10, 44);
   p.scatterDecor('flowers', 130, 80, 30, 25, 6, 45);
+  p.scatterDecor('barrel', 30, 30, 30, 20, 4, 49);
+  p.scatterDecor('crate', 150, 90, 30, 20, 4, 50);
   p.addDecor('sign', 96, 62);
   p.addDecor('sign', 87, 116);
 }

@@ -23,6 +23,11 @@ interface CombatTrack {
    * for the balance harness's "hit rate" metric (see tools/simHarness / test/harness.test.ts). */
   smallArmsFired: number;
   smallArmsHit: number;
+  /** Balance round 4 instrumentation (see test/harness.test.ts): total shots fired, suppression
+   * points applied to the enemy, and mortar HE rounds fired, all keyed by the FIRING side. */
+  shotsFiredBySide: Record<Side, number>;
+  suppressionAppliedBySide: Record<Side, number>;
+  mortarRoundsFiredBySide: Record<Side, number>;
 }
 
 const tracks = new WeakMap<BattleState, CombatTrack>();
@@ -33,6 +38,9 @@ function getTrack(state: BattleState): CombatTrack {
     t = {
       grenadeTimer: new Map(), outOfAmmoMessaged: new Set(), smokeRounds: new Map(),
       smallArmsFired: 0, smallArmsHit: 0,
+      shotsFiredBySide: { german: 0, soviet: 0 },
+      suppressionAppliedBySide: { german: 0, soviet: 0 },
+      mortarRoundsFiredBySide: { german: 0, soviet: 0 },
     };
     tracks.set(state, t);
   }
@@ -45,6 +53,29 @@ const SMALL_ARMS_CLASSES = new Set(['rifle', 'smg', 'lmg', 'hmg', 'pistol', 'coa
 export function getSmallArmsStats(state: BattleState): { fired: number; hit: number } {
   const t = getTrack(state);
   return { fired: t.smallArmsFired, hit: t.smallArmsHit };
+}
+
+function addShots(state: BattleState, side: Side, n: number): void {
+  getTrack(state).shotsFiredBySide[side] += n;
+}
+
+function addSuppressionStat(state: BattleState, side: Side, amount: number): void {
+  getTrack(state).suppressionAppliedBySide[side] += amount;
+}
+
+/** Balance round 4 instrumentation: cumulative shots fired / suppression applied (to the enemy) /
+ * mortar HE rounds fired, by firing side, for the whole battle so far. */
+export function getCombatInstrumentation(state: BattleState): {
+  shotsFiredBySide: Record<Side, number>;
+  suppressionAppliedBySide: Record<Side, number>;
+  mortarRoundsFiredBySide: Record<Side, number>;
+} {
+  const t = getTrack(state);
+  return {
+    shotsFiredBySide: { ...t.shotsFiredBySide },
+    suppressionAppliedBySide: { ...t.suppressionAppliedBySide },
+    mortarRoundsFiredBySide: { ...t.mortarRoundsFiredBySide },
+  };
 }
 
 // ------------------------------------------------------------------ target
@@ -228,7 +259,9 @@ export function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: W
       if (rng.chance(chance)) {
         applyHit(state, s, weapon, rng, shooterSide);
       } else {
-        s.suppression = clamp(s.suppression + weapon.suppression * 30, 0, 100);
+        const amount = weapon.suppression * 30;
+        s.suppression = clamp(s.suppression + amount, 0, 100);
+        addSuppressionStat(state, shooterSide, amount);
       }
     }
   }
@@ -309,14 +342,24 @@ function fireAtVehicle(
 }
 
 // -------------------------------------------------------------- firing
+// Balance round 4: near-miss suppression radius widened 1 -> 1.5 tiles (3m) so that massed fire
+// aimed near a group (not scoring an actual hit) suppresses the whole group, not just whoever
+// happens to stand within 2m of the exact impact point — this is what should be making defenders
+// stop shooting back under heavy incoming fire even when the attacker's low hit-chance-in-cover
+// means they rarely actually kill anyone (see the suppression fire-rate throttle in
+// stepSoldierCombat below, which is what actually converts this suppression into fewer shots back).
+const SUPPRESSION_SPLASH_RADIUS_TILES = 1.5;
+
 function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: WeaponDef, target: Target, wantTracer: boolean): void {
   const map = state.map;
   if (target.kind === 'point') {
     for (const s2 of state.soldiers.values()) {
       if (s2.side === shooter.side) continue;
       if (s2.health === 'dead' || s2.health === 'incapacitated') continue;
-      if (dist(s2.pos, target.pos) <= 1) {
-        s2.suppression = clamp(s2.suppression + weapon.suppression * 40 * (1 - (s2.cover ?? 0) * 0.5), 0, 100);
+      if (dist(s2.pos, target.pos) <= SUPPRESSION_SPLASH_RADIUS_TILES) {
+        const amount = weapon.suppression * 40 * (1 - (s2.cover ?? 0) * 0.5);
+        s2.suppression = clamp(s2.suppression + amount, 0, 100);
+        addSuppressionStat(state, shooter.side, amount);
       }
     }
     if (wantTracer) state.tracers.push({ from: { ...shooter.pos }, to: { ...target.pos }, t: 0, hit: false, kind: tracerKindFor(weapon) });
@@ -357,11 +400,15 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
       if (s2.side === shooter.side) continue;
       if (s2.health === 'dead' || s2.health === 'incapacitated') continue;
       if (s2.id === victim.id) continue;
-      if (dist(s2.pos, impact) <= 1) {
-        s2.suppression = clamp(s2.suppression + weapon.suppression * 40 * (1 - (s2.cover ?? 0) * 0.5), 0, 100);
+      if (dist(s2.pos, impact) <= SUPPRESSION_SPLASH_RADIUS_TILES) {
+        const amount = weapon.suppression * 40 * (1 - (s2.cover ?? 0) * 0.5);
+        s2.suppression = clamp(s2.suppression + amount, 0, 100);
+        addSuppressionStat(state, shooter.side, amount);
       }
     }
-    victim.suppression = clamp(victim.suppression + weapon.suppression * 20, 0, 100);
+    const directAmount = weapon.suppression * 20;
+    victim.suppression = clamp(victim.suppression + directAmount, 0, 100);
+    addSuppressionStat(state, shooter.side, directAmount);
   }
 }
 
@@ -386,11 +433,14 @@ function fireBurst(state: BattleState, rng: Rng, soldier: Soldier, weapon: Weapo
     : weapon.cls === 'smg' || weapon.cls === 'rifle' ? 3
     : 0;
 
+  let roundsFired = 0;
   for (let i = 0; i < weapon.burst; i++) {
     if (soldier.ammo <= 0) break;
     soldier.ammo--;
+    roundsFired++;
     resolveRound(state, rng, soldier, weapon, target, tracerEvery > 0 && i % tracerEvery === 0);
   }
+  addShots(state, soldier.side, roundsFired);
 }
 
 function stepSoldierCombat(state: BattleState, rng: Rng, dt: number, soldier: Soldier, track: CombatTrack): void {
@@ -425,6 +475,15 @@ function stepSoldierCombat(state: BattleState, rng: Rng, dt: number, soldier: So
   }
 
   if (soldier.fireTimer > 0) return;
+
+  // Balance round 4: a soldier's OWN suppression should throttle how often they return fire, not
+  // just degrade their accuracy (ballistics.ts's shooterFactor already does that). Design brief
+  // §6.7: suppression >60 -> pinned ("won't move, may fire"), >85 -> cowering (doesn't fire, and
+  // canSoldierFire already excludes 'cowering'). This makes ">60 fires at ~30% rate, >85 not at
+  // all" true from the raw suppression VALUE this same tick, instead of waiting a frame for the
+  // activity transition in stepMorale (which runs after stepCombat) to catch up.
+  if (soldier.suppression > 85) return;
+  if (soldier.suppression > 60 && !rng.chance(0.3)) return;
 
   const target = pickTarget(state, soldier, team, weapon);
   if (!target) return;
@@ -568,6 +627,8 @@ function stepMortarTeam(state: BattleState, rng: Rng, dt: number, team: Team, tr
   }
 
   state.tracers.push({ from: { ...gunner.pos }, to: impact, t: 0, hit: true, kind: 'mortar' });
+  track.mortarRoundsFiredBySide[gunner.side]++;
+  addShots(state, gunner.side, 1);
   applyHESplash(state, rng, impact, weapon, gunner.side);
 }
 
@@ -685,6 +746,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
     if (facingDiff <= 0.1 && vehicle.mainFireTimer <= 0 && hasLOS(state.map, vehicle.pos, tPos)) {
       vehicle.mainFireTimer = 1 / weapon.rate;
       vehicle.mainAmmo--;
+      addShots(state, vehicle.side, 1);
       state.events.push({ kind: 'shot', pos: { ...vehicle.pos }, weaponId: weapon.id, side: vehicle.side });
       state.flashes.push({ pos: { ...vehicle.pos }, facing: facingRef, t: 0, kind: 'shell' });
 
@@ -709,16 +771,32 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
     if (infTarget && vehicle.coaxFireTimer <= 0 && hasLOS(state.map, vehicle.pos, infTarget.pos)) {
       vehicle.coaxFireTimer = 1 / coax.rate;
       state.events.push({ kind: 'shot', pos: { ...vehicle.pos }, weaponId: coax.id, side: vehicle.side });
+      let coaxRounds = 0;
       for (let i = 0; i < coax.burst && vehicle.coaxAmmo > 0; i++) {
         vehicle.coaxAmmo--;
+        coaxRounds++;
         const distM = dist(vehicle.pos, infTarget.pos) * TILE_M;
         const cover = coverAt(state.map, infTarget.pos);
         const moving = infTarget.activity === 'moving' || infTarget.activity === 'movingFast';
         const p = vehicleHitChance(coax, distM, cover, infTarget.stance, moving);
         const hit = rng.chance(p);
         state.tracers.push({ from: { ...vehicle.pos }, to: { ...infTarget.pos }, t: 0, hit, kind: 'bullet' });
-        if (hit) applyHit(state, infTarget, coax, rng, vehicle.side);
+        if (hit) {
+          applyHit(state, infTarget, coax, rng, vehicle.side);
+        } else {
+          // Balance round 4: a vehicle coax MG missing should still suppress nearby infantry —
+          // this was previously a silent miss with no suppression at all, understating how
+          // dangerous a tank's coax MG is to infantry pinned in the open near it.
+          for (const s2 of state.soldiers.values()) {
+            if (s2.side === vehicle.side || s2.health === 'dead' || s2.health === 'incapacitated') continue;
+            if (dist(s2.pos, infTarget.pos) > SUPPRESSION_SPLASH_RADIUS_TILES) continue;
+            const amount = coax.suppression * 35 * (1 - (s2.cover ?? 0) * 0.5);
+            s2.suppression = clamp(s2.suppression + amount, 0, 100);
+            addSuppressionStat(state, vehicle.side, amount);
+          }
+        }
       }
+      addShots(state, vehicle.side, coaxRounds);
     }
   }
 }

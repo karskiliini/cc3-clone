@@ -8,7 +8,7 @@ import type {
 import { VIEW_W, VIEW_H, ORDER_DOT_COLOR } from '@/shared/types';
 import { facingAngle } from '@/shared/math';
 import { worldToScreen } from '@/engine/camera';
-import { PALETTE } from '@/render/palette';
+import { PALETTE, SIDE_COLOR } from '@/render/palette';
 import { getSoldierSprite, getVehicleSprite, getFlagSprite } from '@/render/sprites';
 import { drawText, textWidth } from '@/render/pixelfont';
 import { VEHICLE_DEFS } from '@/data/units';
@@ -50,12 +50,29 @@ function drawTeamBars(
   }
 }
 
-function rotateAndDraw(ctx: CanvasRenderingContext2D, sprite: HTMLCanvasElement, cx: number, cy: number, rad: number): void {
+/** Minimum on-screen sprite size, in px, below which we scale back up rather than let a unit
+ * shrink to an unreadable speck (sprites otherwise scale 1:1 with cam.zoom). */
+const MIN_SPRITE_PX = 6;
+
+/** `sprite.width/height * zoom`, clamped so the larger dimension never drops below
+ * MIN_SPRITE_PX (uniformly, so the sprite doesn't distort). */
+function spriteDrawSize(sprite: HTMLCanvasElement, zoom: number): { dw: number; dh: number } {
+  let dw = sprite.width * zoom, dh = sprite.height * zoom;
+  const largest = Math.max(dw, dh);
+  if (largest > 0 && largest < MIN_SPRITE_PX) {
+    const s = MIN_SPRITE_PX / largest;
+    dw *= s; dh *= s;
+  }
+  return { dw, dh };
+}
+
+function rotateAndDraw(ctx: CanvasRenderingContext2D, sprite: HTMLCanvasElement, cx: number, cy: number, rad: number, zoom: number): void {
   ctx.save();
   ctx.imageSmoothingEnabled = false;
   ctx.translate(cx, cy);
   ctx.rotate(rad);
-  ctx.drawImage(sprite, -sprite.width / 2, -sprite.height / 2);
+  const { dw, dh } = spriteDrawSize(sprite, zoom);
+  ctx.drawImage(sprite, -dw / 2, -dh / 2, dw, dh);
   ctx.restore();
 }
 
@@ -83,7 +100,8 @@ function drawCorpses(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     const p = worldToScreen(cam, s.pos);
     if (!visible(s.pos, cam)) continue;
     const sprite = getSoldierSprite(s.side, season, 'dead', s.facing, 0);
-    ctx.drawImage(sprite, Math.round(p.x - sprite.width / 2), Math.round(p.y - sprite.height / 2));
+    const { dw, dh } = spriteDrawSize(sprite, cam.zoom);
+    ctx.drawImage(sprite, Math.round(p.x - dw / 2), Math.round(p.y - dh / 2), dw, dh);
   }
 }
 
@@ -95,11 +113,11 @@ function drawVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
     const spriteState = koLike ? 'knockedOut' : 'ok';
     const p = worldToScreen(cam, veh.pos);
     const hull = getVehicleSprite(veh.defId, 'hull', spriteState);
-    rotateAndDraw(ctx, hull, p.x, p.y, veh.hullFacing);
+    rotateAndDraw(ctx, hull, p.x, p.y, veh.hullFacing, cam.zoom);
     const def = VEHICLE_DEFS[veh.defId];
     if (def && def.hasTurret) {
       const turret = getVehicleSprite(veh.defId, 'turret', spriteState);
-      rotateAndDraw(ctx, turret, p.x, p.y, veh.turretFacing);
+      rotateAndDraw(ctx, turret, p.x, p.y, veh.turretFacing, cam.zoom);
     }
   }
 }
@@ -130,7 +148,40 @@ function drawFacingTick(ctx: CanvasRenderingContext2D, p: { x: number; y: number
   ctx.restore();
 }
 
+/** Manual: "soldier outlines visible only in normal and zoomed-in views" — at the zoomed-OUT
+ * (0.5) level individual soldier sprites are replaced by one small 2x2 cluster of dots per
+ * team, in the side's colour, instead of drawing (and shrinking) each soldier's sprite. */
+const DOT_SIZE = 2;
+const DOT_GAP = 1;
+
+function drawSoldierDotClusters(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side): void {
+  const teamPos = new Map<number, { sumX: number; sumY: number; n: number; side: Side }>();
+  for (const s of state.soldiers.values()) {
+    if (s.health === 'dead' || s.vehicleId != null) continue;
+    if (!isEnemyVisible(state, playerSide, s.side, s.id, false)) continue;
+    if (!visible(s.pos, cam)) continue;
+    let g = teamPos.get(s.teamId);
+    if (!g) { g = { sumX: 0, sumY: 0, n: 0, side: s.side }; teamPos.set(s.teamId, g); }
+    g.sumX += s.pos.x; g.sumY += s.pos.y; g.n++;
+  }
+  for (const g of teamPos.values()) {
+    if (g.n === 0) continue;
+    const p = worldToScreen(cam, { x: g.sumX / g.n, y: g.sumY / g.n });
+    ctx.fillStyle = SIDE_COLOR[g.side];
+    const x0 = Math.round(p.x - DOT_GAP - DOT_SIZE), x1 = Math.round(p.x + DOT_GAP);
+    const y0 = Math.round(p.y - DOT_GAP - DOT_SIZE), y1 = Math.round(p.y + DOT_GAP);
+    ctx.fillRect(x0, y0, DOT_SIZE, DOT_SIZE);
+    ctx.fillRect(x1, y0, DOT_SIZE, DOT_SIZE);
+    ctx.fillRect(x0, y1, DOT_SIZE, DOT_SIZE);
+    ctx.fillRect(x1, y1, DOT_SIZE, DOT_SIZE);
+  }
+}
+
 function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side, selectedTeamIds: readonly number[]): void {
+  if (cam.zoom <= 0.5) {
+    drawSoldierDotClusters(ctx, cam, state, playerSide);
+    return;
+  }
   const season = state.map.def.season;
   for (const s of state.soldiers.values()) {
     if (s.health === 'dead') continue;
@@ -142,7 +193,8 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
     if (selected) drawSelectionRing(ctx, p);
     const stance = s.health === 'incapacitated' ? 'prone' : s.stance;
     const sprite = getSoldierSprite(s.side, season, stance, s.facing, frameOf(s));
-    ctx.drawImage(sprite, Math.round(p.x - sprite.width / 2), Math.round(p.y - sprite.height / 2));
+    const { dw, dh } = spriteDrawSize(sprite, cam.zoom);
+    ctx.drawImage(sprite, Math.round(p.x - dw / 2), Math.round(p.y - dh / 2), dw, dh);
     // 2px facing tick in front of the soldier, only for the selected team.
     if (selected) drawFacingTick(ctx, p, s.facing);
   }
@@ -165,13 +217,17 @@ function drawOutlinedLabel(ctx: CanvasRenderingContext2D, text: string, cx: numb
 }
 
 const FLAG_SCALE = 1.6; // native flag sprite art is small; scale up so it reads as a flag, not a dot
+/** Flag size steps with zoom in whole multiples of the zoom-1 size (1x at zoom 1, 2x at zoom
+ * 2), never below 1x — `FLAG_SCALE * cam.zoom` used to make the flag scale linearly with zoom,
+ * which made it huge (1.6*2=3.2x) at zoom 2 and shrink at zoom 0.5 instead of staying legible. */
+function flagZoomFactor(zoom: number): number { return zoom >= 2 ? 2 : 1; }
 
 function drawFlags(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
   for (const vl of state.map.victoryLocations) {
     const pos = { x: vl.x, y: vl.y };
     if (!visible(pos, cam)) continue;
     const p = worldToScreen(cam, pos);
-    const scale = FLAG_SCALE * cam.zoom;
+    const scale = FLAG_SCALE * flagZoomFactor(cam.zoom);
     const contested = vl.capturingSide != null && vl.capturingSide !== vl.owner;
     if (contested) {
       // Split flag: owner's colours on the left half, the capturing side's on the right.

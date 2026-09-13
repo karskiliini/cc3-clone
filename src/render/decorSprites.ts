@@ -3,7 +3,7 @@
 // (DecorItem/DecorKind from shared/types). Cached by kind+variant, drawn onto
 // baked terrain chunks by terrainRender.ts's drawDecor().
 // ============================================================================
-import type { DecorKind } from '@/shared/types';
+import type { DecorKind, Season } from '@/shared/types';
 import { createCanvas, ctx2d } from '@/render/pixelUtil';
 import { hash2 } from '@/shared/rng';
 
@@ -134,16 +134,60 @@ function buildLog(): HTMLCanvasElement {
   return c;
 }
 
-function buildShellhole(): HTMLCanvasElement {
-  const c = createCanvas(5, 5);
+/** A flat crater: an irregular ring (raised rim, lit NW / shadowed SE) around a darker pit,
+ * rather than the old solid dark ellipse that read as a grey sphere. `variant` both jitters the
+ * rim shape and sets size (8-12px); in winter the rim reads dirty grey with a snow-dusted outer
+ * edge instead of the summer dirt-brown tones. */
+function buildShellhole(variant: number, season: Season): HTMLCanvasElement {
+  const size = 8 + (variant % 3) * 2; // 8, 10, 12
+  const c = createCanvas(size, size);
   const ctx = ctx2d(c);
-  ctx.globalAlpha = 0.55;
-  ctx.fillStyle = '#2a2620';
-  ctx.beginPath(); ctx.ellipse(2.5, 2.5, 2.3, 1.9, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.globalAlpha = 0.4;
-  ctx.strokeStyle = '#6a6050';
-  ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.ellipse(2.5, 2.5, 2.1, 1.7, 0, 0, Math.PI * 2); ctx.stroke();
+  const cx = size / 2, cy = size / 2;
+  const rOuter = size / 2 - 0.5;
+  const rInner = rOuter * 0.5;
+  const winter = season === 'winter';
+  const rimLight = winter ? '#9a9690' : '#8a7548';
+  const rimMid = winter ? '#6c6c66' : '#5a4830';
+  const rimDark = winter ? '#3c3e3c' : '#2a2018';
+  const centerColor = winter ? '#484a48' : '#221c14';
+
+  const ring = (r: number, seedOffset: number): void => {
+    const steps = 10;
+    ctx.beginPath();
+    for (let i = 0; i <= steps; i++) {
+      const a = (i / steps) * Math.PI * 2;
+      const jitter = 0.8 + hash2(i, variant, 4471 + seedOffset) * 0.35;
+      const rx = cx + Math.cos(a) * r * jitter;
+      const ry = cy + Math.sin(a) * r * jitter;
+      if (i === 0) ctx.moveTo(rx, ry); else ctx.lineTo(rx, ry);
+    }
+    ctx.closePath();
+  };
+
+  ctx.globalAlpha = 0.7;
+  // raised rim: irregular ring, lit on the NW side and shadowed SE via a diagonal gradient
+  ring(rOuter, 0);
+  const grad = ctx.createLinearGradient(0, 0, size, size);
+  grad.addColorStop(0, rimLight);
+  grad.addColorStop(0.55, rimMid);
+  grad.addColorStop(1, rimDark);
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // darker pit at the centre
+  ring(rInner, 1000);
+  ctx.fillStyle = centerColor;
+  ctx.fill();
+
+  if (winter) {
+    // snow dusted onto the outer edge of the rim, mostly the lit NW arc
+    ctx.globalAlpha = 0.5;
+    ctx.strokeStyle = 'rgba(232,238,242,0.65)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rOuter * 0.9, rOuter * 0.78, -Math.PI / 4, Math.PI * 0.9, Math.PI * 1.7);
+    ctx.stroke();
+  }
   ctx.globalAlpha = 1;
   return c;
 }
@@ -229,7 +273,7 @@ function buildFlowers(variant: number): HTMLCanvasElement {
   return c;
 }
 
-function build(kind: DecorKind, variant: number): HTMLCanvasElement {
+function build(kind: DecorKind, variant: number, season: Season): HTMLCanvasElement {
   switch (kind) {
     case 'haystack': return buildHaystack(variant);
     case 'well': return buildWell();
@@ -239,7 +283,7 @@ function build(kind: DecorKind, variant: number): HTMLCanvasElement {
     case 'pole': return buildPole();
     case 'rocks': return buildRocks();
     case 'log': return buildLog();
-    case 'shellhole': return buildShellhole();
+    case 'shellhole': return buildShellhole(variant, season);
     case 'grave': return buildGrave();
     case 'sign': return buildSign();
     case 'barrel': return buildBarrel();
@@ -253,9 +297,10 @@ function build(kind: DecorKind, variant: number): HTMLCanvasElement {
   }
 }
 
-/** Cached small decor sprite (transparent canvas), keyed by kind+variant. */
-export function getDecorSprite(kind: DecorKind, variant = 0): HTMLCanvasElement {
-  return cached(`decor|${kind}|${variant}`, () => build(kind, variant));
+/** Cached small decor sprite (transparent canvas), keyed by kind+variant(+season for the
+ * season-sensitive kinds). */
+export function getDecorSprite(kind: DecorKind, variant = 0, season: Season = 'summer'): HTMLCanvasElement {
+  return cached(`decor|${kind}|${variant}|${season}`, () => build(kind, variant, season));
 }
 
 /** True if this decor kind casts a visible 1px dark shadow when drawn. */
@@ -264,8 +309,8 @@ export function decorHasShadow(kind: DecorKind): boolean {
 }
 
 /** Draw one decor item centred at world pixel (cx, cy) with its shadow. */
-export function drawDecorItem(ctx: CanvasRenderingContext2D, kind: DecorKind, cx: number, cy: number, variant = 0): void {
-  const sprite = getDecorSprite(kind, variant);
+export function drawDecorItem(ctx: CanvasRenderingContext2D, kind: DecorKind, cx: number, cy: number, variant = 0, season: Season = 'summer'): void {
+  const sprite = getDecorSprite(kind, variant, season);
   const dx = Math.round(cx - sprite.width / 2);
   const dy = Math.round(cy - sprite.height / 2);
   if (decorHasShadow(kind)) {

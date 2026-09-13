@@ -155,6 +155,58 @@ export class MapPainter {
     this.rect(x, y, w, h, 'bridge');
   }
 
+  /** Intersection of two line segments (a-b, c-d), or null if they don't cross within both
+   * segments' extent. Used by `bridgeAcross` to find where a road actually crosses a river. */
+  private segIntersect(a: Vec2, b: Vec2, c: Vec2, d: Vec2): Vec2 | null {
+    const d1x = b.x - a.x, d1y = b.y - a.y;
+    const d2x = d.x - c.x, d2y = d.y - c.y;
+    const denom = d1x * d2y - d1y * d2x;
+    if (Math.abs(denom) < 1e-9) return null;
+    const t = ((c.x - a.x) * d2y - (c.y - a.y) * d2x) / denom;
+    const s = ((c.x - a.x) * d1y - (c.y - a.y) * d1x) / denom;
+    if (t < 0 || t > 1 || s < 0 || s > 1) return null;
+    return { x: a.x + t * d1x, y: a.y + t * d1y };
+  }
+
+  /** Finds where a road polyline actually crosses a river polyline and paints a `bridge` rect
+   * that covers exactly the road's width across the river, plus one tile of bank on each side —
+   * instead of a hand-placed rect that can drift off the true crossing point (and render as
+   * planks floating beside the road instead of on it). If the road/river bend more than once
+   * near each other, pass `near` (approx. tile coords) to pick the intersection closest to it;
+   * otherwise the first intersection found (in road-then-river segment order) is used. Returns
+   * the crossing point, or null if the polylines never cross. */
+  bridgeAcross(roadPoints: Vec2[], roadWidth: number, riverPoints: Vec2[], riverWidth: number, opts: { bankMargin?: number; near?: Vec2 } = {}): Vec2 | null {
+    const { bankMargin = 1, near } = opts;
+    const hits: { pt: Vec2; roadDx: number; roadDy: number }[] = [];
+    for (let ri = 0; ri < roadPoints.length - 1; ri++) {
+      const a = roadPoints[ri], b = roadPoints[ri + 1];
+      for (let rj = 0; rj < riverPoints.length - 1; rj++) {
+        const c = riverPoints[rj], d = riverPoints[rj + 1];
+        const hit = this.segIntersect(a, b, c, d);
+        if (hit) hits.push({ pt: hit, roadDx: b.x - a.x, roadDy: b.y - a.y });
+      }
+    }
+    if (!hits.length) return null;
+    let chosen = hits[0];
+    if (near) {
+      let bestD = Infinity;
+      for (const h of hits) {
+        const d = Math.hypot(h.pt.x - near.x, h.pt.y - near.y);
+        if (d < bestD) { bestD = d; chosen = h; }
+      }
+    }
+    // the bridge's long axis runs along the shallower (more road-like) of the two directions at
+    // the crossing, spanning the river's width + bank margins; its short axis matches the road's
+    // width. Compare the road segment's own slope steepness to decide which screen axis is which.
+    const roadIsSteeper = Math.abs(chosen.roadDy) > Math.abs(chosen.roadDx);
+    const longAxis = riverWidth + bankMargin * 2;
+    const shortAxis = roadWidth + 1; // +1 tile safety margin so a diagonal road/river never clips
+    const w = roadIsSteeper ? shortAxis : longAxis;
+    const h = roadIsSteeper ? longAxis : shortAxis;
+    this.bridge(chosen.pt.x - w / 2, chosen.pt.y - h / 2, w, h);
+    return chosen.pt;
+  }
+
   building(x: number, y: number, w: number, h: number, kind: 'wood' | 'stone'): void {
     const wallT: Terrain = kind === 'wood' ? 'buildingWood' : 'buildingStone';
     const x0 = Math.floor(x), y0 = Math.floor(y);
@@ -322,6 +374,56 @@ export class MapPainter {
     if (cw > 2 && ch > 2) this.rect(x + ring, y + ring, cw, ch, courtyard);
     const gx = Math.floor(x + w / 2) - 1;
     this.rect(gx, y + h - ring - 1, 2, ring + 1, 'pavedroad');
+  }
+
+  /** Places small 'crater'/'shellhole' battle-damage clusters along a polyline at ~15-25 tile
+   * intervals (jittered, offset a couple of tiles to one side of the centerline) — optionally
+   * restricted to a `[tStart,tEnd]` fraction of the polyline's total length, so damage can
+   * concentrate in the contested middle third of a road rather than spreading evenly end to end. */
+  craterLine(points: Vec2[], opts: { tStart?: number; tEnd?: number; radius?: number; seedOffset?: number; minGap?: number; maxGap?: number } = {}): void {
+    const { tStart = 0, tEnd = 1, radius = 1.4, seedOffset = 0, minGap = 15, maxGap = 25 } = opts;
+    const segs: { a: Vec2; b: Vec2; len: number }[] = [];
+    let total = 0;
+    for (let s = 0; s < points.length - 1; s++) {
+      const a = points[s], b = points[s + 1];
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      segs.push({ a, b, len });
+      total += len;
+    }
+    if (total <= 0) return;
+    let travelled = 0;
+    let n = 0;
+    let lastPt: Vec2 | null = null;
+    let next = minGap + hash2(0, 1, this.seed + seedOffset + 9500) * (maxGap - minGap);
+    for (const seg of segs) {
+      for (let localD = 0; localD <= seg.len; localD += 1) {
+        const distAlong = travelled + localD;
+        if (distAlong < next) continue;
+        const frac = total === 0 ? 0 : distAlong / total;
+        if (frac >= tStart && frac <= tEnd) {
+          const t = seg.len === 0 ? 0 : localD / seg.len;
+          const px = seg.a.x + (seg.b.x - seg.a.x) * t;
+          const py = seg.a.y + (seg.b.y - seg.a.y) * t;
+          const off = 1.5 + hash2(n, 3, this.seed + seedOffset + 9501) * 2;
+          const angle = hash2(n, 5, this.seed + seedOffset + 9502) * Math.PI * 2;
+          const cx = px + Math.cos(angle) * off;
+          const cy = py + Math.sin(angle) * off;
+          // never let two craters bunch up into a "cluster of grapes" — even where the road
+          // curves back near itself, enforce a randomized 3-6 tile minimum separation from the
+          // previously placed crater before painting another one.
+          const minSep = 3 + hash2(n, 9, this.seed + seedOffset + 9504) * 3;
+          if (!lastPt || Math.hypot(cx - lastPt.x, cy - lastPt.y) >= minSep) {
+            this.patch(px + Math.cos(angle) * off * 0.4, py + Math.sin(angle) * off * 0.4, radius, 'crater');
+            const variant = Math.floor(hash2(n, 11, this.seed + seedOffset + 9505) * 4);
+            this.addDecor('shellhole', cx, cy, variant);
+            lastPt = { x: cx, y: cy };
+          }
+        }
+        n++;
+        next += minGap + hash2(n, 7, this.seed + seedOffset + 9503) * (maxGap - minGap);
+      }
+      travelled += seg.len;
+    }
   }
 
   /** A bombed-out building footprint: a rubble mound with 2-4 standing wall SEGMENTS (short

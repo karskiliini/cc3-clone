@@ -45,32 +45,62 @@ function strokeRect(g: Grid, x0: number, y0: number, x1: number, y1: number, ch:
 }
 function rowsOf(g: Grid): string[] { return g.map((r) => r.join('')); }
 
-/** Fill a rectangle with NW-highlight / SE-shadow edge shading instead of a
- * flat tone: a `band`-px light strip hugs the top/left edges, a `band`-px
- * dark strip hugs the bottom/right edges, and the interior is the mid tone —
- * this is the literal per-pixel shading the round-2 critique asked for
- * (readable at 1x, not a washed-out proportional gradient). */
-function shadeRect(g: Grid, x0: number, y0: number, x1: number, y1: number, band: number): void {
+/** Fill a rectangle with a soft diagonal NW-lit / SE-shadowed 3-tone gradient
+ * (a lit NW quarter fading through a mid tone to a shadowed SE quarter),
+ * rather than a thin edge band — reads as a painted, gently curved surface
+ * instead of a diagrammatic outline. A canvas-level alpha wash (see
+ * `applyGradientWash`) is layered on top for extra smoothness. */
+function shadeRect(g: Grid, x0: number, y0: number, x1: number, y1: number): void {
+  const w = Math.max(1, x1 - x0), h = Math.max(1, y1 - y0);
   for (let y = Math.max(0, y0); y <= Math.min(g.length - 1, y1); y++) {
     for (let x = Math.max(0, x0); x <= Math.min(g[0].length - 1, x1); x++) {
-      const dNW = Math.min(x - x0, y - y0);
-      const dSE = Math.min(x1 - x, y1 - y);
-      g[y][x] = dNW < band ? 'H' : dSE < band ? 'd' : 'h';
+      const nx = (x - x0) / w, ny = (y - y0) / h;
+      const t = nx * 0.5 + ny * 0.5;
+      g[y][x] = t < 0.36 ? 'H' : t > 0.64 ? 'd' : 'h';
     }
   }
 }
 
-/** Draw a wheel as a small disc (dark rim + light hub) instead of a single
- * pixel, when the track is wide enough to show it, so the road wheels read
- * as distinct discs against the dark track run. */
+/** Soft alpha sheen from the lit NW corner to a dimmed SE corner, composited
+ * only over already-opaque pixels (source-atop) so it hugs the silhouette —
+ * the "soft gradient" pass that sits on top of the 3-tone banding above to
+ * make the whole vehicle read as a lit, curved surface rather than flat
+ * pixel-art blocks. */
+function applyGradientWash(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+  const grad = ctx.createLinearGradient(x, y, x + w, y + h);
+  grad.addColorStop(0, 'rgba(255,255,250,0.16)');
+  grad.addColorStop(0.45, 'rgba(255,255,250,0.02)');
+  grad.addColorStop(0.6, 'rgba(0,0,0,0.04)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.2)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(x, y, w, h);
+  ctx.restore();
+}
+
+/** Draw a wheel as a small disc — a light rim (tread catching the light)
+ * around a dark hub bolt — instead of a single pixel, when the track is wide
+ * enough to show it, so the road wheels read as distinct discs against the
+ * dark track run. */
 function drawWheel(g: Grid, cx: number, cy: number, trackW: number): void {
   if (trackW >= 3) {
     for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) put(g, cx + dx, cy + dy, 'w');
+      for (let dx = -1; dx <= 1; dx++) put(g, cx + dx, cy + dy, 'W');
     }
-    put(g, cx, cy, 'W');
-  } else {
     put(g, cx, cy, 'w');
+  } else {
+    put(g, cx, cy, 'W');
+  }
+}
+
+/** Darken the lowest couple of rows of each track run to a mud/dirt tone —
+ * tracks read as sitting *in* the ground rather than floating on it. */
+function drawTrackMud(g: Grid, trackW: number): void {
+  const h = g.length, w = g[0].length;
+  const mudRows = Math.max(1, Math.round(h * 0.05));
+  for (let y = h - mudRows; y < h; y++) {
+    for (let x = 0; x < trackW; x++) { put(g, x, y, 'u'); put(g, w - 1 - x, y, 'u'); }
   }
 }
 
@@ -175,6 +205,9 @@ const MARK_WHITE = '#eceae0';
 const MARK_BLACK = '#100f0c';
 const MARK_RED = '#c8402c';
 const SOOT = 'rgba(8,7,6,0.55)';
+const MUD_DARK = '#141210';
+const JERRYCAN = '#3a4a30';
+const JERRYCAN_LIGHT = '#526a41';
 
 function colorMapFor(pal: VehPalette): Record<string, string> {
   return {
@@ -185,6 +218,7 @@ function colorMapFor(pal: VehPalette): Record<string, string> {
     m: MARK_WHITE, c: MARK_BLACK, r: MARK_RED,
     a: pal.camoBand ?? pal.hullDark,
     s: 'rgba(6,6,4,0.4)',
+    u: MUD_DARK, j: JERRYCAN, J: JERRYCAN_LIGHT,
   };
 }
 
@@ -211,11 +245,46 @@ function paintBarrel(g: Grid, cx: number, len: number, widthPx: number, muzzleBr
 // ---------------------------------------------------------- hull families -
 type HullFamily = 'boxy' | 'sloped' | 'slab' | 'light' | 'casemate' | 'halftrack';
 
+/** Punch a small hinge tick (a 1px dark dot just outside one edge of a
+ * hatch) so hatches read as hinged panels rather than flat decals. */
+function drawHatchWithHinge(g: Grid, x0: number, y0: number, x1: number, y1: number, hinge: 'n' | 's' | 'e' | 'w'): void {
+  fillRect(g, x0, y0, x1, y1, 'x');
+  strokeRect(g, x0, y0, x1, y1, 'o');
+  if (hinge === 'n') { put(g, x0, y0 - 1, 'o'); put(g, x1, y0 - 1, 'o'); }
+  else if (hinge === 's') { put(g, x0, y1 + 1, 'o'); put(g, x1, y1 + 1, 'o'); }
+  else if (hinge === 'w') { put(g, x0 - 1, y0, 'o'); put(g, x0 - 1, y1, 'o'); }
+  else { put(g, x1 + 1, y0, 'o'); put(g, x1 + 1, y1, 'o'); }
+}
+
+/** A small stowed jerrycan (dark body, light top rim) — Soviet crews lashed
+ * spare fuel cans to the rear deck. */
+function drawJerrycan(g: Grid, cx: number, cy: number): void {
+  fillRect(g, cx - 1, cy - 1, cx, cy + 1, 'j');
+  put(g, cx - 1, cy - 1, 'J');
+}
+
+/** A small tool box (dark box with a lighter lid edge) bolted to the hull
+ * side, above the track run. */
+function drawToolbox(g: Grid, x0: number, y0: number, w: number, h: number): void {
+  fillRect(g, x0, y0, x0 + w - 1, y0 + h - 1, 'd');
+  strokeRect(g, x0, y0, x0 + w - 1, y0 + h - 1, 'o');
+  fillRect(g, x0, y0, x0 + w - 1, y0, 'H');
+}
+
+/** A strip of spare track links stowed across the German glacis plate —
+ * alternating tread-dark/tread-light segments cutting across the lighter
+ * glacis tone. */
+function drawSpareTrackStrip(g: Grid, x0: number, x1: number, y: number): void {
+  for (let x = x0; x <= x1; x++) put(g, x, y, (x - x0) % 2 === 0 ? 't' : 'T');
+}
+
+interface HullOpts { wide?: boolean; taper?: number; light?: boolean; side?: Side; }
+
 /** Shared tracked-hull skeleton (tracks + wheels + hull deck with NW/SE
  * shading, glacis plate, driver hatch, rear grille/exhaust hatch) used by
  * the boxy, sloped, slab and light families — they differ only in nose
  * taper and proportions. */
-function buildTrackedSkeleton(w: number, h: number, opts: { wide?: boolean; taper?: number; light?: boolean }): Grid {
+function buildTrackedSkeleton(w: number, h: number, opts: HullOpts): Grid {
   const g = blank(w, h);
   const trackW = Math.max(2, Math.round(w * (opts.wide ? 0.3 : 0.24)));
   for (let y = 0; y < h; y++) {
@@ -228,10 +297,10 @@ function buildTrackedSkeleton(w: number, h: number, opts: { wide?: boolean; tape
     drawWheel(g, Math.floor(trackW / 2), cy, trackW);
     drawWheel(g, w - 1 - Math.floor(trackW / 2), cy, trackW);
   }
+  drawTrackMud(g, trackW);
   const bx0 = trackW, bx1 = w - 1 - trackW;
   const bw = Math.max(1, bx1 - bx0);
-  const band = Math.max(2, Math.round(Math.min(bw, h) * 0.16));
-  shadeRect(g, bx0, 0, bx1, h - 1, band);
+  shadeRect(g, bx0, 0, bx1, h - 1);
   const glacisH = Math.max(1, Math.round(h * (opts.light ? 0.14 : 0.18)));
   if (opts.taper) {
     const taper = Math.max(1, Math.round(bw * opts.taper));
@@ -244,32 +313,44 @@ function buildTrackedSkeleton(w: number, h: number, opts: { wide?: boolean; tape
   fillRect(g, bx0, 0, bx1, glacisH - 1, 'H');
   put(g, bx0 + 2, glacisH - 1, 'x');
   put(g, bx1 - 2, glacisH - 1, 'x');
+  if (opts.side === 'german' && bx1 - bx0 > 8) drawSpareTrackStrip(g, bx0 + 3, bx1 - 3, Math.max(0, glacisH - 2));
   const midX = Math.floor((bx0 + bx1) / 2);
-  fillRect(g, midX - 1, glacisH + 3, midX + 1, glacisH + 4, 'x');
-  const deckY0 = h - Math.max(3, Math.round(h * 0.14));
-  for (let y = deckY0; y < h - 1; y += 2) fillRect(g, bx0 + 2, y, bx1 - 2, y, 'g');
-  fillRect(g, midX - 2, h - 3, midX + 2, h - 2, 'x');
+  drawHatchWithHinge(g, midX - 1, glacisH + 3, midX + 1, glacisH + 4, 'w');
+  // Engine deck: exactly 3 dark grille slats plus an exhaust hatch, and a
+  // stowed toolbox on the hull side above the track run.
+  const deckH = Math.max(3, Math.round(h * 0.14));
+  const deckY0 = h - deckH;
+  for (let i = 0; i < 3; i++) {
+    const y = deckY0 + Math.round(((i + 0.5) * deckH) / 3);
+    if (y > 0 && y < h - 1) fillRect(g, bx0 + 2, y, bx1 - 2, y, 'g');
+  }
+  drawHatchWithHinge(g, midX - 2, h - 3, midX + 2, h - 2, 's');
+  if (bw > 10) drawToolbox(g, bx0 + 1, Math.round(h * 0.58), 2, 3);
+  if (opts.side === 'soviet' && bw > 10) {
+    drawJerrycan(g, bx1 - 2, h - Math.round(deckH * 1.6));
+    drawJerrycan(g, bx1 - 2, h - Math.round(deckH * 0.6));
+  }
   for (let x = 0; x < w; x++) { g[0][x] = 'o'; g[h - 1][x] = 'o'; }
   for (let y = 0; y < h; y++) { g[y][0] = 'o'; g[y][w - 1] = 'o'; }
   return g;
 }
 
-function buildBoxyHull(w: number, h: number, wide: boolean): Grid {
-  return buildTrackedSkeleton(w, h, { wide });
+function buildBoxyHull(w: number, h: number, wide: boolean, side: Side): Grid {
+  return buildTrackedSkeleton(w, h, { wide, side });
 }
-function buildSlopedHull(w: number, h: number): Grid {
-  return buildTrackedSkeleton(w, h, { taper: 0.32 });
+function buildSlopedHull(w: number, h: number, side: Side): Grid {
+  return buildTrackedSkeleton(w, h, { taper: 0.32, side });
 }
-function buildSlabHull(w: number, h: number): Grid {
-  const g = buildTrackedSkeleton(w, h, { wide: true, taper: 0.08 });
+function buildSlabHull(w: number, h: number, side: Side): Grid {
+  const g = buildTrackedSkeleton(w, h, { wide: true, taper: 0.08, side });
   // Slab-sided KV-1: bolt-on fuel drums at the rear flanks.
   const w2 = g[0].length;
   fillRect(g, Math.round(w2 * 0.24), h - Math.round(h * 0.2), Math.round(w2 * 0.24) + 1, h - Math.round(h * 0.14), 'H');
   fillRect(g, Math.round(w2 * 0.7), h - Math.round(h * 0.2), Math.round(w2 * 0.7) + 1, h - Math.round(h * 0.14), 'H');
   return g;
 }
-function buildLightHull(w: number, h: number): Grid {
-  return buildTrackedSkeleton(w, h, { light: true, taper: 0.14 });
+function buildLightHull(w: number, h: number, side: Side): Grid {
+  return buildTrackedSkeleton(w, h, { light: true, taper: 0.14, side });
 }
 
 /** Half-track: wheeled tapered nose, tracked rear two-thirds, open troop bay
@@ -283,24 +364,41 @@ function buildHalftrackHull(w: number, h: number): Grid {
     const cut = Math.round(half * (1 - y / noseH));
     for (let x = bx0 + cut; x <= bx1 - cut; x++) g[y][x] = 'd';
   }
-  put(g, bx0 + Math.round(half * 0.15), noseH - 1, 'w');
-  put(g, bx1 - Math.round(half * 0.15), noseH - 1, 'w');
+  drawWheel(g, bx0 + Math.round(half * 0.15), noseH - 1, 3);
+  drawWheel(g, bx1 - Math.round(half * 0.15), noseH - 1, 3);
   const bayY0 = noseH + 1, bayY1 = h - Math.max(2, Math.round(h * 0.14));
-  fillRect(g, bx0, bayY0, bx1, bayY1, 'H');
+  shadeRect(g, bx0, bayY0, bx1, bayY1);
   strokeRect(g, bx0, bayY0, bx1, bayY1, 'o');
+  // Open troop bay: exactly 4 crew helmet dots (2x2), visible from above.
   for (let row = 0; row < 2; row++) {
-    for (let i = 0; i < 3; i++) {
-      const x = Math.round(bx0 + (bx1 - bx0) * (0.2 + i * 0.3));
-      const y = Math.round(bayY0 + (bayY1 - bayY0) * (0.32 + row * 0.4));
+    for (let col = 0; col < 2; col++) {
+      const x = Math.round(bx0 + (bx1 - bx0) * (0.3 + col * 0.4));
+      const y = Math.round(bayY0 + (bayY1 - bayY0) * (0.35 + row * 0.35));
       put(g, x, y, 'x');
     }
   }
+  // Pintle-mounted MG shield at the front of the bay, with the barrel
+  // poking forward over the nose.
+  const midX = Math.floor((bx0 + bx1) / 2);
+  fillRect(g, midX - 2, bayY0, midX + 2, bayY0 + 1, 'd');
+  strokeRect(g, midX - 2, bayY0, midX + 2, bayY0 + 1, 'o');
+  put(g, midX, bayY0 - 1, 'b');
+  put(g, midX + 1, noseH, 'b');
+  // Rear engine deck (between the bay and the tail) — solid hull tone with
+  // 3 dark grille slats and an exhaust hatch, not floating on transparent.
+  shadeRect(g, bx0, bayY1 + 1, bx1, h - 2);
+  const deckH = Math.max(1, h - 2 - (bayY1 + 1));
+  for (let i = 0; i < 3; i++) {
+    const y = bayY1 + 1 + Math.round(((i + 0.5) * deckH) / 3);
+    if (y > bayY1 && y < h - 1) fillRect(g, bx0 + 2, y, bx1 - 2, y, 'g');
+  }
+  drawHatchWithHinge(g, midX - 2, h - 3, midX + 2, h - 2, 's');
   const trackW = Math.max(2, Math.round(w * 0.2));
   for (let y = noseH; y < h; y++) {
     const tread = Math.floor(y / 2) % 2 === 0 ? 't' : 'T';
     for (let x = 0; x < trackW; x++) { g[y][x] = tread; g[y][w - 1 - x] = tread; }
   }
-  for (let y = h - 4; y < h - 1; y += 2) fillRect(g, bx0 + 2, y, bx1 - 2, y, 'g');
+  drawTrackMud(g, trackW);
   for (let x = 0; x < w; x++) { if (g[h - 1][x] !== '.') g[h - 1][x] = 'o'; }
   for (let y = 0; y < h; y++) {
     if (g[y][0] !== '.') g[y][0] = 'o';
@@ -315,15 +413,15 @@ function buildHalftrackHull(w: number, h: number): Grid {
  * overhangs the nose, matching the reference's StuG/Marder silhouettes. */
 function buildCasemateHull(
   w: number, h: number, barrelLenPx: number, barrelWpx: number,
-  opts: { muzzleBrake?: boolean; taper?: number } = {},
+  opts: { muzzleBrake?: boolean; taper?: number; side?: Side } = {},
 ): Grid {
-  const body = buildTrackedSkeleton(w, h, { taper: opts.taper });
+  const body = buildTrackedSkeleton(w, h, { taper: opts.taper, side: opts.side });
   const boxH = Math.round(h * 0.46);
   const bx0 = Math.round(w * 0.16), bx1 = w - 1 - Math.round(w * 0.16);
-  shadeRect(body, bx0, 1, bx1, boxH, Math.max(2, Math.round((bx1 - bx0) * 0.18)));
+  shadeRect(body, bx0, 1, bx1, boxH);
   strokeRect(body, bx0, 1, bx1, boxH, 'o');
   const midX = Math.floor((bx0 + bx1) / 2);
-  fillRect(body, midX - 1, 3, midX + 1, 4, 'x');
+  drawHatchWithHinge(body, midX - 1, 3, midX + 1, 4, 'n');
   const barrel = blank(w, barrelLenPx);
   paintBarrel(barrel, midX, barrelLenPx, barrelWpx, opts.muzzleBrake);
   return [...barrel, ...body];
@@ -336,6 +434,21 @@ interface TurretOpts {
   mantletWpx?: number;
   bustleHpx?: number;
   muzzleBrake?: boolean;
+  /** Panther-style long wedge: narrower at the mantlet than at the rear. */
+  wedge?: boolean;
+}
+
+/** A raised cupola ring (outline circle) with a hatch disc in the centre —
+ * reads as a real fitting rather than a single dot. */
+function drawCupola(g: Grid, cx: number, cy: number, r: number): void {
+  const ri = Math.max(1, r);
+  for (let dy = -ri; dy <= ri; dy++) {
+    for (let dx = -ri; dx <= ri; dx++) {
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d > ri + 0.4) continue;
+      put(g, cx + dx, cy + dy, d > ri - 0.6 ? 'o' : 'x');
+    }
+  }
 }
 
 function buildTurretGrid(tw: number, bodyH: number, barrelLenPx: number, barrelWpx: number, opts: TurretOpts): Grid {
@@ -345,26 +458,33 @@ function buildTurretGrid(tw: number, bodyH: number, barrelLenPx: number, barrelW
   const g = blank(tw, th);
   const cx = tw / 2;
   // NW-lit top/west face, SE-shadowed bottom/east face ("under the turret
-  // overhang") — a light crescent hugging the top-left of the body and a
-  // dark one hugging the bottom-right, not a smooth diagonal wash.
+  // overhang") — a soft diagonal 3-tone gradient (see shadeRect) rather than
+  // a flat fill, so the turret body reads as a curved casting.
   for (let y = 0; y < bodyH; y++) {
     for (let x = 0; x < tw; x++) {
       const nx = (x + 0.5 - cx) / (tw / 2);
       const ny = (y + 0.5) / bodyH;
+      // Panther's turret is a long wedge: narrower at the mantlet (front,
+      // ny=0) than at the rear (ny=1).
+      const wedgeLimit = opts.wedge ? 1 - 0.3 * (1 - ny) : 1;
+      const nxAdj = nx / wedgeLimit;
+      // A true ellipse pinches to a point at both the front and rear; a
+      // rounded-rectangle (superellipse, p=2.6) keeps the sides fuller and
+      // the ends flatter/rounded, matching a real cast turret's silhouette
+      // (and giving the Panther wedge a flat rear instead of a lens point).
+      const p = 2.6;
       const shapeVal = opts.square
-        ? Math.max(Math.abs(nx), Math.abs(ny * 2 - 1))
-        : Math.sqrt(nx * nx + Math.pow(ny * 2 - 1, 2));
+        ? Math.max(Math.abs(nxAdj), Math.abs(ny * 2 - 1))
+        : Math.pow(Math.pow(Math.abs(nxAdj), p) + Math.pow(Math.abs(ny * 2 - 1), p), 1 / p);
       if (shapeVal > 1.0) continue;
-      let ch = 'h';
-      if (ny < 0.3 || nx < -0.55) ch = 'H';
-      else if (ny > 0.72 || nx > 0.62) ch = 'd';
-      g[barrelLenPx + y][x] = ch;
+      const t = ((nx + 1) / 2) * 0.5 + ny * 0.5;
+      g[barrelLenPx + y][x] = t < 0.36 ? 'H' : t > 0.64 ? 'd' : 'h';
     }
   }
   if (bustle > 0) {
     const bw = Math.round(tw * 0.72);
     const bx0 = Math.floor((tw - bw) / 2), bx1 = bx0 + bw - 1;
-    shadeRect(g, bx0, barrelLenPx + bodyH, bx1, barrelLenPx + bodyH + bustle - 1, Math.max(1, Math.round(bw * 0.2)));
+    shadeRect(g, bx0, barrelLenPx + bodyH, bx1, barrelLenPx + bodyH + bustle - 1);
   }
   outlineFill(g);
   // Barrel, extending "north" off the top of the turret body, as a lit
@@ -372,10 +492,15 @@ function buildTurretGrid(tw: number, bodyH: number, barrelLenPx: number, barrelW
   const bcx = Math.floor(cx);
   paintBarrel(g, bcx, barrelLenPx, barrelWpx, opts.muzzleBrake);
   if (opts.mantletWpx) {
+    // Mantlet reads as a darker armored block bolted to the turret front.
     const my0 = Math.max(0, barrelLenPx - 2);
-    fillRect(g, bcx - Math.floor(opts.mantletWpx / 2), my0, bcx + Math.floor(opts.mantletWpx / 2), my0 + 2, 'H');
+    fillRect(g, bcx - Math.floor(opts.mantletWpx / 2), my0, bcx + Math.floor(opts.mantletWpx / 2), my0 + 2, 'd');
+    strokeRect(g, bcx - Math.floor(opts.mantletWpx / 2), my0, bcx + Math.floor(opts.mantletWpx / 2), my0 + 2, 'o');
   }
-  if (opts.cupola) put(g, Math.floor(cx + tw * 0.18), barrelLenPx + Math.floor(bodyH * 0.5), 'x');
+  if (opts.cupola) {
+    const r = Math.max(1, Math.round(tw * 0.09));
+    drawCupola(g, Math.floor(cx + tw * 0.18), barrelLenPx + Math.floor(bodyH * 0.5), r);
+  }
   return g;
 }
 
@@ -412,7 +537,7 @@ const SPEC: Record<string, VehSpec> = {
   pz4f1: { side: 'german', era: 'early', hullFamily: 'boxy', turret: 'germanBox', barrelFrac: 0.3, barrelWpx: 3, turretWFrac: 0.6 },
   pz4gh: { side: 'german', era: 'late', hullFamily: 'boxy', turret: 'germanBox', barrelFrac: 0.55, barrelWpx: 3, muzzleBrake: true, turretWFrac: 0.6 },
   stug3g: { side: 'german', era: 'late', hullFamily: 'casemate', turret: 'none', barrelFrac: 0.55, barrelWpx: 3 },
-  panther: { side: 'german', era: 'late', hullFamily: 'sloped', turret: 'pantherLong', barrelFrac: 0.7, barrelWpx: 3, mantletWpx: 7, turretWFrac: 0.46, turretElongate: 1.6 },
+  panther: { side: 'german', era: 'late', hullFamily: 'sloped', turret: 'pantherLong', barrelFrac: 0.7, barrelWpx: 3, muzzleBrake: true, mantletWpx: 7, turretWFrac: 0.46, turretElongate: 1.6 },
   tiger: { side: 'german', era: 'late', hullFamily: 'boxy', wideTracks: true, turret: 'tigerBox', barrelFrac: 0.6, barrelWpx: 3, muzzleBrake: true, turretWFrac: 0.62, turretSquare: true },
   sdkfz251: { side: 'german', era: 'early', hullFamily: 'halftrack', turret: 'none', barrelFrac: 0, barrelWpx: 0 },
   marder3: { side: 'german', era: 'early', hullFamily: 'casemate', turret: 'none', barrelFrac: 0.65, barrelWpx: 3 },
@@ -466,7 +591,37 @@ function gridToCanvas(g: Grid, colorMap: Record<string, string>, shadowDx: numbe
       ctx.fillRect(x, y, 1, 1);
     }
   }
+  // Soft painterly sheen on top of the 3-tone banding (see shadeRect).
+  applyGradientWash(ctx, 0, 0, w, h);
   return c;
+}
+
+/** Scorch + dent + ember pass shared by hull and turret knocked-out states.
+ * Burning (flame/smoke animation) is handled elsewhere; this is the static
+ * "already been hit" look: soot patches, a few small dark dent rectangles
+ * offset off-centre (never a perfectly symmetric hole), thin scorch streaks
+ * radiating from the impact, and a small, subdued ember glow. */
+function paintScorchAndDent(octx: CanvasRenderingContext2D, cx: number, cy: number, rx: number, ry: number): void {
+  octx.fillStyle = SOOT;
+  octx.beginPath(); octx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); octx.fill();
+  // Dent: a couple of small dark rectangles offset asymmetrically off-centre.
+  octx.fillStyle = 'rgba(4,3,2,0.6)';
+  octx.fillRect(cx - rx * 0.35, cy - ry * 0.4, Math.max(1, rx * 0.3), Math.max(1, ry * 0.5));
+  octx.fillRect(cx + rx * 0.15, cy + ry * 0.1, Math.max(1, rx * 0.22), Math.max(1, ry * 0.35));
+  // Scorch streaks radiating from the impact point.
+  octx.strokeStyle = 'rgba(15,12,10,0.5)';
+  octx.lineWidth = 1;
+  for (const a of [-0.9, -0.3, 0.4, 1.1, 2.0]) {
+    octx.beginPath();
+    octx.moveTo(cx, cy);
+    octx.lineTo(cx + Math.cos(a) * rx * 1.5, cy + Math.sin(a) * ry * 1.6);
+    octx.stroke();
+  }
+  const glow = octx.createRadialGradient(cx, cy, 0, cx, cy, rx * 0.8);
+  glow.addColorStop(0, 'rgba(214,110,40,0.4)');
+  glow.addColorStop(1, 'rgba(214,110,40,0)');
+  octx.fillStyle = glow;
+  octx.beginPath(); octx.arc(cx, cy, rx * 0.8, 0, Math.PI * 2); octx.fill();
 }
 
 function applyKnockedOut(c: HTMLCanvasElement, w: number, h: number): HTMLCanvasElement {
@@ -474,14 +629,9 @@ function applyKnockedOut(c: HTMLCanvasElement, w: number, h: number): HTMLCanvas
   const octx = ctx2d(out);
   octx.save();
   octx.translate(HULL_PAD, HULL_PAD);
+  paintScorchAndDent(octx, w * 0.5, h * 0.42, w * 0.34, h * 0.15);
   octx.fillStyle = SOOT;
-  octx.beginPath(); octx.ellipse(w * 0.5, h * 0.42, w * 0.34, h * 0.15, 0, 0, Math.PI * 2); octx.fill();
   octx.beginPath(); octx.ellipse(w * 0.5, h * 0.82, w * 0.3, h * 0.11, 0, 0, Math.PI * 2); octx.fill();
-  const glow = octx.createRadialGradient(w * 0.5, h * 0.42, 0, w * 0.5, h * 0.42, w * 0.32);
-  glow.addColorStop(0, 'rgba(224,120,40,0.55)');
-  glow.addColorStop(1, 'rgba(224,120,40,0)');
-  octx.fillStyle = glow;
-  octx.beginPath(); octx.arc(w * 0.5, h * 0.42, w * 0.32, 0, Math.PI * 2); octx.fill();
   octx.restore();
   return out;
 }
@@ -504,7 +654,7 @@ export function buildVehicleHull(defId: string, lengthM: number, widthM: number,
     const canon = HULL_CANON.casemate;
     const barrelLenCanon = Math.round(canon.h * spec.barrelFrac);
     const built = buildCasemateHull(canon.w, canon.h, barrelLenCanon, Math.max(2, spec.barrelWpx - 1), {
-      muzzleBrake: spec.muzzleBrake, taper: spec.casemateTaper,
+      muzzleBrake: spec.muzzleBrake, taper: spec.casemateTaper, side: spec.side,
     });
     // Resize hull footprint and barrel overhang independently by height so
     // the barrel keeps its own proportion instead of stretching with hull.
@@ -516,10 +666,10 @@ export function buildVehicleHull(defId: string, lengthM: number, widthM: number,
     grid = [...rBarrel, ...rBody];
   } else {
     const canon = HULL_CANON[spec.hullFamily];
-    const built = spec.hullFamily === 'boxy' ? buildBoxyHull(canon.w, canon.h, !!spec.wideTracks)
-      : spec.hullFamily === 'sloped' ? buildSlopedHull(canon.w, canon.h)
-      : spec.hullFamily === 'slab' ? buildSlabHull(canon.w, canon.h)
-      : buildLightHull(canon.w, canon.h);
+    const built = spec.hullFamily === 'boxy' ? buildBoxyHull(canon.w, canon.h, !!spec.wideTracks, spec.side)
+      : spec.hullFamily === 'sloped' ? buildSlopedHull(canon.w, canon.h, spec.side)
+      : spec.hullFamily === 'slab' ? buildSlabHull(canon.w, canon.h, spec.side)
+      : buildLightHull(canon.w, canon.h, spec.side);
     grid = resize(built, w, h);
   }
   if (pal.camoBand) applyCamoBands(grid);
@@ -562,6 +712,7 @@ export function buildVehicleTurret(defId: string, lengthM: number, widthM: numbe
     mantletWpx: spec.mantletWpx ? 5 : undefined,
     bustleHpx: spec.bustle ? 5 : 0,
     muzzleBrake: spec.muzzleBrake,
+    wedge: spec.turret === 'pantherLong',
   });
   const canonBarrel = canonGrid.slice(0, 6);
   const canonBody = canonGrid.slice(6);
@@ -575,7 +726,9 @@ export function buildVehicleTurret(defId: string, lengthM: number, widthM: numbe
   paintBarrel(grid, bcx, barrelLenPx, spec.barrelWpx, spec.muzzleBrake);
   if (spec.mantletWpx) {
     const my0 = Math.max(0, barrelLenPx - 2);
-    fillRect(grid, bcx - Math.floor(spec.mantletWpx / 2), my0, bcx + Math.floor(spec.mantletWpx / 2), my0 + 2, 'H');
+    const mx0 = bcx - Math.floor(spec.mantletWpx / 2), mx1 = bcx + Math.floor(spec.mantletWpx / 2);
+    fillRect(grid, mx0, my0, mx1, my0 + 2, 'd');
+    strokeRect(grid, mx0, my0, mx1, my0 + 2, 'o');
   }
   if (pal.camoBand) applyCamoBands(grid);
   const bodyCy = barrelLenPx + Math.floor((bodyH + bustleHpx) * 0.45);
@@ -606,8 +759,7 @@ export function buildVehicleTurret(defId: string, lengthM: number, widthM: numbe
     const octx = ctx2d(canvas);
     octx.save();
     octx.translate(HULL_PAD, HULL_PAD);
-    octx.fillStyle = SOOT;
-    octx.beginPath(); octx.ellipse(w2 * 0.5, topPad + bodyCy, w2 * 0.42, (bodyH + bustleHpx) * 0.4, 0, 0, Math.PI * 2); octx.fill();
+    paintScorchAndDent(octx, w2 * 0.5, topPad + bodyCy, w2 * 0.42, (bodyH + bustleHpx) * 0.4);
     octx.restore();
   }
   return canvas;

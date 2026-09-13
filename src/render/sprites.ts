@@ -9,6 +9,7 @@ import { hash2 } from '@/shared/rng';
 import { createCanvas, ctx2d } from '@/render/pixelUtil';
 import { buildVehicleHull, buildVehicleTurret } from '@/render/vehicleArt';
 import { buildSoldierArt, orientSoldierArt } from '@/render/soldierArt';
+import { buildTeamIcon } from '@/render/teamIconArt';
 
 const PX_PER_M = TILE_PX / TILE_M; // 5 px/m
 
@@ -122,169 +123,13 @@ export function getFlagSprite(owner: Side | null): HTMLCanvasElement {
 }
 
 // ============================================================================
-// TEAM ICONS — 40x26, transparent bg. Side-view silhouettes (dark grey with a
-// thin white highlight edge so they read on the dark-maroon HUD panel), per
-// the force-pool rows in the original game (ref_cc3_1478.png / 1482.png).
+// TEAM ICONS — 40x26, transparent bg. Small painted-miniature icons (colour,
+// not flat silhouettes), matching the force-pool rows in the original game
+// (ref_cc3_1478.png / 1482.png). Actual pixel art lives in teamIconArt.ts;
+// this just caches by id.
 // ============================================================================
-const ICON_W = 40, ICON_H = 26;
-const ICON_FILL = '#302f2a';
-const ICON_EDGE = '#eceae2';
-const ICON_GROUND = 22; // baseline y that figures/vehicles stand on
-
-function iconPath(ctx: CanvasRenderingContext2D, pts: [number, number][]): void {
-  ctx.beginPath();
-  ctx.moveTo(pts[0][0], pts[0][1]);
-  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-  ctx.closePath();
-  ctx.fillStyle = ICON_FILL;
-  ctx.fill();
-  ctx.strokeStyle = ICON_EDGE;
-  ctx.lineWidth = 0.8;
-  ctx.stroke();
-}
-
-/** A small side-view soldier silhouette: helmet, tunic, two legs, standing on
- * `groundY` with its horizontal centre at `x`. `armForward` extends a thin
- * weapon line toward +x; `crouch` shortens/bends the pose for prone/MG use. */
-function drawManSide(ctx: CanvasRenderingContext2D, x: number, groundY: number, opts: { crouch?: boolean; prone?: boolean } = {}): void {
-  const { crouch, prone } = opts;
-  if (prone) {
-    // Lying flat, facing +x: helmet bump, long low body.
-    const y = groundY - 2;
-    iconPath(ctx, [[x - 5, y], [x - 5, y - 2], [x - 2, y - 3.5], [x + 6, y - 2.5], [x + 7, y - 1.5], [x + 7, y]]);
-    return;
-  }
-  const bodyTop = groundY - (crouch ? 8 : 12);
-  const bodyBot = groundY - (crouch ? 3 : 4);
-  // Helmet: small dome above the body.
-  ctx.fillStyle = ICON_FILL;
-  ctx.strokeStyle = ICON_EDGE;
-  ctx.lineWidth = 0.8;
-  ctx.beginPath();
-  ctx.arc(x, bodyTop - 1.6, 2.1, Math.PI, 0);
-  ctx.lineTo(x + 2.1, bodyTop + 0.4);
-  ctx.lineTo(x - 2.1, bodyTop + 0.4);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-  // Tunic (slightly tapered torso).
-  iconPath(ctx, [[x - 1.8, bodyTop], [x + 1.8, bodyTop], [x + 2.4, bodyBot], [x - 2.4, bodyBot]]);
-  // Legs: a walking stride, one forward one back.
-  iconPath(ctx, [[x - 2.2, bodyBot - 0.5], [x - 0.4, bodyBot - 0.5], [x - 1.6, groundY], [x - 3.2, groundY]]);
-  iconPath(ctx, [[x + 0.4, bodyBot - 0.5], [x + 2.2, bodyBot - 0.5], [x + 3.4, groundY], [x + 1.8, groundY]]);
-}
-
-function drawWeaponLine(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, w = 1.3): void {
-  ctx.strokeStyle = ICON_FILL;
-  ctx.lineWidth = w;
-  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-  ctx.strokeStyle = ICON_EDGE;
-  ctx.lineWidth = 0.5;
-  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-}
-
-function drawTankSide(ctx: CanvasRenderingContext2D, cx: number, groundY: number, hasTurret: boolean): void {
-  const hullW = 26, hullH = 7, hullX = cx - hullW / 2, hullY = groundY - hullH;
-  iconPath(ctx, [[hullX, hullY], [hullX + hullW, hullY], [hullX + hullW, groundY], [hullX, groundY]]);
-  // Road wheels along the bottom of the hull.
-  ctx.fillStyle = ICON_EDGE;
-  for (let i = 0; i < 5; i++) {
-    ctx.beginPath();
-    ctx.arc(hullX + 3 + i * ((hullW - 6) / 4), groundY - 1.2, 1, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  if (hasTurret) {
-    const tw = 11, th = 5;
-    iconPath(ctx, [[cx - tw / 2, hullY - th], [cx + tw / 2 - 2, hullY - th], [cx + tw / 2, hullY], [cx - tw / 2, hullY]]);
-    drawWeaponLine(ctx, cx + tw / 2 - 2, hullY - th + 1.5, hullX + hullW + 6, hullY - th - 1, 1.6);
-  } else {
-    // Casemate: superstructure biased to the front, gun straight out.
-    const bw = 13, bh = 6;
-    iconPath(ctx, [[hullX + 3, hullY - bh], [hullX + 3 + bw, hullY - bh + 1], [hullX + 3 + bw, hullY], [hullX + 3, hullY]]);
-    drawWeaponLine(ctx, hullX + 3 + bw, hullY - bh + 2, hullX + hullW + 7, hullY - bh + 1.5, 1.6);
-  }
-}
-
-function buildIcon(id: string): HTMLCanvasElement {
-  const c = createCanvas(ICON_W, ICON_H);
-  const ctx = ctx2d(c);
-  const gy = ICON_GROUND;
-  switch (id) {
-    case 'rifle':
-      drawManSide(ctx, 10, gy); drawWeaponLine(ctx, 12, gy - 13, 20, gy - 17);
-      drawManSide(ctx, 21, gy); drawWeaponLine(ctx, 23, gy - 13, 31, gy - 17);
-      drawManSide(ctx, 32, gy); drawWeaponLine(ctx, 34, gy - 13, 40, gy - 16);
-      break;
-    case 'smg':
-      drawManSide(ctx, 11, gy); drawWeaponLine(ctx, 13, gy - 12, 19, gy - 14, 1.8);
-      drawManSide(ctx, 24, gy); drawWeaponLine(ctx, 26, gy - 12, 32, gy - 14, 1.8);
-      break;
-    case 'mg':
-      drawManSide(ctx, 14, gy, { crouch: true });
-      drawWeaponLine(ctx, 16, gy - 9, 30, gy - 10, 1.6);
-      // Bipod legs under the muzzle.
-      drawWeaponLine(ctx, 28, gy - 10, 26, gy - 2, 1);
-      drawWeaponLine(ctx, 28, gy - 10, 31, gy - 2, 1);
-      break;
-    case 'mortar': {
-      const bx = 14;
-      drawWeaponLine(ctx, bx, gy, bx + 10, gy - 16, 2.4);
-      iconPath(ctx, [[bx - 4, gy], [bx + 6, gy], [bx + 4, gy - 2], [bx - 2, gy - 2]]); // baseplate
-      drawManSide(ctx, 27, gy, { crouch: true });
-      break;
-    }
-    case 'atgun':
-      iconPath(ctx, [[10, gy - 8], [14, gy - 8], [14, gy - 1], [10, gy - 1]]); // shield
-      ctx.fillStyle = ICON_EDGE; ctx.fillRect(11, gy - 6, 2, 4);
-      drawWeaponLine(ctx, 14, gy - 6, 30, gy - 10, 1.8);
-      ctx.fillStyle = ICON_FILL; ctx.strokeStyle = ICON_EDGE; ctx.lineWidth = 0.8;
-      ctx.beginPath(); ctx.arc(12, gy, 2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      drawManSide(ctx, 22, gy, { crouch: true });
-      break;
-    case 'sniper':
-      drawManSide(ctx, 20, gy, { prone: true });
-      drawWeaponLine(ctx, 22, gy - 4, 34, gy - 6, 1.4);
-      break;
-    case 'atteam':
-      drawManSide(ctx, 12, gy, { crouch: true });
-      drawWeaponLine(ctx, 14, gy - 9, 34, gy - 11, 2.6); // rocket tube on the shoulder
-      iconPath(ctx, [[33, gy - 13], [37, gy - 11], [33, gy - 9]]); // warhead tip
-      break;
-    case 'tank':
-      drawTankSide(ctx, ICON_W / 2, gy, true);
-      break;
-    case 'spg':
-      drawTankSide(ctx, ICON_W / 2, gy, false);
-      break;
-    case 'halftrack': {
-      const hullX = 6, hullW = 28, hullY = gy - 7;
-      iconPath(ctx, [[hullX, gy - 2], [hullX, hullY], [hullX + 8, hullY - 3], [hullX + hullW, hullY - 3], [hullX + hullW, gy]]);
-      ctx.fillStyle = ICON_EDGE;
-      // Two rows of tiny helmets in the open crew compartment.
-      for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(hullX + 12 + i * 5, hullY - 4, 1, 0, Math.PI * 2); ctx.fill(); }
-      // Front road wheel + rear tracks.
-      ctx.beginPath(); ctx.arc(hullX + 4, gy - 1.5, 2, 0, Math.PI * 2); ctx.fill();
-      for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(hullX + 18 + i * 4, gy - 1.2, 1, 0, Math.PI * 2); ctx.fill(); }
-      break;
-    }
-    case 'command':
-      drawManSide(ctx, 18, gy);
-      drawWeaponLine(ctx, 20, gy - 13, 25, gy - 20, 1.4); // raised arm
-      break;
-    case 'engineer':
-      drawManSide(ctx, 18, gy, { crouch: true });
-      drawWeaponLine(ctx, 20, gy - 9, 28, gy - 15, 1.6); // shovel handle
-      iconPath(ctx, [[27, gy - 17], [31, gy - 16], [29, gy - 12]]); // shovel blade
-      break;
-    default:
-      ctx.strokeStyle = ICON_EDGE;
-      ctx.strokeRect(4.5, 4.5, ICON_W - 9, ICON_H - 9);
-  }
-  return c;
-}
-
 export function getTeamIcon(iconId: string): HTMLCanvasElement {
-  return cached(`icon|${iconId}`, () => buildIcon(iconId));
+  return cached(`icon|${iconId}`, () => buildTeamIcon(iconId));
 }
 
 // ============================================================================

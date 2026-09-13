@@ -40,10 +40,11 @@ function paintMap(p: MapPainter): void {
   p.orchard(85, 32, 16, 14, 2);
 
   // stream running roughly north-south with meanders, banks of mud/tallgrass
-  p.river([
+  const river = [
     { x: 145, y: 0 }, { x: 141, y: 20 }, { x: 148, y: 40 }, { x: 140, y: 60 },
     { x: 150, y: 75 }, { x: 143, y: 95 }, { x: 152, y: 115 }, { x: 148, y: 135 }, { x: 152, y: 150 },
-  ], 3);
+  ];
+  p.river(river, 3);
   p.treeLine([{ x: 145, y: 0 }, { x: 141, y: 20 }, { x: 148, y: 40 }, { x: 140, y: 60 }], 13, 0.4);
   // a few large mud patches along the stream banks and one at the crossroads' worn shoulder
   p.patch(143, 20, 4, 'mud');
@@ -52,33 +53,54 @@ function paintMap(p: MapPainter): void {
   p.patch(60, 76, 3, 'mud');
 
   // curving dirt road west-east through the crossroads, spur south, farm tracks
-  p.road([
+  const mainRoad = [
     { x: 0, y: 78 }, { x: 40, y: 74 }, { x: 80, y: 78 }, { x: 100, y: 75 },
     { x: 130, y: 72 }, { x: 165, y: 76 }, { x: 200, y: 78 },
-  ], 3, 'dirtroad');
+  ];
+  p.road(mainRoad, 3, 'dirtroad');
   p.road([
     { x: 100, y: 5 }, { x: 96, y: 40 }, { x: 100, y: 75 }, { x: 104, y: 110 }, { x: 100, y: 145 },
   ], 3, 'dirtroad');
   p.road([{ x: 41, y: 48 }, { x: 60, y: 60 }, { x: 100, y: 75 }], 2, 'dirtroad'); // farm track
   p.road([{ x: 58, y: 96 }, { x: 75, y: 85 }, { x: 100, y: 75 }], 2, 'dirtroad'); // farm track
-  p.bridge(138, 73, 8, 5);
+  // bridge rect computed from the actual road/river intersection (round-3 fix: the old
+  // hand-placed rect drifted off the true crossing and rendered as planks beside the road)
+  const crossing = p.bridgeAcross(mainRoad, 3, river, 3, { near: { x: 141, y: 75 } }) ?? { x: 141, y: 75 };
+
+  // telegraph poles along the main road, and battle damage concentrated in the contested
+  // middle third around the crossroads/bridge (round-3: sparser than the original's road
+  // scarring, matching the crater density along the roads in ref_cc3_1479.png)
+  p.decorLine(mainRoad, 'pole', 7);
+  p.craterLine(mainRoad, { tStart: 0.3, tEnd: 0.75, seedOffset: 70 });
 
   // two farmsteads with yards, fences, orchard, veg patch, decor
   p.farmstead(41, 45, 20);
   p.farmstead(60, 98, 22);
 
-  // stray fence remnants along the near farmstead's field edge
+  // stray fence remnants along the near farmstead's field edge, and a hedge line closing off
+  // the SE crop parcel from the road shoulder
   p.line([{ x: 20, y: 30 }, { x: 20, y: 55 }], 'fence');
+  p.line([{ x: 155, y: 90 }, { x: 190, y: 95 }], 'hedge');
 
-  // decor: rural scatter
-  p.scatterDecor('rocks', 0, 0, WIDTH, HEIGHT, 14, 40);
-  p.scatterDecor('bush', 0, 0, WIDTH, HEIGHT, 20, 41);
-  p.scatterDecor('flowers', 20, 10, 70, 60, 10, 42);
+  // a wrecked vehicle and abandoned cart near the crossroads, wood/log piles at the woods edges
+  p.addDecor('wreck', 96, 80);
+  p.addDecor('cart', 103, 73);
+  p.scatterDecor('stump', 150, 12, 45, 30, 8, 46);
+  p.scatterDecor('log', 155, 15, 35, 22, 6, 47);
+  p.scatterDecor('stump', 20, 118, 30, 22, 6, 48);
+  p.scatterDecor('log', 22, 122, 28, 18, 4, 49);
+
+  // decor: rural scatter (round-3 density pass toward the original's 150-200 items/map)
+  p.scatterDecor('rocks', 0, 0, WIDTH, HEIGHT, 20, 40);
+  p.scatterDecor('bush', 0, 0, WIDTH, HEIGHT, 30, 41);
+  p.scatterDecor('flowers', 20, 10, 70, 60, 14, 42);
   p.scatterDecor('stump', 150, 15, 45, 35, 6, 43);
-  p.scatterDecor('puddle', 0, 60, WIDTH, 30, 8, 44);
+  p.scatterDecor('puddle', 0, 60, WIDTH, 30, 12, 44);
   p.scatterDecor('log', 145, 10, 40, 30, 5, 45);
+  p.scatterDecor('barrel', 30, 30, 60, 40, 6, 72);
+  p.scatterDecor('crate', 40, 85, 50, 40, 6, 73);
   p.addDecor('sign', 100, 76);
-  p.addDecor('sign', 138, 72);
+  p.addDecor('sign', crossing.x - 3, crossing.y - 2);
 }
 
 const { decor, vectors }: { decor: DecorItem[]; vectors: MapVectorFeature[] } = (() => {
@@ -108,7 +130,7 @@ export const border_1941: MapDef = {
     { id: 0, name: 'Crossroads', x: 100, y: 75, value: 2 },
     { id: 1, name: 'North Farm', x: 41, y: 45, value: 1 },
     { id: 2, name: 'South Farm', x: 60, y: 98, value: 1 },
-    { id: 3, name: 'Bridge', x: 141, y: 75, value: 3 },
+    { id: 3, name: 'Bridge', x: 149, y: 74, value: 3 },
     { id: 4, name: 'Orchard', x: 92, y: 38, value: 1 },
   ],
   deployZones: {

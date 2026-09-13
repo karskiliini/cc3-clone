@@ -44,6 +44,15 @@ function paintMap(p: MapPainter): void {
   // the Ministry: a large intact stone building with its own courtyard, facing the Platz
   p.block(95, 44, 22, 16, 'stone', 'pavedroad');
 
+  // small intact houses/sheds tucked into the gaps between blocks (round-3: the original's
+  // winter streets keep a scatter of untouched small buildings between the ruined ones,
+  // ref_cc3_1484/1485.png) — these stay outside the ruin footprint so they read as standing
+  p.building(88, 20, 6, 6, 'stone');
+  p.building(30, 60, 6, 5, 'wood');
+  p.building(120, 118, 6, 6, 'wood');
+  p.building(196, 90, 6, 5, 'stone');
+  p.building(65, 130, 5, 5, 'wood');
+
   // small rubble patches around the craters (not blanket coverage) and light dusting
   // of debris on the streets nearest the ruins
   p.patch(58, 62, 4, 'rubble');
@@ -53,28 +62,42 @@ function paintMap(p: MapPainter): void {
   p.patch(158, 128, 3, 'rubble');
   p.noiseFill('rubble', 0.05, ['pavedroad']);
 
-  // craters pockmarking the streets
+  // craters pockmarking the streets, plus battle-damage strings along the two long vertical
+  // streets closest to the contested Platz/Ministry axis
   p.patch(60, 60, 3, 'crater');
   p.patch(120, 100, 3, 'crater');
   p.patch(170, 90, 3, 'crater');
   p.patch(90, 30, 2.5, 'crater');
   p.patch(160, 130, 2.5, 'crater');
+  p.craterLine([{ x: 90, y: 0 }, { x: 90, y: 160 }], { tStart: 0.25, tEnd: 0.75, radius: 1.2, seedOffset: 110, minGap: 18, maxGap: 28 });
+  p.craterLine([{ x: 140, y: 0 }, { x: 140, y: 160 }], { tStart: 0.25, tEnd: 0.75, radius: 1.2, seedOffset: 111, minGap: 18, maxGap: 28 });
+  p.craterLine([{ x: 0, y: 55 }, { x: 220, y: 55 }], { tStart: 0.3, tEnd: 0.7, radius: 1.2, seedOffset: 112, minGap: 18, maxGap: 28 });
   p.scatterDecor('shellhole', 0, 0, WIDTH, HEIGHT, 20, 50);
 
-  // a barricade of rubble blocking a street, and a second near the Ministry approach
+  // barricades of rubble/stonewall blocking streets at contested chokepoints
   p.line([{ x: 40, y: 97 }, { x: 40, y: 103 }], 'rubble');
   p.line([{ x: 40, y: 98 }, { x: 46, y: 98 }], 'stonewall');
   p.line([{ x: 90, y: 42 }, { x: 90, y: 48 }], 'rubble');
+  p.line([{ x: 140, y: 62 }, { x: 146, y: 62 }], 'rubble');
+  p.line([{ x: 140, y: 63 }, { x: 140, y: 68 }], 'stonewall');
+  p.line([{ x: 168, y: 108 }, { x: 174, y: 108 }], 'rubble');
 
-  // decor: wrecks, barrels/crates, snow drifts, war debris
+  // decor: wrecks, barrels/crates, snow drifts, war debris (round-3: heavier street furniture
+  // than the other maps, matching the ruined-city density of ref_cc3_1484/1485.png)
   p.addDecor('wreck', 42, 32);
   p.addDecor('wreck', 143, 72);
   p.addDecor('wreck', 92, 110);
-  p.scatterDecor('barrel', 0, 0, WIDTH, HEIGHT, 24, 51);
-  p.scatterDecor('crate', 0, 0, WIDTH, HEIGHT, 22, 52);
-  p.scatterDecor('rocks', 0, 0, WIDTH, HEIGHT, 10, 53);
+  p.addDecor('wreck', 40, 100);
+  p.addDecor('wreck', 168, 92);
+  p.addDecor('cart', 132, 60);
+  p.addDecor('woodpile', 128, 61);
+  p.scatterDecor('barrel', 0, 0, WIDTH, HEIGHT, 32, 51);
+  p.scatterDecor('crate', 0, 0, WIDTH, HEIGHT, 30, 52);
+  p.scatterDecor('rocks', 0, 0, WIDTH, HEIGHT, 14, 53);
   p.scatterDecor('sign', 0, 0, WIDTH, HEIGHT, 8, 54);
-  p.scatterDecor('puddle', 0, 0, WIDTH, HEIGHT, 14, 55);
+  p.scatterDecor('puddle', 0, 0, WIDTH, HEIGHT, 16, 55);
+  p.scatterDecor('barrel', 88, 20, 24, 20, 6, 56); // clustered near the small intact buildings
+  p.scatterDecor('crate', 30, 60, 24, 16, 6, 57);
 }
 
 const { decor, vectors }: { decor: DecorItem[]; vectors: MapVectorFeature[] } = (() => {

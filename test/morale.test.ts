@@ -122,6 +122,38 @@ describe('stepMorale', () => {
     expect(s.activity).not.toBe('panicked');
   });
 
+  it('team status is Routed once a majority (not necessarily all) of the squad is routed', () => {
+    // Regression (balance round 3): computeTeamStatus used to require EVERY alive soldier to be
+    // routed simultaneously, which combined with individual recovery (a soldier snapping back to
+    // defending once morale/suppression improve) meant team.status essentially never showed
+    // Routed/Surrendered/Broken in practice. A strict majority is enough.
+    const state = makeState();
+    const rng = new Rng(1);
+    const s1 = state.soldiers.get(1)!;
+    const s2 = state.soldiers.get(2)!;
+    const s3 = state.soldiers.get(3)!;
+    s1.morale = 5; s2.morale = 5; // stays routed (morale<10 keeps it routed every tick)
+    s3.morale = 80; // this one is fine
+    stepMorale(state, rng, 0.1);
+    expect(s1.activity).toBe('routed');
+    expect(s2.activity).toBe('routed');
+    const team = state.teams.get(1)!;
+    expect(team.status).toBe('Routed');
+  });
+
+  it('team status is Broken when average team morale drops below 25', () => {
+    const state = makeState();
+    const rng = new Rng(1);
+    for (const id of [1, 2, 3]) {
+      const s = state.soldiers.get(id)!;
+      s.morale = 20; // below 25, but not low enough to trigger the routed/panicked cascade paths
+      s.suppression = 0;
+    }
+    stepMorale(state, rng, 0.1);
+    const team = state.teams.get(1)!;
+    expect(team.status).toBe('Broken');
+  });
+
   it('caches team morale and status', () => {
     const state = makeState();
     const rng = new Rng(1);

@@ -4,6 +4,7 @@ import { dist } from '@/shared/math';
 import { addMessage } from './messages';
 
 const RADIUS_TILES = VL_CAPTURE_RADIUS_M / TILE_M;
+const MIN_CEASEFIRE_TIME_S = 5 * 60;
 
 function sideName(side: Side): string {
   return side === 'german' ? 'German' : 'Soviet';
@@ -26,14 +27,29 @@ function presentSidesAt(state: BattleState, p: Vec2): Set<Side> {
   return present;
 }
 
-/** VL points × 10 + kills × 2 − losses × 1, for the given side. */
+const KILL_POINTS = 2;
+/** Manual: a captured prisoner counts 3x a kill's point value toward score. */
+const PRISONER_VALUE_MULTIPLIER = 3;
+
+/** Enemy soldiers currently surrendered to `side` (captured, out of the fight but not dead). */
+export function prisonerCount(state: BattleState, side: Side): number {
+  const enemy = otherSide(side);
+  let n = 0;
+  for (const s of state.soldiers.values()) {
+    if (s.side === enemy && s.activity === 'surrendered') n++;
+  }
+  return n;
+}
+
+/** VL points × 10 + kills × 2 + prisoners × 2 × 3 − losses × 1, for the given side. */
 export function sideScore(state: BattleState, side: Side): number {
   let vlPoints = 0;
   for (const vl of state.map.victoryLocations) {
     if (vl.owner === side) vlPoints += vl.value * 10;
   }
   const ss = state.sides[side];
-  return vlPoints + ss.kills * 2 - ss.losses * 1;
+  const prisoners = prisonerCount(state, side);
+  return vlPoints + ss.kills * KILL_POINTS + prisoners * KILL_POINTS * PRISONER_VALUE_MULTIPLIER - ss.losses * 1;
 }
 
 /** Result from the player's perspective: ratio of (score+20) between the two sides. */
@@ -105,10 +121,17 @@ export function stepVictory(state: BattleState, dt: number): void {
   if (state.time >= state.config.durationS) ended = true;
   if (state.sides.german.truceAccepted && state.sides.soviet.truceAccepted) ended = true;
 
-  for (const side of SIDES) {
-    if (state.sides[side].morale < 10) {
-      addMessage(state, `Ceasefire — ${sideName(side)} forces are exhausted.`, 'warn');
-      ended = true;
+  // The morale-based forced ceasefire must not fire in the opening minutes even when a side takes
+  // early heavy losses — per the design brief, a truce/ceasefire shouldn't end a battle before
+  // ~5 min normally (and in a typical, not-lopsided battle side morale shouldn't even reach this
+  // floor before ~12 min once casualties/morale decay are tuned). This is a hard safety floor, not
+  // a soft target: total elimination (below) and the duration timeout can still end a battle early.
+  if (state.time >= MIN_CEASEFIRE_TIME_S) {
+    for (const side of SIDES) {
+      if (state.sides[side].morale < 10) {
+        addMessage(state, `Ceasefire — ${sideName(side)} forces are exhausted.`, 'warn');
+        ended = true;
+      }
     }
   }
 

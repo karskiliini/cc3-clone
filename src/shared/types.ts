@@ -394,6 +394,8 @@ export interface InputState {
   keysDown: Set<string>;      // KeyboardEvent.key lower-cased
   keysPressed: Set<string>;   // edge-triggered, cleared each frame
   wheel: number;              // accumulated deltaY, cleared each frame
+  /** false once the pointer has left the window/canvas or the window lost focus */
+  pointerInside: boolean;
 }
 
 export interface Camera {

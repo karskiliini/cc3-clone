@@ -3,18 +3,24 @@ import type { WeaponDef } from '@/shared/types';
 function w(d: WeaponDef): WeaponDef { return d; }
 
 /** All weapons used by German and Soviet forces, 1941-45. Values are balanced approximations
- * of real-world performance for gameplay purposes (rate = shots/s counting bursts as one shot). */
+ * of real-world performance for gameplay purposes (rate = shots/s counting bursts as one shot).
+ *
+ * Tuning note (balance round 3): rifle/SMG `accuracy` trimmed ~13% (×0.87) from the original
+ * values. Once AI-vs-AI infantry actually closed to engagement range (see the AI bugfixes in
+ * ai.ts), the harness (test/harness.test.ts) measured overall small-arms hit rate at ~8.8%,
+ * above the 3-8% CC3-feel target; this cut brings it back into range without touching MG/AT/tank
+ * weapons (MGs are meant to suppress far more than they kill; that ratio was already fine). */
 export const WEAPONS: Record<string, WeaponDef> = {
   // ---------------------------------------------------------------- rifles
-  kar98k: w({ id: 'kar98k', name: 'Kar98k', cls: 'rifle', rangeM: 400, rate: 0.4, burst: 1, accuracy: 0.35, lethality: 0.55, suppression: 0.15, penetrationMm: 0, heRadiusM: 0, ammo: 5, reloadS: 3 }),
-  mosin: w({ id: 'mosin', name: 'Mosin-Nagant', cls: 'rifle', rangeM: 400, rate: 0.4, burst: 1, accuracy: 0.35, lethality: 0.55, suppression: 0.15, penetrationMm: 0, heRadiusM: 0, ammo: 5, reloadS: 3 }),
-  svt40: w({ id: 'svt40', name: 'SVT-40', cls: 'rifle', rangeM: 400, rate: 0.8, burst: 1, accuracy: 0.35, lethality: 0.5, suppression: 0.15, penetrationMm: 0, heRadiusM: 0, ammo: 10, reloadS: 2.5 }),
-  kar98k_scoped: w({ id: 'kar98k_scoped', name: 'Kar98k (scoped)', cls: 'rifle', rangeM: 600, rate: 0.3, burst: 1, accuracy: 0.7, lethality: 0.6, suppression: 0.1, penetrationMm: 0, heRadiusM: 0, ammo: 5, reloadS: 3.5 }),
-  mosin_scoped: w({ id: 'mosin_scoped', name: 'Mosin (scoped)', cls: 'rifle', rangeM: 600, rate: 0.3, burst: 1, accuracy: 0.7, lethality: 0.6, suppression: 0.1, penetrationMm: 0, heRadiusM: 0, ammo: 5, reloadS: 3.5 }),
+  kar98k: w({ id: 'kar98k', name: 'Kar98k', cls: 'rifle', rangeM: 400, rate: 0.4, burst: 1, accuracy: 0.304, lethality: 0.55, suppression: 0.15, penetrationMm: 0, heRadiusM: 0, ammo: 5, reloadS: 3 }),
+  mosin: w({ id: 'mosin', name: 'Mosin-Nagant', cls: 'rifle', rangeM: 400, rate: 0.4, burst: 1, accuracy: 0.304, lethality: 0.55, suppression: 0.15, penetrationMm: 0, heRadiusM: 0, ammo: 5, reloadS: 3 }),
+  svt40: w({ id: 'svt40', name: 'SVT-40', cls: 'rifle', rangeM: 400, rate: 0.8, burst: 1, accuracy: 0.304, lethality: 0.5, suppression: 0.15, penetrationMm: 0, heRadiusM: 0, ammo: 10, reloadS: 2.5 }),
+  kar98k_scoped: w({ id: 'kar98k_scoped', name: 'Kar98k (scoped)', cls: 'rifle', rangeM: 600, rate: 0.3, burst: 1, accuracy: 0.609, lethality: 0.6, suppression: 0.1, penetrationMm: 0, heRadiusM: 0, ammo: 5, reloadS: 3.5 }),
+  mosin_scoped: w({ id: 'mosin_scoped', name: 'Mosin (scoped)', cls: 'rifle', rangeM: 600, rate: 0.3, burst: 1, accuracy: 0.609, lethality: 0.6, suppression: 0.1, penetrationMm: 0, heRadiusM: 0, ammo: 5, reloadS: 3.5 }),
 
   // ------------------------------------------------------------------ smgs
-  mp40: w({ id: 'mp40', name: 'MP40', cls: 'smg', rangeM: 150, rate: 2, burst: 3, accuracy: 0.25, lethality: 0.45, suppression: 0.2, penetrationMm: 0, heRadiusM: 0, ammo: 32, reloadS: 3 }),
-  ppsh41: w({ id: 'ppsh41', name: 'PPSh-41', cls: 'smg', rangeM: 150, rate: 2.5, burst: 4, accuracy: 0.25, lethality: 0.45, suppression: 0.2, penetrationMm: 0, heRadiusM: 0, ammo: 71, reloadS: 3.5 }),
+  mp40: w({ id: 'mp40', name: 'MP40', cls: 'smg', rangeM: 150, rate: 2, burst: 3, accuracy: 0.217, lethality: 0.45, suppression: 0.2, penetrationMm: 0, heRadiusM: 0, ammo: 32, reloadS: 3 }),
+  ppsh41: w({ id: 'ppsh41', name: 'PPSh-41', cls: 'smg', rangeM: 150, rate: 2.5, burst: 4, accuracy: 0.217, lethality: 0.45, suppression: 0.2, penetrationMm: 0, heRadiusM: 0, ammo: 71, reloadS: 3.5 }),
 
   // -------------------------------------------------------------- pistols
   pistol_p38: w({ id: 'pistol_p38', name: 'Walther P38', cls: 'pistol', rangeM: 40, rate: 1.5, burst: 1, accuracy: 0.2, lethality: 0.3, suppression: 0.05, penetrationMm: 0, heRadiusM: 0, ammo: 8, reloadS: 2 }),

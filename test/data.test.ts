@@ -87,9 +87,9 @@ describe('names', () => {
 });
 
 describe('maps', () => {
-  it('MAPS has exactly the five expected maps', () => {
+  it('MAPS has exactly the six expected maps', () => {
     const ids = MAPS.map((m) => m.id);
-    expect(ids).toEqual(['border_1941', 'village_1942', 'steppe_1943', 'forest_1944', 'berlin_1945']);
+    expect(ids).toEqual(['border_1941', 'moscow_1941', 'village_1942', 'steppe_1943', 'forest_1944', 'berlin_1945']);
   });
 
   it('getMap resolves each id', () => {
@@ -148,8 +148,8 @@ describe('maps', () => {
 });
 
 describe('operation', () => {
-  it('OPERATION has 5 battles referencing valid maps and team ids', () => {
-    expect(OPERATION.length).toBe(5);
+  it('OPERATION has 6 battles referencing valid maps and team ids', () => {
+    expect(OPERATION.length).toBe(6);
     const mapIds = new Set(MAPS.map((m) => m.id));
     for (const battle of OPERATION) {
       expect(mapIds.has(battle.mapId), battle.mapId).toBe(true);

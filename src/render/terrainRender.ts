@@ -28,7 +28,7 @@ import { idx, tileAt, inBounds } from '@/sim/map';
 import { TERRAIN_COLORS } from '@/render/palette';
 import { getTreeSprite, getSmokePuff } from '@/render/sprites';
 import { drawDecorItem } from '@/render/decorSprites';
-import { worldToScreen } from '@/engine/camera';
+import { worldToScreen, ZOOM_LEVELS } from '@/engine/camera';
 
 const CHUNK_TILES = 16;
 const CHUNK_PX = CHUNK_TILES * TILE_PX; // 320
@@ -39,6 +39,11 @@ const BAKES_PER_DRAW = 2;
  * instead of trickling in at 2/frame, while a normal small scroll (<=2 new chunks) still only
  * pays the small per-frame budget. */
 const BAKES_PER_DRAW_BURST = 6;
+/** Zoom-2 chunks are 4x the pixels of a zoom-1 bake, but each bake still measures well under
+ * the ~80ms/chunk budget (see bakeChunk's console.log) — allow a bigger per-frame budget than
+ * zoom 1/0.5 so scrolling in at max zoom still catches up quickly. */
+const BAKES_PER_DRAW_ZOOM2 = 4;
+const BAKES_PER_DRAW_BURST_ZOOM2 = 8;
 const LOWRES_PX_PER_TILE = 2;
 
 const BUILDING_TERRAINS = new Set<Terrain>(['buildingWood', 'buildingStone', 'floor']);
@@ -289,13 +294,14 @@ function buildGrid(map: GameMap, x0: number, y0: number, tiles: number, classify
 /** Bilinear sample of `grid` at the pixel (tx,px,ty,py) local to the chunk, plus hash noise.
  * Skips straight to 0 (no array/hash work at all) when the whole chunk has none of this
  * feature — a common case (e.g. a chunk deep in a forest has no roads/crops/water/rubble). */
-function sampleGrid(grid: Grid, tx: number, px: number, ty: number, py: number, wpx: number, wpy: number, seed: number, noiseAmt = 0.08): number {
+function sampleGrid(grid: Grid, tx: number, px: number, ty: number, py: number, wpx: number, wpy: number, seed: number, noiseAmt = 0.08, tileSize = TILE_PX): number {
   if (!grid.any) return 0;
   const { data, size } = grid;
-  const gx0 = tx + (px < 5 ? 0 : 1);
-  const fx = px < 5 ? 0.5 + px / TILE_PX : px / TILE_PX - 0.5;
-  const gy0 = ty + (py < 5 ? 0 : 1);
-  const fy = py < 5 ? 0.5 + py / TILE_PX : py / TILE_PX - 0.5;
+  const quarter = tileSize / 4;
+  const gx0 = tx + (px < quarter ? 0 : 1);
+  const fx = px < quarter ? 0.5 + px / tileSize : px / tileSize - 0.5;
+  const gy0 = ty + (py < quarter ? 0 : 1);
+  const fy = py < quarter ? 0.5 + py / tileSize : py / tileSize - 0.5;
   const v00 = data[gy0 * size + gx0];
   const v10 = data[gy0 * size + gx0 + 1];
   const v01 = data[(gy0 + 1) * size + gx0];
@@ -408,6 +414,7 @@ function paintGroundAndFeatures(
   cropsGrid: Grid, mudGrid: Grid, tallgrassGrid: Grid, pavedGrid: Grid, dirtGrid: Grid, waterGrid: Grid, rubbleGrid: Grid, dirtyGrid: Grid,
   pavedVec: VecAreaField | null, dirtVec: VecAreaField | null, waterVec: VecAreaField | null,
   tramRailY: number[],
+  zoom: number, bpt: number,
 ): void {
   const groundAt = (tx: number, ty: number): Terrain => {
     const cx = tx < 0 ? 0 : tx >= mapW ? mapW - 1 : tx;
@@ -422,10 +429,10 @@ function paintGroundAndFeatures(
       const wx = x0 + tx;
       if (wx >= mapW) continue;
 
-      for (let py = 0; py < TILE_PX; py++) {
-        const wpy = wy * TILE_PX + py;
-        for (let px = 0; px < TILE_PX; px++) {
-          const wpx = wx * TILE_PX + px;
+      for (let py = 0; py < bpt; py++) {
+        const wpy = wy * TILE_PX + py / zoom;
+        for (let px = 0; px < bpt; px++) {
+          const wpx = wx * TILE_PX + px / zoom;
 
           // -------------------------------------------------------- coverage samples (cheap:
           // a handful of array lookups + one hash2 each — always computed first so the far
@@ -434,24 +441,25 @@ function paintGroundAndFeatures(
           // unconditionally in that case anyway). Roads/rivers prefer the smooth vector
           // distance field when the map declares one (see MapDef.vectors); tile-grid coverage
           // is the fallback (and always used for crops/rubble, which aren't vectorized).
-          const covCrop = sampleGrid(cropsGrid, tx, px, ty, py, wpx, wpy, seed + 3001);
-          const covMud = sampleGrid(mudGrid, tx, px, ty, py, wpx, wpy, seed + 3011, 0.05);
-          const covTallgrass = sampleGrid(tallgrassGrid, tx, px, ty, py, wpx, wpy, seed + 3021, 0.05);
+          const covCrop = sampleGrid(cropsGrid, tx, px, ty, py, wpx, wpy, seed + 3001, 0.08, bpt);
+          const covMud = sampleGrid(mudGrid, tx, px, ty, py, wpx, wpy, seed + 3011, 0.05, bpt);
+          const covTallgrass = sampleGrid(tallgrassGrid, tx, px, ty, py, wpx, wpy, seed + 3021, 0.05, bpt);
           const pavedRes = pavedVec ? sampleVecArea(pavedVec, wpx, wpy, seed + 3101) : null;
-          const covPaved = pavedRes ? pavedRes.cov : sampleGrid(pavedGrid, tx, px, ty, py, wpx, wpy, seed + 3101);
+          const covPaved = pavedRes ? pavedRes.cov : sampleGrid(pavedGrid, tx, px, ty, py, wpx, wpy, seed + 3101, 0.08, bpt);
           const dirtRes = dirtVec ? sampleVecArea(dirtVec, wpx, wpy, seed + 3201) : null;
-          const covDirt = dirtRes ? dirtRes.cov : sampleGrid(dirtGrid, tx, px, ty, py, wpx, wpy, seed + 3201);
+          const covDirt = dirtRes ? dirtRes.cov : sampleGrid(dirtGrid, tx, px, ty, py, wpx, wpy, seed + 3201, 0.08, bpt);
           const waterRes = waterVec ? sampleVecArea(waterVec, wpx, wpy, seed + 3301) : null;
-          const covWater = waterRes ? waterRes.cov : sampleGrid(waterGrid, tx, px, ty, py, wpx, wpy, seed + 3301);
-          const covRubble = sampleGrid(rubbleGrid, tx, px, ty, py, wpx, wpy, seed + 3401);
+          const covWater = waterRes ? waterRes.cov : sampleGrid(waterGrid, tx, px, ty, py, wpx, wpy, seed + 3301, 0.08, bpt);
+          const covRubble = sampleGrid(rubbleGrid, tx, px, ty, py, wpx, wpy, seed + 3401, 0.08, bpt);
           const deepFeature = covCrop > 0.85 || covMud > 0.85 || covTallgrass > 0.85 || covPaved > 0.85 || covDirt > 0.85 || covWater > 0.85 || covRubble > 0.85;
 
           // -------------------------------------------------- smoothed ground (feathered blend)
           let groundT: Terrain = 'grass';
           let color: RGB;
           if (!deepFeature) {
-            const cx0 = px < 5 ? wx - 1 : wx, cx1 = cx0 + 1;
-            const cy0 = py < 5 ? wy - 1 : wy, cy1 = cy0 + 1;
+            const quarterT = bpt / 4;
+            const cx0 = px < quarterT ? wx - 1 : wx, cx1 = cx0 + 1;
+            const cy0 = py < quarterT ? wy - 1 : wy, cy1 = cy0 + 1;
             const tA = groundAt(cx0, cy0), tB = groundAt(cx1, cy0), tC = groundAt(cx0, cy1), tD = groundAt(cx1, cy1);
             // coherent low-frequency fbm wobble of the sample position (not per-pixel white
             // noise) so tile-to-tile ground borders wander like a brushed edge rather than
@@ -459,8 +467,8 @@ function paintGroundAndFeatures(
             // open, tallgrass, snow, mud all flow through this same code path).
             const wobX = (fbm(wpx / 24, wpy / 24, 1, seed + 8801) - 0.5) * (VEC_FEATHER_PX * 1.6);
             const wobY = (fbm(wpx / 24, wpy / 24, 1, seed + 8802) - 0.5) * (VEC_FEATHER_PX * 1.6);
-            const fxx = clamp01((px < 5 ? 0.5 + px / TILE_PX : px / TILE_PX - 0.5) + wobX / TILE_PX);
-            const fyy = clamp01((py < 5 ? 0.5 + py / TILE_PX : py / TILE_PX - 0.5) + wobY / TILE_PX);
+            const fxx = clamp01((px < quarterT ? 0.5 + px / bpt : px / bpt - 0.5) + wobX / TILE_PX);
+            const fyy = clamp01((py < quarterT ? 0.5 + py / bpt : py / bpt - 0.5) + wobY / TILE_PX);
             const sA = (1 - fxx) * (1 - fyy), sB = fxx * (1 - fyy), sC = (1 - fxx) * fyy, sD = fxx * fyy;
             const nA = sA + (hash2(wpx, wpy, seed + hashStrCached(tA)) - 0.5) * 0.06;
             const nB = sB + (hash2(wpx, wpy, seed + hashStrCached(tB)) - 0.5) * 0.06;
@@ -650,7 +658,7 @@ function paintGroundAndFeatures(
           const brush = 0.97 + 0.06 * hash2(Math.floor(wpx / 2), Math.floor(wpy / 3), seed + 9002);
           color = { r: clamp255(color.r * brush), g: clamp255(color.g * brush), b: clamp255(color.b * brush) };
 
-          setPixel(data, bufW, tx * TILE_PX + px, ty * TILE_PX + py, color);
+          setPixel(data, bufW, tx * bpt + px, ty * bpt + py, color);
         }
       }
     }
@@ -1212,8 +1220,10 @@ function paintRoof(ctx: CanvasRenderingContext2D, map: GameMap, bb: BuildingBBox
     else ctx.fillRect(left, top, Math.ceil(w / 2), h);
 
     // gable-end hint: a darker triangle on the shaded slope at each end of the ridge, where it
-    // meets the short walls
-    ctx.fillStyle = shadeHex(v.dark, -0.18);
+    // meets the short walls. In winter this must stay a darker SNOW tone (a faint blue-grey),
+    // not the bare roof material's dark colour — using v.dark unconditionally painted a solid
+    // brown/stone wedge over the snow-covered shaded slope.
+    ctx.fillStyle = snowy ? shadeHex(SNOW_SHADE, -0.15) : shadeHex(v.dark, -0.18);
     if (ridgeHoriz) {
       const g = Math.min(h * 0.4, w * 0.25);
       ctx.beginPath(); ctx.moveTo(left, top + h / 2); ctx.lineTo(left + g, top + h); ctx.lineTo(left, top + h); ctx.closePath(); ctx.fill();
@@ -1865,12 +1875,13 @@ export class TerrainRenderer {
     }
   }
 
-  private chunkKey(cx: number, cy: number): string { return `${cx},${cy}`; }
+  private chunkKey(cx: number, cy: number, zoom: number): string { return `${cx},${cy}@${zoom}`; }
 
   invalidateTile(x: number, y: number): void {
     const cx = Math.floor(x / CHUNK_TILES);
     const cy = Math.floor(y / CHUNK_TILES);
-    this.chunks.delete(this.chunkKey(cx, cy));
+    // a tile edit invalidates the bake at every zoom level it might be cached at.
+    for (const z of ZOOM_LEVELS) this.chunks.delete(this.chunkKey(cx, cy, z));
     this.updateLowResTile(x, y);
   }
 
@@ -1884,11 +1895,21 @@ export class TerrainRenderer {
     }
   }
 
-  private bakeChunk(cx: number, cy: number): HTMLCanvasElement {
+  /** Bakes chunk (cx,cy) at the given zoom level: the ImageData ground/coverage pass runs at
+   * `bpt` (TILE_PX*zoom, rounded) pixels-per-tile — the true output resolution — with every
+   * noise/hash sample expressed in zoom-1 world-pixel units (px/zoom) so per-pixel grain,
+   * feathered edges, ruts and rows are computed fresh at that resolution instead of being
+   * baked once at zoom 1 and blockily upscaled. The remaining canvas-op passes (walls, roofs,
+   * trees, decor) are unchanged code, just run under a ctx.scale(zoom,zoom) so line widths and
+   * drawImage calls scale automatically (smoothing stays off, so sprites scale with nearest-
+   * neighbour as intended). */
+  private bakeChunk(cx: number, cy: number, zoom: number): HTMLCanvasElement {
     const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
+    const bpt = Math.round(TILE_PX * zoom);
+    const chunkPx = CHUNK_TILES * bpt;
     const canvas = document.createElement('canvas');
-    canvas.width = CHUNK_PX;
-    canvas.height = CHUNK_PX;
+    canvas.width = chunkPx;
+    canvas.height = chunkPx;
     const ctx = canvas.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
     const season = this.map.def.season;
@@ -1930,17 +1951,26 @@ export class TerrainRenderer {
       }
     }
 
-    // ------------------------------------------------------------ ground+features pass
-    const img = ctx.createImageData(CHUNK_PX, CHUNK_PX);
+    // ------------------------------------------------------------ ground+features pass (baked
+    // at true output resolution — bpt px/tile — not zoom-1 and upscaled)
+    const img = ctx.createImageData(chunkPx, chunkPx);
     reliefCache = new Map<number, number>();
     paintGroundAndFeatures(
-      img.data, CHUNK_PX, map, season, this.seed, x0, y0, CHUNK_TILES, CHUNK_TILES,
+      img.data, chunkPx, map, season, this.seed, x0, y0, CHUNK_TILES, CHUNK_TILES,
       this.groundUnder, map.width, map.height, this.fieldId, this.fieldAxis,
       cropsGrid, mudGrid, tallgrassGrid, pavedGrid, dirtGrid, waterGrid, rubbleGrid, dirtyGrid,
-      pavedVec, dirtVec, waterVec, tramRailY,
+      pavedVec, dirtVec, waterVec, tramRailY, zoom, bpt,
     );
     reliefCache = null;
     ctx.putImageData(img, 0, 0);
+
+    // Everything below draws with plain canvas ops in TILE_PX-unit coordinates (unchanged from
+    // the zoom-1 code); scaling the context — rather than the coordinates — means line widths,
+    // strokes and drawImage calls all scale by `zoom` for free, with real per-scale
+    // antialiasing on vector ops instead of a blocky post-hoc upscale (sprites keep nearest-
+    // neighbour scaling since imageSmoothingEnabled is off).
+    ctx.save();
+    ctx.scale(zoom, zoom);
 
     // ------------------------------------------------------------ detail pass (walls/hedges/etc + ground texture)
     for (let ty = 0; ty < CHUNK_TILES; ty++) {
@@ -1998,10 +2028,12 @@ export class TerrainRenderer {
     // ------------------------------------------------------------ decor
     this.drawDecor(ctx, x0, y0);
 
+    ctx.restore();
+
     const dt = t0 ? performance.now() - t0 : 0;
     if (typeof console !== 'undefined' && dt) {
       // eslint-disable-next-line no-console
-      console.log(`[terrain] baked chunk (${cx},${cy}) in ${dt.toFixed(1)}ms`);
+      console.log(`[terrain] baked chunk (${cx},${cy}) @${zoom}x in ${dt.toFixed(1)}ms`);
     }
     return canvas;
   }
@@ -2013,7 +2045,7 @@ export class TerrainRenderer {
       if (d.x < x0 - 1 || d.x >= x0 + CHUNK_TILES + 1 || d.y < y0 - 1 || d.y >= y0 + CHUNK_TILES + 1) continue;
       const cx = (d.x - x0) * TILE_PX;
       const cy = (d.y - y0) * TILE_PX;
-      drawDecorItem(ctx, d.kind, cx, cy, d.variant ?? 0);
+      drawDecorItem(ctx, d.kind, cx, cy, d.variant ?? 0, this.map.def.season);
     }
   }
 
@@ -2085,19 +2117,22 @@ export class TerrainRenderer {
     let pending = 0;
     for (let cy = startCy; cy <= endCy; cy++) {
       for (let cx = startCx; cx <= endCx; cx++) {
-        if (!this.chunks.has(this.chunkKey(cx, cy))) pending++;
+        if (!this.chunks.has(this.chunkKey(cx, cy, cam.zoom))) pending++;
       }
     }
-    let bakeBudget = pending > 2 ? BAKES_PER_DRAW_BURST : BAKES_PER_DRAW;
+    const isZoom2 = cam.zoom >= 2;
+    let bakeBudget = pending > 2
+      ? (isZoom2 ? BAKES_PER_DRAW_BURST_ZOOM2 : BAKES_PER_DRAW_BURST)
+      : (isZoom2 ? BAKES_PER_DRAW_ZOOM2 : BAKES_PER_DRAW);
     const lowRes = this.ensureLowRes();
     for (let cy = startCy; cy <= endCy; cy++) {
       for (let cx = startCx; cx <= endCx; cx++) {
-        const key = this.chunkKey(cx, cy);
+        const key = this.chunkKey(cx, cy, cam.zoom);
         let chunk = this.chunks.get(key);
         if (chunk) {
           this.touchChunk(key, chunk);
         } else if (bakeBudget > 0) {
-          chunk = this.bakeChunk(cx, cy);
+          chunk = this.bakeChunk(cx, cy, cam.zoom);
           this.touchChunk(key, chunk);
           bakeBudget--;
         }

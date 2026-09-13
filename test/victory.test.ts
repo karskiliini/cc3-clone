@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeResult, stepVictory } from '@/sim/victory';
+import { computeResult, prisonerCount, sideScore, stepVictory } from '@/sim/victory';
 import { VL_CAPTURE_SECONDS } from '@/shared/types';
 import type { BattleState, Side, Soldier, Vec2 } from '@/shared/types';
 
@@ -125,5 +125,36 @@ describe('victory', () => {
 
     state.sides.german.score = 0; state.sides.soviet.score = 100; // (20)/(120) ~= 0.167
     expect(computeResult(state)).toBe('defeat');
+  });
+
+  it('counts surrendered enemy soldiers as prisoners worth 3x a kill in score (balance round 3)', () => {
+    const state = makeState();
+    const prisoner = makeSoldier('soviet', { x: 0, y: 0 });
+    prisoner.activity = 'surrendered';
+    state.soldiers.set(prisoner.id, prisoner);
+
+    expect(prisonerCount(state, 'german')).toBe(1);
+    expect(prisonerCount(state, 'soviet')).toBe(0); // a soviet soldier surrendering isn't soviet's own prisoner
+
+    state.sides.german.kills = 0;
+    state.sides.german.losses = 0;
+    // score = vlPoints(0) + kills*2(0) + prisoners*2*3(1*6) - losses(0)
+    expect(sideScore(state, 'german')).toBe(6);
+  });
+
+  it('does not force a morale-based ceasefire before the 5-minute floor', () => {
+    const state = makeState();
+    state.sides.german.morale = 5; // well below the <10 ceasefire threshold
+    state.time = 60; // 1 minute in
+    stepVictory(state, 0.1);
+    expect(state.phase).toBe('running');
+  });
+
+  it('does force a morale-based ceasefire once past the 5-minute floor', () => {
+    const state = makeState();
+    state.sides.german.morale = 5;
+    state.time = 5 * 60 + 1;
+    stepVictory(state, 0.1);
+    expect(state.phase).toBe('ended');
   });
 });

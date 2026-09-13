@@ -1,6 +1,7 @@
+import type { CursorKind } from '@/shared/types';
 import { createInput } from '@/engine/input';
 import { startLoop } from '@/engine/loop';
-import { drawCursor } from '@/render/cursor';
+import { cssCursorFor } from '@/render/cursor';
 import { game } from '@/game';
 import { MainMenuScreen } from '@/ui/screens/mainMenu';
 
@@ -21,6 +22,11 @@ function logOnce(err: unknown): void {
   }
 }
 
+// The cursor is the native OS pointer (set via canvas.style.cursor), not a
+// canvas-drawn sprite, so it never lags a frame behind the hardware pointer.
+// The style write only happens when the requested kind actually changes.
+let lastCursorKind: CursorKind | null = null;
+
 startLoop((dt: number) => {
   const screen = game.screen;
   try {
@@ -33,6 +39,10 @@ startLoop((dt: number) => {
   } catch (err) {
     logOnce(err);
   }
-  drawCursor(ctx, input.state.mouse, screen.cursor?.() ?? 'arrow');
+  const kind = screen.cursor?.() ?? 'arrow';
+  if (kind !== lastCursorKind) {
+    canvas.style.cursor = cssCursorFor(kind);
+    lastCursorKind = kind;
+  }
   input.endFrame();
 });

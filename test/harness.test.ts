@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { Battle } from '@/sim/battle';
 import { aiDeploy } from '@/sim/ai';
-import { getSmallArmsStats } from '@/sim/combat';
+import { getSmallArmsStats, getCombatInstrumentation } from '@/sim/combat';
+import { prisonerCount } from '@/sim/victory';
+import { otherSide } from '@/shared/types';
 import { MAPS } from '@/data/maps';
 import { DEFAULT_FORCES } from '@/data/operation';
 import { SIM_DT } from '@/shared/types';
@@ -24,6 +26,16 @@ const YEAR_BY_MAP: Record<string, number> = {
   berlin_1945: 1945,
 };
 
+/** Map ids are expected to end in a year (e.g. a new 'moscow_1941'); fall back to that instead of
+ * a hardcoded table so a newly added map (src/data/maps/* is owned by other agents) still gets a
+ * sensible force year without this file needing an update. */
+function yearForMap(mapId: string): number {
+  if (YEAR_BY_MAP[mapId]) return YEAR_BY_MAP[mapId];
+  const m = /(\d{4})$/.exec(mapId);
+  const year = m ? Number(m[1]) : NaN;
+  return DEFAULT_FORCES[year] ? year : 1943;
+}
+
 const SIDES: Side[] = ['german', 'soviet'];
 const BATTLE_SECONDS = 20 * 60;
 const SEEDS = [1, 2, 3];
@@ -40,6 +52,7 @@ interface SideReport {
   teamsRouted: number;
   teamsDestroyed: number;
   vehiclesKO: number;
+  prisonersTaken: number; // enemy soldiers surrendered to this side
 }
 
 interface RunReport {
@@ -54,10 +67,22 @@ interface RunReport {
   smallArmsHit: number;
   smallArmsHitRate: number;
   sides: Record<Side, SideReport>;
+  // Balance round 4 instrumentation (per coordinator's follow-up ask on the defender advantage).
+  shotsByAttacker: number; // shots fired BY the attacking side (i.e. at defenders)
+  shotsByDefender: number; // shots fired BY the defending side (i.e. at attackers)
+  suppressionByAttacker: number; // suppression applied by the attacker onto the defender
+  suppressionByDefender: number; // suppression applied by the defender onto the attacker
+  mortarRoundsByAttacker: number;
+  mortarRoundsByDefender: number;
+  /** Average suppression among alive defender-side soldiers, sampled only at seconds where some
+   * attacking team is within 150m of some defending team (i.e. "when the fight is actually on"). */
+  avgDefenderSuppressionWhenClose: number | null;
+  /** Fraction of alive attacker-side soldiers with activity pinned/cowering, sampled at t=5/10/15min. */
+  attackerPinnedFractionAt: { m5: number | null; m10: number | null; m15: number | null };
 }
 
 function runOne(mapId: string, seed: number): RunReport {
-  const year = YEAR_BY_MAP[mapId] ?? 1943;
+  const year = yearForMap(mapId);
   const config: BattleConfig = {
     mapId,
     playerSide: 'german',
@@ -84,6 +109,33 @@ function runOne(mapId: string, seed: number): RunReport {
     soviet: battle.state.sides.soviet.losses,
   };
 
+  // team.status is a point-in-time snapshot, and Broken/Routed/Surrendered are often transient —
+  // a team passes through Broken on its way to Routed or Destroyed, so counting only the FINAL
+  // snapshot at battle end undercounts them (a team that broke at minute 8 and was wiped out by
+  // minute 15 shows only as "Destroyed"). Track every distinct team id ever seen in each state
+  // across the battle instead, so the report reflects what actually happened.
+  const everBroken = new Set<number>();
+  const everRouted = new Set<number>();
+  const everSurrendered = new Set<number>();
+
+  const mapDef = MAPS.find((m) => m.id === mapId)!;
+  const attackerSide = mapDef.attacker;
+  const defenderSide = otherSide(attackerSide);
+
+  // Balance round 4 instrumentation.
+  let defenderSuppressionSampleSum = 0;
+  let defenderSuppressionSampleCount = 0;
+  const pinnedFractionAt: { m5: number | null; m10: number | null; m15: number | null } = { m5: null, m10: null, m15: null };
+  const sampleAttackerPinnedFraction = (): number | null => {
+    let alive = 0, pinnedOrCowering = 0;
+    for (const s of battle.state.soldiers.values()) {
+      if (s.side !== attackerSide || s.health === 'dead' || s.health === 'incapacitated') continue;
+      alive++;
+      if (s.activity === 'pinned' || s.activity === 'cowering') pinnedOrCowering++;
+    }
+    return alive > 0 ? pinnedOrCowering / alive : null;
+  };
+
   const t0 = performance.now();
   let stepsTaken = 0;
   while (battle.state.phase === 'running' && battle.state.time < BATTLE_SECONDS) {
@@ -95,14 +147,47 @@ function runOne(mapId: string, seed: number): RunReport {
         - initialLosses.german - initialLosses.soviet;
       if (total > 0) firstCasualtyAtS = battle.state.time;
     }
+    for (const t of battle.state.teams.values()) {
+      if (t.status === 'Broken') everBroken.add(t.id);
+      else if (t.status === 'Routed') everRouted.add(t.id);
+      else if (t.status === 'Surrendered') everSurrendered.add(t.id);
+    }
+
+    // Sample once per sim-second (this loop already steps 1s at a time).
+    const attackerTeamPositions: { x: number; y: number }[] = [];
+    const defenderTeamPositions: { x: number; y: number }[] = [];
+    for (const t of battle.state.teams.values()) {
+      if (t.side === attackerSide) attackerTeamPositions.push(t.pos);
+      else defenderTeamPositions.push(t.pos);
+    }
+    let minAttackerDefenderDistM = Infinity;
+    for (const a of attackerTeamPositions) {
+      for (const d of defenderTeamPositions) {
+        const dm = Math.hypot(a.x - d.x, a.y - d.y) * 2; // TILE_M
+        if (dm < minAttackerDefenderDistM) minAttackerDefenderDistM = dm;
+      }
+    }
+    if (minAttackerDefenderDistM <= 150) {
+      let sum = 0, n = 0;
+      for (const s of battle.state.soldiers.values()) {
+        if (s.side !== defenderSide || s.health === 'dead' || s.health === 'incapacitated') continue;
+        sum += s.suppression;
+        n++;
+      }
+      if (n > 0) { defenderSuppressionSampleSum += sum / n; defenderSuppressionSampleCount++; }
+    }
+
+    const t = battle.state.time;
+    if (pinnedFractionAt.m5 === null && t >= 5 * 60) pinnedFractionAt.m5 = sampleAttackerPinnedFraction();
+    if (pinnedFractionAt.m10 === null && t >= 10 * 60) pinnedFractionAt.m10 = sampleAttackerPinnedFraction();
+    if (pinnedFractionAt.m15 === null && t >= 15 * 60) pinnedFractionAt.m15 = sampleAttackerPinnedFraction();
   }
   const wallMs = performance.now() - t0;
   const simSeconds = battle.state.time;
   const msPerSimSecond = simSeconds > 0 ? wallMs / simSeconds : 0;
 
   const smallArms = getSmallArmsStats(battle.state);
-
-  const mapDef = MAPS.find((m) => m.id === mapId)!;
+  const combatInstr = getCombatInstrumentation(battle.state);
 
   const sides: Record<Side, SideReport> = {} as Record<Side, SideReport>;
   for (const side of SIDES) {
@@ -128,10 +213,11 @@ function runOne(mapId: string, seed: number): RunReport {
       aliveFraction: startingAliveBySide[side] > 0 ? aliveCount / startingAliveBySide[side] : 0,
       morale: battle.state.sides[side].morale,
       vlsHeld,
-      teamsBroken: teams.filter((t) => t.status === 'Broken').length,
-      teamsRouted: teams.filter((t) => t.status === 'Routed' || t.status === 'Surrendered').length,
+      teamsBroken: teams.filter((t) => everBroken.has(t.id)).length,
+      teamsRouted: teams.filter((t) => everRouted.has(t.id) || everSurrendered.has(t.id)).length,
       teamsDestroyed: teams.filter((t) => t.status === 'Destroyed' || t.status === 'Knocked Out').length,
       vehiclesKO,
+      prisonersTaken: prisonerCount(battle.state, side),
     };
   }
 
@@ -147,6 +233,15 @@ function runOne(mapId: string, seed: number): RunReport {
     smallArmsHit: smallArms.hit,
     smallArmsHitRate: smallArms.fired > 0 ? smallArms.hit / smallArms.fired : 0,
     sides,
+    shotsByAttacker: combatInstr.shotsFiredBySide[attackerSide],
+    shotsByDefender: combatInstr.shotsFiredBySide[defenderSide],
+    suppressionByAttacker: combatInstr.suppressionAppliedBySide[attackerSide],
+    suppressionByDefender: combatInstr.suppressionAppliedBySide[defenderSide],
+    mortarRoundsByAttacker: combatInstr.mortarRoundsFiredBySide[attackerSide],
+    mortarRoundsByDefender: combatInstr.mortarRoundsFiredBySide[defenderSide],
+    avgDefenderSuppressionWhenClose: defenderSuppressionSampleCount > 0
+      ? defenderSuppressionSampleSum / defenderSuppressionSampleCount : null,
+    attackerPinnedFractionAt: pinnedFractionAt,
   };
 }
 
@@ -165,20 +260,36 @@ function printReport(reports: RunReport[]): void {
       `ms/simS=${fmt(r.msPerSimSecond, 3)} smallArmsHitRate=${fmt(r.smallArmsHitRate * 100, 2)}% ` +
       `(${r.smallArmsHit}/${r.smallArmsFired})`,
     );
+    lines.push(
+      `    shots: attacker=${r.shotsByAttacker} defender=${r.shotsByDefender} | ` +
+      `suppression: attacker=${fmt(r.suppressionByAttacker, 0)} defender=${fmt(r.suppressionByDefender, 0)} | ` +
+      `mortarHE: attacker=${r.mortarRoundsByAttacker} defender=${r.mortarRoundsByDefender} | ` +
+      `avgDefSuppr(<=150m)=${r.avgDefenderSuppressionWhenClose === null ? 'n/a' : fmt(r.avgDefenderSuppressionWhenClose, 0)} | ` +
+      `attackerPinned% @5/10/15m=${['m5', 'm10', 'm15'].map((k) => {
+        const v = r.attackerPinnedFractionAt[k as 'm5' | 'm10' | 'm15'];
+        return v === null ? 'n/a' : fmt(v * 100, 0) + '%';
+      }).join('/')}`,
+    );
     for (const side of SIDES) {
       const s = r.sides[side];
       lines.push(
         `    ${side.padEnd(7)} kills=${s.kills} losses=${s.losses} dead=${s.dead} ` +
         `aliveFrac=${fmt(s.aliveFraction * 100, 0)}% morale=${fmt(s.morale, 0)} vls=${s.vlsHeld} ` +
-        `broken=${s.teamsBroken} routed=${s.teamsRouted} destroyed=${s.teamsDestroyed} vehKO=${s.vehiclesKO}`,
+        `broken=${s.teamsBroken} routed=${s.teamsRouted} destroyed=${s.teamsDestroyed} vehKO=${s.vehiclesKO} prisoners=${s.prisonersTaken}`,
       );
     }
   }
-  const attackerWins = reports.filter((r) => r.result === 'decisive' || r.result === 'victory').length;
-  const perspectiveIsAttacker = reports.filter((r) => r.attacker === 'german'); // playerSide='german' always
+  // True attacker-win-rate, from the ATTACKER's perspective (not just playerSide='german'): result
+  // is always computed from german's perspective (computeResult in victory.ts), so when the
+  // attacker is soviet, a german 'defeat' is an attacker win and a german 'decisive'/'victory' is
+  // an attacker loss. Draws are excluded from the win-rate denominator (neither side "won").
+  const decided = reports.filter((r) => r.result !== 'draw');
+  const attackerWins = decided.filter((r) => {
+    const germanWon = r.result === 'decisive' || r.result === 'victory';
+    return r.attacker === 'german' ? germanWon : !germanWon;
+  }).length;
   lines.push('');
-  lines.push(`Attacker(=playerSide) win rate across ${reports.length} runs: ${attackerWins}/${reports.length}`);
-  lines.push(`(runs where attacker===playerSide('german')): ${perspectiveIsAttacker.length}/${reports.length}`);
+  lines.push(`Attacker win rate across ${decided.length} decided runs (${reports.length} total, ${reports.length - decided.length} draws): ${attackerWins}/${decided.length}`);
   // eslint-disable-next-line no-console
   console.log(lines.join('\n'));
 }
@@ -201,4 +312,44 @@ describe('AI-vs-AI balance harness', () => {
     printReport(reports);
     expect(reports.length).toBe(MAPS.length * SEEDS.length);
   }, 120_000);
+});
+
+describe('determinism', () => {
+  it('two runs with the same seed produce identical results (score, kills, losses)', () => {
+    // Balance round 3 ask: verify seed-identical runs are bit-identical. The sim itself has no
+    // Math.random/Date.now (all randomness goes through the seeded Rng), so this should already
+    // hold; this test pins it down as a permanent regression guard. Uses a short duration so the
+    // full suite stays fast.
+    const mapId = MAPS[0].id;
+    const year = yearForMap(mapId);
+    const config: BattleConfig = {
+      mapId, playerSide: 'german', year, seed: 7, durationS: 180,
+      difficulty: 'normal', forces: DEFAULT_FORCES[year], aiBothSides: true,
+    };
+
+    function runShort() {
+      const battle = new Battle(config);
+      for (const side of SIDES) aiDeploy(battle.state, side, battle.rng, battle);
+      battle.start();
+      for (let i = 0; i < config.durationS / SIM_DT; i++) {
+        battle.step(SIM_DT);
+        battle.drainEvents();
+      }
+      return {
+        time: battle.state.time,
+        result: battle.state.result,
+        german: { ...battle.state.sides.german },
+        soviet: { ...battle.state.sides.soviet },
+        soldierPositions: Array.from(battle.state.soldiers.values()).map((s) => `${s.id}:${s.pos.x.toFixed(4)},${s.pos.y.toFixed(4)}:${s.health}:${s.activity}`),
+      };
+    }
+
+    const a = runShort();
+    const b = runShort();
+    expect(b.time).toBe(a.time);
+    expect(b.result).toBe(a.result);
+    expect(b.german).toEqual(a.german);
+    expect(b.soviet).toEqual(a.soviet);
+    expect(b.soldierPositions).toEqual(a.soldierPositions);
+  });
 });

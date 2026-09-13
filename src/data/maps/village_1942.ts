@@ -31,16 +31,15 @@ function paintMap(p: MapPainter): void {
   p.orchard(95, 110, 14, 12, 2);
 
   // main street, gently curving, paved; farm tracks feeding it
-  p.road([
+  const mainStreet = [
     { x: 8, y: 82 }, { x: 40, y: 79 }, { x: 75, y: 81 }, { x: 110, y: 80 },
     { x: 145, y: 78 }, { x: 180, y: 81 }, { x: 212, y: 79 },
-  ], 4, 'pavedroad');
+  ];
+  p.road(mainStreet, 4, 'pavedroad');
   p.road([{ x: 20, y: 79 }, { x: 22, y: 50 }], 2, 'dirtroad');
   p.road([{ x: 160, y: 80 }, { x: 165, y: 118 }], 2, 'dirtroad');
-  p.decorLine([
-    { x: 8, y: 82 }, { x: 40, y: 79 }, { x: 75, y: 81 }, { x: 110, y: 80 },
-    { x: 145, y: 78 }, { x: 180, y: 81 }, { x: 212, y: 79 },
-  ], 'pole', 6);
+  p.decorLine(mainStreet, 'pole', 6);
+  p.craterLine(mainStreet, { tStart: 0.3, tEnd: 0.75, seedOffset: 100 });
 
   // two rows of wood houses along the street, alternating sides, irregular gaps, with garden
   // fences behind each row
@@ -89,6 +88,12 @@ function paintMap(p: MapPainter): void {
   p.patch(21, 73, 3, 'mud'); // on the dirt track, clear of the north-row house row
   p.patch(162, 100, 3, 'mud');
   p.patch(100, 84, 3, 'mud');
+
+  // a wrecked vehicle and abandoned cart near the street, stumps/logs at the woods edges
+  p.addDecor('wreck', 90, 82);
+  p.addDecor('wreck', 130, 76);
+  p.scatterDecor('stump', 100, 132, 22, 18, 6, 66);
+  p.scatterDecor('log', 178, 15, 20, 16, 5, 67);
 
   // rural/village decor scatter
   p.scatterDecor('bush', 0, 0, WIDTH, HEIGHT, 24, 60);

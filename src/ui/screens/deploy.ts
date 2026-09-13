@@ -1,4 +1,4 @@
-import type { Camera, CursorKind, InputState, Screen } from '@/shared/types';
+import type { BattleState, Camera, CursorKind, InputState, Screen, Vec2 } from '@/shared/types';
 import { VIEW_H, VIEW_W, otherSide } from '@/shared/types';
 import { game } from '@/game';
 import type { Battle } from '@/sim/battle';
@@ -12,9 +12,12 @@ import { BottomStrip } from '@/ui/hud/bottomStrip';
 import { SoldierMonitorPopup } from '@/ui/hud/soldierMonitor';
 import { Minimap } from '@/ui/hud/minimap';
 import { drawHudBase } from '@/ui/hud/hudChrome';
+import { getTeamIcon } from '@/render/sprites';
 import { drawTextCentered } from '@/render/pixelfont';
 import { PALETTE } from '@/render/palette';
-import { updateCameraEdgeScrollAndKeys, makeDragPanState, updateRightDragPan } from './common';
+import { updateCameraEdgeScrollAndKeys, makeDragPanState, makeEdgeScrollState, updateRightDragPan, pickFriendlyTeamScreen, type EdgeScrollState } from './common';
+import { isPassable } from '@/sim/path';
+import { pointInRect } from '@/shared/math';
 import { BattleScreen } from './battle';
 
 export class DeployScreen implements Screen {
@@ -28,9 +31,12 @@ export class DeployScreen implements Screen {
   private selectedTeamId: number | null = null;
   private draggingTeamId: number | null = null;
   private dragPan = makeDragPanState();
+  private edgeScroll: EdgeScrollState = makeEdgeScrollState();
   private invalidTimer = 0;
   private showMinimap = true;
   private shadeCanvas = document.createElement('canvas');
+  /** true while actively dragging and the current drop point is invalid. */
+  private dragInvalid = false;
 
   constructor(battle: Battle) {
     this.battle = battle;
@@ -61,34 +67,46 @@ export class DeployScreen implements Screen {
 
     if (this.invalidTimer > 0) this.invalidTimer -= dt;
 
-    updateCameraEdgeScrollAndKeys(cam, input, dt, map.width, map.height);
+    updateCameraEdgeScrollAndKeys(cam, input, dt, map.width, map.height, this.edgeScroll);
     updateRightDragPan(cam, input, this.dragPan, map.width, map.height);
     if (input.wheel !== 0) {
       if (input.wheel < 0) zoomIn(cam, map.width, map.height, input.mouse);
       else zoomOut(cam, map.width, map.height, input.mouse);
     }
 
-    // left mouse down on a friendly soldier: select + start drag
+    // left mouse down on a friendly soldier/vehicle: select + start drag
     for (const c of input.clicks) {
       if (c.button !== 0 || c.y >= VIEW_H) continue;
-      const world = screenToWorld(cam, { x: c.x, y: c.y });
-      const soldier = this.battle.soldierAt(world, this.battle.playerSide());
-      if (soldier) {
-        this.selectedTeamId = soldier.teamId;
-        this.draggingTeamId = soldier.teamId;
+      const hitTeam = pickFriendlyTeamScreen(state, cam, { x: c.x, y: c.y }, this.battle.playerSide());
+      if (hitTeam) {
+        this.selectedTeamId = hitTeam.id;
+        this.draggingTeamId = hitTeam.id;
       } else {
         this.draggingTeamId = null;
       }
     }
 
-    // release: drop the dragged team
+    // while dragging: continuously check whether the tile snapped under the
+    // cursor is a legal drop point, so the ghost/cursor can reflect it live.
+    if (this.draggingTeamId != null) {
+      const dragTeam = state.teams.get(this.draggingTeamId);
+      const dropWorld = this.snappedDropPoint(cam, input.mouse);
+      const zone = map.def.deployZones[this.battle.playerSide()];
+      const mover = dragTeam?.vehicleId != null ? 'vehicle' : 'infantry';
+      this.dragInvalid = !pointInRect(dropWorld, zone) || !isPassable(map, Math.floor(dropWorld.x), Math.floor(dropWorld.y), mover);
+    } else {
+      this.dragInvalid = false;
+    }
+
+    // release: drop the dragged team, snapped to the tile under the cursor
     for (const r of input.releases) {
       if (r.button !== 0) continue;
       if (this.draggingTeamId != null) {
-        const world = screenToWorld(cam, { x: r.x, y: r.y });
-        const ok = this.battle.deployTeam(this.draggingTeamId, world);
+        const dropWorld = this.snappedDropPoint(cam, { x: r.x, y: r.y });
+        const ok = this.battle.deployTeam(this.draggingTeamId, dropWorld);
         if (!ok) this.invalidTimer = 1;
         this.draggingTeamId = null;
+        this.dragInvalid = false;
       }
     }
 
@@ -122,6 +140,14 @@ export class DeployScreen implements Screen {
     if (input.keysPressed.has('f6')) this.showMinimap = !this.showMinimap;
   }
 
+  /** World point under a screen point, snapped to the centre of its tile —
+   * dropping a dragged team always lands cleanly on a tile, not at whatever
+   * fractional world coordinate the cursor happened to be over. */
+  private snappedDropPoint(cam: Camera, screenPt: Vec2): Vec2 {
+    const world = screenToWorld(cam, screenPt);
+    return { x: Math.floor(world.x) + 0.5, y: Math.floor(world.y) + 0.5 };
+  }
+
   /** Deployment shading: own zone unshaded, enemy zone dark gray, everything
    * else (neutral ground) light gray — drawn to an offscreen buffer first so
    * the compositing punch-hole doesn't erase the terrain already drawn. */
@@ -152,6 +178,35 @@ export class DeployScreen implements Screen {
     ctx.drawImage(this.shadeCanvas, 0, 0);
   }
 
+  /** Drag ghost: the whole team's formation, translucent, snapped to the
+   * tile under the cursor, plus its team icon. Tinted red (and the cursor
+   * switches to 'no', see cursor()) when the drop point isn't legal. */
+  private drawDragGhost(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, teamId: number): void {
+    const team = state.teams.get(teamId);
+    if (!team) return;
+    const drop = this.snappedDropPoint(cam, game.input.state.mouse);
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    for (const sid of team.soldierIds) {
+      const s = state.soldiers.get(sid);
+      if (!s) continue;
+      const p = worldToScreen(cam, team.vehicleId != null ? drop : { x: drop.x + s.formationOffset.x, y: drop.y + s.formationOffset.y });
+      ctx.fillStyle = this.dragInvalid ? PALETTE.red : PALETTE.gold;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const centre = worldToScreen(cam, drop);
+    const icon = getTeamIcon(team.type);
+    ctx.drawImage(icon, Math.round(centre.x - icon.width / 2), Math.round(centre.y - icon.height));
+    ctx.strokeStyle = this.dragInvalid ? PALETTE.red : PALETTE.gold;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(centre.x, centre.y, 8, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   draw(ctx: CanvasRenderingContext2D): void {
     const cam = game.cam;
     const map = this.battle.state.map;
@@ -173,12 +228,7 @@ export class DeployScreen implements Screen {
     drawUnits(ctx, cam, state, this.battle.playerSide(), this.selectedTeamId != null ? [this.selectedTeamId] : [], game.settings);
 
     if (this.draggingTeamId != null) {
-      const mouse = game.input.state.mouse;
-      ctx.strokeStyle = PALETTE.gold;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(mouse.x, mouse.y, 8, 0, Math.PI * 2);
-      ctx.stroke();
+      this.drawDragGhost(ctx, cam, state, this.draggingTeamId);
     }
     if (this.invalidTimer > 0) {
       const mouse = game.input.state.mouse;
@@ -198,6 +248,8 @@ export class DeployScreen implements Screen {
   }
 
   cursor(): CursorKind {
-    return this.dragPan.active ? 'hand' : this.draggingTeamId != null ? 'move' : 'arrow';
+    if (this.dragPan.active) return 'hand';
+    if (this.draggingTeamId != null) return this.dragInvalid ? 'no' : 'move';
+    return 'arrow';
   }
 }

@@ -24,6 +24,9 @@ export class Minimap {
   private thumbForMap: unknown = null;
   private scaleX = 1;
   private scaleY = 1;
+  /** true from the frame the button goes down inside the minimap until it's
+   * released, so dragging pans continuously (not just on the initial click). */
+  private dragging = false;
 
   private ensureThumb(terrain: TerrainRenderer, mapWidth: number, mapHeight: number): void {
     if (this.thumbForMap !== terrain) {
@@ -41,16 +44,23 @@ export class Minimap {
     return MM_Y + Math.round((MM_H - THUMB_H) / 2);
   }
 
-  /** Returns true if the click was consumed (camera recentred). */
+  /** Returns true if the click/drag consumed input this frame (camera
+   * recentred). Panning continues every frame the button stays held, even
+   * once the pointer drags outside the minimap's own rect. */
   update(input: InputState, cam: Camera, mapWidth: number, mapHeight: number): boolean {
     for (const c of input.clicks) {
-      if (c.button !== 0) continue;
-      if (!hitRect({ x: c.x, y: c.y }, this.rect)) continue;
-      const wx = (c.x - this.originX()) / this.scaleX;
-      const wy = (c.y - this.originY()) / this.scaleY;
-      centerCamera(cam, { x: wx, y: wy });
-      clampCamera(cam, mapWidth, mapHeight);
-      return true;
+      if (c.button === 0 && hitRect({ x: c.x, y: c.y }, this.rect)) this.dragging = true;
+    }
+    if (this.dragging) {
+      if (!input.buttons.left) {
+        this.dragging = false;
+      } else {
+        const wx = (input.mouse.x - this.originX()) / this.scaleX;
+        const wy = (input.mouse.y - this.originY()) / this.scaleY;
+        centerCamera(cam, { x: wx, y: wy });
+        clampCamera(cam, mapWidth, mapHeight);
+        return true;
+      }
     }
     return false;
   }

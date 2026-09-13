@@ -1,7 +1,7 @@
 import type { OperationBattleDef, OperationState, Side } from '@/shared/types';
 import { TEAM_DEFS, teamsForYear } from './units';
 
-/** The five-battle linear operation, June 1941 -> April 1945. */
+/** The six-battle linear operation, June 1941 -> April 1945. */
 export const OPERATION: OperationBattleDef[] = [
   {
     mapId: 'border_1941',
@@ -11,6 +11,16 @@ export const OPERATION: OperationBattleDef[] = [
     aiForces: {
       german: ['ger_rifle_41', 'ger_rifle_41', 'ger_mg34_hmg', 'ger_mortar81', 'ger_pak38', 'ger_sniper', 'ger_command', 'ger_engineers', 'ger_pz3j', 'ger_pz4f1'],
       soviet: ['sov_rifle_41', 'sov_rifle_41', 'sov_maxim_hmg', 'sov_mortar82', 'sov_45mm_at', 'sov_sniper', 'sov_ptrd', 'sov_command', 'sov_t26', 'sov_bt7'],
+    },
+  },
+  {
+    mapId: 'moscow_1941',
+    year: 1941,
+    title: 'Battle of Moscow — December 1941',
+    requisition: { german: 210, soviet: 210 },
+    aiForces: {
+      german: ['ger_rifle_41', 'ger_rifle_41', 'ger_mg34_hmg', 'ger_mortar81', 'ger_pak38', 'ger_sniper', 'ger_command', 'ger_engineers', 'ger_pz3j', 'ger_sdkfz251'],
+      soviet: ['sov_rifle_41', 'sov_rifle_41', 'sov_maxim_hmg', 'sov_mortar82', 'sov_45mm_at', 'sov_sniper', 'sov_ptrd', 'sov_command', 'sov_kv1', 'sov_t26'],
     },
   },
   {

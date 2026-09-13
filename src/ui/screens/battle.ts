@@ -18,14 +18,16 @@ import { drawHudBase } from '@/ui/hud/hudChrome';
 import { CommandMenu } from '@/ui/commandMenu';
 import { drawTextCentered, FONT_BIG_H } from '@/render/pixelfont';
 import { PALETTE } from '@/render/palette';
-import { updateCameraEdgeScrollAndKeys } from './common';
+import { updateCameraEdgeScrollAndKeys, makeEdgeScrollState, pickFriendlyTeamScreen, type EdgeScrollState } from './common';
 import { DebriefScreen } from './debrief';
 import { OverviewScreen } from './overview';
 import { OptionsScreen } from './options';
 
 const SPEEDS: (1 | 2 | 4)[] = [1, 2, 4];
 const MOVE_TYPES: OrderType[] = ['move', 'moveFast', 'sneak'];
-const DRAG_THRESHOLD_PX = 6;
+const DRAG_THRESHOLD_PX = 5;
+const RIGHT_GESTURE_PX = 5;
+const RIGHT_GESTURE_MS = 400;
 
 /** Big gold word on a 60%-black box, centred in the map viewport — used for
  * the PAUSED overlay and the end-of-battle result word. */
@@ -48,6 +50,11 @@ interface RightDrag {
   lastX: number;
   lastY: number;
   moved: number;
+  startTime: number;
+  /** true when the press itself landed on a friendly team, opening the
+   * command menu immediately — enables the original's press/drag/release
+   * gesture (mousedown on team, drag onto a row, release to pick it). */
+  menuOpenedOnPress: boolean;
 }
 
 interface LeftDrag {
@@ -72,8 +79,9 @@ export class BattleScreen implements Screen {
   private pendingWaypoints: Vec2[] = [];
   private paused = false;
   private endedAt: number | null = null;
-  private rightDrag: RightDrag = { active: false, startX: 0, startY: 0, lastX: 0, lastY: 0, moved: 0 };
+  private rightDrag: RightDrag = { active: false, startX: 0, startY: 0, lastX: 0, lastY: 0, moved: 0, startTime: 0, menuOpenedOnPress: false };
   private leftDrag: LeftDrag = { active: false, startX: 0, startY: 0, moved: 0 };
+  private edgeScroll: EdgeScrollState = makeEdgeScrollState();
 
   // F5/F6/F7 toggles, Ctrl+K show-dead toggle (original CC3 keyboard reference).
   private showTeamGrid = true;
@@ -145,20 +153,36 @@ export class BattleScreen implements Screen {
       }
     }
 
-    updateCameraEdgeScrollAndKeys(cam, input, dt, state.map.width, state.map.height);
+    updateCameraEdgeScrollAndKeys(cam, input, dt, state.map.width, state.map.height, this.edgeScroll);
 
     if (input.wheel !== 0) {
       if (input.wheel < 0) zoomIn(cam, state.map.width, state.map.height, input.mouse);
       else zoomOut(cam, state.map.width, state.map.height, input.mouse);
     }
 
-    // right mouse: drag = pan, click (no team) = nothing, click (team selected) = command menu
+    // right mouse: pressing directly on a friendly team opens the command
+    // menu immediately at the press point (like the original's press/drag
+    // onto a row/release gesture); pressing elsewhere starts a pan-or-click
+    // gesture resolved on release; right-clicking again while the menu is
+    // open closes it (so does Escape, handled below).
     for (const c of input.clicks) {
-      if (c.button === 2) {
-        this.rightDrag = { active: true, startX: c.x, startY: c.y, lastX: c.x, lastY: c.y, moved: 0 };
+      if (c.button !== 2) continue;
+      if (this.commandMenu.isOpen) {
+        this.commandMenu.close();
+        continue;
+      }
+      const hitTeam = pickFriendlyTeamScreen(state, cam, { x: c.x, y: c.y }, battle.playerSide());
+      this.rightDrag = { active: true, startX: c.x, startY: c.y, lastX: c.x, lastY: c.y, moved: 0, startTime: state.time, menuOpenedOnPress: false };
+      if (hitTeam) {
+        this.setSelection([hitTeam.id]);
+        this.commandMenu.open({ x: c.x, y: c.y }, hitTeam, {
+          canSmoke: teamHasSmoke(state, hitTeam),
+          canFire: teamCanFire(state, hitTeam),
+        });
+        this.rightDrag.menuOpenedOnPress = true;
       }
     }
-    if (this.rightDrag.active && input.buttons.right) {
+    if (this.rightDrag.active && input.buttons.right && !this.rightDrag.menuOpenedOnPress) {
       const dx = input.mouse.x - this.rightDrag.lastX;
       const dy = input.mouse.y - this.rightDrag.lastY;
       if (dx !== 0 || dy !== 0) {
@@ -170,18 +194,19 @@ export class BattleScreen implements Screen {
       this.rightDrag.moved = Math.max(this.rightDrag.moved, Math.hypot(input.mouse.x - this.rightDrag.startX, input.mouse.y - this.rightDrag.startY));
     }
     for (const r of input.releases) {
-      if (r.button === 2 && this.rightDrag.active) {
-        if (this.rightDrag.moved < 4 && this.selectedTeamId != null && !this.commandMenu.isOpen) {
-          const team = state.teams.get(this.selectedTeamId);
-          if (team) {
-            this.commandMenu.open({ x: r.x, y: r.y }, team, {
-              canSmoke: teamHasSmoke(state, team),
-              canFire: teamCanFire(state, team),
-            });
-          }
+      if (r.button !== 2 || !this.rightDrag.active) continue;
+      const heldMs = (state.time - this.rightDrag.startTime) * 1000;
+      if (!this.rightDrag.menuOpenedOnPress && this.rightDrag.moved < RIGHT_GESTURE_PX && heldMs <= RIGHT_GESTURE_MS
+        && this.selectedTeamId != null && !this.commandMenu.isOpen) {
+        const team = state.teams.get(this.selectedTeamId);
+        if (team) {
+          this.commandMenu.open({ x: r.x, y: r.y }, team, {
+            canSmoke: teamHasSmoke(state, team),
+            canFire: teamCanFire(state, team),
+          });
         }
-        this.rightDrag.active = false;
       }
+      this.rightDrag.active = false;
     }
 
     // command menu
@@ -238,8 +263,8 @@ export class BattleScreen implements Screen {
             this.issueOrderToSelection(input, world);
           }
         } else {
-          const soldier = battle.soldierAt(world, battle.playerSide());
-          this.setSelection(soldier ? [soldier.teamId] : []);
+          const hitTeam = pickFriendlyTeamScreen(state, cam, { x: r.x, y: r.y }, battle.playerSide());
+          this.setSelection(hitTeam ? [hitTeam.id] : []);
         }
       }
       this.leftDrag.active = false;
@@ -373,7 +398,7 @@ export class BattleScreen implements Screen {
       const mouse = game.input.state.mouse;
       const x0 = Math.min(this.leftDrag.startX, mouse.x), x1 = Math.max(this.leftDrag.startX, mouse.x);
       const y0 = Math.min(this.leftDrag.startY, mouse.y), y1 = Math.max(this.leftDrag.startY, mouse.y);
-      ctx.strokeStyle = PALETTE.gold;
+      ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 1;
       ctx.setLineDash([3, 2]);
       ctx.strokeRect(x0 + 0.5, y0 + 0.5, x1 - x0, y1 - y0);
@@ -404,7 +429,7 @@ export class BattleScreen implements Screen {
 
   cursor(): CursorKind {
     if (this.pendingOrder) return 'crosshair';
-    if (this.rightDrag.active && this.rightDrag.moved >= 4) return 'hand';
+    if (this.rightDrag.active && !this.rightDrag.menuOpenedOnPress && this.rightDrag.moved >= RIGHT_GESTURE_PX) return 'hand';
     return 'arrow';
   }
 }

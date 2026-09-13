@@ -1,5 +1,6 @@
 import type { InputState } from '@/shared/types';
 import { SCREEN_W, SCREEN_H } from '@/shared/types';
+import { clamp } from '@/shared/math';
 import { game } from '@/game';
 
 const PREVENT_KEYS = new Set([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'tab']);
@@ -17,8 +18,17 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
     keysDown: new Set(),
     keysPressed: new Set(),
     wheel: 0,
+    pointerInside: true,
   };
 
+  // Reused scratch object for clientToLogical results, to avoid allocating a
+  // new {x,y} on every mousemove/mousedown/mouseup — those fire very often.
+  const scratchPt = { x: 0, y: 0 };
+
+  // DevicePixelRatio-independent: getBoundingClientRect() and clientX/clientY
+  // are both in CSS pixels, so this mapping is exact regardless of DPR. The
+  // canvas is laid out with object-fit:contain (letterboxed, 4:3), so we
+  // recompute the same contain-fit math the browser uses for painting.
   function clientToLogical(clientX: number, clientY: number): { x: number; y: number } {
     const rect = canvas.getBoundingClientRect();
     const scale = Math.min(rect.width / SCREEN_W, rect.height / SCREEN_H);
@@ -26,9 +36,9 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
     const dispH = SCREEN_H * scale;
     const offX = rect.left + (rect.width - dispW) / 2;
     const offY = rect.top + (rect.height - dispH) / 2;
-    const x = (clientX - offX) / (scale || 1);
-    const y = (clientY - offY) / (scale || 1);
-    return { x, y };
+    scratchPt.x = clamp((clientX - offX) / (scale || 1), 0, SCREEN_W - 1);
+    scratchPt.y = clamp((clientY - offY) / (scale || 1), 0, SCREEN_H - 1);
+    return scratchPt;
   }
 
   function buttonOf(b: number): 0 | 1 | 2 {
@@ -39,6 +49,21 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
     const p = clientToLogical(e.clientX, e.clientY);
     state.mouse.x = p.x;
     state.mouse.y = p.y;
+    state.pointerInside = true;
+  });
+
+  // Edge-scroll and drag gestures must stop dead the instant the pointer
+  // leaves the page or the window loses focus — otherwise the camera (or a
+  // stuck button) keeps "moving" after the user has alt-tabbed away.
+  canvas.addEventListener('mouseleave', () => {
+    state.pointerInside = false;
+  });
+  window.addEventListener('blur', () => {
+    state.pointerInside = false;
+    state.buttons.left = false;
+    state.buttons.right = false;
+    state.buttons.middle = false;
+    state.keysDown.clear();
   });
 
   window.addEventListener('mousedown', (e: MouseEvent) => {
@@ -63,6 +88,11 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
   window.addEventListener('contextmenu', (e: Event) => {
     e.preventDefault();
   });
+
+  // Right-drag-to-pan and left-drag-to-select must never trigger the
+  // browser's native text/image selection or drag-ghost affordances.
+  window.addEventListener('selectstart', (e: Event) => e.preventDefault());
+  canvas.addEventListener('dragstart', (e: Event) => e.preventDefault());
 
   window.addEventListener('keydown', (e: KeyboardEvent) => {
     unlockAudio();

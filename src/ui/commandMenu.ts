@@ -19,7 +19,7 @@ const MENU_GROUPS: OrderType[][] = [
 const MENU_ORDER: OrderType[] = MENU_GROUPS.flat();
 
 const ROW_W = 104;
-const ROW_H = 16;
+const ROW_H = 18; // taller rows = a bigger, easier target (native-feel hit area)
 const GROUP_GAP = 4; // thin separator gap between categories
 const BORDER = 2;
 const SWATCH_SIZE = 6;
@@ -124,6 +124,22 @@ export class CommandMenu {
       } else if (c.button === 0 || c.button === 2) {
         this.close();
         return 'cancel';
+      }
+    }
+
+    // Press-drag-release: mousedown on the team (elsewhere) opened this menu
+    // while the right button is still held; releasing it over a row picks
+    // that order, same as a left click would.
+    for (const r of input.releases) {
+      if (r.button !== 2) continue;
+      const p = { x: r.x, y: r.y };
+      const idx = this.rowIndexAt(p);
+      if (idx != null) {
+        const type = LAYOUT[idx].type;
+        if (!this.disabled[type]) {
+          this.close();
+          return type;
+        }
       }
     }
 

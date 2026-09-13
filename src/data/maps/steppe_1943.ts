@@ -30,14 +30,17 @@ function paintMap(p: MapPainter): void {
   p.orchard(158, 46, 12, 10, 2);
 
   // dirt tracks crossing the steppe, curved, with a junction
-  p.road([
+  const mainTrack = [
     { x: 0, y: 102 }, { x: 45, y: 98 }, { x: 90, y: 103 }, { x: 135, y: 99 },
     { x: 180, y: 104 }, { x: 240, y: 100 },
-  ], 2, 'dirtroad');
+  ];
+  p.road(mainTrack, 2, 'dirtroad');
   p.road([
     { x: 180, y: 0 }, { x: 176, y: 40 }, { x: 182, y: 80 }, { x: 178, y: 120 }, { x: 182, y: 170 },
   ], 2, 'dirtroad');
   p.rect(177, 101, 3, 3, 'dirtroad');
+  p.decorLine(mainTrack, 'pole', 8);
+  p.craterLine(mainTrack, { tStart: 0.3, tEnd: 0.75, seedOffset: 80 });
 
   // German trench belt in the north, zig-zag, with barbed-wire-style fence in front and craters
   p.line([
@@ -74,13 +77,23 @@ function paintMap(p: MapPainter): void {
   p.addDecor('haystack', 68, 90);
   p.addDecor('cart', 54, 90);
   p.addDecor('woodpile', 70, 82);
+  p.addDecor('woodpile', 57, 91);
+  p.addDecor('haystack', 51, 82);
 
-  // decor: steppe scatter
-  p.scatterDecor('bush', 0, 0, WIDTH, HEIGHT, 20, 60);
-  p.scatterDecor('rocks', 0, 0, WIDTH, HEIGHT, 16, 61);
-  p.scatterDecor('flowers', 20, 60, 200, 60, 14, 62);
+  // stumps/log piles at the copse's edge, and a wrecked vehicle near the trench line
+  p.scatterDecor('stump', 140, 50, 24, 20, 6, 66);
+  p.scatterDecor('log', 145, 44, 20, 16, 5, 67);
+  p.addDecor('wreck', 105, 43);
+  p.addDecor('wreck', 160, 96);
+
+  // decor: steppe scatter (round-3 density pass toward the original's crater/scatter density)
+  p.scatterDecor('bush', 0, 0, WIDTH, HEIGHT, 26, 60);
+  p.scatterDecor('rocks', 0, 0, WIDTH, HEIGHT, 22, 61);
+  p.scatterDecor('flowers', 20, 60, 200, 60, 16, 62);
   p.scatterDecor('log', 140, 40, 40, 30, 6, 63);
-  p.scatterDecor('barrel', 40, 40, 30, 15, 4, 64);
+  p.scatterDecor('barrel', 40, 40, 30, 15, 6, 64);
+  p.scatterDecor('crate', 90, 95, 40, 20, 6, 68);
+  p.scatterDecor('puddle', 0, 90, WIDTH, 40, 10, 69);
   p.scatterDecor('sign', 90, 100, 1, 1, 1, 65);
 }
 

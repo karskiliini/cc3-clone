@@ -18,6 +18,11 @@ const THUMB_H = 360;
 const qs = new URLSearchParams(location.search);
 const cxOverride = qs.has('cx') ? Number(qs.get('cx')) : null;
 const cyOverride = qs.has('cy') ? Number(qs.get('cy')) : null;
+// ?zoom=2 (or 0.5) bakes+renders the 1:1 viewport at that zoom instead of 1, so a chunk's
+// true-output-resolution bake can be eyeballed directly against the zoom-1 version (e.g. field
+// edges/ruts staying smooth rather than blockily upscaled).
+const ZOOM_QS = qs.has('zoom') ? Number(qs.get('zoom')) : 1;
+const previewZoom = [0.5, 1, 2].includes(ZOOM_QS) ? ZOOM_QS : 1;
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -67,6 +72,7 @@ function renderMap(root: HTMLElement, mapId: string): void {
   const vctx = viewCanvas.getContext('2d')!;
   vctx.imageSmoothingEnabled = false;
   const cam = createCamera();
+  cam.zoom = previewZoom;
   const centerX = cxOverride !== null && !Number.isNaN(cxOverride) ? cxOverride : map.width / 2;
   const centerY = cyOverride !== null && !Number.isNaN(cyOverride) ? cyOverride : map.height / 2;
   centerCamera(cam, { x: centerX, y: centerY });
@@ -80,8 +86,8 @@ function renderMap(root: HTMLElement, mapId: string): void {
   viewWrap.appendChild(viewCanvas);
   const viewCaption = el('div', 'caption');
   viewCaption.textContent = cxOverride !== null || cyOverride !== null
-    ? `1:1 viewport ${VIEW_W}x${VIEW_H} @ zoom 1, centred on (${centerX}, ${centerY})`
-    : `1:1 viewport ${VIEW_W}x${VIEW_H} @ zoom 1, centred on map`;
+    ? `1:1 viewport ${VIEW_W}x${VIEW_H} @ zoom ${previewZoom}, centred on (${centerX}, ${centerY})`
+    : `1:1 viewport ${VIEW_W}x${VIEW_H} @ zoom ${previewZoom}, centred on map`;
   viewWrap.appendChild(viewCaption);
   row.appendChild(viewWrap);
 

@@ -3,10 +3,10 @@
 // a small ListBox widget, word-wrap, camera-control helpers and a BACK button
 // factory. Nothing here owns simulation state.
 // ============================================================================
-import type { Camera, InputState, Rect, Side, TeamDef, TeamType } from '@/shared/types';
-import { SCREEN_W, SCREEN_H, VIEW_W, VIEW_H, MENU_X, MENU_Y, MENU_W, MENU_H } from '@/shared/types';
+import type { BattleState, Camera, InputState, Rect, Side, Team, TeamDef, TeamType, Vec2 } from '@/shared/types';
+import { SCREEN_W, SCREEN_H, VIEW_W, VIEW_H, MENU_X, MENU_Y, MENU_W, MENU_H, TILE_M, TILE_PX } from '@/shared/types';
 import { pointInRect } from '@/shared/math';
-import { panCamera, clampCamera } from '@/engine/camera';
+import { panCamera, clampCamera, worldToScreen } from '@/engine/camera';
 import { Button, drawDarkPanel, drawBottomStrip, drawSmallMetalButton, drawVerticalStencil, drawShadowText, drawPoster } from '@/ui/chrome';
 import { PALETTE } from '@/render/palette';
 import { drawText, textWidth } from '@/render/pixelfont';
@@ -182,28 +182,80 @@ export class ListBox {
 
 // -------------------------------------------------------------- camera ctl --
 /** Edge-scroll (cursor near the viewport border) + arrow-key panning, clamped to the map. */
+const EDGE_PX = 8;          // width of the edge-scroll hot zone
+const EDGE_ACCEL_PX = 3;    // outermost band of the hot zone: faster scroll
+const EDGE_SPEED = 700;     // px/s (base)
+const EDGE_ACCEL_MULT = 1.6;
+const EDGE_DWELL_S = 0.12;  // must dwell in the zone this long before it starts
+const KEY_SPEED = 700;      // px/s, arrow keys — instant, no dwell
+
+export interface EdgeScrollState {
+  dwellLeft: number;
+  dwellRight: number;
+  dwellTop: number;
+  dwellBottom: number;
+}
+
+export function makeEdgeScrollState(): EdgeScrollState {
+  return { dwellLeft: 0, dwellRight: 0, dwellTop: 0, dwellBottom: 0 };
+}
+
+/** One edge's dwell-then-scroll speed (px/s), or 0 while not yet past the
+ * dwell threshold / not active. Mutates `dwellRef` in place (no allocation). */
+function edgeSpeed(active: boolean, distFromEdge: number, dt: number, dwellRef: EdgeScrollState, key: keyof EdgeScrollState): number {
+  if (!active) {
+    dwellRef[key] = 0;
+    return 0;
+  }
+  dwellRef[key] += dt;
+  if (dwellRef[key] < EDGE_DWELL_S) return 0;
+  return distFromEdge <= EDGE_ACCEL_PX ? EDGE_SPEED * EDGE_ACCEL_MULT : EDGE_SPEED;
+}
+
+/**
+ * Edge-scroll (mouse near the viewport edge, excluding the bottom panel) and
+ * arrow-key scroll, combined into one smooth per-frame camera pan.
+ * - Edge-scroll only engages when the pointer is inside the canvas, requires
+ *   a short dwell before it starts (so passing the mouse over the edge on
+ *   the way elsewhere doesn't yank the camera), and accelerates in the
+ *   outermost few pixels of the hot zone.
+ * - Arrow keys pan immediately, no dwell.
+ * - Stops instantly when the pointer leaves the canvas/window or the window
+ *   loses focus (via input.pointerInside, cleared by engine/input.ts).
+ */
 export function updateCameraEdgeScrollAndKeys(
   cam: Camera,
   input: InputState,
   dt: number,
   mapW: number,
   mapH: number,
-  edgePx = 8,
-  speedPxPerSec = 300,
+  edgeState: EdgeScrollState,
 ): void {
-  let dx = 0;
-  let dy = 0;
-  if (input.mouse.y >= 0 && input.mouse.y <= VIEW_H) {
-    if (input.mouse.x >= 0 && input.mouse.x < edgePx) dx -= 1;
-    if (input.mouse.x <= VIEW_W && input.mouse.x > VIEW_W - edgePx) dx += 1;
-    if (input.mouse.y >= 0 && input.mouse.y < edgePx) dy -= 1;
-    if (input.mouse.y > VIEW_H - edgePx) dy += 1;
-  }
-  if (input.keysDown.has('arrowleft')) dx -= 1;
-  if (input.keysDown.has('arrowright')) dx += 1;
-  if (input.keysDown.has('arrowup')) dy -= 1;
-  if (input.keysDown.has('arrowdown')) dy += 1;
-  if (dx !== 0 || dy !== 0) panCamera(cam, dx * speedPxPerSec * dt, dy * speedPxPerSec * dt);
+  const inside = input.pointerInside && input.mouse.x >= 0 && input.mouse.x <= VIEW_W && input.mouse.y >= 0 && input.mouse.y <= VIEW_H;
+
+  const leftActive = inside && input.mouse.x < EDGE_PX;
+  const rightActive = inside && input.mouse.x > VIEW_W - EDGE_PX;
+  const topActive = inside && input.mouse.y < EDGE_PX;
+  const bottomActive = inside && input.mouse.y > VIEW_H - EDGE_PX;
+
+  const leftSpd = edgeSpeed(leftActive, input.mouse.x, dt, edgeState, 'dwellLeft');
+  const rightSpd = edgeSpeed(rightActive, VIEW_W - input.mouse.x, dt, edgeState, 'dwellRight');
+  const topSpd = edgeSpeed(topActive, input.mouse.y, dt, edgeState, 'dwellTop');
+  const bottomSpd = edgeSpeed(bottomActive, VIEW_H - input.mouse.y, dt, edgeState, 'dwellBottom');
+
+  let dx = (rightSpd - leftSpd) * dt;
+  let dy = (bottomSpd - topSpd) * dt;
+
+  let kx = 0;
+  let ky = 0;
+  if (input.keysDown.has('arrowleft')) kx -= 1;
+  if (input.keysDown.has('arrowright')) kx += 1;
+  if (input.keysDown.has('arrowup')) ky -= 1;
+  if (input.keysDown.has('arrowdown')) ky += 1;
+  dx += kx * KEY_SPEED * dt;
+  dy += ky * KEY_SPEED * dt;
+
+  if (dx !== 0 || dy !== 0) panCamera(cam, dx, dy);
   clampCamera(cam, mapW, mapH);
 }
 
@@ -237,6 +289,101 @@ export function updateRightDragPan(cam: Camera, input: InputState, s: DragPanSta
     s.active = false;
   }
   clampCamera(cam, mapW, mapH);
+}
+
+// ============================================================================
+// SCREEN-SPACE HIT-TESTING — selecting a team should feel forgiving and
+// zoom-independent, like the original: pick the nearest friendly soldier
+// within a fixed screen-pixel radius, else fall back to a team's bounding
+// circle, else a vehicle's rotated hull rectangle (+ a few px of slop).
+// ============================================================================
+const SOLDIER_PICK_PX = 14;
+const TEAM_CIRCLE_SLOP_PX = 12;
+const VEHICLE_HULL_SLOP_PX = 6;
+
+/** Nearest living friendly soldier whose on-screen position is within
+ * `SOLDIER_PICK_PX` screen pixels of `screenPt`, regardless of zoom. */
+function pickFriendlySoldierScreen(state: BattleState, cam: Camera, screenPt: Vec2, side: Side): Team | null {
+  let bestTeam: Team | null = null;
+  let bestD = SOLDIER_PICK_PX;
+  for (const s of state.soldiers.values()) {
+    if (s.side !== side || s.health === 'dead') continue;
+    const p = worldToScreen(cam, s.pos);
+    const d = Math.hypot(p.x - screenPt.x, p.y - screenPt.y);
+    if (d <= bestD) {
+      const team = state.teams.get(s.teamId);
+      if (team) { bestD = d; bestTeam = team; }
+    }
+  }
+  return bestTeam;
+}
+
+/** Screen-space team bounding circle: centre = centroid of the team's alive
+ * soldiers (or vehicle position), radius = the furthest member from that
+ * centre plus a fixed px margin, so a click anywhere near a spread-out
+ * team's footprint still hits it. */
+function teamBoundingCircleScreen(state: BattleState, cam: Camera, team: Team): { c: Vec2; r: number } | null {
+  const pts: Vec2[] = [];
+  for (const sid of team.soldierIds) {
+    const s = state.soldiers.get(sid);
+    if (s && s.health !== 'dead') pts.push(worldToScreen(cam, s.pos));
+  }
+  if (pts.length === 0) {
+    if (team.vehicleId == null) return null;
+    const v = state.vehicles.get(team.vehicleId);
+    if (!v) return null;
+    pts.push(worldToScreen(cam, v.pos));
+  }
+  let cx = 0, cy = 0;
+  for (const p of pts) { cx += p.x; cy += p.y; }
+  cx /= pts.length; cy /= pts.length;
+  let r = 0;
+  for (const p of pts) r = Math.max(r, Math.hypot(p.x - cx, p.y - cy));
+  return { c: { x: cx, y: cy }, r: r + TEAM_CIRCLE_SLOP_PX };
+}
+
+/** Point-in-rotated-rectangle test, in screen space, expanded by `slopPx` on
+ * every side — used for a vehicle's hull (heading: 0 = north, clockwise). */
+function pointInRotatedRectScreen(p: Vec2, centre: Vec2, halfLenPx: number, halfWidPx: number, headingRad: number, slopPx: number): boolean {
+  const dx = p.x - centre.x;
+  const dy = p.y - centre.y;
+  const cos = Math.cos(-headingRad);
+  const sin = Math.sin(-headingRad);
+  const lx = dx * sin - dy * cos; // along the hull's length axis
+  const ly = dx * cos + dy * sin; // across the hull's width axis
+  return Math.abs(lx) <= halfLenPx + slopPx && Math.abs(ly) <= halfWidPx + slopPx;
+}
+
+/**
+ * Selecting a team the way the original felt: forgiving, not pixel-precise.
+ * Tries, in order: the nearest friendly soldier within a fixed screen-px
+ * radius (independent of zoom), then any friendly team's screen-space
+ * bounding circle, then any friendly vehicle's rotated hull rectangle
+ * (+ slop). Returns the hit team, or null.
+ */
+export function pickFriendlyTeamScreen(state: BattleState, cam: Camera, screenPt: Vec2, side: Side): Team | null {
+  const soldierHit = pickFriendlySoldierScreen(state, cam, screenPt, side);
+  if (soldierHit) return soldierHit;
+
+  for (const team of state.teams.values()) {
+    if (team.side !== side || team.outOfAction) continue;
+    const circle = teamBoundingCircleScreen(state, cam, team);
+    if (circle && Math.hypot(screenPt.x - circle.c.x, screenPt.y - circle.c.y) <= circle.r) return team;
+  }
+
+  const pxPerTile = TILE_PX * cam.zoom;
+  for (const v of state.vehicles.values()) {
+    if (v.side !== side) continue;
+    const def = VEHICLE_DEFS[v.defId];
+    if (!def) continue;
+    const centre = worldToScreen(cam, v.pos);
+    const halfLenPx = (def.lengthM / TILE_M / 2) * pxPerTile;
+    const halfWidPx = (def.widthM / TILE_M / 2) * pxPerTile;
+    if (pointInRotatedRectScreen(screenPt, centre, halfLenPx, halfWidPx, v.hullFacing, VEHICLE_HULL_SLOP_PX)) {
+      return state.teams.get(v.teamId) ?? null;
+    }
+  }
+  return null;
 }
 
 export function formatClock(seconds: number): string {

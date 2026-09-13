@@ -69,7 +69,7 @@ function drawFlashes(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     ctx.fill();
     // star spikes for a "muzzle flash" silhouette, not just a blob
     ctx.strokeStyle = '#ff9a3c';
-    ctx.lineWidth = Math.max(1, (big ? 2.5 : 1.5) * cam.zoom);
+    ctx.lineWidth = big ? 2.5 : 1.5; // screen-space width — not scaled with zoom
     const spike = haloD / 2 + (big ? 8 : 4) * cam.zoom;
     ctx.beginPath();
     ctx.moveTo(sx - spike, sy); ctx.lineTo(sx + spike, sy);
@@ -122,7 +122,7 @@ function drawTracers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     ctx.save();
     ctx.lineCap = 'round';
     ctx.strokeStyle = color;
-    ctx.lineWidth = width * cam.zoom;
+    ctx.lineWidth = width; // screen-space width — not scaled with zoom
     // fading tail (behind the bright head)
     ctx.globalAlpha = fadeOut * 0.45;
     ctx.beginPath();
@@ -137,7 +137,7 @@ function drawTracers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     ctx.stroke();
     if (coreColor) {
       ctx.strokeStyle = coreColor;
-      ctx.lineWidth = Math.max(1, cam.zoom);
+      ctx.lineWidth = 1; // screen-space width — not scaled with zoom
       ctx.beginPath();
       ctx.moveTo(hbx, hby);
       ctx.lineTo(hx, hy);
@@ -164,7 +164,7 @@ function drawExplosions(ctx: CanvasRenderingContext2D, cam: Camera, state: Battl
         ctx.save();
         ctx.globalAlpha = clamp(1 - ff, 0, 1) * 0.9;
         ctx.strokeStyle = '#fff6d8';
-        ctx.lineWidth = Math.max(2, 3 * cam.zoom);
+        ctx.lineWidth = 2; // screen-space width — not scaled with zoom
         ctx.beginPath();
         ctx.arc(p.x, p.y, ringR, 0, Math.PI * 2);
         ctx.stroke();
@@ -190,7 +190,7 @@ function drawExplosions(ctx: CanvasRenderingContext2D, cam: Camera, state: Battl
         const n = 14;
         ctx.save();
         ctx.strokeStyle = '#241f1c';
-        ctx.lineWidth = Math.max(1.5, 2 * cam.zoom);
+        ctx.lineWidth = 1.5; // screen-space width — not scaled with zoom
         ctx.globalAlpha = fireAlpha;
         for (let i = 0; i < n; i++) {
           const a = (i / n) * Math.PI * 2 + hash2(Math.floor(e.pos.x * 4), Math.floor(e.pos.y * 4), i) * 0.5;

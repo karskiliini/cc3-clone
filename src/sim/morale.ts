@@ -206,11 +206,16 @@ function stepSoldierState(state: BattleState, s: Soldier, dt: number, track: Mor
   }
 
   // ------------------------------------------------------------- surrender
+  // Loosened thresholds (balance round 3): morale<15 + "no teammate within 6 tiles" + "enemy
+  // within 4 tiles" was so tight it essentially never fired in the AI-vs-AI harness (surrenders
+  // stayed at 0 across every run). The design brief's bar is "isolated, broken, enemy adjacent" —
+  // <25 matches the team-level Broken threshold, and 6 tiles (12m) for "adjacent" enemy still
+  // requires the enemy to be genuinely close, not just anywhere on the map.
   if (s.activity !== 'surrendered' && s.activity !== 'dead' && s.activity !== 'incapacitated') {
-    if (s.morale < 15 && team) {
+    if (s.morale < 25 && team) {
       const teammatesNear = aliveTeammatesWithin(state, s, team, 6);
       const enemyDist = nearestEnemySoldierDistTiles(state, s);
-      if (teammatesNear === 0 && enemyDist <= 4) {
+      if (teammatesNear === 0 && enemyDist <= 6) {
         s.activity = 'surrendered';
         s.stance = 'standing';
         s.path = [];
@@ -274,8 +279,15 @@ function computeTeamStatus(state: BattleState, team: Team): { status: TeamStatus
   const actingAlive = alive.filter((s) => s.activity !== 'routed' && s.activity !== 'surrendered');
   const outOfAction = actingAlive.length === 0;
 
-  if (alive.every((s) => s.activity === 'surrendered')) return { status: 'Surrendered', outOfAction, morale };
-  if (alive.every((s) => s.activity === 'routed')) return { status: 'Routed', outOfAction, morale };
+  // Regression (balance round 3): these used to require EVERY alive soldier to be
+  // surrendered/routed simultaneously — a bar so high (a squad's last man recovering from pinned
+  // back to defending resets it every tick) that team.status essentially never showed
+  // Surrendered/Routed/Broken in the AI-vs-AI harness. Use "most of the squad" (a strict majority)
+  // for the routed/surrendered display states, and keep Broken purely a function of average team
+  // morale (<25) per the design brief, checked after the more severe states.
+  const majority = (pred: (s: Soldier) => boolean): boolean => alive.filter(pred).length * 2 > alive.length;
+  if (majority((s) => s.activity === 'surrendered')) return { status: 'Surrendered', outOfAction, morale };
+  if (majority((s) => s.activity === 'routed')) return { status: 'Routed', outOfAction, morale };
   if (morale < 25) return { status: 'Broken', outOfAction, morale };
 
   const counts = new Map<Activity, number>();

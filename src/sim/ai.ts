@@ -4,9 +4,11 @@ import type {
 import { otherSide, TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { angleTo, dist } from '@/shared/math';
-import { inBounds, coverAt } from './map';
+import { inBounds, coverAt, concealmentAt } from './map';
 import { isPassable } from './path';
 import { hasLOS } from './los';
+import { VEHICLE_DEFS } from '@/data/units';
+import { WEAPONS } from '@/data/weapons';
 
 export interface AIBattle {
   issueOrder(teamId: number, order: Order): void;
@@ -70,6 +72,34 @@ function findClusterTarget(state: BattleState, side: Side): Vec2 | null {
   return bestCount >= 3 ? best : null;
 }
 
+/** The nearest enemy-owned VL (from `sorted`, so preference order matches the attack priority)
+ * that has an enemy soldier spotted within 15 tiles (30m) of it — i.e. worth screening with smoke
+ * before our attackers cross the open ground into it. */
+function findDefendedObjective(state: BattleState, side: Side, sorted: VictoryLocation[]): VictoryLocation | null {
+  const enemySoldiers: Vec2[] = [];
+  for (const id of state.spotted[side]) {
+    const s = state.soldiers.get(id);
+    if (s && s.health !== 'dead' && s.health !== 'incapacitated') enemySoldiers.push(s.pos);
+  }
+  if (enemySoldiers.length === 0) return null;
+  for (const vl of sorted) {
+    if (vl.owner === side) continue;
+    const p = { x: vl.x, y: vl.y };
+    if (enemySoldiers.some((ep) => dist(ep, p) <= 15)) return vl;
+  }
+  return null;
+}
+
+/** Closest any attacking team is currently to `point`, in metres (Infinity if there are none). */
+function nearestAttackerDistToPoint(attackerTeams: Team[], point: Vec2): number {
+  let best = Infinity;
+  for (const t of attackerTeams) {
+    const d = dist(t.pos, point) * TILE_M;
+    if (d < best) best = d;
+  }
+  return best;
+}
+
 function teamHasLOSToEnemy(state: BattleState, team: Team, enemyPos: Vec2): boolean {
   for (const id of team.soldierIds) {
     const s = state.soldiers.get(id);
@@ -125,7 +155,7 @@ function goodCoverNearRoad(state: BattleState, centre: Vec2, rng: Rng): Vec2 {
   return best ?? centre;
 }
 
-function chooseWaypoint(state: BattleState, from: Vec2, objective: Vec2, rng: Rng): Vec2 {
+function chooseWaypoint(state: BattleState, from: Vec2, objective: Vec2, rng: Rng, preferConcealment = false): Vec2 {
   // Sample within a forward cone toward the objective (not a full 0..2pi circle) and weight net
   // progress far more heavily than cover. The old formula (cover*2 - dObj/50) let a ~1.0 cover
   // bonus at a random nearby tile outweigh tens of tiles of distance-to-objective difference, so
@@ -150,9 +180,14 @@ function chooseWaypoint(state: BattleState, from: Vec2, objective: Vec2, rng: Rn
     if (!isPassable(state.map, x, y, 'infantry')) continue;
     const pos = { x: x + 0.5, y: y + 0.5 };
     const cover = coverAt(state.map, pos);
+    // Balance round 4: when closing on a defended objective, bias toward concealment (hedges,
+    // woods edges, tallgrass/crops) rather than just open-ground cover — hugging concealed terrain
+    // on the approach is what should let an attacker close distance without being spotted/shot at
+    // every step, per the coordinator's "sneak along hedges/woods when available" ask.
+    const concealment = preferConcealment ? concealmentAt(state.map, pos) : 0;
     const dObj = dist(pos, objective);
     const progress = toObjective - dObj; // positive = closer to objective than `from`
-    const score = progress + cover * 0.5;
+    const score = progress + cover * 0.5 + concealment * 1.5;
     if (score > bestScore) { bestScore = score; best = pos; }
   }
   return best ?? objective;
@@ -313,9 +348,28 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
       const cluster = findClusterTarget(state, enemy);
       if (cluster) {
         tryIssueOrder(state, battle, track, team, { type: 'fire', target: { ...cluster }, issuedAt: state.time });
-      } else if (ownedVLs.length) {
-        const contested = ownedVLs.reduce((best, vl) => (!best || vl.value > best.value ? vl : best));
-        tryIssueOrder(state, battle, track, team, { type: 'smoke', target: { x: contested.x, y: contested.y }, issuedAt: state.time });
+      } else {
+        // Balance round 4: a mortar with no direct cluster target supports the attack in two
+        // phases against a defended objective (an enemy-owned VL with enemies spotted near it) —
+        // (a) while our own attackers are still >150m out, keep dropping real HE on the VL itself
+        // (pickTarget/stepMortarTeam fire at an empty point still resolves suppression via
+        // resolveRound's point branch, and here there ARE defenders there so it can also land real
+        // hits), suppressing the defenders before the attackers are exposed; (b) once our nearest
+        // attacker is inside 150m, switch to smoke to screen the final approach instead, since more
+        // HE at that range risks our own troops. Falls back to screening our own best VL if nothing
+        // is contested (previous behaviour).
+        const defended = findDefendedObjective(state, side, allVLsSorted);
+        if (defended) {
+          const distToDefended = nearestAttackerDistToPoint(attackerTeams, { x: defended.x, y: defended.y });
+          if (distToDefended > 150) {
+            tryIssueOrder(state, battle, track, team, { type: 'fire', target: { x: defended.x, y: defended.y }, issuedAt: state.time });
+          } else {
+            tryIssueOrder(state, battle, track, team, { type: 'smoke', target: { x: defended.x, y: defended.y }, issuedAt: state.time });
+          }
+        } else if (ownedVLs.length) {
+          const contested = ownedVLs.reduce((best, vl) => (!best || vl.value > best.value ? vl : best));
+          tryIssueOrder(state, battle, track, team, { type: 'smoke', target: { x: contested.x, y: contested.y }, issuedAt: state.time });
+        }
       }
       continue;
     }
@@ -328,9 +382,50 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
     // infantry: defenders vs attackers
     if (defenders.has(team.id)) {
       const dIdx = defenderTeams.indexOf(team);
-      const vl = pickVL(dIdx, true);
-      const pos = vl ? bestCoverWithin(state, { x: vl.x, y: vl.y }, 8, rng) : team.pos;
+      let vl = pickVL(dIdx, true);
+
+      // Balance round 4: a defender under 40 morale withdraws to a different owned VL instead of
+      // holding the same ground forever — per the coordinator's ask. Falls back to its own zone
+      // if there's nowhere else owned to go.
+      if (team.morale < 40 && ownedVLs.length > 1 && vl) {
+        const fallback = ownedVLs.find((v) => v.id !== vl!.id);
+        if (fallback) vl = fallback;
+      }
+
+      // Reuse the previously-assigned cover point as long as it's still near the (possibly new)
+      // target VL, instead of resampling bestCoverWithin's 30 random candidates every single tick
+      // — that resampling made a "defend" order's target position jitter tile-to-tile even though
+      // the team wasn't actually moving there anyway (see below), and would otherwise fight the
+      // "already in position" distance check with noise.
+      const prev = team.aiObjective;
+      const pos = vl && (!prev || dist(prev, { x: vl.x, y: vl.y }) > 10)
+        ? bestCoverWithin(state, { x: vl.x, y: vl.y }, 8, rng)
+        : (prev ?? team.pos);
       team.aiObjective = pos;
+
+      // Balance round 4 — the actual mechanism fix: a `defend` order never moves anyone (see
+      // orders.ts), it only holds the CURRENT position and faces `enemyZoneCentre`. So a defender
+      // that was simply deployed near its own zone edge (aiDeploy has no idea which VL it'll be
+      // assigned to defend) would just camp there forever, never actually covering the VL it was
+      // supposedly guarding — while still racking up kills on approaching attackers from a safe,
+      // unintended position. Defenders must first MOVE to their assigned cover point; only once
+      // they're actually there do they switch to holding it.
+      const distToPosM = dist(team.pos, pos) * TILE_M;
+      if (distToPosM > 15) {
+        tryIssueOrder(state, battle, track, team, { type: 'move', target: pos, issuedAt: state.time });
+        continue;
+      }
+
+      // Occasional counterattack (balance round 4): a healthy, in-position defender that spots a
+      // weak, close attacker sometimes pushes out briefly to press the advantage instead of always
+      // passively holding — rather than every defender being a pure turret forever.
+      const nearbyEnemy = nearestSpottedSoldier(state, side, team.pos);
+      const nearbyEnemyDistM = nearbyEnemy ? dist(team.pos, nearbyEnemy.pos) * TILE_M : Infinity;
+      if (team.morale >= 60 && nearbyEnemy && nearbyEnemyDistM <= 40 && teamHasLOSToEnemy(state, team, nearbyEnemy.pos) && rng.chance(0.15)) {
+        tryIssueOrder(state, battle, track, team, { type: 'moveFast', target: { ...nearbyEnemy.pos }, issuedAt: state.time });
+        continue;
+      }
+
       tryIssueOrder(state, battle, track, team, { type: 'defend', target: enemyZoneCentre, issuedAt: state.time });
       continue;
     }
@@ -356,7 +451,24 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
       continue;
     }
 
-    const waypoint = chooseWaypoint(state, team.pos, objective, rng);
+    // Bounding overwatch (balance round 3): once an attacker is close enough to see the enemy but
+    // not yet within the 120 m "stop and fight" range above, alternate which half of the attacking
+    // teams advance each 5 s AI tick and which half halts and covers them with fire — instead of
+    // every team always closing the whole distance at once with nobody providing suppression. `n`
+    // (this side's stepAI call count) flips the two halves every tick so they leapfrog each other.
+    if (nearestEnemy && nearestEnemyDistM <= 250 && teamHasLOSToEnemy(state, team, nearestEnemy.pos)) {
+      const bounding = (aIdx + n) % 2 === 0;
+      if (!bounding) {
+        tryIssueOrder(state, battle, track, team, { type: 'defend', target: { ...nearestEnemy.pos }, issuedAt: state.time });
+        continue;
+      }
+    }
+
+    // Balance round 4: hug concealed terrain (hedges/woods/tallgrass) on the approach, per the
+    // coordinator's "sneak along hedges/woods when available" ask — not just when already
+    // sneaking, but for the whole final approach band where being seen matters.
+    const preferConcealment = nearestEnemyDistM <= 150;
+    const waypoint = chooseWaypoint(state, team.pos, objective, rng, preferConcealment);
     let orderType: OrderType = 'move';
     if (nearestEnemyDistM > 150) orderType = 'moveFast';
     else if (nearestEnemyDistM <= 60) orderType = 'sneak';
@@ -383,10 +495,33 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
       continue;
     }
 
+    // Balance round 4: with no direct enemy vehicle/soldier target, put HE on a defended VL that's
+    // still out of our attacking infantry's 150 m contact range, rather than only advancing — a
+    // tank's main gun is exactly the kind of asset that should suppress/damage a held position
+    // before infantry have to cross open ground into it.
+    const def = VEHICLE_DEFS[vehicle.defId];
+    const mainWeapon = def?.mainWeaponId ? WEAPONS[def.mainWeaponId] : null;
+    if (mainWeapon) {
+      const defended = findDefendedObjective(state, side, allVLsSorted);
+      if (defended) {
+        const point = { x: defended.x, y: defended.y };
+        const distM = dist(vehicle.pos, point) * TILE_M;
+        const attackersFar = nearestAttackerDistToPoint(attackerTeams, point) > 150;
+        if (attackersFar && distM <= mainWeapon.rangeM) {
+          tryIssueOrder(state, battle, track, team, { type: 'fire', target: point, issuedAt: state.time });
+          continue;
+        }
+      }
+    }
+
     const infTeam = nearestAttackingInfantryTeam(myTeams, team);
     const objective = infTeam?.aiObjective ?? enemyZoneCentre;
     team.aiObjective = objective;
-    const orderType: OrderType = state.config.difficulty === 'hard' ? 'moveFast' : 'move';
-    tryIssueOrder(state, battle, track, team, { type: orderType, target: objective, issuedAt: state.time });
+    // Balance round 3: tanks lead the advance rather than plod at infantry pace — a vehicle can
+    // only ever be routed over terrain it's already allowed on (woods/buildings are impassable to
+    // it), so there's no risk of moveFast rushing it somewhere infantry-only cover would matter.
+    // This used to only apply on 'hard' difficulty; mechanized forces should press forward on any
+    // difficulty when they have no immediate target.
+    tryIssueOrder(state, battle, track, team, { type: 'moveFast', target: objective, issuedAt: state.time });
   }
 }
