@@ -54,11 +54,19 @@ function paintHelmet(g: Grid, cx: number, cy: number, r: number): void {
 }
 
 // -------------------------------------------------------------- palette ---
-const BOOT = '#2a2620';
-const WEAPON = '#2b2b28';
+// Boots and weapon are near-black — the original's small figures still read
+// their gear as the darkest thing on the sprite even against dark terrain.
+const BOOT = '#171510';
+const WEAPON = '#121210';
 const STOCK = '#6b4a2e';
 const SKIN = '#c9a37c';
 const BLOOD = '#5a1a12';
+// Round-2 critique: soldiers were too low-contrast against grass/snow. A
+// baked 1px silhouette outline plus a mid-grey SE shading tone (winter only,
+// so white smocks don't vanish against snow) fixes that without changing the
+// authored shapes above.
+const OUTLINE_COLOR = 'rgba(30,31,24,0.85)'; // '#1e1f18' @ 85%
+const WINTER_SE_SHADE = '#b9bbb4';
 
 interface UniformPalette { u: string; s: string; helmetMid: string; helmetLight: string }
 const GERMAN_SUMMER: UniformPalette = { u: '#6a7256', s: '#4d5440', helmetMid: '#5a604c', helmetLight: '#737a64' };
@@ -94,24 +102,36 @@ function paletteFor(side: Side, season: Season): UniformPalette {
 }
 
 /** Resolve the character->colour map for one soldier variant. Dead soldiers
- * get every colour desaturated 40% toward grey then darkened 30%. */
+ * get every colour desaturated 40% toward grey then darkened 30%.
+ *
+ * Round-2 contrast pass: the shoulder/torso dark edge ('S') is darkened
+ * further than the palette's own dark tone, and the helmet's light tone
+ * ('h', and therefore its derived specular) is brightened, so the head reads
+ * as a distinct disc and the body silhouette reads as a distinct shape at
+ * battle zoom instead of blending into the ground ramp. */
 function colorsFor(side: Side, season: Season, dead: boolean): Record<string, string> {
   const pal = paletteFor(side, season);
-  let u = pal.u, s = pal.s, helmetMid = pal.helmetMid, helmetLight = pal.helmetLight;
+  let u = pal.u;
+  let s = darkenHex(pal.s, 0.72);
+  let helmetMid = pal.helmetMid;
+  let helmetLight = lightenHex(pal.helmetLight, 0.22);
   let weapon = WEAPON, stock = STOCK, skin = SKIN, boot = BOOT;
+  let winterShade = WINTER_SE_SHADE;
   if (dead) {
     const fix = (hex: string) => darkenHex(desaturateHex(hex, 0.4), 0.7);
     u = fix(u); s = fix(s); helmetMid = fix(helmetMid); helmetLight = fix(helmetLight);
     weapon = fix(weapon); stock = fix(stock); skin = fix(skin); boot = fix(boot);
+    winterShade = fix(winterShade);
   }
   const rim = darkenHex(helmetMid, 0.62);
   const specular = lightenHex(helmetLight, 0.55);
   return {
     O: rim, H: helmetMid, h: helmetLight, P: specular,
-    U: u, S: s,
+    U: u, S: s, V: winterShade,
     W: weapon, K: stock, G: skin,
-    b: boot, k: darkenHex(boot, 0.6),
+    b: boot, k: darkenHex(boot, 0.55),
     R: 'rgba(90,26,18,0.7)',
+    X: OUTLINE_COLOR,
   };
 }
 
@@ -241,26 +261,68 @@ function buildDeadGrid(): Built {
   return built;
 }
 
+/** Mid-grey SE shading for winter smocks: half of each uniform ('U') cell,
+ * split along the sprite's own NW/SE diagonal, is recoloured to a distinct
+ * shade tone so a white-clad figure keeps volume/contrast against snow
+ * instead of dissolving into a flat white blob (compare ref_cc3_1482.png,
+ * where the white-clad figures still read clearly against snow). */
+function applyWinterShading(grid: Grid): void {
+  const h = grid.length, w = grid[0].length;
+  const refX = w / 2, refY = h / 2;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (grid[y][x] !== 'U') continue;
+      if (x - refX + (y - refY) >= 0) grid[y][x] = 'V';
+    }
+  }
+}
+
+/** Expand a grid by one empty ring on every side and mark every background
+ * cell touching a filled cell as outline ('X') — a baked 1px silhouette
+ * outline around the whole figure so it separates from noisy ground/snow
+ * texture at battle zoom, independent of whatever's under it. */
+function addOutline(grid: Grid): Grid {
+  const h = grid.length, w = grid[0].length;
+  const nw = w + 2, nh = h + 2;
+  const out = blank(nw, nh);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) out[y + 1][x + 1] = grid[y][x];
+  const filled = (x: number, y: number) => x >= 0 && y >= 0 && x < nw && y < nh && out[y][x] !== '.';
+  const withOutline = out.map((row) => row.slice());
+  for (let y = 0; y < nh; y++) {
+    for (let x = 0; x < nw; x++) {
+      if (out[y][x] !== '.') continue;
+      if (filled(x - 1, y) || filled(x + 1, y) || filled(x, y - 1) || filled(x, y + 1)) withOutline[y][x] = 'X';
+    }
+  }
+  return withOutline;
+}
+
 // --------------------------------------------------------- canvas compose -
-const PAD = 2; // room for the baked SE drop shadow without clipping
+const PAD = 3; // room for the baked outline ring + SE drop shadow without clipping
 
 function gridToCanvas(grid: Grid, colors: Record<string, string>): HTMLCanvasElement {
   const w = grid[0].length, h = grid.length;
+  const expanded = addOutline(grid);
+  const ew = expanded[0].length, eh = expanded.length;
   const c = createCanvas(w + PAD * 2, h + PAD * 2);
   const ctx = ctx2d(c);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (grid[y][x] === '.') continue;
+  // The expanded grid's (0,0) is the original grid's (-1,-1), so it lands at
+  // canvas (PAD-1, PAD-1) to keep the original grid's (0,0) at (PAD, PAD) —
+  // the convention `buildSoldierArt`'s helmet-offset math below relies on.
+  const base = PAD - 1;
+  for (let y = 0; y < eh; y++) {
+    for (let x = 0; x < ew; x++) {
+      if (expanded[y][x] === '.') continue;
       ctx.fillStyle = 'rgba(10,10,8,0.3)';
-      ctx.fillRect(PAD + x + 1, PAD + y + 2, 1, 1);
+      ctx.fillRect(base + x + 1, base + y + 2, 1, 1);
     }
   }
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const ch = grid[y][x];
+  for (let y = 0; y < eh; y++) {
+    for (let x = 0; x < ew; x++) {
+      const ch = expanded[y][x];
       if (ch === '.') continue;
       ctx.fillStyle = colors[ch] ?? '#ff00ff';
-      ctx.fillRect(PAD + x, PAD + y, 1, 1);
+      ctx.fillRect(base + x, base + y, 1, 1);
     }
   }
   return c;
@@ -281,6 +343,7 @@ export function buildSoldierArt(side: Side, season: Season, stance: Stance | 'de
     : stance === 'prone' ? buildProneGrid()
     : stance === 'crouching' ? buildCrouchingGrid(frame)
     : buildStandingGrid(frame);
+  if (season === 'winter') applyWinterShading(built.grid);
   const canvas = gridToCanvas(built.grid, colors);
   return {
     canvas,

@@ -45,6 +45,35 @@ function strokeRect(g: Grid, x0: number, y0: number, x1: number, y1: number, ch:
 }
 function rowsOf(g: Grid): string[] { return g.map((r) => r.join('')); }
 
+/** Fill a rectangle with NW-highlight / SE-shadow edge shading instead of a
+ * flat tone: a `band`-px light strip hugs the top/left edges, a `band`-px
+ * dark strip hugs the bottom/right edges, and the interior is the mid tone —
+ * this is the literal per-pixel shading the round-2 critique asked for
+ * (readable at 1x, not a washed-out proportional gradient). */
+function shadeRect(g: Grid, x0: number, y0: number, x1: number, y1: number, band: number): void {
+  for (let y = Math.max(0, y0); y <= Math.min(g.length - 1, y1); y++) {
+    for (let x = Math.max(0, x0); x <= Math.min(g[0].length - 1, x1); x++) {
+      const dNW = Math.min(x - x0, y - y0);
+      const dSE = Math.min(x1 - x, y1 - y);
+      g[y][x] = dNW < band ? 'H' : dSE < band ? 'd' : 'h';
+    }
+  }
+}
+
+/** Draw a wheel as a small disc (dark rim + light hub) instead of a single
+ * pixel, when the track is wide enough to show it, so the road wheels read
+ * as distinct discs against the dark track run. */
+function drawWheel(g: Grid, cx: number, cy: number, trackW: number): void {
+  if (trackW >= 3) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) put(g, cx + dx, cy + dy, 'w');
+    }
+    put(g, cx, cy, 'W');
+  } else {
+    put(g, cx, cy, 'w');
+  }
+}
+
 /** Nearest-neighbour resample of a character grid to an exact target size
  * (independent horizontal/vertical factors, so non-square scaling — e.g. a
  * longer, narrower hull — comes out proportioned to the real vehicle). */
@@ -115,14 +144,31 @@ export interface VehPalette {
   hullMid: string; hullLight: string; hullDark: string;
   camoBand?: string;
 }
-const EARLY_GERMAN_PALETTE: VehPalette = { hullMid: '#5e6066', hullLight: '#7c7e84', hullDark: '#3f4147' };
-const LATE_GERMAN_PALETTE: VehPalette = { hullMid: '#a9956a', hullLight: '#c4b184', hullDark: '#7d6d48', camoBand: '#6f7a4d' };
-const SOVIET_PALETTE: VehPalette = { hullMid: '#5d6a3f', hullLight: '#7a8858', hullDark: '#3f4a2a' };
 
-const OUTLINE = '#1a1a14';
-const TRACK_DARK = '#252420';
-const TRACK_LIGHT = '#413f38';
-const WHEEL = '#67655a';
+/** Lighten/darken a hex color by a percentage (e.g. 0.2 = +20% toward white,
+ * -0.25 = -25% toward black) — used to derive the NW-highlight/SE-shadow
+ * tones from a single mid hull tone at an exact, literal contrast ratio. */
+function shade(hex: string, pct: number): string {
+  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  const f = (v: number) => {
+    const out = pct >= 0 ? v + (255 - v) * pct : v * (1 + pct);
+    return Math.max(0, Math.min(255, Math.round(out))).toString(16).padStart(2, '0');
+  };
+  return '#' + f(r) + f(g) + f(b);
+}
+
+function makePalette(hullMid: string, camoBand?: string): VehPalette {
+  return { hullMid, hullLight: shade(hullMid, 0.2), hullDark: shade(hullMid, -0.25), camoBand };
+}
+
+const EARLY_GERMAN_PALETTE: VehPalette = makePalette('#5e6066');
+const LATE_GERMAN_PALETTE: VehPalette = makePalette('#a9956a', '#6f7a4d');
+const SOVIET_PALETTE: VehPalette = makePalette('#5d6a3f');
+
+const OUTLINE = '#0c0c0a'; // near-black, deliberately darker than any hullDark tone
+const TRACK_DARK = '#23221d';
+const TRACK_LIGHT = '#403e37';
+const WHEEL_RIM = '#1c1b17';
 const GRILLE = '#201f1c';
 const HATCH = '#d8d2b8';
 const MARK_WHITE = '#eceae0';
@@ -132,13 +178,34 @@ const SOOT = 'rgba(8,7,6,0.55)';
 
 function colorMapFor(pal: VehPalette): Record<string, string> {
   return {
-    o: OUTLINE, t: TRACK_DARK, T: TRACK_LIGHT, w: WHEEL, W: pal.hullLight,
+    o: OUTLINE, t: TRACK_DARK, T: TRACK_LIGHT, w: WHEEL_RIM, W: pal.hullLight,
     h: pal.hullMid, H: pal.hullLight, d: pal.hullDark, g: GRILLE, x: HATCH,
-    b: pal.hullDark, B: pal.hullLight, k: OUTLINE,
+    // Barrel reads as a lit cylinder: light top edge, mid body, dark underside.
+    B: pal.hullLight, b: pal.hullMid, n: pal.hullDark, k: OUTLINE,
     m: MARK_WHITE, c: MARK_BLACK, r: MARK_RED,
     a: pal.camoBand ?? pal.hullDark,
-    s: 'rgba(6,6,4,0.35)',
+    s: 'rgba(6,6,4,0.4)',
   };
+}
+
+/** Paint a gun barrel as a lit cylinder: 1px light top edge, mid body, 1px
+ * dark underside (for width>=3); a 2px barrel gets just light/dark. Applies
+ * a muzzle-brake block at the tip when requested. */
+function paintBarrel(g: Grid, cx: number, len: number, widthPx: number, muzzleBrake?: boolean): void {
+  const w = Math.max(2, widthPx);
+  const half = Math.floor((w - 1) / 2);
+  const left = cx - half;
+  for (let y = 0; y < len; y++) {
+    for (let i = 0; i < w; i++) {
+      const ch = i === 0 ? 'B' : i === w - 1 ? 'n' : 'b';
+      put(g, left + i, y, ch);
+    }
+  }
+  if (muzzleBrake) {
+    for (let y = 0; y < Math.min(2, len); y++) {
+      for (let i = -1; i <= w; i++) put(g, left + i, y, 'k');
+    }
+  }
 }
 
 // ---------------------------------------------------------- hull families -
@@ -158,17 +225,13 @@ function buildTrackedSkeleton(w: number, h: number, opts: { wide?: boolean; tape
   const wheelCount = opts.light ? 4 : Math.max(5, Math.min(8, Math.round(h / (opts.wide ? 7 : 5.5))));
   for (let i = 0; i < wheelCount; i++) {
     const cy = Math.round((i + 0.5) * (h / wheelCount));
-    put(g, Math.floor(trackW / 2), cy, 'w');
-    put(g, w - 1 - Math.floor(trackW / 2), cy, 'w');
+    drawWheel(g, Math.floor(trackW / 2), cy, trackW);
+    drawWheel(g, w - 1 - Math.floor(trackW / 2), cy, trackW);
   }
   const bx0 = trackW, bx1 = w - 1 - trackW;
   const bw = Math.max(1, bx1 - bx0);
-  for (let y = 0; y < h; y++) {
-    for (let x = bx0; x <= bx1; x++) {
-      const t = ((x - bx0) / bw) * 0.45 + (y / h) * 0.55;
-      g[y][x] = t < 0.32 ? 'H' : t > 0.68 ? 'd' : 'h';
-    }
-  }
+  const band = Math.max(2, Math.round(Math.min(bw, h) * 0.16));
+  shadeRect(g, bx0, 0, bx1, h - 1, band);
   const glacisH = Math.max(1, Math.round(h * (opts.light ? 0.14 : 0.18)));
   if (opts.taper) {
     const taper = Math.max(1, Math.round(bw * opts.taper));
@@ -257,20 +320,12 @@ function buildCasemateHull(
   const body = buildTrackedSkeleton(w, h, { taper: opts.taper });
   const boxH = Math.round(h * 0.46);
   const bx0 = Math.round(w * 0.16), bx1 = w - 1 - Math.round(w * 0.16);
-  fillRect(body, bx0, 1, bx1, boxH, 'H');
+  shadeRect(body, bx0, 1, bx1, boxH, Math.max(2, Math.round((bx1 - bx0) * 0.18)));
   strokeRect(body, bx0, 1, bx1, boxH, 'o');
   const midX = Math.floor((bx0 + bx1) / 2);
   fillRect(body, midX - 1, 3, midX + 1, 4, 'x');
   const barrel = blank(w, barrelLenPx);
-  const half = Math.max(1, Math.floor(barrelWpx / 2));
-  for (let y = 0; y < barrelLenPx; y++) {
-    for (let dx = -half; dx <= half; dx++) barrel[y][midX + dx] = dx === -half ? 'B' : 'b';
-  }
-  if (opts.muzzleBrake) {
-    for (let y = 0; y < Math.min(2, barrelLenPx); y++) {
-      for (let dx = -half - 1; dx <= half + 1; dx++) barrel[y][midX + dx] = 'k';
-    }
-  }
+  paintBarrel(barrel, midX, barrelLenPx, barrelWpx, opts.muzzleBrake);
   return [...barrel, ...body];
 }
 
@@ -289,6 +344,9 @@ function buildTurretGrid(tw: number, bodyH: number, barrelLenPx: number, barrelW
   const th = barrelLenPx + totalBodyH;
   const g = blank(tw, th);
   const cx = tw / 2;
+  // NW-lit top/west face, SE-shadowed bottom/east face ("under the turret
+  // overhang") — a light crescent hugging the top-left of the body and a
+  // dark one hugging the bottom-right, not a smooth diagonal wash.
   for (let y = 0; y < bodyH; y++) {
     for (let x = 0; x < tw; x++) {
       const nx = (x + 0.5 - cx) / (tw / 2);
@@ -297,30 +355,22 @@ function buildTurretGrid(tw: number, bodyH: number, barrelLenPx: number, barrelW
         ? Math.max(Math.abs(nx), Math.abs(ny * 2 - 1))
         : Math.sqrt(nx * nx + Math.pow(ny * 2 - 1, 2));
       if (shapeVal > 1.0) continue;
-      const t = ((nx + 1) / 2) * 0.5 + ny * 0.5;
-      g[barrelLenPx + y][x] = t < 0.32 ? 'H' : t > 0.68 ? 'd' : 'h';
+      let ch = 'h';
+      if (ny < 0.3 || nx < -0.55) ch = 'H';
+      else if (ny > 0.72 || nx > 0.62) ch = 'd';
+      g[barrelLenPx + y][x] = ch;
     }
   }
   if (bustle > 0) {
     const bw = Math.round(tw * 0.72);
     const bx0 = Math.floor((tw - bw) / 2), bx1 = bx0 + bw - 1;
-    for (let y = 0; y < bustle; y++) {
-      const t = 0.5 + (y / bustle) * 0.3;
-      fillRect(g, bx0, barrelLenPx + bodyH + y, bx1, barrelLenPx + bodyH + y, t < 0.5 ? 'h' : 'd');
-    }
+    shadeRect(g, bx0, barrelLenPx + bodyH, bx1, barrelLenPx + bodyH + bustle - 1, Math.max(1, Math.round(bw * 0.2)));
   }
   outlineFill(g);
-  // Barrel, extending "north" off the top of the turret body.
+  // Barrel, extending "north" off the top of the turret body, as a lit
+  // cylinder (light top edge / mid body / dark underside).
   const bcx = Math.floor(cx);
-  const half = Math.max(1, Math.floor(barrelWpx / 2));
-  for (let y = 0; y < barrelLenPx; y++) {
-    for (let dx = -half; dx <= half; dx++) g[y][bcx + dx] = dx === -half ? 'B' : 'b';
-  }
-  if (opts.muzzleBrake) {
-    for (let y = 0; y < Math.min(2, barrelLenPx); y++) {
-      for (let dx = -half - 1; dx <= half + 1; dx++) put(g, bcx + dx, y, 'k');
-    }
-  }
+  paintBarrel(g, bcx, barrelLenPx, barrelWpx, opts.muzzleBrake);
   if (opts.mantletWpx) {
     const my0 = Math.max(0, barrelLenPx - 2);
     fillRect(g, bcx - Math.floor(opts.mantletWpx / 2), my0, bcx + Math.floor(opts.mantletWpx / 2), my0 + 2, 'H');
@@ -345,27 +395,34 @@ interface VehSpec {
   bustle?: boolean;
   turretWFrac?: number;
   casemateTaper?: number;
+  /** Turret body length : width ratio override (Panther/IS-2 "long" turrets
+   * with a pronounced overhang, per the round-2 critique) instead of the
+   * default hull-length-derived body height. */
+  turretElongate?: number;
+  /** Force a flat-sided (square-cornered) turret body instead of a rounded
+   * casting — used for the wide, boxy Tiger turret as well as the KV-1. */
+  turretSquare?: boolean;
   hullCrossPos?: [number, number][];
   turretCrossPos?: [number, number];
   starPos?: [number, number];
 }
 
 const SPEC: Record<string, VehSpec> = {
-  pz3j: { side: 'german', era: 'early', hullFamily: 'boxy', turret: 'germanBox', barrelFrac: 0.45, barrelWpx: 2, turretWFrac: 0.56 },
+  pz3j: { side: 'german', era: 'early', hullFamily: 'boxy', turret: 'germanBox', barrelFrac: 0.45, barrelWpx: 3, turretWFrac: 0.56 },
   pz4f1: { side: 'german', era: 'early', hullFamily: 'boxy', turret: 'germanBox', barrelFrac: 0.3, barrelWpx: 3, turretWFrac: 0.6 },
   pz4gh: { side: 'german', era: 'late', hullFamily: 'boxy', turret: 'germanBox', barrelFrac: 0.55, barrelWpx: 3, muzzleBrake: true, turretWFrac: 0.6 },
   stug3g: { side: 'german', era: 'late', hullFamily: 'casemate', turret: 'none', barrelFrac: 0.55, barrelWpx: 3 },
-  panther: { side: 'german', era: 'late', hullFamily: 'sloped', turret: 'pantherLong', barrelFrac: 0.7, barrelWpx: 3, mantletWpx: 5, turretWFrac: 0.5 },
-  tiger: { side: 'german', era: 'late', hullFamily: 'boxy', wideTracks: true, turret: 'tigerBox', barrelFrac: 0.6, barrelWpx: 3, muzzleBrake: true, turretWFrac: 0.56 },
+  panther: { side: 'german', era: 'late', hullFamily: 'sloped', turret: 'pantherLong', barrelFrac: 0.7, barrelWpx: 3, mantletWpx: 7, turretWFrac: 0.46, turretElongate: 1.6 },
+  tiger: { side: 'german', era: 'late', hullFamily: 'boxy', wideTracks: true, turret: 'tigerBox', barrelFrac: 0.6, barrelWpx: 3, muzzleBrake: true, turretWFrac: 0.62, turretSquare: true },
   sdkfz251: { side: 'german', era: 'early', hullFamily: 'halftrack', turret: 'none', barrelFrac: 0, barrelWpx: 0 },
   marder3: { side: 'german', era: 'early', hullFamily: 'casemate', turret: 'none', barrelFrac: 0.65, barrelWpx: 3 },
-  t26: { side: 'soviet', era: 'soviet', hullFamily: 'light', turret: 'sovietRound', barrelFrac: 0.35, barrelWpx: 2, turretWFrac: 0.48 },
-  bt7: { side: 'soviet', era: 'soviet', hullFamily: 'light', turret: 'sovietRound', barrelFrac: 0.4, barrelWpx: 2, turretWFrac: 0.48 },
+  t26: { side: 'soviet', era: 'soviet', hullFamily: 'light', turret: 'sovietRound', barrelFrac: 0.35, barrelWpx: 3, turretWFrac: 0.48 },
+  bt7: { side: 'soviet', era: 'soviet', hullFamily: 'light', turret: 'sovietRound', barrelFrac: 0.4, barrelWpx: 3, turretWFrac: 0.48 },
   t34_76: { side: 'soviet', era: 'soviet', hullFamily: 'sloped', turret: 'sovietRound', barrelFrac: 0.5, barrelWpx: 3, turretWFrac: 0.52 },
   t34_85: { side: 'soviet', era: 'soviet', hullFamily: 'sloped', turret: 'sovietRound', barrelFrac: 0.55, barrelWpx: 3, bustle: true, turretWFrac: 0.62 },
-  kv1: { side: 'soviet', era: 'soviet', hullFamily: 'slab', turret: 'kvBoxy', barrelFrac: 0.5, barrelWpx: 3, turretWFrac: 0.58 },
-  is2: { side: 'soviet', era: 'soviet', hullFamily: 'sloped', turret: 'sovietRound', barrelFrac: 0.7, barrelWpx: 3, muzzleBrake: true, turretWFrac: 0.55 },
-  t70: { side: 'soviet', era: 'soviet', hullFamily: 'light', turret: 'sovietRound', barrelFrac: 0.35, barrelWpx: 2, turretWFrac: 0.44 },
+  kv1: { side: 'soviet', era: 'soviet', hullFamily: 'slab', turret: 'kvBoxy', barrelFrac: 0.5, barrelWpx: 3, turretWFrac: 0.58, turretSquare: true },
+  is2: { side: 'soviet', era: 'soviet', hullFamily: 'sloped', turret: 'sovietRound', barrelFrac: 0.7, barrelWpx: 3, muzzleBrake: true, mantletWpx: 6, turretWFrac: 0.5, turretElongate: 1.6 },
+  t70: { side: 'soviet', era: 'soviet', hullFamily: 'light', turret: 'sovietRound', barrelFrac: 0.35, barrelWpx: 3, turretWFrac: 0.44 },
   su76: { side: 'soviet', era: 'soviet', hullFamily: 'casemate', turret: 'none', barrelFrac: 0.55, barrelWpx: 3 },
   su85: { side: 'soviet', era: 'soviet', hullFamily: 'casemate', turret: 'none', barrelFrac: 0.65, barrelWpx: 3, casemateTaper: 0.32 },
 };
@@ -389,7 +446,7 @@ function gridToCanvas(g: Grid, colorMap: Record<string, string>, shadowDx: numbe
   const ctx = ctx2d(c);
   // Soft SE cast shadow: the hull's own silhouette, shifted and dimmed.
   ctx.save();
-  ctx.globalAlpha = 0.35;
+  ctx.globalAlpha = 0.4;
   ctx.translate(HULL_PAD + shadowDx, HULL_PAD + shadowDy);
   ctx.fillStyle = '#000000';
   for (let y = 0; y < h; y++) {
@@ -474,7 +531,7 @@ export function buildVehicleHull(defId: string, lengthM: number, widthM: number,
     stampMarking(grid, 0.7, 0.32, 'star');
   }
   const colorMap = colorMapFor(pal);
-  let canvas = gridToCanvas(grid, colorMap, 2, 3);
+  let canvas = gridToCanvas(grid, colorMap, 3, 4);
   if (state === 'knockedOut') canvas = applyKnockedOut(canvas, grid[0].length, gh);
   return canvas;
 }
@@ -491,13 +548,16 @@ export function buildVehicleTurret(defId: string, lengthM: number, widthM: numbe
   const hullH = Math.max(10, Math.round(lengthM * VEH_PX_PER_M));
   const tw = Math.max(5, Math.round(hullW * (spec.turretWFrac ?? 0.56)));
   const barrelLenPx = Math.max(2, Math.round(hullH * spec.barrelFrac));
-  const bodyH = Math.max(5, Math.round(hullH * (spec.turret === 'tigerBox' || spec.turret === 'kvBoxy' ? 0.34 : 0.3)));
+  const isBoxyBody = spec.turret === 'tigerBox' || spec.turret === 'kvBoxy';
+  const bodyH = spec.turretElongate
+    ? Math.max(5, Math.round(tw * spec.turretElongate))
+    : Math.max(5, Math.round(hullH * (isBoxyBody ? 0.34 : 0.3)));
   const bustleHpx = spec.bustle ? Math.round(hullH * 0.14) : 0;
 
   // Build at canonical body height then resize body/barrel independently so
   // barrel proportion (thin gun vs. hull length) is preserved across scale.
   const canonGrid = buildTurretGrid(TURRET_CANON_W, TURRET_CANON_BODY_H, 6, 3, {
-    square: spec.turret === 'kvBoxy',
+    square: !!spec.turretSquare || spec.turret === 'kvBoxy',
     cupola: spec.turret !== 'sovietRound' || defId === 'is2',
     mantletWpx: spec.mantletWpx ? 5 : undefined,
     bustleHpx: spec.bustle ? 5 : 0,
@@ -510,16 +570,12 @@ export function buildVehicleTurret(defId: string, lengthM: number, widthM: numbe
   let grid: Grid = [...rBarrel, ...rBody];
   // Re-draw barrel at correct absolute width in real pixels (resize above
   // already blurs the barrel's width toward tw's scale; overwrite with a
-  // clean N-px-wide bar so it stays bold at 1x regardless of turret size).
+  // clean, lit-cylinder bar so it stays bold at 1x regardless of turret size).
   const bcx = Math.floor(tw / 2);
-  const half = Math.max(1, Math.floor(spec.barrelWpx / 2));
-  for (let y = 0; y < barrelLenPx; y++) {
-    for (let dx = -half; dx <= half; dx++) put(grid, bcx + dx, y, dx === -half ? 'B' : 'b');
-  }
-  if (spec.muzzleBrake) {
-    for (let y = 0; y < Math.min(2, barrelLenPx); y++) {
-      for (let dx = -half - 1; dx <= half + 1; dx++) put(grid, bcx + dx, y, 'k');
-    }
+  paintBarrel(grid, bcx, barrelLenPx, spec.barrelWpx, spec.muzzleBrake);
+  if (spec.mantletWpx) {
+    const my0 = Math.max(0, barrelLenPx - 2);
+    fillRect(grid, bcx - Math.floor(spec.mantletWpx / 2), my0, bcx + Math.floor(spec.mantletWpx / 2), my0 + 2, 'H');
   }
   if (pal.camoBand) applyCamoBands(grid);
   const bodyCy = barrelLenPx + Math.floor((bodyH + bustleHpx) * 0.45);

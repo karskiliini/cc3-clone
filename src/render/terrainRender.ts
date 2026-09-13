@@ -34,6 +34,11 @@ const CHUNK_TILES = 16;
 const CHUNK_PX = CHUNK_TILES * TILE_PX; // 320
 const MAX_CACHED_CHUNKS = 48;
 const BAKES_PER_DRAW = 2;
+/** Burst budget used when a camera jump (map open, teleport, big scroll) leaves more than 2
+ * visible chunks unbaked at once — lets the whole viewport catch up within ~2-3 draw() calls
+ * instead of trickling in at 2/frame, while a normal small scroll (<=2 new chunks) still only
+ * pays the small per-frame budget. */
+const BAKES_PER_DRAW_BURST = 6;
 const LOWRES_PX_PER_TILE = 2;
 
 const BUILDING_TERRAINS = new Set<Terrain>(['buildingWood', 'buildingStone', 'floor']);
@@ -76,6 +81,9 @@ const MUD_RAMP = ['#4b3d2b', '#5b4a33', '#6b593d', '#78664a'];
 const CROPS_RAMP = ['#8f7d3a', '#b09a47', '#c9b255', '#d9c465'];
 const WATER_RAMP = ['#3c5566', '#4a6578', '#5a7688', '#6a8698'];
 const ICE_RAMP = ['#b8c4cc', '#c8d2d9', '#d6dee4'];
+// grey-brown debris, not the pinkish-brown palette.ts default (that read as a paint spatter,
+// especially over snow) — used for all seasons since rubble is rubble regardless.
+const RUBBLE_RAMP = ['#6e675c', '#7a7266', '#847c70', '#8a8276'];
 
 const LOCAL_RAMPS: Partial<Record<Season, Partial<Record<Terrain, string[]>>>> = {
   summer: {
@@ -87,6 +95,7 @@ const LOCAL_RAMPS: Partial<Record<Season, Partial<Record<Terrain, string[]>>>> =
     dirtroad: ROAD_RAMP,
     pavedroad: PAVED_RAMP,
     water: WATER_RAMP,
+    rubble: RUBBLE_RAMP,
   },
   autumn: {
     open: ['#8a7a48', '#93844f', '#847338', '#9c8c52', '#b8a850'],
@@ -97,6 +106,7 @@ const LOCAL_RAMPS: Partial<Record<Season, Partial<Record<Terrain, string[]>>>> =
     dirtroad: ROAD_RAMP,
     pavedroad: PAVED_RAMP,
     water: WATER_RAMP,
+    rubble: RUBBLE_RAMP,
   },
   winter: {
     snow: ['#c4c9d1', '#d6dae0', '#e6e9ee', '#f2f4f7'],
@@ -104,6 +114,7 @@ const LOCAL_RAMPS: Partial<Record<Season, Partial<Record<Terrain, string[]>>>> =
     pavedroad: ['#6a6c70', '#75777c', '#7d7f84', '#87898e'],
     mud: ['#3a352e', '#4a4238', '#585044', '#635a4c'],
     water: ICE_RAMP,
+    rubble: RUBBLE_RAMP,
   },
 };
 function rampFor(season: Season, t: Terrain): string[] {
@@ -135,6 +146,14 @@ function shade(c: RGB, amt: number): RGB { // amt: -1..1, fraction of brightness
 function shadeHex(hex: string, amt: number): string {
   const s = shade(hexToRgb(hex), amt);
   const h = (n: number) => Math.round(n).toString(16).padStart(2, '0');
+  return `#${h(s.r)}${h(s.g)}${h(s.b)}`;
+}
+/** Blends toward `to` by `t` (0..1) — unlike shadeHex (which only scales brightness and so keeps
+ * the original hue), this is what "snow-covered" needs: a green/brown roof under snow should
+ * read as pale white-grey, not a brighter version of the same green/brown. */
+function mixHex(hex: string, to: string, t: number): string {
+  const s = lerpRGB(hexToRgb(hex), hexToRgb(to), t);
+  const h = (n: number) => Math.round(clamp255(n)).toString(16).padStart(2, '0');
   return `#${h(s.r)}${h(s.g)}${h(s.b)}`;
 }
 
@@ -488,14 +507,21 @@ function paintGroundAndFeatures(
 
           // -------------------------------------------------------- crops
           if (covCrop > 0.5) {
+            // One row axis per contiguous field (flood-filled in computeFields), not per-pixel
+            // or per-tile, so rows run continuously across the whole field instead of quilting.
             const fid = fieldId[wy * mapW + wx];
             const info = fid >= 0 ? fieldAxis.get(fid) : undefined;
             const horiz = info ? info.horiz : true;
             const cropBase = groundColorFbm('crops', season, wpx, wpy, seed);
-            const stripe = horiz ? Math.floor(wpy / 2) % 2 : Math.floor(wpx / 2) % 2;
-            const ragged = hash2(wpx, wpy, seed + 909) < 0.1;
-            color = ragged ? cropBase : shade(cropBase, stripe === 0 ? 0.1 : -0.1);
-            if (covCrop < 0.6) color = shade(color, -0.12); // headland darker near edge
+            // slight low-frequency fbm wobble along the row so lines don't look ruler-straight,
+            // then 3px-spaced rows at +-7% brightness.
+            const wobSeed = seed + (fid >= 0 ? fid * 131 : 0) + 7701;
+            const wobble = (fbm(wpx / 60, wpy / 60, 1, wobSeed) - 0.5) * 4;
+            const perp = horiz ? wpy + wobble : wpx + wobble;
+            const rowPhase = Math.floor(perp / 3) % 2;
+            let color2 = shade(cropBase, rowPhase === 0 ? 0.07 : -0.07);
+            if (covCrop < 0.65) color2 = shade(color2, -0.14); // darker headland near the field edge
+            color = color2;
           }
 
           // -------------------------------------------------------- roads
@@ -577,9 +603,13 @@ function paintGroundAndFeatures(
             const bx = Math.floor(wpx / 2), by = Math.floor(wpy / 2);
             const fragH = hash2(bx, by, seed + 3501);
             if (fragH < 0.08) {
-              rb = fragH < 0.04 ? { r: 138, g: 74, b: 58 } : { r: 116, g: 112, b: 104 };
+              // muted brick red fragments + dark grey wall-stub fragments (~8% combined)
+              rb = fragH < 0.04 ? { r: 122, g: 74, b: 60 } : { r: 92, g: 88, b: 80 };
             } else {
               rb = shade(rb, -0.06); // dust
+            }
+            if (season === 'winter' && hash2(bx, by, seed + 3502) < 0.4) {
+              rb = lerpRGB(rb, { r: 226, g: 230, b: 234 }, 0.5); // snow dusting on top of the debris
             }
             color = rb;
           }
@@ -591,10 +621,21 @@ function paintGroundAndFeatures(
             if (blend > 0.01) color = lerpRGB(color, groundColorFbm('mud', season, wpx, wpy, seed), blend);
           }
 
+          // ------------------------------------------- sparse per-pixel tufts on plain ground
+          // (not crops/mud/tallgrass/roads/water/rubble): ~4% of pixels get a lighter or darker
+          // fleck, on top of everything else, so open ground reads as grainy at 1:1 instead of
+          // a smooth colour wash (round-2 critique #1).
+          const plainGround = (groundT === 'grass' || groundT === 'open' || groundT === 'snow')
+            && covCrop <= 0.5 && covMud <= 0.5 && covTallgrass <= 0.5
+            && covPaved <= 0.5 && covDirt <= 0.5 && covWater <= 0.5 && covRubble <= 0.5;
+          if (plainGround && hash2(wpx, wpy, seed + 9101) < 0.04) {
+            color = shade(color, hash2(wpx, wpy, seed + 9102) > 0.5 ? 0.22 : -0.22);
+          }
+
           // -------------------------------------------------------- relief + grain + brush
           const rf = reliefFactor(wpx, wpy, seed);
           color = shade(color, rf - 1);
-          const grain = (hash2(wpx, wpy, seed + 9001) - 0.5) * 8;
+          const grain = (hash2(wpx, wpy, seed + 9001) - 0.5) * 12; // +-6 RGB
           color = { r: clamp255(color.r + grain), g: clamp255(color.g + grain), b: clamp255(color.b + grain) };
           const brush = 0.97 + 0.06 * hash2(Math.floor(wpx / 2), Math.floor(wpy / 3), seed + 9002);
           color = { r: clamp255(color.r * brush), g: clamp255(color.g * brush), b: clamp255(color.b * brush) };
@@ -1092,7 +1133,10 @@ function paintRoof(ctx: CanvasRenderingContext2D, map: GameMap, bb: BuildingBBox
     // scattered dusting, not a full whiteout — the flat fill needs to stay visibly darker than
     // the surrounding snow ground or the whole ring silhouette disappears against it.
     const flatBase = BLOCK_FLAT_VARIANTS[Math.floor(hash2(bb.id, bb.minX + bb.minY, seed + 601) * BLOCK_FLAT_VARIANTS.length)];
-    const flat = snowy ? shadeHex(flatBase, 0.22) : flatBase;
+    // In winter this must read as a snow-covered roof (pale, off-white), not merely a brighter
+    // version of the same olive/brown material colour — a hue-preserving brighten here is what
+    // produced the flat olive-green rectangle the critique flagged.
+    const flat = snowy ? mixHex(flatBase, SNOW_LIT, 0.72) : flatBase;
     ctx.fillStyle = flat;
     ctx.fillRect(left, top, w, h);
     if (snowy) {
@@ -1425,17 +1469,38 @@ function paintLineVector(ctx: CanvasRenderingContext2D, v: MapVectorFeature, x0:
   const pts = v.points;
   if (pts.length < 2) return;
   if (v.terrain === 'hedge') {
-    strokePolylineWorld(ctx, pts, x0, y0, TILE_PX * 0.4, 'rgba(10,20,8,0.28)');
-    strokePolylineWorld(ctx, pts, x0, y0, TILE_PX * 0.3, '#2c3d22');
-    strokePolylineWorld(ctx, pts, x0, y0, TILE_PX * 0.15, 'rgba(76,106,52,0.55)');
+    // a slim (6px) bumpy line, not a flat wide bar: a plain core stroke, a 1px shadow line
+    // offset to the SE, and lobed lighter blobs every ~6px on the NW side for a leafy silhouette.
+    strokePolylineWorld(ctx, pts, x0, y0, 6, '#2c3d22');
+    ctx.strokeStyle = 'rgba(6,10,4,0.45)';
+    ctx.lineWidth = 1;
+    walkPolylineWorld(pts, 4, (wx, wy, ux, uy) => {
+      const lx = wx - x0 * TILE_PX, ly = wy - y0 * TILE_PX;
+      let px_ = -uy, py_ = ux;
+      if (px_ + py_ < 0) { px_ = -px_; py_ = -py_; } // SE-ish perpendicular
+      ctx.beginPath();
+      ctx.moveTo(lx, ly);
+      ctx.lineTo(lx + px_ * 3.5, ly + py_ * 3.5);
+      ctx.stroke();
+    });
+    ctx.fillStyle = '#5c7a3e';
+    walkPolylineWorld(pts, 6, (wx, wy, ux, uy) => {
+      let px_ = -uy, py_ = ux;
+      if (px_ + py_ > 0) { px_ = -px_; py_ = -py_; } // NW-ish perpendicular
+      const lx = wx - x0 * TILE_PX + px_ * 2.2, ly = wy - y0 * TILE_PX + py_ * 2.2;
+      const r = 1.6 + hash2(Math.round(wx), Math.round(wy), seed + 881) * 1.2;
+      ctx.beginPath();
+      ctx.ellipse(lx, ly, r, r * 0.7, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
   } else if (v.terrain === 'stonewall') {
-    strokePolylineWorld(ctx, pts, x0, y0, TILE_PX * 0.24, 'rgba(16,16,8,0.3)');
-    strokePolylineWorld(ctx, pts, x0, y0, TILE_PX * 0.2, '#9a9a92');
+    strokePolylineWorld(ctx, pts, x0, y0, 6, 'rgba(16,16,8,0.3)');
+    strokePolylineWorld(ctx, pts, x0, y0, 5, '#9a9a92');
     ctx.strokeStyle = '#5a5a52';
     ctx.lineWidth = 1;
     walkPolylineWorld(pts, 3, (wx, wy, ux, uy) => {
       const lx = wx - x0 * TILE_PX, ly = wy - y0 * TILE_PX;
-      const px_ = -uy * 2, py_ = ux * 2;
+      const px_ = -uy * 2.5, py_ = ux * 2.5;
       ctx.beginPath();
       ctx.moveTo(lx - px_, ly - py_);
       ctx.lineTo(lx + px_, ly + py_);
@@ -1449,8 +1514,8 @@ function paintLineVector(ctx: CanvasRenderingContext2D, v: MapVectorFeature, x0:
       ctx.fillRect(lx - 1, ly - 1, 3, 3);
     });
   } else if (v.terrain === 'trench') {
-    strokePolylineWorld(ctx, pts, x0, y0, TILE_PX * 0.35, 'rgba(120,108,84,0.32)');
-    strokePolylineWorld(ctx, pts, x0, y0, TILE_PX * 0.25, '#161410');
+    strokePolylineWorld(ctx, pts, x0, y0, 10, 'rgba(120,108,84,0.28)'); // lighter spoil either side
+    strokePolylineWorld(ctx, pts, x0, y0, 6, '#161410');
   } else {
     void seed;
   }
@@ -1543,29 +1608,83 @@ export class TerrainRenderer {
   }
 
   /** Flood-fill contiguous 'crops' tiles into field ids, and pick a row axis per field. */
+  /** Flood-fills contiguous 'crops' tiles into field ids (one hashed row axis per id — see fix
+   * for the "quilted fields" bug). 8-connected on purpose: a blobby/jagged field edge (from
+   * `field()`'s angle-noise boundary) routinely leaves diagonal-only-adjacent tiles at the
+   * boundary; a 4-connected flood fill would split those off into separate 1-2 tile "fields"
+   * with their own independently-hashed axis, which is exactly what produced the
+   * alternating-direction quilt look instead of one field with continuous rows. */
   private computeFields(): void {
     const map = this.map;
     const w = map.width, h = map.height;
-    let nextId = 0;
-    const stack: number[] = [];
+    const n = w * h;
+    const isCrop = new Uint8Array(n);
+    for (let i = 0; i < n; i++) if (map.tiles[i] === 'crops') isCrop[i] = 1;
+
+    // Dilate the crops mask by a couple of tiles before flood-filling connectivity: two
+    // separately-painted `field()`/`patch()` calls that visually read as one continuous
+    // wheat field (touching or a tile or two apart — a farm track, a thin gap, a single
+    // stray tile) must still get ONE consistent row axis. Flood-filling the raw mask alone
+    // (even 8-connected) treats any such gap as two unrelated fields, each independently
+    // hashing its own axis — exactly what produced the alternating-direction "quilt" look
+    // where two nearly-touching fields meet.
+    const DILATE_R = 2;
+    const dilated = new Uint8Array(n);
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
-        const i = idx(map, x, y);
-        if (this.fieldId[i] !== -1 || map.tiles[i] !== 'crops') continue;
+        const i = y * w + x;
+        if (isCrop[i]) { dilated[i] = 1; continue; }
+        outer: for (let dy = -DILATE_R; dy <= DILATE_R; dy++) {
+          const ny = y + dy;
+          if (ny < 0 || ny >= h) continue;
+          const rowBase = ny * w;
+          for (let dx = -DILATE_R; dx <= DILATE_R; dx++) {
+            const nx = x + dx;
+            if (nx < 0 || nx >= w) continue;
+            if (isCrop[rowBase + nx]) { dilated[i] = 1; break outer; }
+          }
+        }
+      }
+    }
+
+    // Flood-fill connected components over the DILATED mask (8-connected) — this is what
+    // actually decides field identity/axis; the dilation is purely a connectivity aid.
+    const compId = new Int32Array(n).fill(-1);
+    let nextId = 0;
+    const stack: number[] = [];
+    const neighbors8: [number, number][] = [
+      [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1],
+    ];
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        if (!dilated[i] || compId[i] !== -1) continue;
         const id = nextId++;
         stack.push(i);
-        this.fieldId[i] = id;
+        compId[i] = id;
         while (stack.length) {
           const ci = stack.pop()!;
           const cx = ci % w, cy = Math.floor(ci / w);
-          for (const [nx, ny] of [[cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]]) {
+          for (const [dx, dy] of neighbors8) {
+            const nx = cx + dx, ny = cy + dy;
             if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
             const ni = ny * w + nx;
-            if (this.fieldId[ni] !== -1 || map.tiles[ni] !== 'crops') continue;
-            this.fieldId[ni] = id;
+            if (!dilated[ni] || compId[ni] !== -1) continue;
+            compId[ni] = id;
             stack.push(ni);
           }
         }
+      }
+    }
+
+    // Only real crop tiles get a fieldId (the dilation halo cells are discarded — they were
+    // only a connectivity bridge); one hashed axis per connected component.
+    for (let i = 0; i < n; i++) {
+      if (!isCrop[i]) continue;
+      const id = compId[i];
+      this.fieldId[i] = id;
+      if (!this.fieldAxis.has(id)) {
+        const x = i % w, y = Math.floor(i / w);
         this.fieldAxis.set(id, { horiz: hash2(x, y, this.seed + 303) < 0.5 });
       }
     }
@@ -1742,31 +1861,29 @@ export class TerrainRenderer {
     return canvas;
   }
 
+  /** Uses the exact same `groundColorFbm` ramp+fbm function the real per-pixel bake uses (just
+   * sampled once at the tile centre instead of per pixel), so the low-res scrolling fallback's
+   * tone actually matches baked chunks at their seam instead of reading as a flatter, greyer
+   * patch next to them. */
   private paintLowResTile(ctx: CanvasRenderingContext2D, x: number, y: number): void {
     const map = this.map;
     const season = map.def.season;
     const t = tileAt(map, x, y);
     const i = idx(map, x, y);
+    const cx = (x + 0.5) * TILE_PX, cy = (y + 0.5) * TILE_PX;
     let color: RGB;
     if (t === 'buildingWood' || t === 'buildingStone' || t === 'floor') {
       const bid = map.buildingId[i];
       const bb = bid >= 0 ? this.buildingBBoxes.get(bid) : undefined;
       const stone = bb ? bb.kind === 'stone' : t === 'buildingStone';
-      color = hexToRgb(stone ? '#6d6d68' : '#6f4a2c');
-    } else if (t === 'woods') {
-      color = hexToRgb(season === 'winter' ? '#7a7468' : '#33502a');
-    } else if (t === 'scatteredtrees') {
-      color = hexToRgb(season === 'winter' ? '#8a8478' : '#43602f');
-    } else if (t === 'water') {
-      color = hexToRgb(season === 'winter' ? '#c8d2d9' : '#4a6578');
+      const base = hexToRgb(stone ? '#6d6d68' : '#6f4a2c');
+      color = shade(base, (fbm(cx / 40, cy / 40, 2, this.seed + 8811) - 0.5) * 0.2);
     } else if (t === 'crater' || t === 'bridge') {
-      color = rampLerp(rampRgb(season, this.groundUnder[i]), 0.5);
+      color = groundColorFbm(this.groundUnder[i], season, cx, cy, this.seed);
     } else {
-      color = rampLerp(rampRgb(season, t), 0.5);
+      color = groundColorFbm(t, season, cx, cy, this.seed);
     }
-    const tint = (hash2(x, y, this.seed + 8811) - 0.5) * 10;
-    color = { r: clamp255(color.r + tint), g: clamp255(color.g + tint), b: clamp255(color.b + tint) };
-    ctx.fillStyle = `rgb(${color.r | 0},${color.g | 0},${color.b | 0})`;
+    ctx.fillStyle = `rgb(${clamp255(color.r) | 0},${clamp255(color.g) | 0},${clamp255(color.b) | 0})`;
     ctx.fillRect(x * LOWRES_PX_PER_TILE, y * LOWRES_PX_PER_TILE, LOWRES_PX_PER_TILE, LOWRES_PX_PER_TILE);
   }
 
@@ -1790,7 +1907,13 @@ export class TerrainRenderer {
     const endCx = Math.min(this.chunksX - 1, Math.floor((cam.x + viewTilesW) / CHUNK_TILES));
     const startCy = Math.max(0, Math.floor(cam.y / CHUNK_TILES));
     const endCy = Math.min(this.chunksY - 1, Math.floor((cam.y + viewTilesH) / CHUNK_TILES));
-    let bakeBudget = BAKES_PER_DRAW;
+    let pending = 0;
+    for (let cy = startCy; cy <= endCy; cy++) {
+      for (let cx = startCx; cx <= endCx; cx++) {
+        if (!this.chunks.has(this.chunkKey(cx, cy))) pending++;
+      }
+    }
+    let bakeBudget = pending > 2 ? BAKES_PER_DRAW_BURST : BAKES_PER_DRAW;
     const lowRes = this.ensureLowRes();
     for (let cy = startCy; cy <= endCy; cy++) {
       for (let cx = startCx; cx <= endCx; cx++) {
