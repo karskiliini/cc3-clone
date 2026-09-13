@@ -142,6 +142,17 @@ function hexToRgb(hex: string): RGB {
 }
 function lerp(a: number, b: number, t: number): number { return a + (b - a) * t; }
 function clamp01(v: number): number { return v < 0 ? 0 : v > 1 ? 1 : v; }
+/** Smoothstep-style ramp from 0 at `lo` to 1 at `hi`, clamped. Used to turn a coverage field's
+ * hard `> 0.5` colour switch into an actual cross-fade over the coverage value's own feathered
+ * band, instead of the base ground colour and the feature colour meeting at a 1-pixel-wide hard
+ * edge right at the threshold — the fix for the round-3 critique's "seam" (a tallgrass/crops/mud
+ * patch interior, blurred at the coverage-grid level but still fully opaque past its 0.5
+ * threshold, meeting fully-opaque grass on the other side with no actual colour blend between
+ * them). */
+function smooth01(v: number, lo: number, hi: number): number {
+  const t = clamp01((v - lo) / (hi - lo));
+  return t * t * (3 - 2 * t);
+}
 function clamp255(v: number): number { return v < 0 ? 0 : v > 255 ? 255 : v; }
 function lerpRGB(a: RGB, b: RGB, t: number): RGB {
   return { r: lerp(a.r, b.r, t), g: lerp(a.g, b.g, t), b: lerp(a.b, b.b, t) };
@@ -529,22 +540,30 @@ function paintGroundAndFeatures(
 
           // ------------------------------------------------ tallgrass / mud (blurred coverage
           // overlays — see buildGrid's blurR — so their macro silhouette is a soft blob, not a
-          // tile-stepped stamp; mud takes priority since it's usually the smaller, later detail)
-          if (covTallgrass > 0.5) {
+          // tile-stepped stamp; mud takes priority since it's usually the smaller, later detail).
+          // Cross-faded by the coverage value itself (smooth01) rather than a hard `> 0.5` colour
+          // switch — the grid is already blurred so covTallgrass/covMud ramp smoothly across a
+          // real pixel band at the patch edge, but a binary switch still meets 100%-base-colour
+          // against 100%-feature-colour in a single pixel right at the threshold, which is
+          // exactly the hard "seam" the round-3 critique caught (fix #1/#2).
+          const tgBlend = smooth01(covTallgrass, 0.32, 0.68);
+          if (tgBlend > 0.003) {
             let tg = groundColorFbm('tallgrass', season, wpx, wpy, seed);
             if (covTallgrass < 0.62) tg = shade(tg, -0.08); // feathered inner edge, slightly duller
-            color = tg;
-            groundT = 'tallgrass';
+            color = lerpRGB(color, tg, tgBlend);
+            if (tgBlend > 0.5) groundT = 'tallgrass';
           }
-          if (covMud > 0.5) {
+          const mudBlend = smooth01(covMud, 0.32, 0.68);
+          if (mudBlend > 0.003) {
             let mc = groundColorFbm('mud', season, wpx, wpy, seed);
             if (covMud < 0.62) mc = shade(mc, -0.1);
-            color = mc;
-            groundT = 'mud';
+            color = lerpRGB(color, mc, mudBlend);
+            if (mudBlend > 0.5) groundT = 'mud';
           }
 
           // -------------------------------------------------------- crops
-          if (covCrop > 0.5) {
+          const cropBlend = smooth01(covCrop, 0.32, 0.68);
+          if (cropBlend > 0.003) {
             // Row axis: ONE base angle for the whole MAP (see fieldBaseAngleDeg — hashed from
             // the map id to 0/90/occasionally 45 degrees), and each contiguous field (flood-
             // filled in computeFields, small fields inheriting their nearest large field's
@@ -563,7 +582,7 @@ function paintGroundAndFeatures(
             const rowPhase = ((Math.floor(perp / 3) % 2) + 2) % 2; // guard against negative perp
             let color2 = shade(cropBase, rowPhase === 0 ? 0.07 : -0.07);
             if (covCrop < 0.65) color2 = shade(color2, -0.14); // darker headland near the field edge
-            color = color2;
+            color = lerpRGB(color, color2, cropBlend);
           }
 
           // -------------------------------------------------------- roads
@@ -626,7 +645,8 @@ function paintGroundAndFeatures(
           }
 
           // -------------------------------------------------------- water
-          if (covWater > 0.5) {
+          const waterBlend = smooth01(covWater, 0.32, 0.68);
+          if (waterBlend > 0.003) {
             let wc = groundColorFbm('water', season, wpx, wpy, seed);
             const bankRatio = waterRes ? waterRes.dist / waterRes.halfW : null;
             if (season === 'winter') {
@@ -641,11 +661,12 @@ function paintGroundAndFeatures(
               if (covWater < 0.62) wc = shade(wc, -0.3);
               else if (covWater < 0.72) wc = shade(wc, 0.18);
             }
-            color = wc;
+            color = lerpRGB(color, wc, waterBlend);
           }
 
           // -------------------------------------------------------- rubble
-          if (covRubble > 0.5) {
+          const rubbleBlend = smooth01(covRubble, 0.32, 0.68);
+          if (rubbleBlend > 0.003) {
             let rb = groundColorFbm('rubble', season, wpx, wpy, seed);
             const bx = Math.floor(wpx / 2), by = Math.floor(wpy / 2);
             const fragH = hash2(bx, by, seed + 3501);
@@ -658,7 +679,7 @@ function paintGroundAndFeatures(
             if (season === 'winter' && hash2(bx, by, seed + 3502) < 0.4) {
               rb = lerpRGB(rb, { r: 226, g: 230, b: 234 }, 0.5); // snow dusting on top of the debris
             }
-            color = rb;
+            color = lerpRGB(color, rb, rubbleBlend);
           }
 
           // ---------------------------------------------------- dirty snow near roads/rubble
