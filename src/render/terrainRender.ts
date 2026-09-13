@@ -100,17 +100,18 @@ const RUBBLE_RAMP = ['#6e675c', '#7a7266', '#847c70', '#8a8276'];
 // Summer grass patch ramps (same dark->light positions as the grass ramp so the fine/clump
 // texture carries straight across a patch edge): warm ochre dry-grass and darker brown earth.
 const SUMMER_OCHRE_PATCH: RGB[] = [[84, 68, 24], [102, 84, 32], [120, 100, 42], [138, 116, 54], [154, 132, 68]].map(([r, g, b]) => ({ r, g, b }));
+const SPECKLE_BROWN: RGB = { r: 94, g: 66, b: 34 }; // ~#6a4a24 warm dirt
+const SPECKLE_OCHRE: RGB = { r: 140, g: 114, b: 54 }; // ~#9a7a38 dry grass
 const SUMMER_BROWN_PATCH: RGB[] = [[62, 50, 28], [76, 62, 34], [90, 74, 42], [104, 88, 52], [118, 102, 64]].map(([r, g, b]) => ({ r, g, b }));
 
 const LOCAL_RAMPS: Partial<Record<Season, Partial<Record<Terrain, string[]>>>> = {
   summer: {
     // warm bare earth (ref_cc3_1479 bare ground ~(146,126,46)), not grey concrete
     open: ['#86692e', '#9a7a36', '#ab8a40', '#ba984a', '#c6a656'],
-    // CC3 mid green (round-4 #1: the old olive ramp read as mustard next to the gold wheat).
-    // Hue ~75-80deg, moderate saturation, brighter stops desaturate like sunlit blades; warm
-    // ochre/brown comes from the separate low-frequency patch layer in groundColorFbm, not
-    // from yellowing the whole ramp.
-    grass: ['#37421a', '#475422', '#55642a', '#637434', '#748644'],
+    // CC3 olive green, ramp hue ~66deg / sat ~0.66: the per-pixel warm dirt speckle in
+    // paintGroundAndFeatures pulls the rendered mean to ~60deg like ref_cc3_1479; large ochre/
+    // brown blotches come from the low-frequency patch layer in groundColorFbm.
+    grass: ['#424617', '#53591e', '#646a25', '#737a2c', '#858d38'],
     tallgrass: ['#62652a', '#767834', '#8a893e', '#9a984a'],
     crops: SUMMER_CROPS_RAMP,
     mud: MUD_RAMP,
@@ -303,16 +304,23 @@ function reliefFactor(X: number, Y: number, seed: number): number {
  * randomly. Returns a +-0.1 shade delta for pixels within ~0.7px of the stroke, else 0. Anchors
  * are kept 2px inset from the cell edge so a stroke never needs to be evaluated from a
  * neighbouring cell — one hash lookup per pixel, no neighbour scan. */
+const tuftMemo = { cx: NaN, cy: NaN, seed: NaN, ax0: 0, ay0: 0, ex: 0, ey: 0 };
 function tuftShade(wpx: number, wpy: number, seed: number, chance = 0.22, amt = 0.1): number {
   const cellSize = 10;
   const ccx = Math.floor(wpx / cellSize), ccy = Math.floor(wpy / cellSize);
   if (hash2(ccx, ccy, seed + 4601) > chance) return 0;
-  const ax = ccx * cellSize + 2 + hash2(ccx, ccy, seed + 4602) * (cellSize - 4);
-  const ay = ccy * cellSize + 2 + hash2(ccx, ccy, seed + 4603) * (cellSize - 4);
-  const len = 3 + hash2(ccx, ccy, seed + 4604) * 4;
-  const ang = angleField(ax, ay, seed);
-  const dx = Math.cos(ang) * len * 0.5, dy = Math.sin(ang) * len * 0.5;
-  const ax0 = ax - dx, ay0 = ay - dy, ex = dx * 2, ey = dy * 2;
+  // Stroke geometry depends only on the cell, and the bake loop walks pixels row by row, so
+  // memoise the last cell's stroke (identical output; skips angleField's fbm on ~90% of calls).
+  if (ccx !== tuftMemo.cx || ccy !== tuftMemo.cy || seed !== tuftMemo.seed) {
+    const ax = ccx * cellSize + 2 + hash2(ccx, ccy, seed + 4602) * (cellSize - 4);
+    const ay = ccy * cellSize + 2 + hash2(ccx, ccy, seed + 4603) * (cellSize - 4);
+    const len = 3 + hash2(ccx, ccy, seed + 4604) * 4;
+    const ang = angleField(ax, ay, seed);
+    const dx = Math.cos(ang) * len * 0.5, dy = Math.sin(ang) * len * 0.5;
+    tuftMemo.cx = ccx; tuftMemo.cy = ccy; tuftMemo.seed = seed;
+    tuftMemo.ax0 = ax - dx; tuftMemo.ay0 = ay - dy; tuftMemo.ex = dx * 2; tuftMemo.ey = dy * 2;
+  }
+  const { ax0, ay0, ex, ey } = tuftMemo;
   const len2 = ex * ex + ey * ey;
   let t = len2 > 1e-6 ? ((wpx - ax0) * ex + (wpy - ay0) * ey) / len2 : 0;
   t = t < 0 ? 0 : t > 1 ? 1 : t;
@@ -709,8 +717,8 @@ function paintGroundAndFeatures(
               if (covCrop < 0.65) color2 = shade(color2, -0.04);
             } else {
               const cropBase = groundColorFbm('crops', season, wpx, wpy, seed);
-              // round-4 #1: 2px stipple 0.4 -> 0.16 plus a 1px term (was a hard 2px checkerboard at 1:1)
-              color2 = shade(cropBase, (hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4242) - 0.5) * 0.16 + (hash2(wpx, wpy, seed + 4243) - 0.5) * 0.14);
+              // single-pixel stipple only (the old 2px-block term read as a checkerboard, 4px blocks at zoom 2)
+              color2 = shade(cropBase, (hash2(wpx, wpy, seed + 4243) - 0.5) * 0.26);
               color2 = shade(color2, rowPhase === 0 ? 0.03 : -0.03);
               if (cropEdge < 0.58) color2 = shade(color2, -0.22); // thin dark headland rim
             }
@@ -867,12 +875,23 @@ function paintGroundAndFeatures(
             // earth flecks (ref grass stipple); snow keeps the subtler original values.
             const tuft = isSnowGround ? tuftShade(wpx, wpy, seed) : tuftShade(wpx, wpy, seed, 0.4, 0.16);
             if (tuft !== 0) color = shade(color, tuft);
-            if (!isSnowGround && hash2(wpx, wpy, seed + 9100) < 0.06) color = lerpRGB(color, { r: 92, g: 70, b: 38 }, 0.35);
-            // summer: dense fine stipple — ref_cc3_1479 grass has ~2x our luminance SD at 1:1.
-            // Mostly 1px with a weaker 2px term so it doesn't read as a 2px checkerboard.
+            if (season !== 'summer' && !isSnowGround && hash2(wpx, wpy, seed + 9100) < 0.06) color = lerpRGB(color, { r: 92, g: 70, b: 38 }, 0.35);
             if (season === 'summer' && !isSnowGround) {
-              // round-4 #1: ~40% lower (0.34/0.14 -> 0.20/0.07; the 2px term cut harder, it's the checkerboard)
-              color = shade(color, (hash2(wpx, wpy, seed + 9111) - 0.5) * 0.20 + (hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 9110) - 0.5) * 0.07);
+              // Single-pixel only (no 2px term: that read as a checkerboard). ref_cc3_1479 grass is
+              // olive with dense per-pixel warm dirt/dry-grass speckle, so: a 1px luminance stipple,
+              // plus ~8-12% of pixels pushed to warm brown or dry ochre and darker 1px flecks, with
+              // density clumped by the mid-frequency `clump` field (dirt showing through grass).
+              const hs = hash2(wpx, wpy, seed + 9111);
+              color = shade(color, (hs - 0.5) * 0.48);
+              const dirt = fbm(wpx / 12, wpy / 12, 1, seed + 9130) * 0.65 + clump * 0.35;
+              const dens = 0.02 + 0.26 * smooth01(dirt, 0.42, 0.74);
+              const hp = hash2(wpx, wpy, seed + 9120);
+              if (hp < dens) {
+                const warm = hash2(wpx, wpy, seed + 9121) < 0.55 ? SPECKLE_BROWN : SPECKLE_OCHRE;
+                color = lerpRGB(color, warm, 0.45 + 0.35 * (hp / dens));
+              } else if (hp < dens * 1.45) {
+                color = shade(color, -0.36 - 0.2 * hs); // dark 1px fleck
+              }
             }
           }
 

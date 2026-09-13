@@ -25,7 +25,7 @@ export const PALETTE = {
 export const TERRAIN_COLORS: Record<Season, Record<Terrain, string[]>> = {
   summer: {
     open: ['#8a7a52', '#8f7f58', '#84754c', '#93844f'],
-    grass: ['#55642a', '#637434', '#475422', '#748644'],
+    grass: ['#646a25', '#737a2c', '#53591e', '#858d38'],
     tallgrass: ['#767834', '#8a893e', '#62652a'],
     crops: ['#9a8f3f', '#a39847', '#8f8438'],
     dirtroad: ['#8a7a56', '#8f7f5c', '#7f6f4c'],
