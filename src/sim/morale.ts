@@ -226,8 +226,10 @@ function messageForTransition(side: Side, playerSide: Side, teamName: string, st
     if (status === 'Broken') return `${teamName}\nWe're breaking!`;
     if (status === 'Routed') return `${teamName}\nWe're running!`;
     if (status === 'Destroyed') return `${teamName}\n${teamName} has been destroyed.`;
+    if (status === 'Knocked Out') return `${teamName}\n${teamName} has been knocked out.`;
     return null;
   }
+  if (status === 'Knocked Out') return 'Enemy\nEnemy vehicle knocked out.';
   if (status === 'Routed' || status === 'Destroyed') return 'Enemy\nEnemy team is routing.';
   return null;
 }
@@ -243,7 +245,7 @@ function updateTeamCaches(state: BattleState, track: MoraleTrack): void {
     const last = track.teamLastStatus.get(team.id);
     if (last !== status) {
       track.teamLastStatus.set(team.id, status);
-      if (status === 'Pinned' || status === 'Broken' || status === 'Routed' || status === 'Destroyed') {
+      if (status === 'Pinned' || status === 'Broken' || status === 'Routed' || status === 'Destroyed' || status === 'Knocked Out') {
         const msg = messageForTransition(team.side, state.config.playerSide, team.name, status);
         if (msg) addMessage(state, msg, team.side === state.config.playerSide ? 'bad' : 'good');
         if (status === 'Broken' || status === 'Routed') {

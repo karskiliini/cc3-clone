@@ -188,3 +188,44 @@ describe('moraleWord', () => {
     expect(moraleWord(10)).toBe('Broken');
   });
 });
+
+describe('knocked-out vehicle team messages (round-4 HUD finding 2)', () => {
+  function withVehicle(side: 'german' | 'soviet') {
+    const state = makeState();
+    const team = state.teams.get(1)!;
+    team.side = side;
+    team.name = 'PzKw IV G';
+    team.vehicleId = 42;
+    state.vehicles.set(42, {
+      id: 42, teamId: 1, side, defId: 'pz4gh', pos: { x: 5, y: 5 }, hullFacing: 0, turretFacing: 0,
+      state: 'ok', mainAmmo: 50, coaxAmmo: 200, path: [], speed: 0,
+      targetVehicleId: null, targetSoldierId: null, targetPoint: null,
+      mainFireTimer: 0, coaxFireTimer: 0, burnTimer: 0, hits: 0,
+    });
+    for (const s of state.soldiers.values()) { s.side = side; s.vehicleId = 42; }
+    return state;
+  }
+
+  it('player vehicle knocked out posts a bad message naming the team', () => {
+    const state = withVehicle('german');
+    const rng = new Rng(1);
+    stepMorale(state, rng, 0.1);
+    state.vehicles.get(42)!.state = 'burning';
+    stepMorale(state, rng, 0.1);
+    expect(state.teams.get(1)!.status).toBe('Knocked Out');
+    const m = state.messages.find((x) => x.text.includes('knocked out'));
+    expect(m?.text).toBe('PzKw IV G\nPzKw IV G has been knocked out.');
+    expect(m?.kind).toBe('bad');
+  });
+
+  it('enemy vehicle knocked out posts a good generic message', () => {
+    const state = withVehicle('soviet');
+    const rng = new Rng(1);
+    stepMorale(state, rng, 0.1);
+    state.vehicles.get(42)!.state = 'knockedOut';
+    stepMorale(state, rng, 0.1);
+    const m = state.messages.find((x) => x.text.includes('knocked out'));
+    expect(m?.text).toBe('Enemy\nEnemy vehicle knocked out.');
+    expect(m?.kind).toBe('good');
+  });
+});

@@ -10,6 +10,7 @@ import { hasLOS, losTrace } from './los';
 import { isPassable } from './path';
 import { addStress, addOrMergeBelief } from './mind';
 import { expectedPenetrationChance } from './ballistics';
+import { addMessage } from './messages';
 
 const HEADING_ALIGN_RAD = 0.35;
 const BURN_TO_KO_S = 30;
@@ -280,6 +281,7 @@ function stepOneVehicleMind(state: BattleState, rng: Rng, dt: number, v: Vehicle
   if (v.state === 'immobilized') {
     // crew bails: vehicle abandoned, crew become panicked infantry (spec §10.2).
     v.state = 'abandoned';
+    if (team.side === state.config.playerSide) addMessage(state, `${team.name}\nCrew bailing out!`, 'bad');
     for (const id of team.soldierIds) {
       const s = state.soldiers.get(id);
       if (!s || s.health === 'dead' || s.health === 'incapacitated') continue;
@@ -353,6 +355,9 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
       v.burnTimer += dt;
       if (v.burnTimer >= BURN_TO_KO_S) v.state = 'knockedOut';
     }
+    // A burning, knocked-out or abandoned vehicle is dead weight: it never drives, and any path
+    // left over from an order or a reverse-to-cover is dropped. Immobilized is NOT in this list.
+    if (v.state === 'knockedOut' || v.state === 'burning' || v.state === 'abandoned') { v.speed = 0; v.path = []; continue; }
 
     const def = VEHICLE_DEFS[v.defId];
     if (!def) continue;
@@ -367,8 +372,6 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     } else if (v.targetPoint) {
       targetPos = v.targetPoint;
     }
-
-    if (v.state === 'knockedOut' || v.state === 'abandoned') continue;
 
     const track = reverseTracks.get(state)?.get(v.id);
     const isReversing = !!track?.target;

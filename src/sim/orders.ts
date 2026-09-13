@@ -193,6 +193,10 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
   if (team.outOfAction) return;
 
   const isVehicleTeam = team.vehicleId != null;
+  // team.outOfAction lags a tick behind a kill (morale.ts refreshes it); a burning/knocked-out/
+  // abandoned hull and its crew must not take a movement order in that window.
+  const deadHull = isVehicleTeam ? state.vehicles.get(team.vehicleId!) : undefined;
+  if (deadHull && (deadHull.state === 'knockedOut' || deadHull.state === 'burning' || deadHull.state === 'abandoned')) return;
   team.order = order;
   const type = effectiveType(team, order);
 

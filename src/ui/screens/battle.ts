@@ -107,9 +107,11 @@ export class BattleScreen implements Screen {
   private showSoldierMonitor = true;
   private showDead = true;
 
-  constructor(battle: Battle) {
+  /** `terrain` is the deploy screen's renderer, handed over so its baked chunks carry into battle
+   * instead of re-baking the whole map on Begin. */
+  constructor(battle: Battle, terrain?: TerrainRenderer) {
     this.battle = battle;
-    this.terrain = new TerrainRenderer(battle.state.map);
+    this.terrain = terrain ?? new TerrainRenderer(battle.state.map);
   }
 
   onEnter(): void {
@@ -310,6 +312,9 @@ export class BattleScreen implements Screen {
         if (inBox.length > 0) {
           const ids = inBox.map((t) => t.id);
           if (shiftHeld) this.addToSelection(ids); else this.setSelection(ids);
+        } else if (!shiftHeld) {
+          // An empty marquee deselects, same as a plain click on empty ground; Shift keeps it.
+          this.setSelection([]);
         }
       } else {
         const world = screenToWorld(cam, { x: r.x, y: r.y });
@@ -386,7 +391,6 @@ export class BattleScreen implements Screen {
     this.hoverTeamId = (!this.pendingOrder && input.mouse.y < VIEW_H && !this.commandMenu.isOpen)
       ? (pickFriendlyTeamScreen(state, cam, input.mouse, battle.playerSide())?.id ?? null)
       : null;
-    this.hudHover = input.mouse.y >= VIEW_H;
 
     if (this.showMinimap) this.minimap.update(input, cam, state.map.width, state.map.height);
 
@@ -397,6 +401,17 @@ export class BattleScreen implements Screen {
     if (this.fleeArmedUntil !== 0 && performance.now() >= this.fleeArmedUntil) this.fleeArmedUntil = 0;
     this.bottomStrip.setFleeArmed(this.fleeArmedUntil !== 0);
     const action = this.bottomStrip.update(input);
+    // Hand cursor only over real controls: a hot bottom-strip button, a filled (actionable) team
+    // box, an order-bar button, or the minimap — not the whole bottom panel.
+    const roster = this.rosterTeams(battle.playerSide());
+    const gridHover = this.teamGrid['hoverIndex'];
+    const m = input.mouse;
+    const r = this.minimap.rect;
+    this.hudHover = !this.commandMenu.isOpen && (
+      this.bottomStrip['hover'].size > 0
+      || (this.showTeamGrid && gridHover >= 0 && gridHover < roster.length && !roster[gridHover].outOfAction)
+      || this.orderBar.isHovering()
+      || (this.showMinimap && m.x >= r.x && m.x < r.x + r.w && m.y >= r.y && m.y < r.y + r.h));
     if (action === 'truce') {
       battle.offerTruce(battle.playerSide());
     } else if (action === 'flee') {
@@ -543,7 +558,7 @@ export class BattleScreen implements Screen {
     if (this.pendingOrder) return 'crosshair';
     if (this.modernPanDrag.active) return 'hand';
     if (this.rightDrag.active && !this.rightDrag.menuOpenedOnPress && this.rightDrag.moved >= RIGHT_GESTURE_PX) return 'hand';
-    if (this.hudHover || this.orderBar.isHovering()) return 'hand';
+    if (this.hudHover) return 'hand';
     if (this.hoverTeamId != null) return 'hand';
     return 'arrow';
   }

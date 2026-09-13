@@ -23,6 +23,8 @@ import { isPassable } from '@/sim/path';
 import { pointInRect } from '@/shared/math';
 import { BattleScreen } from './battle';
 
+const DRAG_THRESHOLD_PX = 5;
+
 export class DeployScreen implements Screen {
   private battle: Battle;
   private terrain: TerrainRenderer;
@@ -33,6 +35,10 @@ export class DeployScreen implements Screen {
   private minimap = new Minimap();
   private selectedTeamId: number | null = null;
   private draggingTeamId: number | null = null;
+  /** Left press on a friendly team that hasn't yet moved DRAG_THRESHOLD_PX — becomes a drag
+   * (draggingTeamId) only past the threshold, so a plain click just selects. */
+  private pressTeamId: number | null = null;
+  private pressStart: Vec2 = { x: 0, y: 0 };
   private dragPan = makeDragPanState();
   private modernPanDrag: DragPanState = makeDragPanState();
   private edgeScroll: EdgeScrollState = makeEdgeScrollState();
@@ -89,12 +95,24 @@ export class DeployScreen implements Screen {
     for (const c of input.clicks) {
       if (c.button !== 0 || c.y >= VIEW_H || modernPanning) continue;
       const hitTeam = pickFriendlyTeamScreen(state, cam, { x: c.x, y: c.y }, this.battle.playerSide());
+      this.draggingTeamId = null;
       if (hitTeam) {
         this.selectedTeamId = hitTeam.id;
-        this.draggingTeamId = hitTeam.id;
+        this.pressTeamId = hitTeam.id;
+        this.pressStart = { x: c.x, y: c.y };
       } else {
-        this.draggingTeamId = null;
+        this.pressTeamId = null;
       }
+    }
+    if (this.pressTeamId != null && input.buttons.left && !modernPanning
+      && Math.hypot(input.mouse.x - this.pressStart.x, input.mouse.y - this.pressStart.y) >= DRAG_THRESHOLD_PX) {
+      this.draggingTeamId = this.pressTeamId;
+      this.pressTeamId = null;
+    }
+    // Escape abandons the drag; the team stays where it was.
+    if (input.keysPressed.has('escape')) {
+      this.draggingTeamId = null;
+      this.pressTeamId = null;
     }
 
     // while dragging: continuously check whether the tile snapped under the
@@ -112,6 +130,7 @@ export class DeployScreen implements Screen {
     // release: drop the dragged team, snapped to the tile under the cursor
     for (const r of input.releases) {
       if (r.button !== 0) continue;
+      this.pressTeamId = null;
       if (this.draggingTeamId != null) {
         const dropWorld = this.snappedDropPoint(cam, { x: r.x, y: r.y });
         const ok = this.battle.deployTeam(this.draggingTeamId, dropWorld);
@@ -125,9 +144,11 @@ export class DeployScreen implements Screen {
     const clicked = this.teamGrid.update(input, teams);
     if (clicked != null) {
       this.selectedTeamId = clicked.id;
-      const team = state.teams.get(clicked.id);
-      if (team) centerCamera(cam, team.pos);
-      clampCamera(cam, map.width, map.height);
+      if (clicked.doubleClick) {
+        const team = state.teams.get(clicked.id);
+        if (team) centerCamera(cam, team.pos);
+        clampCamera(cam, map.width, map.height);
+      }
     }
 
     if (this.showMinimap) this.minimap.update(input, cam, map.width, map.height);
@@ -140,7 +161,7 @@ export class DeployScreen implements Screen {
       aiDeploy(this.battle.state, this.battle.playerSide(), this.battle.rng, this.battle);
     } else if (action === 'begin') {
       this.battle.start();
-      game.setScreen(new BattleScreen(this.battle));
+      game.setScreen(new BattleScreen(this.battle, this.terrain));
     } else if (action === 'map') {
       this.showMinimap = !this.showMinimap;
     } else if (action === 'zoomIn') {
@@ -202,21 +223,31 @@ export class DeployScreen implements Screen {
     const team = state.teams.get(teamId);
     if (!team) return;
     const drop = this.snappedDropPoint(cam, game.input.state.mouse);
+    const tint = this.dragInvalid ? PALETTE.red : PALETTE.gold;
     ctx.save();
-    ctx.globalAlpha = 0.55;
+    // Target tile outline, full strength so the snap point reads clearly.
+    const tl = worldToScreen(cam, { x: Math.floor(drop.x), y: Math.floor(drop.y) });
+    const br = worldToScreen(cam, { x: Math.floor(drop.x) + 1, y: Math.floor(drop.y) + 1 });
+    ctx.strokeStyle = tint;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(Math.round(tl.x) + 0.5, Math.round(tl.y) + 0.5, Math.max(1, Math.round(br.x - tl.x) - 1), Math.max(1, Math.round(br.y - tl.y) - 1));
+    ctx.globalAlpha = 0.8;
     for (const sid of team.soldierIds) {
       const s = state.soldiers.get(sid);
       if (!s) continue;
       const p = worldToScreen(cam, team.vehicleId != null ? drop : { x: drop.x + s.formationOffset.x, y: drop.y + s.formationOffset.y });
-      ctx.fillStyle = this.dragInvalid ? PALETTE.red : PALETTE.gold;
+      ctx.fillStyle = tint;
+      ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); // 5 px dot
       ctx.fill();
+      ctx.stroke();
     }
     const centre = worldToScreen(cam, drop);
     const icon = getTeamIcon(team.type);
     ctx.drawImage(icon, Math.round(centre.x - icon.width / 2), Math.round(centre.y - icon.height));
-    ctx.strokeStyle = this.dragInvalid ? PALETTE.red : PALETTE.gold;
+    ctx.strokeStyle = tint;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(centre.x, centre.y, 8, 0, Math.PI * 2);

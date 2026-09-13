@@ -4,7 +4,8 @@ import type {
 } from '@/shared/types';
 import { Rng } from '@/shared/rng';
 import { createMind, baseMotivation } from '@/sim/mind';
-import { stepVehicleMinds, onVehicleHit, onVehicleNearMiss } from '@/sim/vehicle';
+import { stepVehicleMinds, stepVehicles, onVehicleHit, onVehicleNearMiss } from '@/sim/vehicle';
+import { applyOrder } from '@/sim/orders';
 import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';
 
@@ -246,5 +247,54 @@ describe('vehicle crew alarm from AT near misses (spec §10c)', () => {
     state.teams.set(1, makeTeam(1, v.id, [cmdr.id]));
     onVehicleNearMiss(state, v, WEAPONS.kar98k, { x: 10.5, y: 2.5 });
     expect(cmdr.mind.threatLevel).toBe(0);
+  });
+});
+
+describe('dead hulls stay put (round-4 units finding 2)', () => {
+  for (const dead of ['burning', 'knockedOut', 'abandoned'] as const) {
+    it(`a ${dead} tank with a path left over stops dead and drops the path`, () => {
+      const state = makeState(makeMap());
+      const v = makeVehicle(1, 1, 'pz4gh', {
+        state: dead, hullFacing: Math.PI / 2, speed: 5,
+        path: [{ x: 30.5, y: 10.5 }, { x: 50.5, y: 10.5 }],
+      });
+      state.vehicles.set(v.id, v);
+      const cmdr = makeCommander(1, 1);
+      state.soldiers.set(cmdr.id, cmdr);
+      state.teams.set(1, makeTeam(1, v.id, [cmdr.id]));
+      const start = { ...v.pos };
+      const rng = new Rng(1);
+      for (let i = 0; i < 20; i++) stepVehicles(state, rng, 0.25);
+      expect(v.pos).toEqual(start);
+      expect(v.speed).toBe(0);
+      expect(v.path).toEqual([]);
+    });
+  }
+
+  it('a move order to a burning tank (before morale marks the team out of action) gives it no path', () => {
+    const state = makeState(makeMap());
+    const v = makeVehicle(1, 1, 'pz4gh', { state: 'burning' });
+    state.vehicles.set(v.id, v);
+    const cmdr = makeCommander(1, 1);
+    state.soldiers.set(cmdr.id, cmdr);
+    const team = makeTeam(1, v.id, [cmdr.id]);
+    state.teams.set(1, team);
+    applyOrder(state, team, { type: 'move', target: { x: 40.5, y: 10.5 }, issuedAt: 0 }, new Rng(1));
+    expect(v.path).toEqual([]);
+    const start = { ...v.pos };
+    for (let i = 0; i < 10; i++) stepVehicles(state, new Rng(2), 0.25);
+    expect(v.pos).toEqual(start);
+  });
+
+  it('an ok tank with the same path does drive (control)', () => {
+    const state = makeState(makeMap());
+    const v = makeVehicle(1, 1, 'pz4gh', { hullFacing: Math.PI / 2, path: [{ x: 30.5, y: 10.5 }] });
+    state.vehicles.set(v.id, v);
+    const cmdr = makeCommander(1, 1);
+    state.soldiers.set(cmdr.id, cmdr);
+    state.teams.set(1, makeTeam(1, v.id, [cmdr.id]));
+    const rng = new Rng(1);
+    for (let i = 0; i < 20; i++) stepVehicles(state, rng, 0.25);
+    expect(v.pos.x).not.toBeCloseTo(10.5, 1);
   });
 });
