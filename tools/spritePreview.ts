@@ -74,13 +74,37 @@ const SEASONS: Season[] = ['summer', 'autumn', 'winter'];
 const STANCES: (Stance | 'dead')[] = ['standing', 'crouching', 'prone', 'dead'];
 const FACINGS: Facing8[] = [0, 1, 2, 3, 4, 5, 6, 7];
 
+/** Show a soldier sprite at 1x (true in-game size) AND 4x (for eyeballing
+ * detail), stacked in one cell, per the verification requirement. */
+function cellPair1x4x(row: HTMLElement, label: string, src: HTMLCanvasElement): void {
+  const c = document.createElement('div');
+  c.className = 'cell';
+  const mk = (scale: number) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, src.width * scale);
+    canvas.height = Math.max(1, src.height * scale);
+    const ctx = canvas.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
+    canvas.style.display = 'block';
+    canvas.style.margin = '0 auto 2px';
+    return canvas;
+  };
+  c.appendChild(mk(SCALE_1X));
+  c.appendChild(mk(SCALE));
+  const span = document.createElement('span');
+  span.textContent = `${label} (1x/4x)`;
+  c.appendChild(span);
+  row.appendChild(c);
+}
+
 for (const side of SIDES) {
   for (const season of SEASONS) {
     const row = section(`Soldiers — ${side} / ${season}`);
     for (const stance of STANCES) {
       for (const facing of FACINGS) {
         const sprite = getSoldierSprite(side, season, stance, facing, 0);
-        cellPair(row, `${stance} f${facing}`, sprite);
+        cellPair1x4x(row, `${stance} f${facing}`, sprite);
       }
     }
   }
