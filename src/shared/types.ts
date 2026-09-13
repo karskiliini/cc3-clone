@@ -312,8 +312,19 @@ export interface BattleMessage {
 }
 
 export interface Explosion { pos: Vec2; radiusM: number; t: number; kind: 'he' | 'smoke' | 'small' }
-export interface Tracer { from: Vec2; to: Vec2; t: number; hit: boolean; kind: 'bullet' | 'shell' | 'mortar' }
-export interface Flash { pos: Vec2; facing: number; t: number }
+export interface Tracer { from: Vec2; to: Vec2; t: number; hit: boolean; kind: 'bullet' | 'mg' | 'shell' | 'mortar' }
+/** `kind: 'shell'` marks a vehicle main-gun flash, drawn larger than the default infantry flash. */
+export interface Flash { pos: Vec2; facing: number; t: number; kind?: 'shell' }
+
+// ---------------------------------------------------- effect lifetimes (s)
+// Shared between src/sim/battle.ts (ageEffects, which must expire records at
+// these exact lifetimes) and src/render/effects.ts (which draws the fade
+// curve against the same lifetime) so the two never drift out of sync.
+export const FLASH_LIFE = 0.25;
+export const TRACER_LIFE = 0.35;
+export const EXPLOSION_LIFE_HE = 0.9;
+export const EXPLOSION_LIFE_SMALL = 0.3;
+export const EXPLOSION_LIFE_SMOKE = 2.0;
 
 export interface BattleEvent {
   kind: 'shot' | 'hit' | 'kill' | 'explosion' | 'vlCaptured' | 'teamBroken' | 'vehicleKO' | 'message' | 'truce' | 'ended';

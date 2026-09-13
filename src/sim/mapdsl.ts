@@ -306,12 +306,16 @@ export class MapPainter {
     this.addDecor('cart', cx - 3, cy + 4);
     this.addDecor('woodpile', cx - 6, cy + 4);
     this.orchard(cx - 22, cy - 12, 12, 12, 2);
-    this.field(cx + 12, cy + 2, 4, 4, 'crops', seedOffset + 21);
+    // centred well clear of the barn (at cx+2..cx+9) — field() paints out to ~1.3x its radius,
+    // so a field placed any closer clips into the barn's footprint and corrupts its building
+    // tiles (previously invisible since the roof was one undifferentiated fillRect; the
+    // footprint-aware roof/courtyard rendering exposes any such overlap directly).
+    this.field(cx + 20, cy + 6, 4, 4, 'crops', seedOffset + 21);
   }
 
   /** A city block: a ring of buildings around an interior courtyard, with a 2-wide paved gateway
    * through one wall connecting the street to the courtyard. */
-  block(x: number, y: number, w: number, h: number, kind: 'wood' | 'stone', courtyard: Terrain = 'rubble'): void {
+  block(x: number, y: number, w: number, h: number, kind: 'wood' | 'stone', courtyard: Terrain = 'pavedroad'): void {
     this.building(x, y, w, h, kind);
     const ring = 3;
     const cw = w - 2 * ring, ch = h - 2 * ring;
@@ -320,18 +324,29 @@ export class MapPainter {
     this.rect(gx, y + h - ring - 1, 2, ring + 1, 'pavedroad');
   }
 
-  /** A bombed-out building footprint: rubble with a scatter of standing wall fragments at the edges. */
+  /** A bombed-out building footprint: a rubble mound with 2-4 standing wall SEGMENTS (short
+   * contiguous runs, not scattered single-tile dots) surviving along the original perimeter, as
+   * if part of each wall collapsed and part is still standing. */
   ruin(x: number, y: number, w: number, h: number, seedOffset = 0): void {
     this.rect(x, y, w, h, 'rubble');
     const x0 = Math.floor(x), y0 = Math.floor(y), x1 = Math.floor(x + w), y1 = Math.floor(y + h);
-    for (let xx = x0; xx < x1; xx++) {
-      for (const yy of [y0, y1 - 1]) {
-        if (hash2(xx, yy, this.seed + seedOffset + 9001) > 0.55) this.set(xx, yy, 'stonewall');
-      }
-    }
-    for (let yy = y0; yy < y1; yy++) {
-      for (const xx of [x0, x1 - 1]) {
-        if (hash2(xx, yy, this.seed + seedOffset + 9002) > 0.55) this.set(xx, yy, 'stonewall');
+    // the four perimeter edges as (start, end, isHoriz) runs in edge-local coordinates
+    const edges: { x0: number; y0: number; len: number; horiz: boolean }[] = [
+      { x0, y0, len: x1 - x0, horiz: true },       // north
+      { x0, y0: y1 - 1, len: x1 - x0, horiz: true }, // south
+      { x0, y0, len: y1 - y0, horiz: false },       // west
+      { x0: x1 - 1, y0, len: y1 - y0, horiz: false }, // east
+    ];
+    const nSegments = 2 + Math.floor(hash2(x0, y0, this.seed + seedOffset + 9010) * 3); // 2..4
+    for (let s = 0; s < nSegments; s++) {
+      const edge = edges[Math.floor(hash2(x0 + s, y0 + s, this.seed + seedOffset + 9011) * edges.length)];
+      const segLen = Math.min(edge.len, 2 + Math.floor(hash2(s, x0, this.seed + seedOffset + 9012) * 3)); // 2..4 tiles
+      const maxStart = Math.max(0, edge.len - segLen);
+      const start = Math.floor(hash2(s, y0, this.seed + seedOffset + 9013) * (maxStart + 1));
+      for (let i = 0; i < segLen; i++) {
+        const xx = edge.horiz ? edge.x0 + start + i : edge.x0;
+        const yy = edge.horiz ? edge.y0 : edge.y0 + start + i;
+        this.set(xx, yy, 'stonewall');
       }
     }
   }

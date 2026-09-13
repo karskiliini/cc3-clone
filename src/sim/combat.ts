@@ -61,9 +61,10 @@ function targetPosOf(target: Target): Vec2 {
   }
 }
 
-function tracerKindFor(weapon: WeaponDef): 'bullet' | 'shell' | 'mortar' {
+function tracerKindFor(weapon: WeaponDef): 'bullet' | 'mg' | 'shell' | 'mortar' {
   if (weapon.cls === 'mortar') return 'mortar';
   if (weapon.cls === 'tankgun' || weapon.cls === 'atgun' || weapon.cls === 'atrocket') return 'shell';
+  if (weapon.cls === 'lmg' || weapon.cls === 'hmg' || weapon.cls === 'coaxmg') return 'mg';
   return 'bullet';
 }
 
@@ -317,6 +318,7 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
       }
     }
     if (wantTracer) state.tracers.push({ from: { ...shooter.pos }, to: { ...target.pos }, t: 0, hit: false, kind: tracerKindFor(weapon) });
+    if (weapon.heRadiusM === 0) state.explosions.push({ pos: { ...target.pos }, radiusM: 0, t: 0, kind: 'small' });
     return;
   }
 
@@ -348,6 +350,7 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
     const spread = 0.5 + distM / 200;
     const impact = { x: victim.pos.x + rng.gauss() * spread, y: victim.pos.y + rng.gauss() * spread };
     if (wantTracer) state.tracers.push({ from: { ...shooter.pos }, to: impact, t: 0, hit: false, kind: tracerKindFor(weapon) });
+    if (weapon.heRadiusM === 0) state.explosions.push({ pos: { ...impact }, radiusM: 0, t: 0, kind: 'small' });
     for (const s2 of state.soldiers.values()) {
       if (s2.side === shooter.side) continue;
       if (s2.health === 'dead' || s2.health === 'incapacitated') continue;
@@ -368,10 +371,18 @@ function fireBurst(state: BattleState, rng: Rng, soldier: Soldier, weapon: Weapo
   soldier.lastFiredAt = state.time;
   const tPos = targetPosOf(target);
   soldier.facing = facingTo(soldier.pos, tPos);
-  state.flashes.push({ pos: { ...soldier.pos }, facing: facingAngle(soldier.facing), t: 0 });
+  const flashKind = weapon.cls === 'atgun' || weapon.cls === 'atrocket' ? 'shell' as const : undefined;
+  state.flashes.push({ pos: { ...soldier.pos }, facing: facingAngle(soldier.facing), t: 0, kind: flashKind });
   state.events.push({ kind: 'shot', pos: { ...soldier.pos }, weaponId: weapon.id, side: soldier.side });
 
-  const tracerEvery = weapon.cls === 'lmg' || weapon.cls === 'hmg' || weapon.cls === 'coaxmg' ? 1 : weapon.cls === 'smg' ? 3 : 0;
+  // Every MG round and every tank/AT shell gets a tracer; small arms (rifle/
+  // SMG) show a tracer roughly every 3rd shot, like the original's darting
+  // tracer rounds mixed in with the rest of the burst.
+  const tracerEvery =
+    weapon.cls === 'lmg' || weapon.cls === 'hmg' || weapon.cls === 'coaxmg'
+    || weapon.cls === 'tankgun' || weapon.cls === 'atgun' || weapon.cls === 'atrocket' ? 1
+    : weapon.cls === 'smg' || weapon.cls === 'rifle' ? 3
+    : 0;
 
   for (let i = 0; i < weapon.burst; i++) {
     if (soldier.ammo <= 0) break;
@@ -673,6 +684,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
       vehicle.mainFireTimer = 1 / weapon.rate;
       vehicle.mainAmmo--;
       state.events.push({ kind: 'shot', pos: { ...vehicle.pos }, weaponId: weapon.id, side: vehicle.side });
+      state.flashes.push({ pos: { ...vehicle.pos }, facing: facingRef, t: 0, kind: 'shell' });
 
       if (target.kind === 'vehicle') {
         const distM = dist(vehicle.pos, target.vehicle.pos) * TILE_M;

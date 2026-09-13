@@ -68,7 +68,7 @@ function paintMap(p: MapPainter): void {
   p.building(59, 86, 6, 5, 'stone');
   p.line([{ x: 52, y: 75 }, { x: 72, y: 75 }, { x: 72, y: 93 }, { x: 62, y: 93 }], 'fence');
   p.line([{ x: 58, y: 93 }, { x: 52, y: 93 }, { x: 52, y: 75 }], 'fence');
-  p.rect(60, 80, 4, 5, 'open'); // trodden farmyard between the buildings
+  p.rect(61, 80, 2, 5, 'open'); // trodden farmyard, fit exactly in the gap between the two buildings
   p.road([{ x: 62, y: 93 }, { x: 62, y: 102 }], 2, 'dirtroad');
   p.addDecor('well', 62, 84);
   p.addDecor('haystack', 68, 90);

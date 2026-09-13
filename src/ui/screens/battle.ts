@@ -1,5 +1,5 @@
 import type { CursorKind, InputState, OrderType, Screen, Team, Vec2 } from '@/shared/types';
-import { ORDER_HOTKEYS, ORDER_TYPES, VIEW_H, VIEW_W, otherSide } from '@/shared/types';
+import { ORDER_DOT_COLOR, ORDER_HOTKEYS, ORDER_TYPES, VIEW_H, VIEW_W, otherSide } from '@/shared/types';
 import { game } from '@/game';
 import type { Battle } from '@/sim/battle';
 import { teamCanFire, teamHasSmoke } from '@/sim/team';
@@ -348,7 +348,11 @@ export class BattleScreen implements Screen {
       const to = screenToWorld(cam, game.input.state.mouse);
       const a = worldToScreen(cam, from);
       const b = worldToScreen(cam, to);
-      ctx.strokeStyle = PALETTE.gold;
+      // Use the order's own color from the very first aiming frame (before
+      // commit), matching the color the line will render once the order is
+      // actually issued — was hardcoded gold, which briefly looked wrong for
+      // every order type except Move.
+      ctx.strokeStyle = ORDER_DOT_COLOR[this.pendingOrder];
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);

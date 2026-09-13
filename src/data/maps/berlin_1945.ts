@@ -42,7 +42,7 @@ function paintMap(p: MapPainter): void {
   p.block(168, 118, 14, 14, 'stone');
 
   // the Ministry: a large intact stone building with its own courtyard, facing the Platz
-  p.block(95, 44, 22, 16, 'stone', 'open');
+  p.block(95, 44, 22, 16, 'stone', 'pavedroad');
 
   // small rubble patches around the craters (not blanket coverage) and light dusting
   // of debris on the streets nearest the ruins

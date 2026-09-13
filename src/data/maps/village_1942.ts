@@ -65,7 +65,8 @@ function paintMap(p: MapPainter): void {
   // church (stone) with a stone wall enclosure and graveyard
   p.building(100, 56, 10, 8, 'stone');
   p.building(103, 48, 4, 8, 'stone'); // tower
-  p.line([{ x: 96, y: 46 }, { x: 116, y: 46 }, { x: 116, y: 68 }, { x: 96, y: 68 }, { x: 96, y: 46 }], 'stonewall');
+  // left edge at x=99 (not 96) so it clears the last north-row house, which reaches x=96
+  p.line([{ x: 99, y: 46 }, { x: 116, y: 46 }, { x: 116, y: 68 }, { x: 99, y: 68 }, { x: 99, y: 46 }], 'stonewall');
   for (let gy = 0; gy < 3; gy++) {
     for (let gx = 0; gx < 4; gx++) p.addDecor('grave', 98 + gx * 2, 60 + gy * 2);
   }
@@ -85,7 +86,7 @@ function paintMap(p: MapPainter): void {
   p.farmstead(35, 130, 32);
 
   // a few large mud patches near the street and the dirt-track low ground
-  p.patch(20, 65, 3, 'mud');
+  p.patch(21, 73, 3, 'mud'); // on the dirt track, clear of the north-row house row
   p.patch(162, 100, 3, 'mud');
   p.patch(100, 84, 3, 'mud');
 

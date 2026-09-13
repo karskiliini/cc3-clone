@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>FX Preview — cc3_clone</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 16px;
+        background: #202018;
+        color: #e8e8e0;
+        font: 12px monospace;
+      }
+      h1 { font-size: 16px; margin: 0 0 8px; }
+      p { color: #9a9c94; max-width: 900px; }
+      #canvasWrap { border: 1px solid #444; display: inline-block; }
+      canvas { image-rendering: pixelated; display: block; }
+      .legend { margin-top: 8px; font-size: 11px; color: #b8bab2; }
+      .legend b { color: #d8b448; }
+    </style>
+  </head>
+  <body>
+    <h1>cc3_clone — combat effects preview (deterministic, no rAF needed)</h1>
+    <p>
+      Each row is one effect; the 4 columns are hand-set life stages
+      (early / quarter / mid-late / near-end) of that effect's lifetime,
+      drawn with the SAME <code>drawEffects</code>/<code>drawVehicles</code>
+      code the live battle uses, against a plain grass-colored background —
+      so a screenshot always catches every effect regardless of frame timing.
+    </p>
+    <div id="canvasWrap">
+      <canvas id="c" width="1024" height="630"></canvas>
+    </div>
+    <div class="legend" id="legend"></div>
+    <script type="module" src="./fxPreview.ts"></script>
+  </body>
+</html>

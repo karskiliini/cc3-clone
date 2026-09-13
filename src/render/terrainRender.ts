@@ -101,7 +101,7 @@ const LOCAL_RAMPS: Partial<Record<Season, Partial<Record<Terrain, string[]>>>> =
   winter: {
     snow: ['#c4c9d1', '#d6dae0', '#e6e9ee', '#f2f4f7'],
     dirtroad: ['#7c7264', '#8c8072', '#98897a', '#a49484'],
-    pavedroad: ['#48484a', '#585858', '#666664', '#727068'],
+    pavedroad: ['#6a6c70', '#75777c', '#7d7f84', '#87898e'],
     mud: ['#3a352e', '#4a4238', '#585044', '#635a4c'],
     water: ICE_RAMP,
   },
@@ -387,6 +387,7 @@ function paintGroundAndFeatures(
   fieldId: Int32Array, fieldAxis: Map<number, FieldInfo>,
   cropsGrid: Grid, mudGrid: Grid, tallgrassGrid: Grid, pavedGrid: Grid, dirtGrid: Grid, waterGrid: Grid, rubbleGrid: Grid, dirtyGrid: Grid,
   pavedVec: VecAreaField | null, dirtVec: VecAreaField | null, waterVec: VecAreaField | null,
+  tramRailY: number[],
 ): void {
   const groundAt = (tx: number, ty: number): Terrain => {
     const cx = tx < 0 ? 0 : tx >= mapW ? mapW - 1 : tx;
@@ -504,13 +505,30 @@ function paintGroundAndFeatures(
             // as individually laid stones rather than a flat tinted band.
             const cobbleX = Math.floor(wpx / 4), cobbleY = Math.floor(wpy / 4);
             const cobble = hash2(cobbleX, cobbleY, seed + 4520);
-            rc = shade(rc, (cobble - 0.5) * 0.16);
+            rc = shade(rc, (cobble - 0.5) * 0.08);
             const nearEdge = pavedRes ? pavedRes.dist > pavedRes.halfW * 0.82 : covPaved < 0.58;
             const atGutter = pavedRes ? pavedRes.dist > pavedRes.halfW * 0.9 : covPaved < 0.55;
-            if (atGutter) rc = shade(rc, -0.32); // dark gutter line right at the edge
-            else if (nearEdge) rc = shade(rc, -0.16); // kerb
+            if (season === 'winter') {
+              // snow blends into the gutters over ~3px instead of a dark kerb line, and two
+              // soft wheel-track bands read as slightly darker either side of the centreline.
+              const ratio = pavedRes ? pavedRes.dist / pavedRes.halfW : 1 - covPaved;
+              if (ratio > 0.78) {
+                const snowBlend = clamp01((ratio - 0.78) / 0.22) * 0.8;
+                rc = lerpRGB(rc, groundColorFbm('snow', season, wpx, wpy, seed), snowBlend);
+              }
+              const trackOff = pavedRes ? Math.abs(pavedRes.dist - 0.4 * pavedRes.halfW) : Math.abs(ratio - 0.4) * 6;
+              if (trackOff < 1.6) rc = shade(rc, -0.14);
+            } else {
+              if (atGutter) rc = shade(rc, -0.32); // dark gutter line right at the edge
+              else if (nearEdge) rc = shade(rc, -0.16); // kerb
+            }
             const crackBlockX = Math.floor(wpx / 3), crackBlockY = Math.floor(wpy / 3);
             if (hash2(crackBlockX, crackBlockY, seed + 4501) < 0.02) rc = shade(rc, -0.24);
+            // tram rails: two 1px dark lines 4px apart, where a tramwire decor line runs
+            for (let i = 0; i < tramRailY.length; i++) {
+              const off = wpy - tramRailY[i];
+              if (off === -2 || off === 2) { rc = shade(rc, -0.55); break; }
+            }
             color = rc;
           } else if (covDirt > 0.5) {
             let rc = groundColorFbm('dirtroad', season, wpx, wpy, seed);
@@ -664,7 +682,17 @@ function paintMud(ctx: CanvasRenderingContext2D, wx: number, wy: number, ox: num
 /** Debris pass for a rubble tile: a handful of rotated wall-fragment blocks with a highlight
  * edge and their own offset drop shadow, plus a scatter of small masonry chips — so a rubble
  * tile reads as a collapsed structure, not just a tinted-noise ground colour. */
-function paintRubbleDebris(ctx: CanvasRenderingContext2D, wx: number, wy: number, ox: number, oy: number, seed: number): void {
+function paintRubbleDebris(ctx: CanvasRenderingContext2D, wx: number, wy: number, ox: number, oy: number, seed: number, season: Season): void {
+  // a scorched dark patch, roughly a third of tiles, drawn first so fragments/beams sit on it
+  if (hash2(wx, wy, seed + 5220) < 0.35) {
+    const sx = ox + hash2(wx * 41, wy * 41, seed + 5221) * TILE_PX;
+    const sy = oy + hash2(wx * 43, wy * 43, seed + 5222) * TILE_PX;
+    const sr = 5 + hash2(wx * 47, wy * 47, seed + 5223) * 5;
+    ctx.globalAlpha = 0.4;
+    ctx.fillStyle = '#0e0c0a';
+    ctx.beginPath(); ctx.ellipse(sx, sy, sr, sr * 0.7, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
   const nFrag = 2 + Math.floor(hash2(wx, wy, seed + 5201) * 3); // 2..4
   for (let i = 0; i < nFrag; i++) {
     const fx = ox + 2 + hash2(wx * 7 + i, wy * 7 + i, seed + 5202) * (TILE_PX - 10);
@@ -691,12 +719,37 @@ function paintRubbleDebris(ctx: CanvasRenderingContext2D, wx: number, wy: number
     ctx.fillRect(-w / 2, h / 2 - 1, w, 1);
     ctx.restore();
   }
-  // fine masonry dust/chips scattered between the fragments
+  // a couple of charred black roof-beam fragments, on maybe a third of tiles
+  if (hash2(wx, wy, seed + 5230) < 0.3) {
+    const nBeam = 1 + Math.floor(hash2(wx, wy, seed + 5231) * 2);
+    for (let i = 0; i < nBeam; i++) {
+      const bx = ox + 2 + hash2(wx * 53 + i, wy * 53 + i, seed + 5232) * (TILE_PX - 8);
+      const by = oy + 2 + hash2(wx * 59 + i, wy * 59 + i, seed + 5233) * (TILE_PX - 8);
+      const len = 6 + hash2(wx * 61 + i, wy * 61 + i, seed + 5234) * 6;
+      const ang = hash2(wx * 67 + i, wy * 67 + i, seed + 5235) * Math.PI;
+      ctx.strokeStyle = '#161310';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(bx - Math.cos(ang) * len / 2, by - Math.sin(ang) * len / 2);
+      ctx.lineTo(bx + Math.cos(ang) * len / 2, by + Math.sin(ang) * len / 2);
+      ctx.stroke();
+    }
+  }
+  // fine masonry dust/chips scattered between the fragments; in winter, a few white flecks of
+  // snow dusted on top so the debris still reads as grey-brown but frost-touched
   for (let i = 0; i < 6; i++) {
     const px_ = ox + hash2(wx * 29 + i, wy * 29 + i, seed + 5208) * TILE_PX;
     const py_ = oy + hash2(wx * 31 + i, wy * 31 + i, seed + 5209) * TILE_PX;
     ctx.fillStyle = hash2(wx * 37 + i, wy * 37 + i, seed + 5210) < 0.5 ? 'rgba(150,140,130,0.6)' : 'rgba(40,34,28,0.5)';
     ctx.fillRect(px_, py_, 1, 1);
+  }
+  if (season === 'winter') {
+    for (let i = 0; i < 5; i++) {
+      const px_ = ox + hash2(wx * 71 + i, wy * 71 + i, seed + 5240) * TILE_PX;
+      const py_ = oy + hash2(wx * 73 + i, wy * 73 + i, seed + 5241) * TILE_PX;
+      ctx.fillStyle = 'rgba(232,236,240,0.55)';
+      ctx.fillRect(px_, py_, 1, 1);
+    }
   }
 }
 
@@ -848,7 +901,128 @@ function paintRoofWeathering(ctx: CanvasRenderingContext2D, left: number, top: n
   ctx.globalAlpha = 1;
 }
 
-function paintRoof(ctx: CanvasRenderingContext2D, bb: BuildingBBox, x0: number, y0: number, seed: number): void {
+const SNOW_LIT = '#e4e7ec';
+const SNOW_SHADE = '#c9ced6';
+
+interface Footprint {
+  w: number; h: number; occ: boolean[];
+  /** an enclosed interior gap (a real courtyard) in world tile coords, or null */
+  hole: { minX: number; minY: number; maxX: number; maxY: number } | null;
+  /** true if the footprint isn't a plain filled rectangle (has a notch or a hole) */
+  irregular: boolean;
+}
+
+/** Classify every tile of a building's bbox as occupied/empty, then flood-fill the empty tiles
+ * reachable from the bbox border ("outside" the true footprint, e.g. the flanks of a narrower
+ * tower merged into a wider nave) so what's left over (empties that never touch the border) is a
+ * genuinely enclosed hole — a courtyard, not a concave notch in the outline. */
+function analyzeFootprint(map: GameMap, bb: BuildingBBox): Footprint {
+  const w = bb.maxX - bb.minX + 1, h = bb.maxY - bb.minY + 1;
+  const occ = new Array<boolean>(w * h);
+  for (let ty = 0; ty < h; ty++) {
+    for (let tx = 0; tx < w; tx++) {
+      occ[ty * w + tx] = map.buildingId[idx(map, bb.minX + tx, bb.minY + ty)] === bb.id;
+    }
+  }
+  const outside = new Array<boolean>(w * h).fill(false);
+  const stack: number[] = [];
+  const seed = (i: number) => { if (!occ[i] && !outside[i]) { outside[i] = true; stack.push(i); } };
+  for (let tx = 0; tx < w; tx++) { seed(tx); seed((h - 1) * w + tx); }
+  for (let ty = 0; ty < h; ty++) { seed(ty * w); seed(ty * w + w - 1); }
+  while (stack.length) {
+    const i = stack.pop()!;
+    const tx = i % w, ty = (i / w) | 0;
+    const nbrs: [number, number][] = [[tx + 1, ty], [tx - 1, ty], [tx, ty + 1], [tx, ty - 1]];
+    for (const [nx, ny] of nbrs) {
+      if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+      const ni = ny * w + nx;
+      if (occ[ni] || outside[ni]) continue;
+      outside[ni] = true;
+      stack.push(ni);
+    }
+  }
+  let holeMinX = Infinity, holeMinY = Infinity, holeMaxX = -Infinity, holeMaxY = -Infinity;
+  let irregular = false;
+  for (let i = 0; i < w * h; i++) {
+    if (occ[i]) continue;
+    irregular = true;
+    if (outside[i]) continue;
+    const tx = i % w, ty = (i / w) | 0;
+    if (tx < holeMinX) holeMinX = tx; if (tx > holeMaxX) holeMaxX = tx;
+    if (ty < holeMinY) holeMinY = ty; if (ty > holeMaxY) holeMaxY = ty;
+  }
+  const hole = holeMaxX >= holeMinX
+    ? { minX: bb.minX + holeMinX, minY: bb.minY + holeMinY, maxX: bb.minX + holeMaxX, maxY: bb.minY + holeMaxY }
+    : null;
+  return { w, h, occ, hole, irregular };
+}
+
+/** A narrower band of occupied tiles at the top or bottom of the footprint (e.g. a church tower
+ * merged with its nave) — returned in tile coords local to the bbox, or null if the footprint
+ * doesn't have one. */
+function findTowerBand(fp: Footprint): { minX: number; maxX: number; minY: number; maxY: number } | null {
+  const { w, h, occ } = fp;
+  const rowRange = (ty: number): [number, number] | null => {
+    let lo = Infinity, hi = -Infinity;
+    for (let tx = 0; tx < w; tx++) if (occ[ty * w + tx]) { if (tx < lo) lo = tx; if (tx > hi) hi = tx; }
+    return hi >= lo ? [lo, hi] : null;
+  };
+  const top = rowRange(0);
+  if (top && top[1] - top[0] + 1 < w * 0.75) {
+    let endTy = 0;
+    while (endTy + 1 < h - 1) {
+      const r = rowRange(endTy + 1);
+      if (!r || r[1] - r[0] + 1 > top[1] - top[0] + 2) break;
+      endTy++;
+    }
+    return { minX: top[0], maxX: top[1], minY: 0, maxY: endTy };
+  }
+  const bot = rowRange(h - 1);
+  if (bot && bot[1] - bot[0] + 1 < w * 0.75) {
+    let startTy = h - 1;
+    while (startTy - 1 > 0) {
+      const r = rowRange(startTy - 1);
+      if (!r || r[1] - r[0] + 1 > bot[1] - bot[0] + 2) break;
+      startTy--;
+    }
+    return { minX: bot[0], maxX: bot[1], minY: startTy, maxY: h - 1 };
+  }
+  return null;
+}
+
+/** A small pyramidal (hipped) tower roof: 4 shaded facets meeting at a centre apex, used for a
+ * narrower tower section that pokes out of a wider building (village church/school). */
+function paintPyramidTower(ctx: CanvasRenderingContext2D, left: number, top: number, w: number, h: number, base: string): void {
+  const cx = left + w / 2, cy = top + h / 2;
+  ctx.fillStyle = shadeHex(base, 0.3); // N facet, lit
+  ctx.beginPath(); ctx.moveTo(left, top); ctx.lineTo(left + w, top); ctx.lineTo(cx, cy); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = shadeHex(base, 0.06); // W facet
+  ctx.beginPath(); ctx.moveTo(left, top); ctx.lineTo(left, top + h); ctx.lineTo(cx, cy); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = shadeHex(base, -0.12); // E facet
+  ctx.beginPath(); ctx.moveTo(left + w, top); ctx.lineTo(left + w, top + h); ctx.lineTo(cx, cy); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = shadeHex(base, -0.32); // S facet, shaded
+  ctx.beginPath(); ctx.moveTo(left, top + h); ctx.lineTo(left + w, top + h); ctx.lineTo(cx, cy); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = shadeHex(base, 0.45);
+  ctx.fillRect(Math.round(cx) - 1, Math.round(cy) - 1, 2, 2); // apex highlight
+  ctx.strokeStyle = shadeHex(base, -0.45);
+  ctx.lineWidth = 1;
+  ctx.strokeRect(left + 0.5, top + 0.5, Math.max(0, w - 1), Math.max(0, h - 1));
+}
+
+/** Occupied-tile rectangles as one clip path, so a roof drawn with plain fillRect() calls over
+ * the whole bbox never bleeds onto ground beside a notch (e.g. a tower narrower than its nave). */
+function occupancyClipPath(fp: Footprint, bb: BuildingBBox, x0: number, y0: number): Path2D {
+  const path = new Path2D();
+  for (let ty = 0; ty < fp.h; ty++) {
+    for (let tx = 0; tx < fp.w; tx++) {
+      if (!fp.occ[ty * fp.w + tx]) continue;
+      path.rect((bb.minX + tx - x0) * TILE_PX, (bb.minY + ty - y0) * TILE_PX, TILE_PX, TILE_PX);
+    }
+  }
+  return path;
+}
+
+function paintRoof(ctx: CanvasRenderingContext2D, map: GameMap, bb: BuildingBBox, x0: number, y0: number, seed: number, season: Season): void {
   const left = (bb.minX - x0) * TILE_PX;
   const top = (bb.minY - y0) * TILE_PX;
   const wTiles = bb.maxX - bb.minX + 1;
@@ -856,114 +1030,242 @@ function paintRoof(ctx: CanvasRenderingContext2D, bb: BuildingBBox, x0: number, 
   const w = wTiles * TILE_PX;
   const h = hTiles * TILE_PX;
   const stone = bb.kind === 'stone';
-  const big = Math.max(wTiles, hTiles) > 12;
+  const snowy = season === 'winter';
+  const fp = analyzeFootprint(map, bb);
+  const big = fp.hole !== null || (wTiles > 12 && hTiles > 12);
 
   // Wall/base course, just outside the roof footprint on the S and E sides, so the roof reads
-  // as sitting on a structure rather than floating directly on the ground texture. Darker than
-  // the roof itself; a lit sliver against the eave and a dark mortar/base line at ground level.
-  const WALL_PX = 3;
-  const wallColor = stone ? '#4a4a46' : '#3e2c1c';
-  ctx.fillStyle = wallColor;
-  ctx.fillRect(left + w, top + 2, WALL_PX, h - 2 + WALL_PX);
-  ctx.fillRect(left + 2, top + h, w - 2 + WALL_PX, WALL_PX);
-  ctx.fillStyle = shadeHex(wallColor, 0.28);
-  ctx.fillRect(left + w, top + 2, 1, h - 2 + WALL_PX);
-  ctx.fillRect(left + 2, top + h, w - 2 + WALL_PX, 1);
-  ctx.fillStyle = shadeHex(wallColor, -0.32);
-  ctx.fillRect(left + w + WALL_PX - 1, top + 2, 1, h - 2 + WALL_PX);
-  ctx.fillRect(left + 2, top + h + WALL_PX - 1, w - 2 + WALL_PX, 1);
+  // as sitting on a structure rather than floating directly on the ground texture: a lit top
+  // edge, a material-appropriate mid tone, a dark base line, and a handful of window marks with
+  // sills. Ground-shadow band cast beyond the wall, in two alpha steps.
+  const WALL_PX = 4;
+  const wallMid = stone ? '#8d8a80' : (hash2(bb.id, 7, seed + 711) < 0.5 ? '#c8bfa8' : '#6b4a2e');
+  ctx.fillStyle = wallMid;
+  ctx.fillRect(left + w, top, WALL_PX, h + WALL_PX);
+  ctx.fillRect(left, top + h, w + WALL_PX, WALL_PX);
+  ctx.fillStyle = shadeHex(wallMid, 0.32);
+  ctx.fillRect(left + w, top, 1, h + WALL_PX);
+  ctx.fillRect(left, top + h, w + WALL_PX, 1);
+  ctx.fillStyle = shadeHex(wallMid, -0.38);
+  ctx.fillRect(left + w + WALL_PX - 1, top, 1, h + WALL_PX);
+  ctx.fillRect(left, top + h + WALL_PX - 1, w + WALL_PX, 1);
 
-  // soft shadow cast onto the ground beyond the wall (two alpha steps), drawn first.
+  // window marks with a light sill: denser rhythm (every ~4px) for tenement facades, a handful
+  // (2-3) for ordinary houses.
+  const drawWinV = (wx: number, wy: number) => {
+    ctx.fillStyle = 'rgba(20,18,16,0.8)';
+    ctx.fillRect(wx, wy, 2, 3);
+    ctx.fillStyle = snowy ? 'rgba(210,214,220,0.85)' : 'rgba(230,224,200,0.85)';
+    ctx.fillRect(wx, wy + 3, 2, 1);
+  };
+  const drawWinH = (wx: number, wy: number) => {
+    ctx.fillStyle = 'rgba(20,18,16,0.8)';
+    ctx.fillRect(wx, wy, 3, 2);
+    ctx.fillStyle = snowy ? 'rgba(210,214,220,0.85)' : 'rgba(230,224,200,0.85)';
+    ctx.fillRect(wx + 3, wy, 1, 2);
+  };
+  if (big) {
+    for (let d = 5; d < h - 1; d += 4) drawWinV(left + w + 1, top + d);
+    for (let d = 5; d < w - 1; d += 4) drawWinH(left + d, top + h + 1);
+  } else {
+    const winN = 2 + Math.floor(hash2(bb.id, 91, seed + 712) * 2);
+    for (let i = 0; i < winN; i++) { const t = (i + 1) / (winN + 1); drawWinV(left + w + 1, top + Math.round(t * h)); }
+    for (let i = 0; i < winN; i++) { const t = (i + 1) / (winN + 1); drawWinH(left + Math.round(t * w), top + h + 1); }
+  }
+
+  // soft shadow cast onto the ground beyond the wall, ~6px wide, in two alpha steps.
   ctx.fillStyle = 'rgba(8,8,6,0.35)';
-  ctx.fillRect(left + w + WALL_PX, top + 3, 1, h - 3 + WALL_PX);
-  ctx.fillRect(left + 3, top + h + WALL_PX, w - 3 + WALL_PX, 1);
-  ctx.fillStyle = 'rgba(8,8,6,0.16)';
-  ctx.fillRect(left + w + WALL_PX + 1, top + 3, 2, h - 3 + WALL_PX);
-  ctx.fillRect(left + 3, top + h + WALL_PX + 1, w - 3 + WALL_PX, 2);
+  ctx.fillRect(left + w + WALL_PX, top, 2, h + WALL_PX);
+  ctx.fillRect(left, top + h + WALL_PX, w + WALL_PX, 2);
+  ctx.fillStyle = 'rgba(8,8,6,0.18)';
+  ctx.fillRect(left + w + WALL_PX + 2, top, 4, h + WALL_PX);
+  ctx.fillRect(left, top + h + WALL_PX + 2, w + WALL_PX, 4);
+
+  // If the footprint isn't a plain rectangle (a notch, like a narrower tower merged into a
+  // nave, or a real interior hole/courtyard), clip the roof fills to the occupied tiles only so
+  // they never paint over ground that isn't actually part of the building.
+  const clip = fp.irregular ? occupancyClipPath(fp, bb, x0, y0) : null;
+  if (clip) { ctx.save(); ctx.clip(clip); }
 
   if (big) {
-    const flat = BLOCK_FLAT_VARIANTS[Math.floor(hash2(bb.id, bb.minX + bb.minY, seed + 601) * BLOCK_FLAT_VARIANTS.length)];
+    // Snow "on" the roof means a frosted lightening of the mansard's own dark grey-brown plus a
+    // scattered dusting, not a full whiteout — the flat fill needs to stay visibly darker than
+    // the surrounding snow ground or the whole ring silhouette disappears against it.
+    const flatBase = BLOCK_FLAT_VARIANTS[Math.floor(hash2(bb.id, bb.minX + bb.minY, seed + 601) * BLOCK_FLAT_VARIANTS.length)];
+    const flat = snowy ? shadeHex(flatBase, 0.22) : flatBase;
     ctx.fillStyle = flat;
     ctx.fillRect(left, top, w, h);
-    // lighter parapet inset by 1px
+    if (snowy) {
+      ctx.fillStyle = shadeHex(flat, 0.3);
+      ctx.fillRect(left, top, w, Math.ceil(h * 0.4));
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      const dustN = Math.max(4, Math.floor((w * h) / 120));
+      for (let i = 0; i < dustN; i++) {
+        const sx = left + hash2(bb.id * 53 + i, i, 821) * w;
+        const sy = top + hash2(bb.id * 59 + i, i, 822) * h;
+        ctx.fillRect(sx, sy, 1, 1);
+      }
+    }
+    // inset lighter rectangle: a two-tier mansard/roof-terrace hint
     ctx.strokeStyle = shadeHex(flat, 0.22);
-    ctx.lineWidth = 1;
-    ctx.strokeRect(left + 1.5, top + 1.5, Math.max(0, w - 3), Math.max(0, h - 3));
-    ctx.fillStyle = shadeHex(flat, -0.3);
-    ctx.fillRect(left, top + h - 1, w, 1);
-    ctx.fillRect(left + w - 1, top, 1, h);
-    // row of small chimneys along the ridge line
+    ctx.lineWidth = 2;
+    ctx.strokeRect(left + 2, top + 2, Math.max(0, w - 4), Math.max(0, h - 4));
+    // 2px parapet at the outer edge
+    ctx.fillStyle = shadeHex(flat, -0.35);
+    ctx.fillRect(left, top, w, 2);
+    ctx.fillRect(left, top, 2, h);
+    ctx.fillRect(left, top + h - 2, w, 2);
+    ctx.fillRect(left + w - 2, top, 2, h);
+    // row of chimneys along the long axis
     const chimN = Math.max(2, Math.floor(w / 24));
-    ctx.fillStyle = '#2c2a26';
     for (let i = 0; i < chimN; i++) {
       const cx = left + 4 + Math.floor((i * (w - 8)) / Math.max(1, chimN - 1));
-      ctx.fillRect(cx, top + 2, 2, 2);
+      const cy = top + 3;
+      ctx.fillStyle = 'rgba(10,8,6,0.35)';
+      ctx.fillRect(cx + 1, cy + 1, 2, 2);
+      ctx.fillStyle = '#2c2a26';
+      ctx.fillRect(cx, cy, 2, 2);
     }
-    // skylights
-    ctx.fillStyle = '#8a9aa0';
-    const skyN = Math.max(2, Math.floor((w * h) / 900));
-    for (let i = 0; i < skyN; i++) {
-      const sx = left + 3 + Math.floor(hash2(bb.id * 7 + i, i, 55) * Math.max(1, w - 6));
-      const sy = top + 3 + Math.floor(hash2(bb.id * 11 + i, i, 56) * Math.max(1, h - 6));
-      ctx.fillRect(sx, sy, 2, 2);
+    if (!snowy) {
+      ctx.fillStyle = '#8a9aa0';
+      const skyN = Math.max(2, Math.floor((w * h) / 900));
+      for (let i = 0; i < skyN; i++) {
+        const sx = left + 3 + Math.floor(hash2(bb.id * 7 + i, i, 55) * Math.max(1, w - 6));
+        const sy = top + 3 + Math.floor(hash2(bb.id * 11 + i, i, 56) * Math.max(1, h - 6));
+        ctx.fillRect(sx, sy, 2, 2);
+      }
     }
     paintRoofWeathering(ctx, left, top, w, h, bb.id);
-    if (stone) {
+    if (stone && !snowy) {
       ctx.strokeStyle = 'rgba(0,0,0,0.12)';
       ctx.lineWidth = 1;
       for (let gx = 5; gx < w; gx += 6) { ctx.beginPath(); ctx.moveTo(left + gx + 0.5, top); ctx.lineTo(left + gx + 0.5, top + h); ctx.stroke(); }
       for (let gy = 5; gy < h; gy += 6) { ctx.beginPath(); ctx.moveTo(left, top + gy + 0.5); ctx.lineTo(left + w, top + gy + 0.5); ctx.stroke(); }
     }
-    return;
-  }
+  } else {
+    const variants = stone ? STONE_ROOF_VARIANTS : WOOD_ROOF_VARIANTS;
+    const v = variants[Math.floor(hash2(bb.id, bb.minX + bb.minY, seed + 602) * variants.length)];
+    const ridgeHoriz = wTiles >= hTiles; // ridge runs along the longer axis
+    const litFill = snowy ? SNOW_LIT : v.light;
+    const shadeFill = snowy ? SNOW_SHADE : v.dark;
 
-  const variants = stone ? STONE_ROOF_VARIANTS : WOOD_ROOF_VARIANTS;
-  const v = variants[Math.floor(hash2(bb.id, bb.minX + bb.minY, seed + 602) * variants.length)];
-  const ridgeHoriz = wTiles >= hTiles; // ridge runs along the longer axis
+    // shaded (unlit) slope first, full footprint
+    ctx.fillStyle = shadeFill;
+    ctx.fillRect(left, top, w, h);
+    // lit slope, brighter than the shaded slope
+    ctx.fillStyle = litFill;
+    if (ridgeHoriz) ctx.fillRect(left, top, w, Math.ceil(h / 2));
+    else ctx.fillRect(left, top, Math.ceil(w / 2), h);
 
-  // shaded (unlit) slope first, full footprint
-  ctx.fillStyle = v.dark;
-  ctx.fillRect(left, top, w, h);
-  // lit slope, >=18% brighter than the shaded slope
-  ctx.fillStyle = v.light;
-  if (ridgeHoriz) ctx.fillRect(left, top, w, Math.ceil(h / 2));
-  else ctx.fillRect(left, top, Math.ceil(w / 2), h);
+    // gable-end hint: a darker triangle on the shaded slope at each end of the ridge, where it
+    // meets the short walls
+    ctx.fillStyle = shadeHex(v.dark, -0.18);
+    if (ridgeHoriz) {
+      const g = Math.min(h * 0.4, w * 0.25);
+      ctx.beginPath(); ctx.moveTo(left, top + h / 2); ctx.lineTo(left + g, top + h); ctx.lineTo(left, top + h); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(left + w, top + h / 2); ctx.lineTo(left + w - g, top + h); ctx.lineTo(left + w, top + h); ctx.closePath(); ctx.fill();
+    } else {
+      const g = Math.min(w * 0.4, h * 0.25);
+      ctx.beginPath(); ctx.moveTo(left + w / 2, top); ctx.lineTo(left + w, top + g); ctx.lineTo(left + w, top); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(left + w / 2, top + h); ctx.lineTo(left + w, top + h - g); ctx.lineTo(left + w, top + h); ctx.closePath(); ctx.fill();
+    }
 
-  // plank/tile lines perpendicular to the ridge, -8% brightness
-  ctx.fillStyle = 'rgba(0,0,0,0.18)';
-  if (ridgeHoriz) { for (let x = 2; x < w; x += 3) ctx.fillRect(left + x, top, 1, h); }
-  else { for (let y = 2; y < h; y += 3) ctx.fillRect(left, top + y, w, 1); }
+    // plank/tile lines perpendicular to the ridge, -8% brightness
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    if (ridgeHoriz) { for (let x = 2; x < w; x += 3) ctx.fillRect(left + x, top, 1, h); }
+    else { for (let y = 2; y < h; y += 3) ctx.fillRect(left, top + y, w, 1); }
 
-  // ridge line: 1px lighter than the lit slope
-  ctx.fillStyle = shadeHex(v.light, 0.2);
-  if (ridgeHoriz) ctx.fillRect(left, top + Math.floor(h / 2), w, 1);
-  else ctx.fillRect(left + Math.floor(w / 2), top, 1, h);
+    // ridge line: always the roof material's own dark tone, so it (and the eave outline below)
+    // stay visible against a snow-covered roof rather than disappearing into it.
+    ctx.fillStyle = snowy ? v.dark : shadeHex(v.light, 0.2);
+    if (ridgeHoriz) ctx.fillRect(left, top + Math.floor(h / 2), w, 1);
+    else ctx.fillRect(left + Math.floor(w / 2), top, 1, h);
 
-  // eave outline: 1px dark
-  ctx.strokeStyle = v.dark;
-  ctx.lineWidth = 1;
-  ctx.strokeRect(left + 0.5, top + 0.5, Math.max(0, w - 1), Math.max(0, h - 1));
-
-  // faint stone-coursing mortar lines
-  if (stone) {
-    ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+    // eave outline: 1px dark
+    ctx.strokeStyle = v.dark;
     ctx.lineWidth = 1;
-    for (let gx = 4; gx < w; gx += 5) { ctx.beginPath(); ctx.moveTo(left + gx + 0.5, top); ctx.lineTo(left + gx + 0.5, top + h); ctx.stroke(); }
-    for (let gy = 4; gy < h; gy += 5) { ctx.beginPath(); ctx.moveTo(left, top + gy + 0.5); ctx.lineTo(left + w, top + gy + 0.5); ctx.stroke(); }
+    ctx.strokeRect(left + 0.5, top + 0.5, Math.max(0, w - 1), Math.max(0, h - 1));
+
+    // faint stone-coursing mortar lines
+    if (stone && !snowy) {
+      ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+      ctx.lineWidth = 1;
+      for (let gx = 4; gx < w; gx += 5) { ctx.beginPath(); ctx.moveTo(left + gx + 0.5, top); ctx.lineTo(left + gx + 0.5, top + h); ctx.stroke(); }
+      for (let gy = 4; gy < h; gy += 5) { ctx.beginPath(); ctx.moveTo(left, top + gy + 0.5); ctx.lineTo(left + w, top + gy + 0.5); ctx.stroke(); }
+    }
+
+    // chimney on buildings >= 5x5 tiles, with a highlight and its own tiny cast shadow; in
+    // winter, a few bare patches of the roof's own colour show through the snow near it.
+    if (wTiles >= 5 && hTiles >= 5) {
+      const chimSize = 3;
+      const cx = left + w - chimSize - 2, cy = top + 2;
+      ctx.fillStyle = 'rgba(10,8,6,0.4)';
+      ctx.fillRect(cx + 1, cy + 1, chimSize, chimSize);
+      ctx.fillStyle = '#38352e';
+      ctx.fillRect(cx, cy, chimSize, chimSize);
+      ctx.fillStyle = '#7a766c';
+      ctx.fillRect(cx, cy, chimSize, 1);
+      ctx.fillRect(cx, cy, 1, chimSize);
+      if (snowy) {
+        ctx.fillStyle = v.base;
+        for (let i = 0; i < 4; i++) {
+          const px_ = cx + (hash2(bb.id * 41 + i, i, 813) - 0.5) * 10;
+          const py_ = cy + (hash2(bb.id * 43 + i, i, 814) - 0.5) * 10;
+          ctx.fillRect(px_, py_, 1 + Math.round(hash2(bb.id, i, 815)), 1);
+        }
+      }
+    }
+
+    paintRoofWeathering(ctx, left, top, w, h, bb.id);
+
+    // a narrower tower band (church/school): re-draw that sub-rect as a small pyramid roof
+    const tower = findTowerBand(fp);
+    if (tower) {
+      const tLeft = left + tower.minX * TILE_PX, tTop = top + tower.minY * TILE_PX;
+      const tW = (tower.maxX - tower.minX + 1) * TILE_PX, tH = (tower.maxY - tower.minY + 1) * TILE_PX;
+      paintPyramidTower(ctx, tLeft, tTop, tW, tH, snowy ? SNOW_LIT : v.base);
+    }
   }
 
-  // chimney on buildings >= 5x5 tiles, with a highlight
-  if (wTiles >= 5 && hTiles >= 5) {
-    const chimSize = 3;
-    const cx = left + w - chimSize - 2, cy = top + 2;
-    ctx.fillStyle = '#38352e';
-    ctx.fillRect(cx, cy, chimSize, chimSize);
-    ctx.fillStyle = '#7a766c';
-    ctx.fillRect(cx, cy, chimSize, 1);
-    ctx.fillRect(cx, cy, 1, chimSize);
-  }
+  if (clip) ctx.restore();
 
-  paintRoofWeathering(ctx, left, top, w, h, bb.id);
+  // A genuine interior courtyard (a hole fully enclosed by the ring, not just a notch in the
+  // outline): cobbled grey ground with a lighter centre, an inner parapet edge, and a rhythm of
+  // windows on the facade facing in, instead of being hidden under one solid roof slab.
+  if (fp.hole) {
+    const hl = (fp.hole.minX - x0) * TILE_PX, ht = (fp.hole.minY - y0) * TILE_PX;
+    const hw = (fp.hole.maxX - fp.hole.minX + 1) * TILE_PX, hh = (fp.hole.maxY - fp.hole.minY + 1) * TILE_PX;
+    const cobble = snowy ? '#7d7f84' : '#6e6f6a';
+    ctx.fillStyle = cobble;
+    ctx.fillRect(hl, ht, hw, hh);
+    for (let cy2 = 0; cy2 < hh; cy2 += 4) {
+      for (let cx2 = 0; cx2 < hw; cx2 += 4) {
+        const v2 = hash2(Math.floor((hl + cx2) / 4), Math.floor((ht + cy2) / 4), seed + 6301);
+        ctx.globalAlpha = 0.07;
+        ctx.fillStyle = v2 > 0.5 ? '#ffffff' : '#000000';
+        ctx.fillRect(hl + cx2, ht + cy2, 4, 4);
+      }
+    }
+    ctx.globalAlpha = 1;
+    const grad = ctx.createRadialGradient(hl + hw / 2, ht + hh / 2, 1, hl + hw / 2, ht + hh / 2, Math.max(hw, hh) / 2);
+    grad.addColorStop(0, 'rgba(255,255,255,0.16)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(hl, ht, hw, hh);
+    ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(hl + 1, ht + 1, Math.max(0, hw - 2), Math.max(0, hh - 2));
+    ctx.fillStyle = snowy ? 'rgba(30,28,26,0.85)' : 'rgba(40,36,30,0.7)';
+    for (let wx2 = hl + 4; wx2 < hl + hw - 3; wx2 += 4) { ctx.fillRect(wx2, ht + 2, 2, 3); ctx.fillRect(wx2, ht + hh - 5, 2, 3); }
+    for (let wy2 = ht + 4; wy2 < ht + hh - 3; wy2 += 4) { ctx.fillRect(hl + 2, wy2, 3, 2); ctx.fillRect(hl + hw - 5, wy2, 3, 2); }
+    if (snowy) {
+      ctx.globalAlpha = 0.28;
+      ctx.fillStyle = '#e8ecf0';
+      ctx.fillRect(hl, ht, hw, 2); ctx.fillRect(hl, ht + hh - 2, hw, 2);
+      ctx.fillRect(hl, ht, 2, hh); ctx.fillRect(hl + hw - 2, ht, 2, hh);
+      ctx.globalAlpha = 1;
+    }
+  }
 }
 
 function paintEaveNotches(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number): void {
@@ -1071,7 +1373,7 @@ function paintDetail(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy
   const t = tileAt(map, wx, wy);
   switch (t) {
     case 'mud': paintMud(ctx, wx, wy, ox, oy, seed); break;
-    case 'rubble': paintRubbleDebris(ctx, wx, wy, ox, oy, seed); break;
+    case 'rubble': paintRubbleDebris(ctx, wx, wy, ox, oy, seed, season); break;
     case 'crater': paintCraterTile(ctx, ox, oy, seed, season); break;
     case 'trench': if (!vectorLineTerrains.has('trench')) paintTrench(ctx, map, wx, wy, ox, oy, seed); break;
     case 'hedge': if (!vectorLineTerrains.has('hedge')) paintHedge(ctx, map, wx, wy, ox, oy, seed); break;
@@ -1311,13 +1613,28 @@ export class TerrainRenderer {
     const pavedGrid = buildGrid(map, x0, y0, CHUNK_TILES, isPaved);
     const dirtGrid = buildGrid(map, x0, y0, CHUNK_TILES, isDirtRoad);
     const waterGrid = buildGrid(map, x0, y0, CHUNK_TILES, isWater);
-    const rubbleGrid = buildGrid(map, x0, y0, CHUNK_TILES, isRubble, AREA_BLUR);
+    // rubble spreads only ~1 tile past its footprint (not the wider AREA_BLUR used for
+    // crops/mud/tallgrass), so debris reads as a collapsed building, not a blanket stain.
+    const rubbleGrid = buildGrid(map, x0, y0, CHUNK_TILES, isRubble, 1);
     const dirtyGrid = season === 'winter' ? buildGrid(map, x0, y0, CHUNK_TILES, isDirtySource) : cropsGrid;
 
     // ------------------------------------------------------ vector geometry (smooth roads/rivers)
     const pavedVec = buildAreaField(map.def.vectors, 'road', 'pavedroad', x0, y0, CHUNK_TILES, CHUNK_TILES);
     const dirtVec = buildAreaField(map.def.vectors, 'road', 'dirtroad', x0, y0, CHUNK_TILES, CHUNK_TILES);
     const waterVec = buildAreaField(map.def.vectors, 'river', 'water', x0, y0, CHUNK_TILES, CHUNK_TILES);
+
+    // world-pixel Y centrelines of any 'tramwire' decor line running through this chunk, so the
+    // paved-road pass can draw a pair of rail lines beneath it.
+    const tramRailY: number[] = [];
+    {
+      const seen = new Set<number>();
+      for (const d of map.def.decor ?? []) {
+        if (d.kind !== 'tramwire') continue;
+        if (d.x < x0 - 2 || d.x > x0 + CHUNK_TILES + 2) continue;
+        const ry = Math.round(d.y * TILE_PX);
+        if (!seen.has(ry)) { seen.add(ry); tramRailY.push(ry); }
+      }
+    }
 
     // ------------------------------------------------------------ ground+features pass
     const img = ctx.createImageData(CHUNK_PX, CHUNK_PX);
@@ -1326,7 +1643,7 @@ export class TerrainRenderer {
       img.data, CHUNK_PX, map, season, this.seed, x0, y0, CHUNK_TILES, CHUNK_TILES,
       this.groundUnder, map.width, map.height, this.fieldId, this.fieldAxis,
       cropsGrid, mudGrid, tallgrassGrid, pavedGrid, dirtGrid, waterGrid, rubbleGrid, dirtyGrid,
-      pavedVec, dirtVec, waterVec,
+      pavedVec, dirtVec, waterVec, tramRailY,
     );
     reliefCache = null;
     ctx.putImageData(img, 0, 0);
@@ -1355,8 +1672,12 @@ export class TerrainRenderer {
 
     // ------------------------------------------------------------ buildings
     for (const bb of this.buildingBBoxes.values()) {
-      if (bb.maxX < x0 || bb.minX >= x0 + CHUNK_TILES || bb.maxY < y0 || bb.minY >= y0 + CHUNK_TILES) continue;
-      paintRoof(ctx, bb, x0, y0, this.seed);
+      // The wall band + cast shadow drawn on the S/E sides protrude up to ~1 tile past the
+      // building's own footprint, so a chunk immediately past that edge still needs a (clipped)
+      // draw call to pick up that protruding sliver — widen the overlap test by 1 tile on the
+      // max side accordingly.
+      if (bb.maxX < x0 - 1 || bb.minX >= x0 + CHUNK_TILES || bb.maxY < y0 - 1 || bb.minY >= y0 + CHUNK_TILES) continue;
+      paintRoof(ctx, map, bb, x0, y0, this.seed, season);
     }
     for (let ty = 0; ty < CHUNK_TILES; ty++) {
       const wy = y0 + ty;

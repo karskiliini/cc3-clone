@@ -23,16 +23,30 @@ function soldierBarColor(s: Soldier): string {
 
 /** Draws a small 12x3 colour bar 8px above each living soldier of every
  * selected team — green healthy, yellow pinned/wounded, red broken/incap,
- * matching CC3's selected-team status ticks. */
-function drawSelectedTeamBars(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, selectedTeamIds: readonly number[]): void {
-  if (selectedTeamIds.length === 0) return;
+ * matching CC3's selected-team status ticks. Unselected friendly teams get a
+ * dimmer, smaller version of the same bar (per the manual, team status bars
+ * are visible above every friendly team at normal zoom, not only the
+ * selected one) so the battlefield reads at a glance without a click. */
+function drawTeamBars(
+  ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState,
+  playerSide: Side, selectedTeamIds: readonly number[],
+): void {
   for (const s of state.soldiers.values()) {
-    if (!selectedTeamIds.includes(s.teamId)) continue;
     if (s.health === 'dead' || s.vehicleId != null) continue;
+    if (s.side !== playerSide) continue;
     if (!visible(s.pos, cam)) continue;
     const p = worldToScreen(cam, s.pos);
-    ctx.fillStyle = soldierBarColor(s);
-    ctx.fillRect(Math.round(p.x - 6), Math.round(p.y - 12), 12, 3);
+    const selected = selectedTeamIds.includes(s.teamId);
+    ctx.save();
+    if (selected) {
+      ctx.fillStyle = soldierBarColor(s);
+      ctx.fillRect(Math.round(p.x - 6), Math.round(p.y - 12), 12, 3);
+    } else {
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = soldierBarColor(s);
+      ctx.fillRect(Math.round(p.x - 4), Math.round(p.y - 10), 8, 2);
+    }
+    ctx.restore();
   }
 }
 
@@ -272,7 +286,7 @@ export function drawUnits(
   drawCorpses(ctx, cam, state, playerSide, showDead);
   drawVehicles(ctx, cam, state, playerSide);
   drawSoldiers(ctx, cam, state, playerSide, selectedTeamIds);
-  drawSelectedTeamBars(ctx, cam, state, selectedTeamIds);
+  drawTeamBars(ctx, cam, state, playerSide, selectedTeamIds);
   drawFlags(ctx, cam, state);
   drawTeamLabels(ctx, cam, state, settings);
 

@@ -1,7 +1,10 @@
 import type {
   BattleConfig, BattleEvent, BattleState, Order, Rect, Side, Soldier, Team, Vec2,
 } from '@/shared/types';
-import { AI_INTERVAL, SIDES, SIM_DT, SPOT_INTERVAL, TILE_M, otherSide } from '@/shared/types';
+import {
+  AI_INTERVAL, EXPLOSION_LIFE_HE, EXPLOSION_LIFE_SMALL, EXPLOSION_LIFE_SMOKE,
+  FLASH_LIFE, SIDES, SIM_DT, SPOT_INTERVAL, TILE_M, TRACER_LIFE, otherSide,
+} from '@/shared/types';
 import { Rng } from '@/shared/rng';
 import { dist, pointInRect, vadd } from '@/shared/math';
 import { buildMap } from './map';
@@ -165,11 +168,13 @@ export class Battle {
   private ageEffects(dt: number): void {
     const state = this.state;
     for (const e of state.explosions) e.t += dt;
-    state.explosions = state.explosions.filter((e) => e.t < 1);
+    state.explosions = state.explosions.filter((e) => e.t < (
+      e.kind === 'he' ? EXPLOSION_LIFE_HE : e.kind === 'smoke' ? EXPLOSION_LIFE_SMOKE : EXPLOSION_LIFE_SMALL
+    ));
     for (const t of state.tracers) t.t += dt;
-    state.tracers = state.tracers.filter((t) => t.t < 0.15);
+    state.tracers = state.tracers.filter((t) => t.t < TRACER_LIFE);
     for (const f of state.flashes) f.t += dt;
-    state.flashes = state.flashes.filter((f) => f.t < 0.1);
+    state.flashes = state.flashes.filter((f) => f.t < FLASH_LIFE);
   }
 
   issueOrder(teamId: number, order: Order): void {
