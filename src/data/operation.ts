@@ -8,9 +8,11 @@ export const OPERATION: OperationBattleDef[] = [
     year: 1941,
     title: 'Operation Barbarossa — June 1941',
     requisition: { german: 220, soviet: 190 },
+    // Balance pass: german gets a second mortar and PzKw III J; soviet loses its Maxim HMG (see
+    // DEFAULT_FORCES[1941] note - its suppression volume dominated the harness on this map).
     aiForces: {
-      german: ['ger_rifle_41', 'ger_rifle_41', 'ger_mg34_hmg', 'ger_mortar81', 'ger_pak38', 'ger_sniper', 'ger_command', 'ger_engineers', 'ger_pz3j', 'ger_pz4f1'],
-      soviet: ['sov_rifle_41', 'sov_rifle_41', 'sov_maxim_hmg', 'sov_mortar82', 'sov_45mm_at', 'sov_sniper', 'sov_ptrd', 'sov_command', 'sov_t26', 'sov_bt7'],
+      german: ['ger_rifle_41', 'ger_rifle_41', 'ger_mg34_hmg', 'ger_mortar81', 'ger_mortar81', 'ger_pak38', 'ger_sniper', 'ger_command', 'ger_engineers', 'ger_pz3j', 'ger_pz3j', 'ger_pz4f1'],
+      soviet: ['sov_rifle_41', 'sov_rifle_41', 'sov_mortar82', 'sov_45mm_at', 'sov_sniper', 'sov_ptrd', 'sov_command', 'sov_t26', 'sov_bt7'],
     },
   },
   {
@@ -18,9 +20,10 @@ export const OPERATION: OperationBattleDef[] = [
     year: 1941,
     title: 'Battle of Moscow — December 1941',
     requisition: { german: 210, soviet: 210 },
+    // Balance pass: same rationale as border_1941 above.
     aiForces: {
-      german: ['ger_rifle_41', 'ger_rifle_41', 'ger_mg34_hmg', 'ger_mortar81', 'ger_pak38', 'ger_sniper', 'ger_command', 'ger_engineers', 'ger_pz3j', 'ger_sdkfz251'],
-      soviet: ['sov_rifle_41', 'sov_rifle_41', 'sov_maxim_hmg', 'sov_mortar82', 'sov_45mm_at', 'sov_sniper', 'sov_ptrd', 'sov_command', 'sov_kv1', 'sov_t26'],
+      german: ['ger_rifle_41', 'ger_rifle_41', 'ger_mg34_hmg', 'ger_mortar81', 'ger_mortar81', 'ger_pak38', 'ger_sniper', 'ger_command', 'ger_engineers', 'ger_pz3j', 'ger_pz3j', 'ger_sdkfz251'],
+      soviet: ['sov_rifle_41', 'sov_rifle_41', 'sov_mortar82', 'sov_45mm_at', 'sov_sniper', 'sov_ptrd', 'sov_command', 'sov_kv1', 'sov_t26'],
     },
   },
   {
@@ -38,9 +41,11 @@ export const OPERATION: OperationBattleDef[] = [
     year: 1943,
     title: 'Battle of Kursk — July 1943',
     requisition: { german: 240, soviet: 240 },
+    // Balance pass (attacker=soviet on this map): german loses its PaK 40 (see
+    // DEFAULT_FORCES[1943] note); soviet adds sappers, a second T-34/76 and a second mortar.
     aiForces: {
-      german: ['ger_rifle_43', 'ger_rifle_43', 'ger_mg42_hmg', 'ger_mortar81', 'ger_pak40', 'ger_sniper', 'ger_command', 'ger_engineers', 'ger_pz4gh', 'ger_stug3g', 'ger_tiger'],
-      soviet: ['sov_rifle_43', 'sov_rifle_43', 'sov_maxim_hmg', 'sov_mortar82', 'sov_zis3', 'sov_sniper', 'sov_command', 'sov_sappers', 'sov_t34_76', 'sov_su76', 'sov_su85'],
+      german: ['ger_rifle_43', 'ger_rifle_43', 'ger_mg42_hmg', 'ger_mortar81', 'ger_sniper', 'ger_command', 'ger_engineers', 'ger_pz4gh', 'ger_stug3g', 'ger_tiger'],
+      soviet: ['sov_rifle_43', 'sov_rifle_43', 'sov_maxim_hmg', 'sov_mortar82', 'sov_mortar82', 'sov_zis3', 'sov_sniper', 'sov_command', 'sov_sappers', 'sov_t34_76', 'sov_t34_76', 'sov_su76', 'sov_su85'],
     },
   },
   {
@@ -67,17 +72,29 @@ export const OPERATION: OperationBattleDef[] = [
 
 /** Default forces for free "Battle" mode, keyed by year, for both sides. */
 export const DEFAULT_FORCES: Record<number, Record<Side, string[]>> = {
+  // Balance pass (border_1941/moscow_1941 attacker=german came in far under CC3's historical
+  // norm of a stronger attacker): german gets a second mortar and a second PzKw III J; soviet
+  // loses its Maxim HMG, whose suppression volume was the single biggest driver of the lopsided
+  // harness results on these two maps (defender out-shot attacker 5-10x pre-change).
   1941: {
-    german: ['ger_rifle_41', 'ger_rifle_41', 'ger_mg34_hmg', 'ger_mortar81', 'ger_pak38', 'ger_sniper', 'ger_command', 'ger_pz3j', 'ger_pz4f1', 'ger_sdkfz251'],
-    soviet: ['sov_rifle_41', 'sov_rifle_41', 'sov_maxim_hmg', 'sov_mortar82', 'sov_45mm_at', 'sov_sniper', 'sov_command', 'sov_t26', 'sov_bt7', 'sov_kv1'],
+    german: ['ger_rifle_41', 'ger_rifle_41', 'ger_mg34_hmg', 'ger_mortar81', 'ger_mortar81', 'ger_pak38', 'ger_sniper', 'ger_command', 'ger_pz3j', 'ger_pz3j', 'ger_pz4f1', 'ger_sdkfz251'],
+    soviet: ['sov_rifle_41', 'sov_rifle_41', 'sov_mortar82', 'sov_45mm_at', 'sov_sniper', 'sov_command', 'sov_t26', 'sov_bt7', 'sov_kv1'],
   },
   1942: {
     german: ['ger_rifle_41', 'ger_assault_42', 'ger_mg34_hmg', 'ger_mortar81', 'ger_pak38', 'ger_sniper', 'ger_command', 'ger_pz4gh', 'ger_stug3g', 'ger_sdkfz251'],
     soviet: ['sov_rifle_41', 'sov_smg_42', 'sov_maxim_hmg', 'sov_mortar82', 'sov_45mm_at', 'sov_sniper', 'sov_command', 'sov_t34_76', 'sov_t70', 'sov_kv1'],
   },
+  // Balance pass (steppe_1943 attacker=soviet, defending on a dug-in trench line): the AI's
+  // combat/targeting behavior on this map turned out very sensitive to soviet force SIZE -
+  // both a 3rd mortar and reverting to no extra units at all tested worse (more one-sided
+  // decisive german wins) than the config below, which was the best result found: german loses
+  // its redundant PaK 40 (Tiger/StuG/PzIV already carry plenty of AT punch); soviet adds
+  // sappers (satchel charges vs. entrenched troops per the manual), a second T-34/76, and a
+  // second mortar - no more, no less. The map's fix leans on this plus the VL-value rebalance
+  // below (see steppe_1943.ts).
   1943: {
-    german: ['ger_rifle_43', 'ger_assault_42', 'ger_mg42_hmg', 'ger_mortar81', 'ger_pak40', 'ger_sniper', 'ger_command', 'ger_pz4gh', 'ger_stug3g', 'ger_tiger'],
-    soviet: ['sov_rifle_43', 'sov_smg_42', 'sov_maxim_hmg', 'sov_mortar82', 'sov_zis3', 'sov_sniper', 'sov_command', 'sov_t34_76', 'sov_su76', 'sov_su85'],
+    german: ['ger_rifle_43', 'ger_assault_42', 'ger_mg42_hmg', 'ger_mortar81', 'ger_sniper', 'ger_command', 'ger_pz4gh', 'ger_stug3g', 'ger_tiger'],
+    soviet: ['sov_rifle_43', 'sov_smg_42', 'sov_maxim_hmg', 'sov_mortar82', 'sov_mortar82', 'sov_zis3', 'sov_sniper', 'sov_command', 'sov_sappers', 'sov_t34_76', 'sov_t34_76', 'sov_su76', 'sov_su85'],
   },
   1944: {
     german: ['ger_rifle_43', 'ger_assault_42', 'ger_mg42_hmg', 'ger_mortar81', 'ger_pak40', 'ger_pschreck', 'ger_sniper', 'ger_command', 'ger_stug3g', 'ger_panther'],

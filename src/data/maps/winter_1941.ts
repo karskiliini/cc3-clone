@@ -40,6 +40,11 @@ function paintMap(p: MapPainter): void {
   p.patch(101, 25, 4, 'mud');
   p.patch(103, 105, 4, 'mud');
 
+  // balance: hedge line giving the German advance some concealment on the open final approach
+  // to the bridge/church (harness showed the attacker crossing this stretch almost entirely in
+  // the open). Added before the road/buildings so those still cut through it cleanly.
+  p.line([{ x: 40, y: 70 }, { x: 65, y: 72 }, { x: 92, y: 76 }], 'hedge');
+
   // main street through the village, gently curving, with telegraph poles and battle damage
   // concentrated in the contested middle third
   const mainRoad = [
@@ -173,7 +178,10 @@ export const winter_1941: MapDef = {
     { id: 4, name: 'Crossroads', x: 130, y: 81, value: 1 },
   ],
   deployZones: {
-    german: { x: 0, y: 0, w: 26, h: 150 },
+    // balance: widened from w:26 - the old narrow strip put the zone centre ~200m+ from the
+    // Church/Bridge objectives, forcing German attackers to cross the entire open snowfield
+    // before making contact; this brings the primary axis into the ~150-200m band.
+    german: { x: 0, y: 0, w: 50, h: 150 },
     soviet: { x: 178, y: 0, w: 22, h: 150 },
   },
   decor,

@@ -26,6 +26,14 @@ function paintMap(p: MapPainter): void {
   p.line([{ x: 45, y: 95 }, { x: 90, y: 98 }, { x: 130, y: 96 }], 'hedge');
   p.line([{ x: 130, y: 92 }, { x: 175, y: 88 }], 'fence');
 
+  // balance: concealed corridor from the German jump-off toward the crossroads/bridge — the
+  // long open stretch between the two farmsteads (roughly x30-95, y75-90) let the Soviet MG/AT
+  // gun screen dominate the advance unopposed (harness: defender out-shot attacker 5-10x on this
+  // map). Added early so the roads/farmsteads painted later cut through it cleanly.
+  p.line([{ x: 30, y: 82 }, { x: 55, y: 80 }, { x: 80, y: 83 }, { x: 95, y: 79 }], 'hedge');
+  p.field(42, 78, 8, 6, 'tallgrass', 92);
+  p.field(68, 82, 7, 5, 'tallgrass', 93);
+
   // woods block NE, a smaller copse SW, denser tree lines along field edges and the road
   // (round-2 critique: the summer map read as under-treed compared to the reference)
   p.woods(170, 30, 22, 18);

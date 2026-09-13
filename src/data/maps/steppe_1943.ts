@@ -29,6 +29,12 @@ function paintMap(p: MapPainter): void {
   p.woods(150, 60, 7, 6);
   p.orchard(158, 46, 12, 10, 2);
 
+  // balance: a woods belt blocking the open, flat sightline from the German trench line
+  // (y36-54) straight down onto the Kolkhoz (the map's highest-value VL) - harness testing
+  // showed the defender's long-range suppression across this gap, not any specific weapon,
+  // was the dominant factor keeping the attacker from ever reaching/holding it.
+  p.woods(97, 66, 9, 7);
+
   // dirt tracks crossing the steppe, curved, with a junction
   const mainTrack = [
     { x: 0, y: 102 }, { x: 45, y: 98 }, { x: 90, y: 103 }, { x: 135, y: 99 },
@@ -64,6 +70,11 @@ function paintMap(p: MapPainter): void {
     { x: 145, y: 108 }, { x: 175, y: 116 }, { x: 210, y: 109 },
   ], 'trench');
   p.rect(114, 117, 2, 2, 'trench');
+
+  // balance: tallgrass patches giving the approach to the balka gully some concealment short
+  // of the trench.
+  p.field(100, 127, 16, 6, 'tallgrass', 95);
+  p.field(160, 127, 16, 6, 'tallgrass', 96);
 
   // kolkhoz: three stone buildings around a fenced yard, farm track leading in
   p.building(55, 78, 6, 5, 'stone');
@@ -122,13 +133,28 @@ export const steppe_1943: MapDef = {
   },
   victoryLocations: [
     { id: 0, name: 'Kolkhoz', x: 62, y: 82, value: 3 },
-    { id: 1, name: 'Trench Line', x: 100, y: 39, value: 2 },
+    // balance: Trench Line 2->1, Balka 1->2 - harness runs showed the soviet attacker often
+    // fighting reasonably well (comparable/better kills, decent alive fraction) but still
+    // drawing or losing on the VL-point-dominated score formula because the German defender
+    // held enough VL value even while losing the firefight. VictoryLocation.value is capped
+    // at 3 (see shared/types.ts), so instead of raising Kolkhoz further this rebalances the
+    // other VLs: the two the soviet attacker starts closest to (Kolkhoz+Balka = 5) now outweigh
+    // the three on/near the German trench line (Trench Line+Copse+Track Junction = 3). Do NOT
+    // raise Balka to 3 (tying Kolkhoz) - that made every attacking team's preferredIdx (see
+    // ai.ts pickVL/allVLsSorted) funnel onto the nearer of the two tied-value VLs instead of
+    // spreading pressure across objectives, which was measurably worse in testing.
+    { id: 1, name: 'Trench Line', x: 100, y: 39, value: 1 },
     { id: 2, name: 'Copse', x: 150, y: 60, value: 1 },
     { id: 3, name: 'Track Junction', x: 178, y: 102, value: 1 },
-    { id: 4, name: 'Balka', x: 115, y: 118, value: 1 },
+    { id: 4, name: 'Balka', x: 115, y: 118, value: 2 },
   ],
   deployZones: {
     german: { x: 0, y: 0, w: 240, h: 25 },
+    // balance note: an earlier pass tried enlarging/moving this zone north to shorten the
+    // soviet attacker's march, but harness testing showed it made the map MORE lopsided (units
+    // engaged the trench line's defenders earlier and less organized, with worse casualties on
+    // every seed) - reverted to the original strip; the force-mix and VL-value changes below
+    // carry this map's fix instead.
     soviet: { x: 0, y: 145, w: 240, h: 25 },
   },
   decor,
