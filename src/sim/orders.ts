@@ -1,14 +1,33 @@
 import type { BattleState, Team, Order, Soldier, Vec2 } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
-import { dist, facingTo, vadd, vnorm, vscale, vsub } from '@/shared/math';
+import { clamp, dist, facingTo, vadd, vnorm, vscale, vsub } from '@/shared/math';
 import { findPath } from './path';
 import { teamHasSmoke } from './team';
+import { isFirstFireFrozen, isLeaderless } from './mind';
 
 const INCAPABLE_ACTIVITIES = new Set(['pinned', 'cowering', 'panicked', 'routed', 'surrendered']);
 
-function canObey(s: Soldier): boolean {
+/** Obedience probability (spec §4): clamp(0.5 + motivation/200 + experience/400 - fear/150), with a
+ * `brave` bonus and a "who's in charge?" penalty while the team has no living leader (spec §11). On
+ * success, sets `mind.anchor` to the ordered position (used by coverSeek.ts). On failure, the
+ * soldier hesitates 1-5 s (longer for low experience) before he would retry. */
+function canObey(state: BattleState, rng: Rng, s: Soldier, team: Team, target: Vec2): boolean {
   if (s.health === 'dead' || s.health === 'incapacitated') return false;
-  return !INCAPABLE_ACTIVITIES.has(s.activity);
+  if (INCAPABLE_ACTIVITIES.has(s.activity)) return false;
+  if (isFirstFireFrozen(state, s.id)) return false;
+  if (s.mind.hesitation > 0) return false;
+
+  let p = 0.5 + s.mind.motivation / 200 + s.experience / 400 - s.mind.fear / 150;
+  if (s.mind.trait === 'brave') p += 0.15;
+  if (isLeaderless(state, team)) p -= 0.2;
+  p = clamp(p, 0.02, 0.98);
+
+  if (!rng.chance(p)) {
+    s.mind.hesitation = s.experience < 30 ? rng.range(2, 5) : rng.range(1, 3);
+    return false;
+  }
+  s.mind.anchor = { ...target };
+  return true;
 }
 
 function stopSoldier(s: Soldier): void {
@@ -42,7 +61,7 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
       }
       for (const sid of team.soldierIds) {
         const s = state.soldiers.get(sid);
-        if (s && canObey(s)) s.activity = activity === 'sneaking' ? 'moving' : (activity as Soldier['activity']);
+        if (s && canObey(state, rng, s, team, order.target)) s.activity = activity === 'sneaking' ? 'moving' : (activity as Soldier['activity']);
       }
       return;
     }
@@ -51,7 +70,7 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
     const leaderPath = leader ? findPath(state.map, leader.pos, order.target, 'infantry') : [];
     for (const sid of team.soldierIds) {
       const s = state.soldiers.get(sid);
-      if (!s || !canObey(s)) continue;
+      if (!s || !canObey(state, rng, s, team, order.target)) continue;
       let path: Vec2[];
       if (s.id === team.leaderId) {
         path = leaderPath;
@@ -87,14 +106,14 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
       }
       for (const sid of team.soldierIds) {
         const s = state.soldiers.get(sid);
-        if (s && canObey(s)) s.activity = 'firing';
+        if (s && canObey(state, rng, s, team, order.target)) s.activity = 'firing';
       }
       return;
     }
 
     for (const sid of team.soldierIds) {
       const s = state.soldiers.get(sid);
-      if (!s || !canObey(s)) continue;
+      if (!s || !canObey(state, rng, s, team, order.target)) continue;
       stopSoldier(s);
       s.activity = 'firing';
       s.targetPoint = order.target;
@@ -111,14 +130,14 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
       }
       for (const sid of team.soldierIds) {
         const s = state.soldiers.get(sid);
-        if (s && canObey(s)) s.activity = 'firing';
+        if (s && canObey(state, rng, s, team, order.target)) s.activity = 'firing';
       }
       return;
     }
     if (team.type === 'mortar') {
       for (const sid of team.soldierIds) {
         const s = state.soldiers.get(sid);
-        if (!s || !canObey(s)) continue;
+        if (!s || !canObey(state, rng, s, team, order.target)) continue;
         stopSoldier(s);
         s.activity = 'firing';
         s.targetPoint = order.target;
@@ -130,7 +149,7 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
       const d = dist(team.pos, order.target);
       for (const sid of team.soldierIds) {
         const s = state.soldiers.get(sid);
-        if (!s || !canObey(s)) continue;
+        if (!s || !canObey(state, rng, s, team, order.target)) continue;
         if (d <= rangeTiles) {
           stopSoldier(s);
           s.activity = 'firing';
@@ -155,13 +174,13 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
       if (vehicle) vehicle.path = [];
       for (const sid of team.soldierIds) {
         const s = state.soldiers.get(sid);
-        if (s && canObey(s)) s.activity = 'defending';
+        if (s && canObey(state, rng, s, team, order.target)) s.activity = 'defending';
       }
       return;
     }
     for (const sid of team.soldierIds) {
       const s = state.soldiers.get(sid);
-      if (!s || !canObey(s)) continue;
+      if (!s || !canObey(state, rng, s, team, order.target)) continue;
       stopSoldier(s);
       s.activity = 'defending';
       s.stance = s.cover < 0.2 ? 'prone' : 'crouching';
@@ -174,13 +193,13 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
       if (vehicle) vehicle.path = [];
       for (const sid of team.soldierIds) {
         const s = state.soldiers.get(sid);
-        if (s && canObey(s)) s.activity = 'ambushing';
+        if (s && canObey(state, rng, s, team, order.target)) s.activity = 'ambushing';
       }
       return;
     }
     for (const sid of team.soldierIds) {
       const s = state.soldiers.get(sid);
-      if (!s || !canObey(s)) continue;
+      if (!s || !canObey(state, rng, s, team, order.target)) continue;
       stopSoldier(s);
       s.activity = 'ambushing';
       s.stance = 'prone';

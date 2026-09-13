@@ -69,9 +69,9 @@ function paintMap(p: MapPainter): void {
   p.patch(170, 90, 3, 'crater');
   p.patch(90, 30, 2.5, 'crater');
   p.patch(160, 130, 2.5, 'crater');
-  p.craterLine([{ x: 90, y: 0 }, { x: 90, y: 160 }], { tStart: 0.25, tEnd: 0.75, radius: 1.2, seedOffset: 110, minGap: 18, maxGap: 28 });
-  p.craterLine([{ x: 140, y: 0 }, { x: 140, y: 160 }], { tStart: 0.25, tEnd: 0.75, radius: 1.2, seedOffset: 111, minGap: 18, maxGap: 28 });
-  p.craterLine([{ x: 0, y: 55 }, { x: 220, y: 55 }], { tStart: 0.3, tEnd: 0.7, radius: 1.2, seedOffset: 112, minGap: 18, maxGap: 28 });
+  p.craterLine([{ x: 90, y: 0 }, { x: 90, y: 160 }], { tStart: 0.25, tEnd: 0.75, seedOffset: 110, minGap: 18, maxGap: 28 });
+  p.craterLine([{ x: 140, y: 0 }, { x: 140, y: 160 }], { tStart: 0.25, tEnd: 0.75, seedOffset: 111, minGap: 18, maxGap: 28 });
+  p.craterLine([{ x: 0, y: 55 }, { x: 220, y: 55 }], { tStart: 0.3, tEnd: 0.7, seedOffset: 112, minGap: 18, maxGap: 28 });
   p.scatterDecor('shellhole', 0, 0, WIDTH, HEIGHT, 20, 50);
 
   // barricades of rubble/stonewall blocking streets at contested chokepoints

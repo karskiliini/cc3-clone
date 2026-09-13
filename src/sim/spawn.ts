@@ -4,6 +4,7 @@ import { angleTo, vadd } from '@/shared/math';
 import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';
 import { randomName } from '@/data/names';
+import { baseMotivation, createMind, rollTrait } from './mind';
 
 const RELOAD_HEAVY = new Set(['mortar', 'atgun', 'atrocket']);
 
@@ -116,6 +117,7 @@ export function spawnTeam(state: BattleState, def: TeamDef, side: Side, pos: Vec
       lastFiredAt: -999,
       cover: 0,
       kills: 0,
+      mind: createMind(baseMotivation(experience, i === 0), state.time, rollTrait(rng, i === 0)),
     };
     state.soldiers.set(soldier.id, soldier);
     soldierIds.push(soldier.id);

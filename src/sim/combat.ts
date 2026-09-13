@@ -11,6 +11,9 @@ import { addSmoke } from './smoke';
 import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';
 import { addMessage } from './messages';
+import { coverFrom } from './cover';
+import { onIncomingFire, onExplosionNear, onOwnWound, onCasualtySeen, onGunnerHit, onFired, isFirstFireFrozen, addStress } from './mind';
+import { onVehicleHit } from './vehicle';
 
 export { hitChance, penetrates };
 
@@ -28,6 +31,8 @@ interface CombatTrack {
   shotsFiredBySide: Record<Side, number>;
   suppressionAppliedBySide: Record<Side, number>;
   mortarRoundsFiredBySide: Record<Side, number>;
+  /** spec §4: MG/rifle suppressive fire on a `fired` belief happens every 3rd opportunity. */
+  beliefFireCounter: Map<number, number>;
 }
 
 const tracks = new WeakMap<BattleState, CombatTrack>();
@@ -41,6 +46,7 @@ function getTrack(state: BattleState): CombatTrack {
       shotsFiredBySide: { german: 0, soviet: 0 },
       suppressionAppliedBySide: { german: 0, soviet: 0 },
       mortarRoundsFiredBySide: { german: 0, soviet: 0 },
+      beliefFireCounter: new Map(),
     };
     tracks.set(state, t);
   }
@@ -101,10 +107,11 @@ function tracerKindFor(weapon: WeaponDef): 'bullet' | 'mg' | 'shell' | 'mortar' 
 
 const AT_WEAPON_CLASSES = new Set(['atgun', 'atrocket', 'atrifle', 'tankgun']);
 
-function canSoldierFire(s: Soldier): boolean {
+function canSoldierFire(s: Soldier, state: BattleState): boolean {
   if (s.vehicleId != null) return false;
   if (s.health === 'dead' || s.health === 'incapacitated') return false;
   if (s.activity === 'surrendered' || s.activity === 'routed' || s.activity === 'panicked' || s.activity === 'cowering') return false;
+  if (isFirstFireFrozen(state, s.id)) return false;
   return !!WEAPONS[s.weaponId];
 }
 
@@ -112,7 +119,7 @@ function gatherCandidates(state: BattleState, side: Side): { soldiers: Soldier[]
   const soldiers: Soldier[] = [];
   for (const id of state.spotted[side]) {
     const s = state.soldiers.get(id);
-    if (s && s.health !== 'dead') soldiers.push(s);
+    if (s && s.health !== 'dead' && s.health !== 'incapacitated') soldiers.push(s);
   }
   const vehicles: Vehicle[] = [];
   for (const id of state.spottedVehicles[side]) {
@@ -192,8 +199,25 @@ function pickTarget(state: BattleState, soldier: Soldier, team: Team | undefined
       if (d < bestD) { bestD = d; best = s2; bestIsVehicle = false; }
     }
   }
-  if (!best) return null;
-  return bestIsVehicle ? { kind: 'vehicle', vehicle: best as Vehicle } : { kind: 'soldier', soldier: best as Soldier };
+  if (best) return bestIsVehicle ? { kind: 'vehicle', vehicle: best as Vehicle } : { kind: 'soldier', soldier: best as Soldier };
+
+  // spec §4: with no visible enemy, MG/LMG/rifle can put suppressive fire on a `fired` belief
+  // (confidence > 0.6, LOS) every 3rd firing opportunity, to conserve ammo. Ambushers never do this
+  // (they hold fire until an enemy is actually seen within 30 m).
+  const suppressiveClasses = weapon.cls === 'lmg' || weapon.cls === 'hmg' || weapon.cls === 'rifle';
+  if (suppressiveClasses && order?.type !== 'ambush') {
+    const bestBelief = soldier.mind.beliefs
+      .filter((b) => b.kind === 'fired' && b.confidence > 0.6 && inRangeLOS(b.pos))
+      .sort((a, b) => dist(soldier.pos, a.pos) - dist(soldier.pos, b.pos))[0];
+    if (bestBelief) {
+      const track = getTrack(state);
+      const n = (track.beliefFireCounter.get(soldier.id) ?? 0) + 1;
+      track.beliefFireCounter.set(soldier.id, n);
+      if (n % 3 === 0) return { kind: 'point', pos: bestBelief.pos };
+      return null;
+    }
+  }
+  return null;
 }
 
 // ------------------------------------------------------------------ hits
@@ -205,6 +229,12 @@ export function applyHit(
   killerSide?: Side,
   killer?: Soldier,
 ): void {
+  // A soldier who is already incapacitated or dead cannot be hit again: no re-rolled outcome, no
+  // repeated kill/casualty message, no double-counted kill (regression: the same "has been killed"
+  // message and kill event firing twice for one soldier because later shots kept landing on an
+  // already-incapacitated body before it was excluded from targeting).
+  if (victim.health === 'dead' || victim.health === 'incapacitated') return;
+
   const cover = coverAt(state.map, victim.pos);
   const result: Health | null = damageRoll(weapon, cover, rng);
   if (!result) return;
@@ -222,6 +252,25 @@ export function applyHit(
   } else {
     victim.activity = 'dead';
     state.bloodDecals.push({ ...victim.pos });
+  }
+  onOwnWound(victim);
+
+  const victimTeamForGunner = state.teams.get(victim.teamId);
+  const victimWeapon = WEAPONS[victim.weaponId];
+  if (victimTeamForGunner && victimWeapon && (victimWeapon.cls === 'lmg' || victimWeapon.cls === 'hmg')) {
+    onGunnerHit(state, victimTeamForGunner);
+  }
+
+  const killed = result === 'dead';
+  if (victimTeamForGunner) {
+    for (const id of victimTeamForGunner.soldierIds) {
+      if (id === victim.id) continue;
+      const teammate = state.soldiers.get(id);
+      if (!teammate || teammate.health === 'dead' || teammate.health === 'incapacitated') continue;
+      if (dist(teammate.pos, victim.pos) <= 15 && hasLOS(state.map, teammate.pos, victim.pos)) {
+        onCasualtySeen(state, rng, teammate, victim, killed);
+      }
+    }
   }
 
   const resolvedKillerSide = killerSide ?? otherSide(victim.side);
@@ -265,6 +314,11 @@ export function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: W
       }
     }
   }
+  for (const s of state.soldiers.values()) {
+    if (s.health === 'dead' || s.health === 'incapacitated' || s.vehicleId != null) continue;
+    onExplosionNear(state, s, pos);
+  }
+
   const kind = weapon.heRadiusM >= 3 ? 'he' : 'small';
   state.explosions.push({ pos: { ...pos }, radiusM: weapon.heRadiusM, t: 0, kind });
   state.events.push({ kind: 'explosion', pos: { ...pos }, side: shooterSide, weaponId: weapon.id });
@@ -322,7 +376,9 @@ function fireAtVehicle(
   const def = VEHICLE_DEFS[vehicle.defId];
   const armorMm = def ? def.armor[facing] : 9999;
 
+  let penetrated = false;
   if (weapon.penetrationMm > 0 && penetrates(weapon, distM, armorMm, rng)) {
+    penetrated = true;
     vehicle.hits++;
     const roll = rng.next();
     if (roll < 0.5) {
@@ -337,6 +393,9 @@ function fireAtVehicle(
   } else {
     state.events.push({ kind: 'hit', pos: { ...vehicle.pos }, side: shooterSide });
   }
+  if (vehicle.state !== 'knockedOut' && vehicle.state !== 'burning') {
+    onVehicleHit(state, vehicle, weapon, penetrated, { ...shooterPos });
+  }
 
   if (weapon.heRadiusM > 0) applyHESplash(state, rng, vehicle.pos, weapon, shooterSide);
 }
@@ -350,16 +409,30 @@ function fireAtVehicle(
 // stepSoldierCombat below, which is what actually converts this suppression into fewer shots back).
 const SUPPRESSION_SPLASH_RADIUS_TILES = 1.5;
 
+const NOISE_RADIUS_TILES = 100 / TILE_M;
+
+/** Cheap "noise" stress (spec §2) for soldiers of the affected side within 100 m of an impact, using
+ * a loop the caller already runs over all soldiers for splash suppression (no extra O(N) scan). */
+function maybeNoiseStress(s2: Soldier, impact: Vec2, weaponCls: WeaponDef['cls']): void {
+  if (weaponCls === 'rifle' || weaponCls === 'pistol') return; // only MG bursts / guns / explosions count as "noise"
+  if (dist(s2.pos, impact) > NOISE_RADIUS_TILES) return;
+  addStress(s2.mind, 1 * (1 - (s2.cover ?? 0) * 0.5));
+}
+
 function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: WeaponDef, target: Target, wantTracer: boolean): void {
   const map = state.map;
   if (target.kind === 'point') {
     for (const s2 of state.soldiers.values()) {
       if (s2.side === shooter.side) continue;
       if (s2.health === 'dead' || s2.health === 'incapacitated') continue;
-      if (dist(s2.pos, target.pos) <= SUPPRESSION_SPLASH_RADIUS_TILES) {
+      const dTiles = dist(s2.pos, target.pos);
+      if (dTiles <= SUPPRESSION_SPLASH_RADIUS_TILES) {
         const amount = weapon.suppression * 40 * (1 - (s2.cover ?? 0) * 0.5);
         s2.suppression = clamp(s2.suppression + amount, 0, 100);
         addSuppressionStat(state, shooter.side, amount);
+        onIncomingFire(state, rng, s2, shooter, target.pos, weapon.cls);
+      } else {
+        maybeNoiseStress(s2, target.pos, weapon.cls);
       }
     }
     if (wantTracer) state.tracers.push({ from: { ...shooter.pos }, to: { ...target.pos }, t: 0, hit: false, kind: tracerKindFor(weapon) });
@@ -378,7 +451,10 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
 
   const victim = target.soldier;
   const distM = dist(shooter.pos, victim.pos) * TILE_M;
-  const cover = coverAt(map, victim.pos);
+  // Directional cover (spec §9): the protection victim's tile offers against fire arriving FROM
+  // the shooter's bearing, not the omni `soldier.cover` (kept only for display).
+  const angleFromVictimToShooter = angleTo(victim.pos, shooter.pos);
+  const cover = coverFrom(map, victim.pos, angleFromVictimToShooter);
   const moving = victim.activity === 'moving' || victim.activity === 'movingFast' || victim.activity === 'sneaking';
   const p = hitChance(weapon, distM, cover, victim.stance, shooter, moving);
 
@@ -390,20 +466,26 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
   if (rng.chance(p)) {
     if (SMALL_ARMS_CLASSES.has(weapon.cls)) getTrack(state).smallArmsHit++;
     if (wantTracer) state.tracers.push({ from: { ...shooter.pos }, to: { ...victim.pos }, t: 0, hit: true, kind: tracerKindFor(weapon) });
+    onIncomingFire(state, rng, victim, shooter, victim.pos, weapon.cls, false);
     applyHit(state, victim, weapon, rng, shooter.side, shooter);
   } else {
     const spread = 0.5 + distM / 200;
     const impact = { x: victim.pos.x + rng.gauss() * spread, y: victim.pos.y + rng.gauss() * spread };
     if (wantTracer) state.tracers.push({ from: { ...shooter.pos }, to: impact, t: 0, hit: false, kind: tracerKindFor(weapon) });
     if (weapon.heRadiusM === 0) state.explosions.push({ pos: { ...impact }, radiusM: 0, t: 0, kind: 'small' });
+    onIncomingFire(state, rng, victim, shooter, impact, weapon.cls);
     for (const s2 of state.soldiers.values()) {
       if (s2.side === shooter.side) continue;
       if (s2.health === 'dead' || s2.health === 'incapacitated') continue;
       if (s2.id === victim.id) continue;
-      if (dist(s2.pos, impact) <= SUPPRESSION_SPLASH_RADIUS_TILES) {
+      const dTiles = dist(s2.pos, impact);
+      if (dTiles <= SUPPRESSION_SPLASH_RADIUS_TILES) {
         const amount = weapon.suppression * 40 * (1 - (s2.cover ?? 0) * 0.5);
         s2.suppression = clamp(s2.suppression + amount, 0, 100);
         addSuppressionStat(state, shooter.side, amount);
+        onIncomingFire(state, rng, s2, shooter, impact, weapon.cls);
+      } else {
+        maybeNoiseStress(s2, impact, weapon.cls);
       }
     }
     const directAmount = weapon.suppression * 20;
@@ -444,7 +526,7 @@ function fireBurst(state: BattleState, rng: Rng, soldier: Soldier, weapon: Weapo
 }
 
 function stepSoldierCombat(state: BattleState, rng: Rng, dt: number, soldier: Soldier, track: CombatTrack): void {
-  if (!canSoldierFire(soldier)) return;
+  if (!canSoldierFire(soldier, state)) return;
   const weapon = WEAPONS[soldier.weaponId];
   if (!weapon || weapon.indirect) return;
   const team = state.teams.get(soldier.teamId);
@@ -482,11 +564,19 @@ function stepSoldierCombat(state: BattleState, rng: Rng, dt: number, soldier: So
   // canSoldierFire already excludes 'cowering'). This makes ">60 fires at ~30% rate, >85 not at
   // all" true from the raw suppression VALUE this same tick, instead of waiting a frame for the
   // activity transition in stepMorale (which runs after stepCombat) to catch up.
-  if (soldier.suppression > 85) return;
-  if (soldier.suppression > 60 && !rng.chance(0.3)) return;
+  // Berserk soldiers ignore suppression entirely (spec §3); everyone else keeps the throttle above,
+  // now driven by the mental state (pinned fires at 30%, cowering/panicked already excluded by
+  // canSoldierFire) rather than the raw suppression number, which used to race ahead of the state
+  // machine by a tick.
+  if (soldier.mind.state !== 'berserk') {
+    if (soldier.mind.state === 'pinned' && !rng.chance(0.3)) return;
+    if (soldier.suppression > 85) return;
+    if (soldier.suppression > 60 && !rng.chance(0.3)) return;
+  }
 
   const target = pickTarget(state, soldier, team, weapon);
   if (!target) return;
+  onFired(state, rng, soldier);
   fireBurst(state, rng, soldier, weapon, target);
 }
 

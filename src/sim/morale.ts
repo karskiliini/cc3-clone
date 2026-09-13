@@ -4,15 +4,21 @@ import type {
 import { SIDES, TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { clamp, dist } from '@/shared/math';
-import { findPath } from './path';
 import { VEHICLE_DEFS } from '@/data/units';
 import { addMessage } from './messages';
+
+// ============================================================================
+// morale.ts — team-level morale aggregation, casualty morale hits, tank-scare,
+// surrender, and team/side status caching. Per-SOLDIER psychology (stress,
+// fear, the mental-state machine, beliefs) lives in mind.ts (spec §1-8); this
+// module only keeps the team-wide bookkeeping and the exported names other
+// modules rely on (stepMorale, moraleWord, team status caching).
+// ============================================================================
 
 // ---------------------------------------------------------------- tracking
 interface MoraleTrack {
   lastHealth: Map<number, Health>;
   tankScareAt: Map<number, number>;
-  berserkUntil: Map<number, number>;
   teamLastStatus: Map<number, TeamStatusWord>;
 }
 
@@ -21,12 +27,7 @@ const tracks = new WeakMap<BattleState, MoraleTrack>();
 function getTrack(state: BattleState): MoraleTrack {
   let t = tracks.get(state);
   if (!t) {
-    t = {
-      lastHealth: new Map(),
-      tankScareAt: new Map(),
-      berserkUntil: new Map(),
-      teamLastStatus: new Map(),
-    };
+    t = { lastHealth: new Map(), tankScareAt: new Map(), teamLastStatus: new Map() };
     tracks.set(state, t);
   }
   return t;
@@ -39,8 +40,6 @@ export function moraleWord(m: number): TeamMoraleWord {
   if (m >= 25) return 'Shaken';
   return 'Broken';
 }
-
-const BROKEN_ACTIVITIES: Activity[] = ['cowering', 'pinned', 'panicked', 'routed'];
 
 function aliveTeammatesWithin(state: BattleState, s: Soldier, team: Team, radiusTiles: number): number {
   let n = 0;
@@ -87,60 +86,10 @@ function applyTeamMoraleHit(state: BattleState, team: Team, amount: number): voi
   }
 }
 
-function maybeBerserk(state: BattleState, rng: Rng, team: Team, track: MoraleTrack): void {
-  for (const id of team.soldierIds) {
-    const s = state.soldiers.get(id);
-    if (!s || s.health === 'dead' || s.health === 'incapacitated') continue;
-    if (s.activity === 'berserk' || s.activity === 'surrendered') continue;
-    if (s.experience > 70 && s.morale > 60 && rng.chance(0.05)) {
-      s.activity = 'berserk';
-      track.berserkUntil.set(s.id, state.time + 20);
-      const nearestId = nearestSpottedEnemyId(state, s);
-      if (nearestId != null) {
-        const enemy = state.soldiers.get(nearestId);
-        if (enemy) {
-          s.targetPoint = { ...enemy.pos };
-          s.path = findPath(state.map, s.pos, enemy.pos, 'infantry');
-        }
-      }
-    }
-  }
-}
-
-function nearestSpottedEnemyId(state: BattleState, s: Soldier): number | null {
-  const spotted = state.spotted[s.side];
-  let best: number | null = null;
-  let bestD = Infinity;
-  for (const id of spotted) {
-    const e = state.soldiers.get(id);
-    if (!e || e.health === 'dead' || e.health === 'incapacitated') continue;
-    const d = dist(e.pos, s.pos);
-    if (d < bestD) { bestD = d; best = id; }
-  }
-  return best;
-}
-
-function resumeSoldier(state: BattleState, s: Soldier, team: Team | undefined): void {
-  s.stance = 'crouching';
-  if (team && team.order && (team.order.type === 'move' || team.order.type === 'moveFast' || team.order.type === 'sneak')) {
-    s.path = findPath(state.map, s.pos, team.order.target, 'infantry');
-    s.activity = team.order.type === 'moveFast' ? 'movingFast' : team.order.type === 'sneak' ? 'sneaking' : 'moving';
-  } else {
-    s.activity = 'defending';
-  }
-}
-
-function stepSoldierState(state: BattleState, s: Soldier, dt: number, track: MoraleTrack): void {
-  // Vehicle crew are shielded by armor: they must not break from mere spotting or near-miss
-  // suppression the way exposed infantry do. They only lose morale via the casualty morale hit
-  // in detectCasualtiesAndApply (a crewmate killed/incapacitated when the vehicle is penetrated)
-  // and a light tank-scare tick below; suppression/pinned/cowering/panicked/routed cascades and
-  // grenade/surrender logic are skipped for them entirely.
-  if (s.vehicleId != null) {
-    s.suppression = clamp(s.suppression - 20 * dt, 0, 100);
-    s.morale = clamp(s.morale + 0.3 * dt, 0, 100);
-    return;
-  }
+function stepSoldierMorale(state: BattleState, s: Soldier, dt: number, track: MoraleTrack): void {
+  // Vehicle crew are shielded by armor: their morale/suppression is driven by vehicle.ts's crew
+  // mind (spec §10), not by exposed-infantry mechanics.
+  if (s.vehicleId != null) return;
 
   const team = state.teams.get(s.teamId);
   const leader = team ? state.soldiers.get(team.leaderId) : undefined;
@@ -152,17 +101,6 @@ function stepSoldierState(state: BattleState, s: Soldier, dt: number, track: Mor
   const decayRate = leaderNearM && leaderNotSuppressed ? 8 : 5;
   s.suppression = clamp(s.suppression - decayRate * dt, 0, 100);
 
-  // ------------------------------------------------------------- morale rate
-  if (s.suppression > 60) {
-    s.morale = clamp(s.morale - 0.5 * dt, 0, 100);
-  } else if (s.activity === 'panicked' && nearestEnemySoldierDistTiles(state, s) * TILE_M > 100) {
-    s.morale = clamp(s.morale + 1 * dt, 0, 100);
-  } else if (leaderAlive) {
-    s.morale = clamp(s.morale + 0.3 * dt, 0, 100);
-  } else {
-    s.morale = clamp(s.morale + 0.15 * dt, 0, 100);
-  }
-
   // -------------------------------------------------------------- tank scare
   const tankDistM = nearestEnemyTankDistTiles(state, s) * TILE_M;
   if (tankDistM <= 100) {
@@ -173,52 +111,21 @@ function stepSoldierState(state: BattleState, s: Soldier, dt: number, track: Mor
     }
   }
 
-  // ------------------------------------------------------------ berserk end
-  if (s.activity === 'berserk') {
-    const until = track.berserkUntil.get(s.id) ?? 0;
-    if (state.time >= until) {
-      s.activity = 'idle';
-      track.berserkUntil.delete(s.id);
-    } else {
-      return; // berserk soldiers ignore other state transitions
-    }
-  }
-
-  // -------------------------------------------------------- state cascade
-  if (s.morale < 10) {
-    if (s.activity !== 'routed') { s.activity = 'routed'; s.stance = 'standing'; }
-  } else if (s.suppression > 85) {
-    if (s.activity !== 'cowering') { s.activity = 'cowering'; s.stance = 'prone'; s.path = []; }
-  } else if (s.suppression > 60) {
-    if (s.activity !== 'pinned') { s.activity = 'pinned'; s.stance = 'prone'; s.path = []; }
-  } else if (s.morale < 25) {
-    if (s.activity !== 'panicked') { s.activity = 'panicked'; s.stance = 'standing'; }
-  } else {
-    // possible recovery from a broken state
-    const wasCoweringOrPinned = s.activity === 'cowering' || s.activity === 'pinned';
-    const wasPanickedOrRouted = s.activity === 'panicked' || s.activity === 'routed';
-    if (wasCoweringOrPinned && s.suppression < 40 && s.morale >= 25) {
-      resumeSoldier(state, s, team);
-    } else if (wasPanickedOrRouted && s.morale >= 35) {
-      if (s.suppression > 60) { s.activity = 'pinned'; s.stance = 'prone'; }
-      else resumeSoldier(state, s, team);
-    }
-  }
-
   // ------------------------------------------------------------- surrender
-  // Loosened thresholds (balance round 3): morale<15 + "no teammate within 6 tiles" + "enemy
-  // within 4 tiles" was so tight it essentially never fired in the AI-vs-AI harness (surrenders
-  // stayed at 0 across every run). The design brief's bar is "isolated, broken, enemy adjacent" —
-  // <25 matches the team-level Broken threshold, and 6 tiles (12m) for "adjacent" enemy still
-  // requires the enemy to be genuinely close, not just anywhere on the map.
+  // Broken (mind.state) AND surrounded AND (no ammo or an enemy within 3 tiles) -> surrendered
+  // (spec §11); experienced soldiers (>=60) need the enemy within 2 tiles instead of 3.
   if (s.activity !== 'surrendered' && s.activity !== 'dead' && s.activity !== 'incapacitated') {
-    if (s.morale < 25 && team) {
-      const teammatesNear = aliveTeammatesWithin(state, s, team, 6);
-      const enemyDist = nearestEnemySoldierDistTiles(state, s);
-      if (teammatesNear === 0 && enemyDist <= 6) {
+    if (s.mind.state === 'broken' && s.mind.surrounded) {
+      const enemyDist = nearestEnemySoldierDistTiles(state, s) * TILE_M;
+      const threshold = s.experience >= 60 ? 2 : 3;
+      const noAmmo = s.ammo <= 0 && s.ammoReserve <= 0;
+      if (noAmmo || enemyDist <= threshold) {
         s.activity = 'surrendered';
         s.stance = 'standing';
         s.path = [];
+        if (s.side === state.config.playerSide) {
+          addMessage(state, `${team?.name ?? 'Report'}\n${s.rank}. ${s.name} surrenders.`, 'bad');
+        }
       }
     }
   }
@@ -229,7 +136,7 @@ function stepSoldierState(state: BattleState, s: Soldier, dt: number, track: Mor
   }
 }
 
-function detectCasualtiesAndApply(state: BattleState, rng: Rng, track: MoraleTrack): void {
+function detectCasualtiesAndApply(state: BattleState, track: MoraleTrack): void {
   for (const s of state.soldiers.values()) {
     const last = track.lastHealth.get(s.id);
     if (last !== s.health) {
@@ -241,7 +148,6 @@ function detectCasualtiesAndApply(state: BattleState, rng: Rng, track: MoraleTra
           let amount = isKIA ? 15 : 8;
           if (s.isLeader) amount *= 2;
           applyTeamMoraleHit(state, team, amount);
-          if (isKIA) maybeBerserk(state, rng, team, track);
         }
       }
     }
@@ -279,12 +185,9 @@ function computeTeamStatus(state: BattleState, team: Team): { status: TeamStatus
   const actingAlive = alive.filter((s) => s.activity !== 'routed' && s.activity !== 'surrendered');
   const outOfAction = actingAlive.length === 0;
 
-  // Regression (balance round 3): these used to require EVERY alive soldier to be
-  // surrendered/routed simultaneously — a bar so high (a squad's last man recovering from pinned
-  // back to defending resets it every tick) that team.status essentially never showed
-  // Surrendered/Routed/Broken in the AI-vs-AI harness. Use "most of the squad" (a strict majority)
-  // for the routed/surrendered display states, and keep Broken purely a function of average team
-  // morale (<25) per the design brief, checked after the more severe states.
+  // Team status derives from the majority MENTAL STATE (spec §7): activity mirrors mind.state 1:1
+  // for the severe states (pinned/cowering/panicked/broken->routed), so a majority-of-activity
+  // check here is equivalent and avoids a second soldiers.map pass.
   const majority = (pred: (s: Soldier) => boolean): boolean => alive.filter(pred).length * 2 > alive.length;
   if (majority((s) => s.activity === 'surrendered')) return { status: 'Surrendered', outOfAction, morale };
   if (majority((s) => s.activity === 'routed')) return { status: 'Routed', outOfAction, morale };
@@ -367,14 +270,17 @@ function updateSideMorale(state: BattleState): void {
   }
 }
 
+/** Team-wide morale bookkeeping (spec's design brief §6.7 + this feature's spec's §1-8 "morale
+ * additionally drifts" hooks live in mind.ts's stepOneMind, which runs earlier in the pipeline).
+ * Per-soldier psychology/state-machine is mind.ts's job; this only aggregates. */
 export function stepMorale(state: BattleState, rng: Rng, dt: number): void {
   const track = getTrack(state);
 
-  detectCasualtiesAndApply(state, rng, track);
+  detectCasualtiesAndApply(state, track);
 
   for (const s of state.soldiers.values()) {
     if (s.health === 'dead' || s.health === 'incapacitated' || s.activity === 'surrendered') continue;
-    stepSoldierState(state, s, dt, track);
+    stepSoldierMorale(state, s, dt, track);
   }
 
   updateTeamCaches(state, track);

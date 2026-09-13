@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { computeResult, prisonerCount, sideScore, stepVictory } from '@/sim/victory';
 import { VL_CAPTURE_SECONDS } from '@/shared/types';
 import type { BattleState, Side, Soldier, Vec2 } from '@/shared/types';
+import { createMind } from '@/sim/mind';
 
 function makeState(): BattleState {
   return {
@@ -79,6 +80,7 @@ function makeSoldier(side: Side, pos: Vec2): Soldier {
     lastFiredAt: -999,
     cover: 0,
     kills: 0,
+    mind: createMind(50),
   };
 }
 

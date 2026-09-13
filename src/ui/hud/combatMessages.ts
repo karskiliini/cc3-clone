@@ -10,7 +10,9 @@ import { drawHudBevel, drawHudScrollArrows, hitRect, setHudFont, clipTextToWidth
 
 export const COMBAT_MESSAGES_RECT: Rect = { x: 620, y: 632, w: 168, h: 93 };
 const ARROWS_RECT: Rect = { x: 788, y: 632, w: 12, h: 93 };
-const TITLE_RECT: Rect = { x: 620, y: 730, w: 180, h: 36 };
+// Right-aligned anchor only (x+w is where the text ends); kept clear of the
+// modern order bar, which now occupies x 620..780 in this same strip row.
+const TITLE_RECT: Rect = { x: 820, y: 730, w: 200, h: 36 };
 
 const ROW_H = 31;
 const VISIBLE_ROWS = 3;

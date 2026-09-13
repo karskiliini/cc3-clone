@@ -380,8 +380,8 @@ export class MapPainter {
    * intervals (jittered, offset a couple of tiles to one side of the centerline) — optionally
    * restricted to a `[tStart,tEnd]` fraction of the polyline's total length, so damage can
    * concentrate in the contested middle third of a road rather than spreading evenly end to end. */
-  craterLine(points: Vec2[], opts: { tStart?: number; tEnd?: number; radius?: number; seedOffset?: number; minGap?: number; maxGap?: number } = {}): void {
-    const { tStart = 0, tEnd = 1, radius = 1.4, seedOffset = 0, minGap = 15, maxGap = 25 } = opts;
+  craterLine(points: Vec2[], opts: { tStart?: number; tEnd?: number; seedOffset?: number; minGap?: number; maxGap?: number } = {}): void {
+    const { tStart = 0, tEnd = 1, seedOffset = 0, minGap = 15, maxGap = 25 } = opts;
     const segs: { a: Vec2; b: Vec2; len: number }[] = [];
     let total = 0;
     for (let s = 0; s < points.length - 1; s++) {
@@ -413,7 +413,11 @@ export class MapPainter {
           // previously placed crater before painting another one.
           const minSep = 3 + hash2(n, 9, this.seed + seedOffset + 9504) * 3;
           if (!lastPt || Math.hypot(cx - lastPt.x, cy - lastPt.y) >= minSep) {
-            this.patch(px + Math.cos(angle) * off * 0.4, py + Math.sin(angle) * off * 0.4, radius, 'crater');
+            // a single 'crater' tile, not a multi-tile patch() blob: each 'crater' terrain tile
+            // already renders as its own complete crater shape, so a radius-based blob here used
+            // to paint several adjacent crater tiles that each drew their own circle — reading as
+            // a tight cluster of grey spheres ("bunch of grapes") instead of one shell-hole.
+            this.set(Math.round(px + Math.cos(angle) * off * 0.4), Math.round(py + Math.sin(angle) * off * 0.4), 'crater');
             const variant = Math.floor(hash2(n, 11, this.seed + seedOffset + 9505) * 4);
             this.addDecor('shellhole', cx, cy, variant);
             lastPt = { x: cx, y: cy };

@@ -115,6 +115,10 @@ function crewFallbackWord(roleName: string): string {
 function activityWord(s: Soldier, team: Team | null, vehicle: Vehicle | undefined, roleName: string): string {
   if (s.health === 'dead' || s.activity === 'dead') return 'Dead';
   if (s.health === 'incapacitated' || s.activity === 'incapacitated') return 'Unconscious';
+  // spec §7: show the mental-state word for wary/shaken, which have no dedicated Activity of their
+  // own (calm/alert are unremarkable and keep the normal activity word).
+  if (s.mind.state === 'wary') return 'Wary';
+  if (s.mind.state === 'shaken') return 'Shaken';
   switch (s.activity) {
     case 'moving': return vehicle && roleName === 'Driver' ? 'Driving' : 'Moving';
     case 'movingFast': return 'Running';
@@ -143,6 +147,20 @@ function activityWord(s: Soldier, team: Team | null, vehicle: Vehicle | undefine
 function activityColor(s: Soldier): string {
   if (s.health === 'dead' || s.activity === 'dead') return HUD.red;
   if (s.health === 'incapacitated' || s.activity === 'incapacitated') return HUD.red;
+  // spec §7 colours: wary white, shaken yellow, pinned/cowering orange, panicked/broken red, berserk
+  // magenta (literal hex here: palette.ts is render/'s file, not touched by this feature).
+  switch (s.mind.state) {
+    case 'wary': return HUD.text;
+    case 'shaken': return HUD.yellow;
+    case 'pinned':
+    case 'cowering':
+      return '#e08020';
+    case 'panicked':
+    case 'broken':
+      return HUD.red;
+    case 'berserk': return '#c040c0';
+    default: break;
+  }
   switch (s.activity) {
     case 'pinned': return HUD.yellow;
     case 'panicked':

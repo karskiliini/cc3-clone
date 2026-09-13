@@ -20,6 +20,8 @@ import { stepCombat } from './combat';
 import { stepMorale } from './morale';
 import { stepAI, aiDeploy } from './ai';
 import { addMessage } from './messages';
+import { stepMinds } from './mind';
+import { stepCoverSeeking } from './coverSeek';
 import { TEAM_DEFS, VEHICLE_DEFS } from '@/data/units';
 import { getMap } from '@/data/maps';
 
@@ -136,6 +138,7 @@ export class Battle {
     const state = this.state;
     state.time = Math.round((state.time + dt) * 1000) / 1000;
 
+    stepCoverSeeking(state, this.rng, dt);
     stepMovement(state, this.rng, dt);
     stepVehicles(state, this.rng, dt);
 
@@ -144,6 +147,8 @@ export class Battle {
       this.spotAccum -= SPOT_INTERVAL;
       updateSpotting(state, this.rng);
     }
+
+    stepMinds(state, this.rng, dt);
 
     stepCombat(state, this.rng, dt);
     stepMorale(state, this.rng, dt);

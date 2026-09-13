@@ -5,6 +5,7 @@ import { Rng } from '@/shared/rng';
 import { buildMap } from '@/sim/map';
 import { MapPainter } from '@/sim/mapdsl';
 import { updateSpotting } from '@/sim/spotting';
+import { createMind } from '@/sim/mind';
 
 function makeDef(paint: (tiles: Terrain[], w: number, h: number) => void, w = 120, h = 20): MapDef {
   return {
@@ -55,6 +56,7 @@ function makeSoldier(overrides: Partial<Soldier>): Soldier {
     lastFiredAt: -999,
     cover: 0,
     kills: 0,
+    mind: createMind(50),
     ...overrides,
   };
 }

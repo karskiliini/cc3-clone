@@ -3,6 +3,7 @@ import type {
   BattleConfig, BattleState, GameMap, MapDef, Soldier, Team, Terrain,
 } from '@/shared/types';
 import { Rng } from '@/shared/rng';
+import { createMind, stepMinds } from '@/sim/mind';
 import { stepMorale, moraleWord } from '@/sim/morale';
 
 const W = 20, H = 20;
@@ -34,7 +35,7 @@ function makeSoldier(id: number, teamId: number, overrides: Partial<Soldier> = {
     pos: { x: 5, y: 5 }, facing: 0, targetSoldierId: null, targetVehicleId: null,
     targetPoint: null, path: [], reloadTimer: 0, fireTimer: 0, animFrame: 0,
     isLeader: id === 1, vehicleId: null, formationOffset: { x: 0, y: 0 }, lastFiredAt: -999,
-    cover: 0, kills: 0,
+    cover: 0, kills: 0, mind: createMind(50),
     ...overrides,
   };
 }
@@ -75,31 +76,43 @@ function makeState(): BattleState {
 }
 
 describe('stepMorale', () => {
-  it('suppression above 85 transitions a soldier to cowering', () => {
+  // The pinned/cowering/panicked/routed cascade now lives in mind.ts's mental-state machine
+  // (spec 2026-09-13-soldier-mind-design.md §3); mind.ts mirrors the severe states onto
+  // `soldier.activity` (syncActivityForState) so stepMorale's team-status caching still works off
+  // `activity` unchanged. These tests seed the precursor mind.state and step stepMinds once to
+  // exercise that one-step escalation, then confirm the activity mirror.
+
+  it('suppression above 85 transitions a soldier from pinned to cowering', () => {
     const state = makeState();
     const rng = new Rng(1);
     const s = state.soldiers.get(1)!;
+    s.mind.state = 'pinned';
     s.suppression = 90;
-    stepMorale(state, rng, 0.1);
+    stepMinds(state, rng, 0.1);
+    expect(s.mind.state).toBe('cowering');
     expect(s.activity).toBe('cowering');
     expect(s.stance).toBe('prone');
   });
 
-  it('morale below 10 transitions a soldier to routed', () => {
+  it('morale below 10 transitions a panicked soldier to broken/routed', () => {
     const state = makeState();
     const rng = new Rng(1);
     const s = state.soldiers.get(1)!;
+    s.mind.state = 'panicked';
     s.morale = 5;
-    stepMorale(state, rng, 0.1);
+    stepMinds(state, rng, 0.1);
+    expect(s.mind.state).toBe('broken');
     expect(s.activity).toBe('routed');
   });
 
-  it('suppression above 60 (but not 85) transitions to pinned', () => {
+  it('suppression above 60 (but not 85) transitions a shaken soldier to pinned', () => {
     const state = makeState();
     const rng = new Rng(1);
     const s = state.soldiers.get(1)!;
+    s.mind.state = 'shaken';
     s.suppression = 70;
-    stepMorale(state, rng, 0.1);
+    stepMinds(state, rng, 0.1);
+    expect(s.mind.state).toBe('pinned');
     expect(s.activity).toBe('pinned');
   });
 
@@ -132,8 +145,10 @@ describe('stepMorale', () => {
     const s1 = state.soldiers.get(1)!;
     const s2 = state.soldiers.get(2)!;
     const s3 = state.soldiers.get(3)!;
-    s1.morale = 5; s2.morale = 5; // stays routed (morale<10 keeps it routed every tick)
+    s1.mind.state = 'panicked'; s1.morale = 5;
+    s2.mind.state = 'panicked'; s2.morale = 5; // both cross panicked->broken (routed) this tick
     s3.morale = 80; // this one is fine
+    stepMinds(state, rng, 0.1);
     stepMorale(state, rng, 0.1);
     expect(s1.activity).toBe('routed');
     expect(s2.activity).toBe('routed');

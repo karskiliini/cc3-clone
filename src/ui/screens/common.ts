@@ -246,12 +246,15 @@ export function updateCameraEdgeScrollAndKeys(
   let dx = (rightSpd - leftSpd) * dt;
   let dy = (bottomSpd - topSpd) * dt;
 
+  // WASD panning is suppressed while Ctrl/Cmd is held so Ctrl+A ("select
+  // all") doesn't also nudge the camera.
+  const wasdOk = !input.keysDown.has('control') && !input.keysDown.has('meta');
   let kx = 0;
   let ky = 0;
-  if (input.keysDown.has('arrowleft')) kx -= 1;
-  if (input.keysDown.has('arrowright')) kx += 1;
-  if (input.keysDown.has('arrowup')) ky -= 1;
-  if (input.keysDown.has('arrowdown')) ky += 1;
+  if (input.keysDown.has('arrowleft') || (wasdOk && input.keysDown.has('a'))) kx -= 1;
+  if (input.keysDown.has('arrowright') || (wasdOk && input.keysDown.has('d'))) kx += 1;
+  if (input.keysDown.has('arrowup') || (wasdOk && input.keysDown.has('w'))) ky -= 1;
+  if (input.keysDown.has('arrowdown') || (wasdOk && input.keysDown.has('s'))) ky += 1;
   dx += kx * KEY_SPEED * dt;
   dy += ky * KEY_SPEED * dt;
 
@@ -271,7 +274,23 @@ export function makeDragPanState(): DragPanState {
 
 /** Simple right-drag pan (no click/drag distinction) — used by screens without a command menu. */
 export function updateRightDragPan(cam: Camera, input: InputState, s: DragPanState, mapW: number, mapH: number): void {
-  if (input.buttons.right) {
+  updateDragPanIf(cam, input, s, mapW, mapH, input.buttons.right);
+}
+
+/** Middle-button drag, or Space+left-drag, pans the map — a modern-feeling
+ * alternative to right-drag that doesn't tie up the right button. Returns
+ * whether the pan gesture is currently active, so callers can suppress their
+ * own left-click/drag-select handling while Space is held down. */
+export function updateModernDragPan(cam: Camera, input: InputState, s: DragPanState, mapW: number, mapH: number): boolean {
+  const active = input.buttons.middle || ((input.keysDown.has(' ') || input.keysDown.has('spacebar')) && input.buttons.left);
+  updateDragPanIf(cam, input, s, mapW, mapH, active);
+  return active;
+}
+
+/** Shared drag-pan mechanics: while `active`, panning follows pointer motion
+ * 1:1 (grab-and-drag); otherwise the gesture resets. */
+function updateDragPanIf(cam: Camera, input: InputState, s: DragPanState, mapW: number, mapH: number, active: boolean): void {
+  if (active) {
     if (!s.active) {
       s.active = true;
       s.lastX = input.mouse.x;

@@ -29,28 +29,51 @@ function boxRect(index: number): Rect {
   };
 }
 
+export interface TeamGridClick {
+  id: number;
+  /** Shift was held: caller should toggle this id into the selection rather
+   * than replacing it. */
+  shift: boolean;
+  /** Second click on the same box within the double-click window: caller
+   * should centre the camera on this team. */
+  doubleClick: boolean;
+}
+
+const DOUBLE_CLICK_MS = 350;
+
 export class TeamGrid {
   private hoverIndex = -1;
+  private lastClickIndex = -1;
+  private lastClickTime = 0;
 
-  update(input: InputState, teams: Team[]): number | null {
+  update(input: InputState, teams: Team[]): TeamGridClick | null {
     this.hoverIndex = -1;
-    let clicked: number | null = null;
+    let clicked: TeamGridClick | null = null;
+    const now = performance.now();
     for (let i = 0; i < COLS * ROWS; i++) {
       const r = boxRect(i);
       if (hitRect(input.mouse, r)) this.hoverIndex = i;
       if (i >= teams.length) continue;
       for (const c of input.clicks) {
-        if (c.button === 0 && hitRect({ x: c.x, y: c.y }, r)) clicked = teams[i].id;
+        if (c.button === 0 && hitRect({ x: c.x, y: c.y }, r)) {
+          const doubleClick = this.lastClickIndex === i && now - this.lastClickTime < DOUBLE_CLICK_MS;
+          clicked = { id: teams[i].id, shift: input.keysDown.has('shift'), doubleClick };
+          this.lastClickIndex = i;
+          this.lastClickTime = now;
+        }
       }
     }
     return clicked;
   }
 
-  draw(ctx: CanvasRenderingContext2D, teams: Team[], state: BattleState, selectedTeamId: number | null): void {
+  draw(ctx: CanvasRenderingContext2D, teams: Team[], state: BattleState, selectedTeamIds: number[] | number | null): void {
+    const selected = Array.isArray(selectedTeamIds)
+      ? new Set(selectedTeamIds)
+      : new Set(selectedTeamIds != null ? [selectedTeamIds] : []);
     for (let i = 0; i < COLS * ROWS; i++) {
       const r = boxRect(i);
       const team = i < teams.length ? teams[i] : null;
-      this.drawBox(ctx, r, team, state, team != null && team.id === selectedTeamId, this.hoverIndex === i);
+      this.drawBox(ctx, r, team, state, team != null && selected.has(team.id), this.hoverIndex === i);
     }
   }
 
@@ -67,13 +90,14 @@ export class TeamGrid {
     drawHudBevel(ctx, r, false, HUD.base);
     if (!team) return;
 
-    const iconAreaW = 30;
+    const iconAreaW = 44;
     const iconRect: Rect = { x: r.x + 1, y: r.y + 1, w: iconAreaW - 2, h: r.h - 2 };
     ctx.fillStyle = '#241009';
     ctx.fillRect(Math.round(iconRect.x), Math.round(iconRect.y), Math.round(iconRect.w), Math.round(iconRect.h));
     const icon = tintedTeamIcon(getTeamIcon(team.type), team.type);
-    const iconScale = 2;
-    const iw = icon.width * iconScale, ih = icon.height * iconScale;
+    // Draw at native size (40x26), centred in the slot — was scaled 2x and
+    // clipped, which cropped the art instead of fitting it.
+    const iw = icon.width, ih = icon.height;
     ctx.imageSmoothingEnabled = false;
     // Clip the (often wider-than-the-slot) icon art to its icon cell so it
     // never bleeds into the status-word column to its right.

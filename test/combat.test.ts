@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import type { Soldier, WeaponDef } from '@/shared/types';
 import { Rng } from '@/shared/rng';
-import { hitChance, penetrates, applyHESplash, getSmallArmsStats, stepCombat } from '@/sim/combat';
+import { hitChance, penetrates, applyHESplash, applyHit, getSmallArmsStats, stepCombat } from '@/sim/combat';
 import type { BattleConfig, BattleState, GameMap, MapDef, Team, Terrain } from '@/shared/types';
+import { createMind } from '@/sim/mind';
 
 function makeSoldier(overrides: Partial<Soldier> = {}): Soldier {
   return {
@@ -37,6 +38,7 @@ function makeSoldier(overrides: Partial<Soldier> = {}): Soldier {
     lastFiredAt: -999,
     cover: 0,
     kills: 0,
+    mind: createMind(50),
     ...overrides,
   };
 }
@@ -190,11 +192,63 @@ describe('applyHESplash', () => {
         const before = getSmallArmsStats(state).fired;
         stepCombat(state, rng, 0.1);
         if (getSmallArmsStats(state).fired > before) fired++;
+        // This measures fire RATE, not lethality: keep the target alive (a dead/incapacitated
+        // enemy is correctly excluded from targeting since the combat.ts regression fix — without
+        // this reset the run would end early the moment the enemy goes down, which is a lethality
+        // artifact of this seed, not a suppression-rate effect).
+        if (enemy.health !== 'healthy') { enemy.health = 'healthy'; enemy.activity = 'defending'; }
       }
       return fired;
     };
     const suppressedFires = withSuppression(70);
     const calmFires = withSuppression(0);
     expect(suppressedFires).toBeLessThan(calmFires);
+  });
+
+  it('never fires the kill event/message/kill-count twice for one soldier (regression)', () => {
+    // Regression: the same "has been killed" message and kill event used to fire twice for one
+    // soldier because an already-incapacitated victim stayed targetable and applyHit re-rolled a
+    // fresh outcome (and re-pushed the kill event / incremented kills again) on a later shot that
+    // landed on the same, already-down body.
+    const state = makeState();
+    const killer = makeSoldier({ id: 1, side: 'german' });
+    const victim = makeSoldier({ id: 2, side: 'soviet' });
+    state.soldiers.set(killer.id, killer);
+    state.soldiers.set(victim.id, victim);
+    const weapon: WeaponDef = {
+      id: 'test_gun', name: 'Test Gun', cls: 'rifle', rangeM: 400, rate: 1, burst: 1,
+      accuracy: 1, lethality: 1, suppression: 0.2, penetrationMm: 0, heRadiusM: 0, ammo: 5, reloadS: 1,
+    };
+    const rng = new Rng(1);
+    applyHit(state, victim, weapon, rng, 'german', killer);
+    expect(victim.health).not.toBe('healthy');
+    const killsAfterFirst = killer.kills;
+    const koEventsAfterFirst = state.events.filter((e) => e.kind === 'kill').length;
+
+    // A second shot lands on the same, already-down body.
+    applyHit(state, victim, weapon, rng, 'german', killer);
+    expect(killer.kills).toBe(killsAfterFirst);
+    expect(state.events.filter((e) => e.kind === 'kill').length).toBe(koEventsAfterFirst);
+  });
+
+  it('excludes an incapacitated soldier from target selection', () => {
+    const state = makeState();
+    const shooter = makeSoldier({ id: 1, side: 'german', pos: { x: 5, y: 5 } });
+    const downed = makeSoldier({ id: 2, side: 'soviet', pos: { x: 6, y: 5 }, health: 'incapacitated', activity: 'incapacitated' });
+    const other = makeSoldier({ id: 3, side: 'soviet', pos: { x: 20, y: 20 } }); // out of range/LOS-irrelevant here
+    state.soldiers.set(shooter.id, shooter);
+    state.soldiers.set(downed.id, downed);
+    state.soldiers.set(other.id, other);
+    state.teams.set(1, makeTeam(1, 'german', [shooter.id]));
+    state.spotted.german.add(downed.id);
+    state.spotted.german.add(other.id);
+
+    const rng = new Rng(1);
+    for (let i = 0; i < 10; i++) stepCombat(state, rng, 0.1);
+    // The shooter must never have fired at the downed soldier specifically (it is not a valid
+    // candidate at all) — the only way `fired` can be > 0 here is by targeting `other`, which is
+    // far enough that this loop shouldn't reach it either at rate 0.4/s within 1s; assert instead
+    // that downed's health/activity never changed (i.e. it was never re-resolved as a target).
+    expect(downed.health).toBe('incapacitated');
   });
 });

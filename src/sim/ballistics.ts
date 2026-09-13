@@ -24,8 +24,36 @@ function shooterFactor(shooter: Soldier): number {
   const suppressionTerm = 1 - shooter.suppression / 150;
   const expTerm = 0.7 + shooter.experience / 300;
   const fatigueTerm = shooter.fatigue > 70 ? 0.8 : 1;
-  const berserkTerm = shooter.activity === 'berserk' ? 1.2 : 1;
-  return suppressionTerm * expTerm * fatigueTerm * berserkTerm;
+  const mindState = shooter.mind?.state;
+  // spec §3 state effects: shaken accuracy x0.7, berserk x1.2 (and ignores suppression, handled
+  // by the caller bypassing the suppression fire-rate throttle for berserk soldiers).
+  const stateTerm = mindState === 'shaken' ? 0.7 : mindState === 'berserk' || shooter.activity === 'berserk' ? 1.2 : 1;
+  // first-fire shock (spec §11): a green soldier fires wildly once shaken by it.
+  const wildFireTerm = mindState === 'shaken' && shooter.experience < 30 ? 0.5 : 1;
+  return suppressionTerm * expTerm * fatigueTerm * stateTerm * wildFireTerm;
+}
+
+/** Expectation of `penetrates()` (spec §10 "danger"): probability the round beats the armour,
+ * derived from the same pen*(1+gauss()*0.12) > armour model via the normal CDF. */
+export function expectedPenetrationChance(weapon: WeaponDef, distM: number, armorMm: number): number {
+  if (weapon.penetrationMm <= 0) return 0;
+  const pen = weapon.penetrationMm * Math.max(0.4, 1 - distM / 1000);
+  if (pen <= 0) return 0;
+  const z = (armorMm / pen - 1) / 0.12;
+  return clamp(1 - normalCdf(z), 0, 1);
+}
+
+function erf(x: number): number {
+  const sign = x < 0 ? -1 : 1;
+  const ax = Math.abs(x);
+  const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741, a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+  const t = 1 / (1 + p * ax);
+  const y = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-ax * ax);
+  return sign * y;
+}
+
+function normalCdf(z: number): number {
+  return 0.5 * (1 + erf(z / Math.SQRT2));
 }
 
 /**

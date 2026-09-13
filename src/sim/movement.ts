@@ -5,6 +5,7 @@ import { angleTo, dist, facingFromAngle, pointInRect, vadd, vnorm, vscale, vsub 
 import { coverAt, tileAt } from './map';
 import { TERRAIN_PROPS } from './terrain';
 import { findPath } from './path';
+import { isFirstFireFrozen } from './mind';
 
 const SPEEDS: Record<string, number> = {
   moving: 1.4,
@@ -31,12 +32,18 @@ export function stepMovement(state: BattleState, rng: Rng, dt: number): void {
 
     s.cover = coverAt(state.map, s.pos);
 
+    // First-fire shock (spec §11): frozen soldiers do not move at all.
+    if (isFirstFireFrozen(state, s.id)) continue;
+
     if (s.activity === 'panicked') handleFleeing(state, s, dt);
     else if (s.activity === 'routed') handleRouting(state, s, dt);
 
+    applyMindStanceAndFacing(state, s);
+
     const speed = SPEEDS[s.activity];
     if (speed != null && s.path.length > 0) {
-      moveAlongPath(state, s, speed, dt);
+      const fatigueFast = s.mind.state !== 'panicked' && s.mind.state !== 'broken' && s.fatigue > 70 && s.activity === 'movingFast';
+      moveAlongPath(state, s, fatigueFast ? SPEEDS.moving : speed, dt);
       if (Math.floor(state.time / 0.3) % 2 === 0) s.animFrame = 0; else s.animFrame = 1;
     }
 
@@ -45,6 +52,21 @@ export function stepMovement(state: BattleState, rng: Rng, dt: number): void {
     else if (s.activity === 'idle') s.fatigue = Math.max(0, s.fatigue - 1 * dt);
   }
   separateSoldiers(state);
+}
+
+/** State effects on stance/facing (spec §3): wary crouches/sneaks near a belief and faces the
+ * threat when idle; shaken may drop to crouching. */
+function applyMindStanceAndFacing(state: BattleState, s: Soldier): void {
+  const mind = s.mind;
+  if (mind.state === 'wary') {
+    const nearBelief = mind.beliefs.some((b) => dist(b.pos, s.pos) * TILE_M <= 60);
+    if (nearBelief && s.path.length === 0) s.stance = 'crouching';
+    if (mind.threatDir != null && (s.activity === 'idle' || s.activity === 'defending')) {
+      s.facing = facingFromAngle(mind.threatDir);
+    }
+  } else if (mind.state === 'shaken' && s.stance === 'standing' && s.path.length === 0) {
+    s.stance = 'crouching';
+  }
 }
 
 function moveAlongPath(state: BattleState, s: Soldier, speedMs: number, dt: number): void {
@@ -93,23 +115,26 @@ function isEnemyNear(state: BattleState, s: Soldier): boolean {
   return false;
 }
 
-/** Panicked soldiers flee directly away from the nearest spotted enemy, repathing every 3 s. */
+/** Panicked soldiers run directly away from the nearest threat (coverSeek.ts sets a path toward
+ * cover >= 0.4 first, per spec §9; this is only the fallback when no such cover was found — a
+ * single flee-and-freeze, not a repeated repath). */
 function handleFleeing(state: BattleState, s: Soldier, dt: number): void {
-  s.reloadTimer -= dt;
-  if (s.path.length === 0 || s.reloadTimer <= 0) {
-    s.reloadTimer = REPATH_INTERVAL_S;
-    let nearest: Vec2 | null = null;
-    let nd = Infinity;
-    for (const eid of state.spotted[s.side]) {
-      const e = state.soldiers.get(eid);
-      if (!e) continue;
-      const d = dist(s.pos, e.pos);
-      if (d < nd) { nd = d; nearest = e.pos; }
-    }
-    const dir = nearest ? vnorm(vsub(s.pos, nearest)) : { x: s.side === 'german' ? -1 : 1, y: 0 };
-    const dest = vadd(s.pos, vscale(dir, 20));
-    s.path = findPath(state.map, s.pos, dest, 'infantry');
+  if (s.path.length > 0) return;
+  const last = s.reloadTimer;
+  s.reloadTimer = 0; // repurposed as a one-shot "already tried to flee" guard for panicked soldiers
+  if (last <= -999) return; // already froze once with no destination
+  let nearest: Vec2 | null = null;
+  let nd = Infinity;
+  for (const eid of state.spotted[s.side]) {
+    const e = state.soldiers.get(eid);
+    if (!e) continue;
+    const d = dist(s.pos, e.pos);
+    if (d < nd) { nd = d; nearest = e.pos; }
   }
+  const dir = nearest ? vnorm(vsub(s.pos, nearest)) : { x: s.side === 'german' ? -1 : 1, y: 0 };
+  const dest = vadd(s.pos, vscale(dir, 20));
+  s.path = findPath(state.map, s.pos, dest, 'infantry');
+  s.reloadTimer = s.path.length > 0 ? 0 : -1000;
 }
 
 /** Routed soldiers run for their own deploy-zone edge; once inside, they hide prone. */

@@ -18,6 +18,8 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
     keysDown: new Set(),
     keysPressed: new Set(),
     wheel: 0,
+    wheelDX: 0,
+    wheelDY: 0,
     pointerInside: true,
   };
 
@@ -107,15 +109,32 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
     state.keysDown.delete(key);
   });
 
+  // Two-finger trackpad scroll pans the map (like any modern scrollable
+  // surface); Ctrl/Cmd+wheel — how browsers report a trackpad pinch, and
+  // how a mouse wheel + modifier reads too — zooms around the pointer
+  // instead. Always preventDefault so the wheel never scrolls/back-navigates
+  // the page (paired with `overscroll-behavior:none` in index.html).
   window.addEventListener('wheel', (e: WheelEvent) => {
-    state.wheel += e.deltaY;
-  });
+    e.preventDefault();
+    // DOM_DELTA_LINE (1): browser reports "lines"; DOM_DELTA_PAGE (2): "pages".
+    // Normalize both to approximate screen pixels so pan speed feels the same
+    // regardless of input device/browser.
+    const scale = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? SCREEN_H : 1;
+    if (e.ctrlKey || e.metaKey) {
+      state.wheel += e.deltaY * scale;
+    } else {
+      state.wheelDX += e.deltaX * scale;
+      state.wheelDY += e.deltaY * scale;
+    }
+  }, { passive: false });
 
   function endFrame(): void {
     state.clicks.length = 0;
     state.releases.length = 0;
     state.keysPressed.clear();
     state.wheel = 0;
+    state.wheelDX = 0;
+    state.wheelDY = 0;
   }
 
   return { state, endFrame };

@@ -163,11 +163,15 @@ function mixHex(hex: string, to: string, t: number): string {
   return `#${h(s.r)}${h(s.g)}${h(s.b)}`;
 }
 
-const rampRgbCache = new Map<string, RGB[]>();
+// Nested by season then terrain (rather than a string-concatenated key) so the hot per-pixel
+// path in groundColorFbm — called up to a few times per pixel, and at bpt^2 resolution that's
+// 4x the calls at zoom 2 — never builds a string just to do a cache lookup.
+const rampRgbCache: Partial<Record<Season, Partial<Record<Terrain, RGB[]>>>> = {};
 function rampRgb(season: Season, t: Terrain): RGB[] {
-  const key = season + '|' + t;
-  let r = rampRgbCache.get(key);
-  if (!r) { r = rampFor(season, t).map(hexToRgb); rampRgbCache.set(key, r); }
+  let bySeason = rampRgbCache[season];
+  if (!bySeason) { bySeason = {}; rampRgbCache[season] = bySeason; }
+  let r = bySeason[t];
+  if (!r) { r = rampFor(season, t).map(hexToRgb); bySeason[t] = r; }
   return r;
 }
 /** RGB-interpolate across an N-colour ramp at fractional position t (0..1). */

@@ -16,9 +16,13 @@ import { SoldierMonitorPopup } from '@/ui/hud/soldierMonitor';
 import { Minimap } from '@/ui/hud/minimap';
 import { drawHudBase } from '@/ui/hud/hudChrome';
 import { CommandMenu } from '@/ui/commandMenu';
+import { OrderBar } from '@/ui/hud/orderBar';
 import { drawTextCentered, FONT_BIG_H } from '@/render/pixelfont';
 import { PALETTE } from '@/render/palette';
-import { updateCameraEdgeScrollAndKeys, makeEdgeScrollState, pickFriendlyTeamScreen, type EdgeScrollState } from './common';
+import {
+  updateCameraEdgeScrollAndKeys, makeEdgeScrollState, pickFriendlyTeamScreen,
+  makeDragPanState, updateModernDragPan, type EdgeScrollState, type DragPanState,
+} from './common';
 import { DebriefScreen } from './debrief';
 import { OverviewScreen } from './overview';
 import { OptionsScreen } from './options';
@@ -28,6 +32,8 @@ const MOVE_TYPES: OrderType[] = ['move', 'moveFast', 'sneak'];
 const DRAG_THRESHOLD_PX = 5;
 const RIGHT_GESTURE_PX = 5;
 const RIGHT_GESTURE_MS = 400;
+const DOUBLE_CLICK_MS = 350;
+const HOVER_RING_R = 14;
 
 /** Big gold word on a 60%-black box, centred in the map viewport — used for
  * the PAUSED overlay and the end-of-battle result word. */
@@ -73,6 +79,7 @@ export class BattleScreen implements Screen {
   private soldierMonitor = new SoldierMonitorPopup();
   private minimap = new Minimap();
   private commandMenu = new CommandMenu();
+  private orderBar = new OrderBar();
   private selectedTeamId: number | null = null;
   private selectedTeamIds: number[] = [];
   private pendingOrder: OrderType | null = null;
@@ -82,6 +89,11 @@ export class BattleScreen implements Screen {
   private rightDrag: RightDrag = { active: false, startX: 0, startY: 0, lastX: 0, lastY: 0, moved: 0, startTime: 0, menuOpenedOnPress: false };
   private leftDrag: LeftDrag = { active: false, startX: 0, startY: 0, moved: 0 };
   private edgeScroll: EdgeScrollState = makeEdgeScrollState();
+  private modernPanDrag: DragPanState = makeDragPanState();
+  private hoverTeamId: number | null = null;
+  private hudHover = false;
+  private lastMapClickTeamId: number | null = null;
+  private lastMapClickTime = 0;
 
   // F5/F6/F7 toggles, Ctrl+K show-dead toggle (original CC3 keyboard reference).
   private showTeamGrid = true;
@@ -104,6 +116,18 @@ export class BattleScreen implements Screen {
   private setSelection(ids: number[]): void {
     this.selectedTeamIds = ids;
     this.selectedTeamId = ids.length > 0 ? ids[0] : null;
+  }
+
+  /** Shift-click/drag semantics: toggle a single id into/out of the current
+   * selection, or union a whole set in (never removes the others). */
+  private toggleInSelection(id: number): void {
+    const set = new Set(this.selectedTeamIds);
+    if (set.has(id)) set.delete(id); else set.add(id);
+    this.setSelection([...set]);
+  }
+
+  private addToSelection(ids: number[]): void {
+    this.setSelection([...new Set([...this.selectedTeamIds, ...ids])]);
   }
 
   private issueOrderToSelection(input: InputState, world: Vec2): void {
@@ -155,10 +179,21 @@ export class BattleScreen implements Screen {
 
     updateCameraEdgeScrollAndKeys(cam, input, dt, state.map.width, state.map.height, this.edgeScroll);
 
+    // Ctrl/Cmd+wheel = trackpad pinch = zoom around the pointer. Plain wheel
+    // (two-finger scroll) pans instead — modern-app trackpad conventions.
     if (input.wheel !== 0) {
       if (input.wheel < 0) zoomIn(cam, state.map.width, state.map.height, input.mouse);
       else zoomOut(cam, state.map.width, state.map.height, input.mouse);
     }
+    if (input.wheelDX !== 0 || input.wheelDY !== 0) {
+      panCamera(cam, input.wheelDX, input.wheelDY);
+      clampCamera(cam, state.map.width, state.map.height);
+    }
+
+    // Middle-drag or Space+left-drag: a modern pan gesture that doesn't tie
+    // up the right button. While active, suppress the normal left-click
+    // select/box-select/order handling below.
+    const modernPanning = updateModernDragPan(cam, input, this.modernPanDrag, state.map.width, state.map.height);
 
     // right mouse: pressing directly on a friendly team opens the command
     // menu immediately at the press point (like the original's press/drag
@@ -229,12 +264,13 @@ export class BattleScreen implements Screen {
 
     // left mouse: press starts a potential drag (box-select), release decides
     // whether it was a simple click (select/issue order) or a drag (box-select).
+    // Suppressed while Space/middle-drag panning is active.
     for (const c of input.clicks) {
-      if (c.button === 0 && c.y < VIEW_H && !this.commandMenu.isOpen && !menuWasOpen) {
+      if (c.button === 0 && c.y < VIEW_H && !this.commandMenu.isOpen && !menuWasOpen && !modernPanning) {
         this.leftDrag = { active: true, startX: c.x, startY: c.y, moved: 0 };
       }
     }
-    if (this.leftDrag.active && input.buttons.left) {
+    if (this.leftDrag.active && input.buttons.left && !modernPanning) {
       this.leftDrag.moved = Math.max(this.leftDrag.moved, Math.hypot(input.mouse.x - this.leftDrag.startX, input.mouse.y - this.leftDrag.startY));
     }
     for (const r of input.releases) {
@@ -244,19 +280,29 @@ export class BattleScreen implements Screen {
         continue;
       }
       const dragged = this.leftDrag.moved >= DRAG_THRESHOLD_PX;
+      const shiftHeld = input.keysDown.has('shift');
       if (dragged && !this.pendingOrder) {
-        // box select: any friendly, selectable team whose position falls in the rect
+        // Rect-select: any friendly, selectable team whose centre OR any
+        // living soldier's screen position falls inside the marquee.
         const x0 = Math.min(this.leftDrag.startX, r.x), x1 = Math.max(this.leftDrag.startX, r.x);
         const y0 = Math.min(this.leftDrag.startY, r.y), y1 = Math.max(this.leftDrag.startY, r.y);
+        const inRect = (p: Vec2) => p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1;
         const inBox = battle.selectableTeams(battle.playerSide()).filter((t) => {
-          const p = worldToScreen(cam, t.pos);
-          return p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1;
+          if (inRect(worldToScreen(cam, t.pos))) return true;
+          for (const sid of t.soldierIds) {
+            const s = state.soldiers.get(sid);
+            if (s && s.health !== 'dead' && inRect(worldToScreen(cam, s.pos))) return true;
+          }
+          return false;
         });
-        if (inBox.length > 0) this.setSelection(inBox.map((t) => t.id));
+        if (inBox.length > 0) {
+          const ids = inBox.map((t) => t.id);
+          if (shiftHeld) this.addToSelection(ids); else this.setSelection(ids);
+        }
       } else {
         const world = screenToWorld(cam, { x: r.x, y: r.y });
         if (this.pendingOrder && this.selectedTeamId != null) {
-          const chaining = MOVE_TYPES.includes(this.pendingOrder) && input.keysDown.has('shift');
+          const chaining = MOVE_TYPES.includes(this.pendingOrder) && shiftHeld;
           if (chaining) {
             this.pendingWaypoints.push(world);
           } else {
@@ -264,7 +310,20 @@ export class BattleScreen implements Screen {
           }
         } else {
           const hitTeam = pickFriendlyTeamScreen(state, cam, { x: r.x, y: r.y }, battle.playerSide());
-          this.setSelection(hitTeam ? [hitTeam.id] : []);
+          if (hitTeam) {
+            const now = performance.now();
+            const isDouble = this.lastMapClickTeamId === hitTeam.id && now - this.lastMapClickTime < DOUBLE_CLICK_MS;
+            this.lastMapClickTeamId = hitTeam.id;
+            this.lastMapClickTime = now;
+            if (shiftHeld) this.toggleInSelection(hitTeam.id); else this.setSelection([hitTeam.id]);
+            if (isDouble) {
+              centerCamera(cam, hitTeam.pos);
+              clampCamera(cam, state.map.width, state.map.height);
+            }
+          } else {
+            this.lastMapClickTeamId = null;
+            if (!shiftHeld) this.setSelection([]);
+          }
         }
       }
       this.leftDrag.active = false;
@@ -277,6 +336,9 @@ export class BattleScreen implements Screen {
         this.setSelection([teams[(idx + 1) % teams.length].id]);
       }
     }
+    if (input.keysDown.has('control') && input.keysPressed.has('a')) {
+      this.setSelection(battle.selectableTeams(battle.playerSide()).map((t) => t.id));
+    }
 
     if (this.selectedTeamId != null && !this.commandMenu.isOpen) {
       for (const ot of ORDER_TYPES) {
@@ -284,14 +346,35 @@ export class BattleScreen implements Screen {
       }
     }
 
+    // Order bar: a modern, no-right-click-required way to pick an order —
+    // same order set/colours/hotkeys as the classic menu.
+    const orderBarResult = this.orderBar.update(input, { enabled: this.selectedTeamIds.length > 0, pending: this.pendingOrder });
+    if (orderBarResult === 'cancel') {
+      this.pendingOrder = null;
+      this.pendingWaypoints = [];
+    } else if (orderBarResult) {
+      this.pendingOrder = orderBarResult;
+      this.pendingWaypoints = [];
+    }
+
     const teams = battle.selectableTeams(battle.playerSide());
     const gridClick = this.teamGrid.update(input, teams);
     if (gridClick != null) {
-      this.setSelection([gridClick]);
-      const team = state.teams.get(gridClick);
-      if (team) centerCamera(cam, team.pos);
-      clampCamera(cam, state.map.width, state.map.height);
+      if (gridClick.shift) this.toggleInSelection(gridClick.id);
+      else this.setSelection([gridClick.id]);
+      if (gridClick.doubleClick) {
+        const team = state.teams.get(gridClick.id);
+        if (team) centerCamera(cam, team.pos);
+        clampCamera(cam, state.map.width, state.map.height);
+      }
     }
+
+    // Hover feedback: which friendly team (if any) sits under the pointer
+    // right now, for the subtle map-ring highlight + hand cursor.
+    this.hoverTeamId = (!this.pendingOrder && input.mouse.y < VIEW_H && !this.commandMenu.isOpen)
+      ? (pickFriendlyTeamScreen(state, cam, input.mouse, battle.playerSide())?.id ?? null)
+      : null;
+    this.hudHover = input.mouse.y >= VIEW_H;
 
     if (this.showMinimap) this.minimap.update(input, cam, state.map.width, state.map.height);
 
@@ -393,11 +476,26 @@ export class BattleScreen implements Screen {
       }
     }
 
-    // group-select marquee
+    // hover ring: a subtle highlight under the friendly team the pointer is over
+    if (this.hoverTeamId != null && this.hoverTeamId !== this.selectedTeamId) {
+      const hoverTeam = state.teams.get(this.hoverTeamId);
+      if (hoverTeam) {
+        const p = worldToScreen(cam, hoverTeam.pos);
+        ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, HOVER_RING_R, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    // rect-select marquee: white dashed outline with a translucent fill
     if (this.leftDrag.active && this.leftDrag.moved >= DRAG_THRESHOLD_PX && !this.pendingOrder) {
       const mouse = game.input.state.mouse;
       const x0 = Math.min(this.leftDrag.startX, mouse.x), x1 = Math.max(this.leftDrag.startX, mouse.x);
       const y0 = Math.min(this.leftDrag.startY, mouse.y), y1 = Math.max(this.leftDrag.startY, mouse.y);
+      ctx.fillStyle = 'rgba(255,255,255,0.12)';
+      ctx.fillRect(x0 + 0.5, y0 + 0.5, x1 - x0, y1 - y0);
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 1;
       ctx.setLineDash([3, 2]);
@@ -412,9 +510,10 @@ export class BattleScreen implements Screen {
     if (this.showSoldierMonitor) this.soldierMonitor.draw(ctx, state, selTeam);
 
     drawHudBase(ctx);
-    if (this.showTeamGrid) this.teamGrid.draw(ctx, battle.selectableTeams(battle.playerSide()), state, this.selectedTeamId);
+    if (this.showTeamGrid) this.teamGrid.draw(ctx, battle.selectableTeams(battle.playerSide()), state, this.selectedTeamIds);
     this.combatMessages.draw(ctx, state);
     this.bottomStrip.draw(ctx, state, selTeam);
+    this.orderBar.draw(ctx, { enabled: this.selectedTeamIds.length > 0, pending: this.pendingOrder });
 
     if (this.commandMenu.isOpen) this.commandMenu.draw(ctx);
 
@@ -429,7 +528,10 @@ export class BattleScreen implements Screen {
 
   cursor(): CursorKind {
     if (this.pendingOrder) return 'crosshair';
+    if (this.modernPanDrag.active) return 'hand';
     if (this.rightDrag.active && !this.rightDrag.menuOpenedOnPress && this.rightDrag.moved >= RIGHT_GESTURE_PX) return 'hand';
+    if (this.hudHover || this.orderBar.isHovering()) return 'hand';
+    if (this.hoverTeamId != null) return 'hand';
     return 'arrow';
   }
 }

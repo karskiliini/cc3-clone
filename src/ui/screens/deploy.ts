@@ -3,7 +3,7 @@ import { VIEW_H, VIEW_W, otherSide } from '@/shared/types';
 import { game } from '@/game';
 import type { Battle } from '@/sim/battle';
 import { aiDeploy } from '@/sim/ai';
-import { centerCamera, clampCamera, screenToWorld, worldToScreen, zoomIn, zoomOut } from '@/engine/camera';
+import { centerCamera, clampCamera, panCamera, screenToWorld, worldToScreen, zoomIn, zoomOut } from '@/engine/camera';
 import { TerrainRenderer } from '@/render/terrainRender';
 import { drawUnits } from '@/render/unitRender';
 import { TeamGrid } from '@/ui/hud/teamGrid';
@@ -15,7 +15,10 @@ import { drawHudBase } from '@/ui/hud/hudChrome';
 import { getTeamIcon } from '@/render/sprites';
 import { drawTextCentered } from '@/render/pixelfont';
 import { PALETTE } from '@/render/palette';
-import { updateCameraEdgeScrollAndKeys, makeDragPanState, makeEdgeScrollState, updateRightDragPan, pickFriendlyTeamScreen, type EdgeScrollState } from './common';
+import {
+  updateCameraEdgeScrollAndKeys, makeDragPanState, makeEdgeScrollState, updateRightDragPan,
+  updateModernDragPan, pickFriendlyTeamScreen, type EdgeScrollState, type DragPanState,
+} from './common';
 import { isPassable } from '@/sim/path';
 import { pointInRect } from '@/shared/math';
 import { BattleScreen } from './battle';
@@ -31,6 +34,7 @@ export class DeployScreen implements Screen {
   private selectedTeamId: number | null = null;
   private draggingTeamId: number | null = null;
   private dragPan = makeDragPanState();
+  private modernPanDrag: DragPanState = makeDragPanState();
   private edgeScroll: EdgeScrollState = makeEdgeScrollState();
   private invalidTimer = 0;
   private showMinimap = true;
@@ -69,14 +73,21 @@ export class DeployScreen implements Screen {
 
     updateCameraEdgeScrollAndKeys(cam, input, dt, map.width, map.height, this.edgeScroll);
     updateRightDragPan(cam, input, this.dragPan, map.width, map.height);
+    const modernPanning = updateModernDragPan(cam, input, this.modernPanDrag, map.width, map.height);
+    // Ctrl/Cmd+wheel (pinch) zooms around the pointer; plain wheel pans.
     if (input.wheel !== 0) {
       if (input.wheel < 0) zoomIn(cam, map.width, map.height, input.mouse);
       else zoomOut(cam, map.width, map.height, input.mouse);
     }
+    if (input.wheelDX !== 0 || input.wheelDY !== 0) {
+      panCamera(cam, input.wheelDX, input.wheelDY);
+      clampCamera(cam, map.width, map.height);
+    }
 
     // left mouse down on a friendly soldier/vehicle: select + start drag
+    // (suppressed while Space+drag is panning the map)
     for (const c of input.clicks) {
-      if (c.button !== 0 || c.y >= VIEW_H) continue;
+      if (c.button !== 0 || c.y >= VIEW_H || modernPanning) continue;
       const hitTeam = pickFriendlyTeamScreen(state, cam, { x: c.x, y: c.y }, this.battle.playerSide());
       if (hitTeam) {
         this.selectedTeamId = hitTeam.id;
@@ -113,8 +124,8 @@ export class DeployScreen implements Screen {
     const teams = this.battle.selectableTeams(this.battle.playerSide());
     const clicked = this.teamGrid.update(input, teams);
     if (clicked != null) {
-      this.selectedTeamId = clicked;
-      const team = state.teams.get(clicked);
+      this.selectedTeamId = clicked.id;
+      const team = state.teams.get(clicked.id);
       if (team) centerCamera(cam, team.pos);
       clampCamera(cam, map.width, map.height);
     }
@@ -248,7 +259,7 @@ export class DeployScreen implements Screen {
   }
 
   cursor(): CursorKind {
-    if (this.dragPan.active) return 'hand';
+    if (this.dragPan.active || this.modernPanDrag.active) return 'hand';
     if (this.draggingTeamId != null) return this.dragInvalid ? 'no' : 'move';
     return 'arrow';
   }

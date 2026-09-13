@@ -147,6 +147,41 @@ export type Activity =
   | 'defending' | 'ambushing' | 'hiding' | 'cowering' | 'pinned' | 'panicked'
   | 'routed' | 'berserk' | 'surrendered' | 'dead' | 'incapacitated';
 
+// -------------------------------------------------------------- soldier mind
+export type MentalState =
+  | 'calm' | 'alert' | 'wary' | 'shaken' | 'pinned' | 'cowering' | 'panicked' | 'broken' | 'berserk';
+
+export interface EnemyBelief {
+  pos: Vec2;                  // tile coords
+  count: number;              // enemies believed at this spot
+  confidence: number;         // 0..1
+  kind: 'seen' | 'fired' | 'reported';
+  time: number;               // battle seconds of last refresh
+  deadSeen: number;           // dead enemies seen near this spot
+}
+
+/** Per-soldier psychology and memory; see docs/superpowers/specs/2026-09-13-soldier-mind-design.md */
+export interface SoldierMind {
+  state: MentalState;
+  motivation: number;         // 0..100, slow
+  stress: number;             // 0..100, fast
+  fear: number;               // 0..100, derived each step
+  beliefs: EnemyBelief[];     // max 8
+  threatDir: number | null;   // radians, 0 = north, clockwise
+  threatLevel: number;        // 0..1, decays
+  lastIncomingAt: number;     // battle seconds
+  hesitation: number;         // seconds before acting on the current order
+  surrounded: boolean;
+  helpless: boolean;
+  stateSince: number;         // battle seconds when `state` was entered
+  /** ordered position for cover seeking (set by orders); null = none */
+  anchor: Vec2 | null;
+  /** last cover-seek evaluation time */
+  lastCoverSeekAt: number;
+  /** hidden personality trait rolled at spawn (spec §11); undefined = no notable trait. */
+  trait?: 'steady' | 'nervous' | 'brave' | 'reckless' | 'cautious' | 'stoic';
+}
+
 export interface Soldier {
   id: number;
   teamId: number;
@@ -182,6 +217,7 @@ export interface Soldier {
   /** cover value at current tile (cached) */
   cover: number;
   kills: number;
+  mind: SoldierMind;
 }
 
 // ----------------------------------------------------------------- vehicles
@@ -393,7 +429,10 @@ export interface InputState {
   releases: { x: number; y: number; button: 0 | 1 | 2 }[];
   keysDown: Set<string>;      // KeyboardEvent.key lower-cased
   keysPressed: Set<string>;   // edge-triggered, cleared each frame
-  wheel: number;              // accumulated deltaY, cleared each frame
+  wheel: number;              // accumulated ctrl/cmd+wheel (pinch-zoom) deltaY, cleared each frame
+  /** accumulated plain two-finger-scroll wheel delta (screen px), cleared each frame */
+  wheelDX: number;
+  wheelDY: number;
   /** false once the pointer has left the window/canvas or the window lost focus */
   pointerInside: boolean;
 }

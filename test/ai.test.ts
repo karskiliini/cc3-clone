@@ -3,6 +3,7 @@ import type {
   BattleConfig, BattleState, GameMap, MapDef, Order, Soldier, Team, Terrain,
 } from '@/shared/types';
 import { Rng } from '@/shared/rng';
+import { createMind } from '@/sim/mind';
 import { stepAI, aiDeploy, type AIBattle } from '@/sim/ai';
 
 const W = 30, H = 30;
@@ -35,7 +36,7 @@ function makeSoldier(id: number, teamId: number): Soldier {
     pos: { x: 2, y: 2 }, facing: 0, targetSoldierId: null, targetVehicleId: null,
     targetPoint: null, path: [], reloadTimer: 0, fireTimer: 0, animFrame: 0,
     isLeader: id % 10 === 1, vehicleId: null, formationOffset: { x: 0, y: 0 }, lastFiredAt: -999,
-    cover: 0, kills: 0,
+    cover: 0, kills: 0, mind: createMind(50),
   };
 }
 

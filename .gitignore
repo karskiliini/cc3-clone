@@ -6,3 +6,4 @@ ref/
 .playwright-mcp/
 tools/uiScreens_shots/
 *.png
+test-results/
