@@ -527,11 +527,16 @@ function paintGroundAndFeatures(
           // -------------------------------------------------------- roads
           if (covPaved > 0.5) {
             let rc = groundColorFbm('pavedroad', season, wpx, wpy, seed);
-            // cobble/sett texture: a per-cell brightness step every 3-4px so the surface reads
-            // as individually laid stones rather than a flat tinted band.
-            const cobbleX = Math.floor(wpx / 4), cobbleY = Math.floor(wpy / 4);
-            const cobble = hash2(cobbleX, cobbleY, seed + 4520);
-            rc = shade(rc, (cobble - 0.5) * 0.08);
+            if (season !== 'winter') {
+              // cobble/sett texture: a per-cell brightness step every 3-4px so the surface reads
+              // as individually laid stones rather than a flat tinted band. Skipped in winter —
+              // a snow-covered street reading as a knitted hatch/corduroy pattern was exactly
+              // the bug: smooth snow with soft wheel tracks reads right, cobble grain under snow
+              // does not.
+              const cobbleX = Math.floor(wpx / 4), cobbleY = Math.floor(wpy / 4);
+              const cobble = hash2(cobbleX, cobbleY, seed + 4520);
+              rc = shade(rc, (cobble - 0.5) * 0.08);
+            }
             const nearEdge = pavedRes ? pavedRes.dist > pavedRes.halfW * 0.82 : covPaved < 0.58;
             const atGutter = pavedRes ? pavedRes.dist > pavedRes.halfW * 0.9 : covPaved < 0.55;
             if (season === 'winter') {
@@ -1343,6 +1348,17 @@ function paintTreeShadow(ctx: CanvasRenderingContext2D, cx: number, cy: number, 
   ctx.globalAlpha = 1;
 }
 
+/** A soft lightening on the NW third of the canopy so individual trees pop against the ground
+ * ramp instead of reading as a flat dark disc (round-2 critique: trees don't read as trees). */
+function paintCanopyHighlight(ctx: CanvasRenderingContext2D, cx: number, cy: number, dw: number, dh: number, season: Season): void {
+  ctx.globalAlpha = season === 'winter' ? 0.22 : 0.28;
+  ctx.fillStyle = season === 'winter' ? '#eef2f6' : '#a8c06a';
+  ctx.beginPath();
+  ctx.ellipse(cx - dw * 0.16, cy - dh * 0.18, dw * 0.28, dh * 0.22, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
 /** Winter leafless scrub tree: a spiky brown starburst with a small dark centre. */
 function paintScrubTree(ctx: CanvasRenderingContext2D, cx: number, cy: number, seed: number, size: number): void {
   ctx.globalAlpha = 0.2;
@@ -1385,6 +1401,7 @@ function paintTrees(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy:
       const dw = sprite.width * scale, dh = sprite.height * scale;
       paintTreeShadow(ctx, cx, cy, dw * 0.45, dh * 0.25);
       ctx.drawImage(sprite, Math.round(cx - dw / 2), Math.round(cy - dh / 2), dw, dh);
+      paintCanopyHighlight(ctx, cx, cy, dw, dh, season);
     }
   } else if (t === 'scatteredtrees') {
     if (hash2(wx, wy, seed + 111) < 0.55) {
@@ -1402,6 +1419,7 @@ function paintTrees(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy:
           const dw = sprite.width * scale, dh = sprite.height * scale;
           paintTreeShadow(ctx, cx, cy, dw * 0.45, dh * 0.25);
           ctx.drawImage(sprite, Math.round(cx - dw / 2), Math.round(cy - dh / 2), dw, dh);
+          paintCanopyHighlight(ctx, cx, cy, dw, dh, season);
         }
       }
     }

@@ -26,11 +26,15 @@ function paintMap(p: MapPainter): void {
   p.line([{ x: 45, y: 95 }, { x: 90, y: 98 }, { x: 130, y: 96 }], 'hedge');
   p.line([{ x: 130, y: 92 }, { x: 175, y: 88 }], 'fence');
 
-  // woods block NE, a smaller copse SW, tree line along the north field edge
+  // woods block NE, a smaller copse SW, denser tree lines along field edges and the road
+  // (round-2 critique: the summer map read as under-treed compared to the reference)
   p.woods(170, 30, 22, 18);
   p.woods(38, 132, 13, 9);
-  p.treeLine([{ x: 15, y: 18 }, { x: 40, y: 16 }, { x: 62, y: 20 }], 11);
-  p.treeLine([{ x: 130, y: 90 }, { x: 175, y: 86 }], 12);
+  p.treeLine([{ x: 15, y: 18 }, { x: 40, y: 16 }, { x: 62, y: 20 }], 11, 0.05);
+  p.treeLine([{ x: 130, y: 90 }, { x: 175, y: 86 }], 12, 0.05);
+  p.treeLine([{ x: 20, y: 55 }, { x: 20, y: 72 }], 14, 0.1);
+  p.treeLine([{ x: 165, y: 100 }, { x: 185, y: 100 }], 15, 0.1);
+  p.treeLine([{ x: 0, y: 78 }, { x: 40, y: 74 }], 16, 0.35); // sparse trees along the road shoulder
 
   // orchard between the two farmsteads
   p.orchard(85, 32, 16, 14, 2);
