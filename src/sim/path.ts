@@ -73,6 +73,36 @@ class BinaryHeap {
   }
 }
 
+// Module-level A* scratch. findPath is synchronous and never re-enters itself, so one set of
+// buffers is safe; they are reallocated only when the map size changes. Avoids allocating and
+// filling ~400 KB of typed arrays per call (the AI re-plan tick made hundreds of calls).
+let scratchSize = 0;
+let scratchG = new Float64Array(0);
+let scratchCame = new Int32Array(0);
+let scratchSeen = new Uint32Array(0);
+let scratchClosed = new Uint32Array(0);
+let scratchGen = 0;
+
+function ensureScratch(n: number): void {
+  if (n === scratchSize) return;
+  scratchSize = n;
+  scratchG = new Float64Array(n);
+  scratchCame = new Int32Array(n);
+  scratchSeen = new Uint32Array(n);
+  scratchClosed = new Uint32Array(n);
+  scratchGen = 0;
+}
+
+function nextGen(): number {
+  scratchGen++;
+  if (scratchGen >= 0xffffffff) {
+    scratchSeen.fill(0);
+    scratchClosed.fill(0);
+    scratchGen = 1;
+  }
+  return scratchGen;
+}
+
 export function findPath(map: GameMap, from: Vec2, to: Vec2, mover: Mover, maxNodes = 20000): Vec2[] {
   const sx = Math.floor(from.x), sy = Math.floor(from.y);
   let tx = Math.floor(to.x), ty = Math.floor(to.y);
@@ -82,12 +112,17 @@ export function findPath(map: GameMap, from: Vec2, to: Vec2, mover: Mover, maxNo
   const w = map.width, h = map.height;
   const key = (x: number, y: number) => y * w + x;
 
-  const gScore = new Float64Array(w * h).fill(Infinity);
-  const closed = new Uint8Array(w * h);
-  const cameFrom = new Int32Array(w * h).fill(-1);
+  // Reused scratch buffers (see ensureScratch): a cell's gScore/cameFrom are valid only when its
+  // stamp equals the current generation; closed-ness is a second stamp array.
+  ensureScratch(w * h);
+  const gen = nextGen();
+  const gScoreBuf = scratchG, cameFromBuf = scratchCame, seen = scratchSeen, closedStamp = scratchClosed;
+  const gOf = (i: number) => (seen[i] === gen ? gScoreBuf[i] : Infinity);
+  const setG = (i: number, g: number, from: number) => { seen[i] = gen; gScoreBuf[i] = g; cameFromBuf[i] = from; };
+  const cameOf = (i: number) => (seen[i] === gen ? cameFromBuf[i] : -1);
 
   const heap = new BinaryHeap();
-  gScore[key(sx, sy)] = 0;
+  setG(key(sx, sy), 0, -1);
   heap.push({ x: sx, y: sy, g: 0, f: octile(tx - sx, ty - sy) });
 
   let nodesExpanded = 0;
@@ -99,8 +134,8 @@ export function findPath(map: GameMap, from: Vec2, to: Vec2, mover: Mover, maxNo
   while (heap.size > 0 && nodesExpanded < maxNodes) {
     const cur = heap.pop()!;
     const ci = key(cur.x, cur.y);
-    if (closed[ci]) continue;
-    closed[ci] = 1;
+    if (closedStamp[ci] === gen) continue;
+    closedStamp[ci] = gen;
     nodesExpanded++;
 
     const dRemain = octile(tx - cur.x, ty - cur.y);
@@ -126,12 +161,11 @@ export function findPath(map: GameMap, from: Vec2, to: Vec2, mover: Mover, maxNo
           if (!isPassable(map, cur.x, cur.y + dy, mover)) continue;
         }
         const ni = key(nx, ny);
-        if (closed[ni]) continue;
+        if (closedStamp[ni] === gen) continue;
         const stepCost = (dx !== 0 && dy !== 0 ? Math.SQRT2 : 1) * costOf(map, nx, ny, mover);
         const tentativeG = cur.g + stepCost;
-        if (tentativeG < gScore[ni]) {
-          gScore[ni] = tentativeG;
-          cameFrom[ni] = ci;
+        if (tentativeG < gOf(ni)) {
+          setG(ni, tentativeG, ci);
           heap.push({ x: nx, y: ny, g: tentativeG, f: tentativeG + octile(tx - nx, ty - ny) });
         }
       }
@@ -146,7 +180,7 @@ export function findPath(map: GameMap, from: Vec2, to: Vec2, mover: Mover, maxNo
   while (node !== -1 && node !== key(sx, sy)) {
     const x = node % w, y = Math.floor(node / w);
     chain.push({ x: x + 0.5, y: y + 0.5 });
-    node = cameFrom[node];
+    node = cameOf(node);
   }
   chain.reverse();
   return chain;

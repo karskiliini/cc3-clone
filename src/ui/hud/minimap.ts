@@ -1,7 +1,7 @@
 // ============================================================================
 // minimap.ts — the 168x118 inset at the bottom-left corner of the map
-// viewport (x 0..168, y 512..630): whole-map thumbnail, VLs as small '+'
-// stars, friendly units as blue dots, spotted enemies as red dots, the
+// viewport (x 0..168, y 512..630): whole-map thumbnail, VLs as crosses
+// (German) / stars (Russian), friendly units as blue dots, spotted enemies as red dots, the
 // current viewport as a yellow rectangle. Click to recentre the camera.
 // ============================================================================
 import type { Rect, InputState, BattleState, Side, Camera, Vec2 } from '@/shared/types';
@@ -17,6 +17,25 @@ const MM_X = 0;
 const MM_Y = 512;
 const THUMB_W = 164;
 const THUMB_H = 114;
+
+const FRIENDLY_DOT = '#4a7fd0';
+
+/** 5-point star (Russian VL marker), outer radius `r`, light fill with a dark 1px rim. */
+function drawStar(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, inner: number): void {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const rad = i % 2 === 0 ? r : inner;
+    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    const px = cx + Math.cos(a) * rad, py = cy + Math.sin(a) * rad;
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  ctx.fillStyle = '#f0f0ec';
+  ctx.fill();
+  ctx.strokeStyle = '#0c0c0a';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
 
 export class Minimap {
   rect: Rect = { x: MM_X, y: MM_Y, w: MM_W, h: MM_H };
@@ -74,46 +93,43 @@ export class Minimap {
     ctx.fillRect(MM_X, MM_Y, MM_W, MM_H);
     if (this.thumb) ctx.drawImage(this.thumb, ox, oy);
 
+    // Manual: crosses = German VLs, stars = Russian VLs; unowned VLs stay a thin neutral cross.
     for (const vl of state.map.victoryLocations) {
-      const x = ox + vl.x * this.scaleX;
-      const y = oy + vl.y * this.scaleY;
-      ctx.strokeStyle = '#0c0c0a';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(x - 3, y); ctx.lineTo(x + 3, y);
-      ctx.moveTo(x, y - 3); ctx.lineTo(x, y + 3);
-      ctx.stroke();
+      const x = Math.round(ox + vl.x * this.scaleX);
+      const y = Math.round(oy + vl.y * this.scaleY);
+      if (vl.owner === 'soviet') {
+        drawStar(ctx, x + 0.5, y + 0.5, 4, 1.7);
+      } else {
+        ctx.fillStyle = vl.owner === 'german' ? '#0c0c0a' : '#4a4a46';
+        const t = vl.owner === 'german' ? 2 : 1;
+        ctx.fillRect(x - 4, y - Math.floor(t / 2), 9, t);
+        ctx.fillRect(x - Math.floor(t / 2), y - 4, t, 9);
+      }
     }
 
+    const dot = (wx: number, wy: number, color: string) => {
+      const x = Math.round(ox + wx * this.scaleX);
+      const y = Math.round(oy + wy * this.scaleY);
+      ctx.fillStyle = '#101018';
+      ctx.fillRect(x - 2, y - 2, 5, 5);
+      ctx.fillStyle = color;
+      ctx.fillRect(x - 1, y - 1, 3, 3);
+    };
     for (const s of state.soldiers.values()) {
       if (s.side !== playerSide || s.health === 'dead') continue;
-      const x = ox + s.pos.x * this.scaleX;
-      const y = oy + s.pos.y * this.scaleY;
-      ctx.fillStyle = '#4a7fd0';
-      ctx.fillRect(Math.round(x) - 1, Math.round(y) - 1, 2, 2);
+      dot(s.pos.x, s.pos.y, FRIENDLY_DOT);
     }
     for (const v of state.vehicles.values()) {
       if (v.side !== playerSide) continue;
-      const x = ox + v.pos.x * this.scaleX;
-      const y = oy + v.pos.y * this.scaleY;
-      ctx.fillStyle = '#4a7fd0';
-      ctx.fillRect(Math.round(x) - 1, Math.round(y) - 1, 2, 2);
+      dot(v.pos.x, v.pos.y, FRIENDLY_DOT);
     }
     for (const id of state.spotted[playerSide]) {
       const s = state.soldiers.get(id);
-      if (!s) continue;
-      const x = ox + s.pos.x * this.scaleX;
-      const y = oy + s.pos.y * this.scaleY;
-      ctx.fillStyle = HUD.red;
-      ctx.fillRect(Math.round(x) - 1, Math.round(y) - 1, 2, 2);
+      if (s) dot(s.pos.x, s.pos.y, HUD.red);
     }
     for (const id of state.spottedVehicles[playerSide]) {
       const v = state.vehicles.get(id);
-      if (!v) continue;
-      const x = ox + v.pos.x * this.scaleX;
-      const y = oy + v.pos.y * this.scaleY;
-      ctx.fillStyle = HUD.red;
-      ctx.fillRect(Math.round(x) - 1, Math.round(y) - 1, 2, 2);
+      if (v) dot(v.pos.x, v.pos.y, HUD.red);
     }
 
     const px = TILE_PX * cam.zoom;
@@ -125,8 +141,12 @@ export class Minimap {
     const vhPx = (VIEW_H / px) * this.scaleY;
     ctx.strokeRect(Math.round(vx) + 0.5, Math.round(vy) + 0.5, Math.round(vwPx), Math.round(vhPx));
 
-    ctx.strokeStyle = HUD.frame;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(MM_X + 1, MM_Y + 1, MM_W - 2, MM_H - 2);
+    // light 2px bevelled frame (ref_cc3_1482), not the dark maroon HUD frame
+    ctx.fillStyle = '#c8c8c0';
+    ctx.fillRect(MM_X, MM_Y, MM_W, 2);
+    ctx.fillRect(MM_X, MM_Y, 2, MM_H);
+    ctx.fillStyle = '#6a6a64';
+    ctx.fillRect(MM_X, MM_Y + MM_H - 2, MM_W, 2);
+    ctx.fillRect(MM_X + MM_W - 2, MM_Y, 2, MM_H);
   }
 }

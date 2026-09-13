@@ -5,7 +5,10 @@ import { clamp, wrapAngle, angleTo } from '@/shared/math';
 const DEG60 = (60 * Math.PI) / 180;
 const DEG135 = (135 * Math.PI) / 180;
 
-function stanceFactor(stance: Stance): number {
+/** Hit-exposure multiplier by target stance. Deliberately differs from spotting.ts's
+ * visibilityStanceFactor (prone 0.45 here vs 0.4 there): exposure to fire and visual signature are
+ * separate balance knobs; retuning either is a balance decision. */
+function exposureStanceFactor(stance: Stance): number {
   switch (stance) {
     case 'standing': return 1;
     case 'crouching': return 0.7;
@@ -57,7 +60,7 @@ function normalCdf(z: number): number {
 }
 
 /**
- * hitChance = acc * rangeFactor * (1 - cover*0.8) * stanceFactor * shooterFactor
+ * hitChance = acc * rangeFactor * (1 - cover*0.8) * exposureStanceFactor * shooterFactor
  *   * (targetMoving ? 0.6 : 1) * (shooter moving/movingFast ? 0.4 : 1), clamped 0.02..0.95.
  */
 export function hitChance(
@@ -71,7 +74,7 @@ export function hitChance(
   const rf = rangeFactor(weapon, distM);
   if (rf <= 0) return 0;
   const coverTerm = 1 - targetCover * 0.8;
-  const st = stanceFactor(targetStance);
+  const st = exposureStanceFactor(targetStance);
   const sf = shooterFactor(shooter);
   const movingTargetTerm = targetMoving ? 0.6 : 1;
   // Balance fix (suspect b follow-up): 'movingFast' shooters never reach this function at all

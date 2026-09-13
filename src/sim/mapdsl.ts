@@ -287,8 +287,13 @@ export class MapPainter {
         if (dist > 1.3) continue;
         const angle = Math.atan2(dy, dx);
         const angleBucket = Math.round(((angle + Math.PI) / (2 * Math.PI)) * steps);
-        const noise = hash2(angleBucket, Math.round((rx + ry) * 100), this.seed + seedOffset + 7001);
-        const localR = 0.7 + noise * 0.6;
+        // average the neighbouring angle buckets' hashes so single-bucket spikes (spiky star
+        // outline) are smoothed into lobes, while keeping the 0.7-1.3 irregular range.
+        const salt = Math.round((rx + ry) * 100), hs = this.seed + seedOffset + 7001;
+        const wrap = (b: number) => ((b % (steps + 1)) + (steps + 1)) % (steps + 1);
+        const noise = (hash2(wrap(angleBucket - 1), salt, hs) + hash2(angleBucket, salt, hs) * 2 + hash2(wrap(angleBucket + 1), salt, hs)) / 4;
+        const n01 = (noise - 0.5) * 1.6 + 0.5;
+        const localR = 0.7 + (n01 < 0 ? 0 : n01 > 1 ? 1 : n01) * 0.6;
         if (dist <= localR) this.set(xx, yy, t);
       }
     }

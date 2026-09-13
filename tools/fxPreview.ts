@@ -24,7 +24,8 @@ const COLS = [150, 400, 650, 900];
 const STAGE_LABELS = ['t≈5%', 't≈35%', 't≈65%', 't≈90%'];
 
 function paintBackground(): void {
-  ctx.fillStyle = '#5f7a3e'; // plain grass-ish ground
+  // ?bg=snow previews effects against winter ground (plumes must read on snow)
+  ctx.fillStyle = new URLSearchParams(location.search).get('bg') === 'snow' ? '#dfe2e0' : '#5f7a3e';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   // faint tile grid so positions are legible
   ctx.strokeStyle = 'rgba(0,0,0,0.06)';

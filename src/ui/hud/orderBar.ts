@@ -1,6 +1,6 @@
 // ============================================================================
 // orderBar.ts — modern-controls addition: a small grid of order buttons in
-// the bottom strip's otherwise-empty region (x 620..780, y 728..768), so a
+// the bottom strip's otherwise-empty region (x 812..971, y 728..768), so a
 // pending order can be picked without right-clicking. Mirrors the classic
 // right-click menu's order set/colours/hotkeys (Z/X/C/V/B/N/M) plus a
 // Cancel (Esc) button. The active pending order is highlighted; the whole
@@ -11,7 +11,8 @@ import { ORDER_HOTKEYS, ORDER_DOT_COLOR } from '@/shared/types';
 import { HUD } from '@/render/palette';
 import { drawHudBevel, hitRect, setHudFont } from './hudChrome';
 
-const BAR_X = 620;
+// Well clear of Flee/Truce (x 585..615) and of the Combat Messages column + title (x 620..800).
+const BAR_X = 812;
 const BAR_Y = 728;
 const COLS = 4;
 const ROWS = 2;
@@ -21,6 +22,12 @@ const BTN_H = 19;
 
 type Slot = OrderType | 'cancel';
 const SLOTS: Slot[] = ['move', 'moveFast', 'sneak', 'fire', 'smoke', 'defend', 'ambush', 'cancel'];
+const SLOT_LABEL: Record<Slot, string> = {
+  move: 'Move', moveFast: 'Move Fast', sneak: 'Sneak', fire: 'Fire',
+  smoke: 'Smoke', defend: 'Defend', ambush: 'Ambush', cancel: 'Cancel',
+};
+const TOOLTIP_MIN_X = 620;
+const TOOLTIP_MAX_X = 1020;
 
 function slotRect(i: number): Rect {
   const col = i % COLS;
@@ -71,7 +78,8 @@ export class OrderBar {
       const active = slot !== 'cancel' && opts.pending === slot;
       const hot = this.hoverIndex === i && opts.enabled;
 
-      drawHudBevel(ctx, r, false, active ? HUD.red : HUD.base);
+      // disabled buttons read recessed, not just dim
+      drawHudBevel(ctx, r, !opts.enabled && !active, active ? HUD.red : HUD.base);
       if (hot && !active) {
         ctx.strokeStyle = HUD.bevelLight;
         ctx.lineWidth = 1;
@@ -79,6 +87,7 @@ export class OrderBar {
       }
 
       if (slot === 'cancel') {
+        setHudFont(ctx, 'tiny');
         ctx.fillStyle = opts.enabled || opts.pending ? HUD.text : HUD.dim;
         ctx.fillText('Esc', Math.round(r.x + 4), Math.round(r.y + 5));
         continue;
@@ -93,7 +102,26 @@ export class OrderBar {
 
       const hotkey = ORDER_HOTKEYS[slot].toUpperCase();
       ctx.fillStyle = opts.enabled ? HUD.text : HUD.dim;
+      setHudFont(ctx, 'tiny');
       ctx.fillText(hotkey, Math.round(r.x + 11), Math.round(r.y + 5));
     }
+
+    if (this.hoverIndex >= 0) this.drawTooltip(ctx, this.hoverIndex, opts);
+  }
+
+  /** Name + hotkey of the hovered button, drawn just above the bar (even when disabled). */
+  private drawTooltip(ctx: CanvasRenderingContext2D, i: number, opts: OrderBarOpts): void {
+    const slot = SLOTS[i];
+    const key = slot === 'cancel' ? 'Esc' : ORDER_HOTKEYS[slot].toUpperCase();
+    const text = `${SLOT_LABEL[slot]} (${key})${opts.enabled || slot === 'cancel' ? '' : ' - select a team'}`;
+    setHudFont(ctx, 'small');
+    const w = Math.ceil(ctx.measureText(text).width) + 8;
+    const h = 15;
+    const r = slotRect(i);
+    const x = Math.max(TOOLTIP_MIN_X, Math.min(TOOLTIP_MAX_X - w, Math.round(r.x)));
+    const y = BAR_Y - h - 1;
+    drawHudBevel(ctx, { x, y, w, h }, false, HUD.black);
+    ctx.fillStyle = HUD.text;
+    ctx.fillText(text, x + 4, y + 2);
   }
 }

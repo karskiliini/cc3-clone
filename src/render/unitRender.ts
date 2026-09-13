@@ -12,41 +12,25 @@ import { PALETTE, SIDE_COLOR } from '@/render/palette';
 import { getSoldierSprite, getVehicleSprite, getFlagSprite } from '@/render/sprites';
 import { drawText, textWidth } from '@/render/pixelfont';
 import { VEHICLE_DEFS } from '@/data/units';
+import { teamBarColor } from '@/ui/hud/hudChrome';
 
-function soldierBarColor(s: Soldier): string {
-  if (s.health === 'incapacitated') return PALETTE.red;
-  if (s.health === 'wounded') return PALETTE.yellow;
-  if (s.activity === 'pinned' || s.activity === 'cowering') return PALETTE.yellow;
-  if (s.activity === 'panicked' || s.activity === 'routed' || s.activity === 'berserk') return PALETTE.red;
-  return PALETTE.green;
-}
-
-/** Draws a small 12x3 colour bar 8px above each living soldier of every
- * selected team — green healthy, yellow pinned/wounded, red broken/incap,
- * matching CC3's selected-team status ticks. Unselected friendly teams get a
- * dimmer, smaller version of the same bar (per the manual, team status bars
- * are visible above every friendly team at normal zoom, not only the
- * selected one) so the battlefield reads at a glance without a click. */
-function drawTeamBars(
-  ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState,
-  playerSide: Side, selectedTeamIds: readonly number[],
-): void {
-  for (const s of state.soldiers.values()) {
-    if (s.health === 'dead' || s.vehicleId != null) continue;
-    if (s.side !== playerSide) continue;
-    if (!visible(s.pos, cam)) continue;
-    const p = worldToScreen(cam, s.pos);
-    const selected = selectedTeamIds.includes(s.teamId);
-    ctx.save();
-    if (selected) {
-      ctx.fillStyle = soldierBarColor(s);
-      ctx.fillRect(Math.round(p.x - 6), Math.round(p.y - 12), 12, 3);
-    } else {
-      ctx.globalAlpha = 0.55;
-      ctx.fillStyle = soldierBarColor(s);
-      ctx.fillRect(Math.round(p.x - 4), Math.round(p.y - 10), 8, 2);
-    }
-    ctx.restore();
+/** One morale bar per friendly team (manual: "Team information bars only
+ * visible at normal zoom level"): a solid 30x4 bar centred above the team,
+ * coloured by teamBarColor so it matches the HUD team-grid bar. */
+function drawTeamBars(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side): void {
+  if (cam.zoom !== 1) return;
+  for (const team of state.teams.values()) {
+    if (team.side !== playerSide) continue;
+    if (team.status === 'Destroyed' || team.status === 'Knocked Out') continue;
+    const alive = team.soldierIds.some((id) => {
+      const s = state.soldiers.get(id);
+      return s != null && s.health !== 'dead';
+    });
+    if (!alive) continue;
+    if (!visible(team.pos, cam)) continue;
+    const p = worldToScreen(cam, team.pos);
+    ctx.fillStyle = teamBarColor(team);
+    ctx.fillRect(Math.round(p.x - 15), Math.round(p.y - 16), 30, 4);
   }
 }
 
@@ -80,22 +64,17 @@ function frameOf(soldier: Soldier): 0 | 1 {
   return (Math.floor(soldier.animFrame) % 2 === 0 ? 0 : 1);
 }
 
-/** Round-3 contrast pass: a small soft drop shadow drawn under every soldier
- * (live or dead), offset toward the SE like the vehicles' cast shadow, so
- * figures read as sitting *on* the ground instead of floating on it — the
- * "1-2 tiny helmet/shoulder pixels" of round 2 read fine as a shape but had
- * no ground contact cue at all. Kept in unitRender (screen space) rather
- * than baked into soldierArt's canvas so the offset stays visually
- * consistent regardless of the sprite's own rotation. */
-function drawSoldierShadow(ctx: CanvasRenderingContext2D, p: { x: number; y: number }, dw: number, dh: number, zoom: number): void {
-  const ox = Math.max(1, zoom);
-  const oy = Math.max(1, zoom * 2);
-  const rw = Math.max(1, dw * 0.5);
-  const rh = Math.max(1, dh * 0.28);
+/** Small soft contact shadow peeking out SE from a standing/crouching
+ * soldier's feet. Sized from the body (not the padded sprite canvas) so it
+ * never surrounds the figure; corpses and prone figures get none. The
+ * dw/dh parameters are kept for call-site compatibility. */
+function drawSoldierShadow(ctx: CanvasRenderingContext2D, p: { x: number; y: number }, _dw: number, _dh: number, zoom: number): void {
+  const rw = 3.5 * zoom;
+  const rh = 2 * zoom;
   ctx.save();
-  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
   ctx.beginPath();
-  ctx.ellipse(p.x + ox, p.y + oy, rw, rh, 0, 0, Math.PI * 2);
+  ctx.ellipse(p.x + 1 * zoom, p.y + 1.5 * zoom, rw, rh, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
@@ -121,7 +100,6 @@ function drawCorpses(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     if (!visible(s.pos, cam)) continue;
     const sprite = getSoldierSprite(s.side, season, 'dead', s.facing, 0);
     const { dw, dh } = spriteDrawSize(sprite, cam.zoom);
-    drawSoldierShadow(ctx, p, dw, dh, cam.zoom);
     ctx.drawImage(sprite, Math.round(p.x - dw / 2), Math.round(p.y - dh / 2), dw, dh);
   }
 }
@@ -213,9 +191,10 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
     const selected = selectedTeamIds.includes(s.teamId);
     if (selected) drawSelectionRing(ctx, p);
     const stance = s.health === 'incapacitated' ? 'prone' : s.stance;
-    const sprite = getSoldierSprite(s.side, season, stance, s.facing, frameOf(s));
+    const outline = s.side === playerSide ? 'friendly' : 'enemy';
+    const sprite = getSoldierSprite(s.side, season, stance, s.facing, frameOf(s), outline);
     const { dw, dh } = spriteDrawSize(sprite, cam.zoom);
-    drawSoldierShadow(ctx, p, dw, dh, cam.zoom);
+    if (stance !== 'prone') drawSoldierShadow(ctx, p, dw, dh, cam.zoom);
     ctx.drawImage(sprite, Math.round(p.x - dw / 2), Math.round(p.y - dh / 2), dw, dh);
     // 2px facing tick in front of the soldier, only for the selected team.
     if (selected) drawFacingTick(ctx, p, s.facing);
@@ -364,7 +343,7 @@ export function drawUnits(
   drawCorpses(ctx, cam, state, playerSide, showDead);
   drawVehicles(ctx, cam, state, playerSide);
   drawSoldiers(ctx, cam, state, playerSide, selectedTeamIds);
-  drawTeamBars(ctx, cam, state, playerSide, selectedTeamIds);
+  drawTeamBars(ctx, cam, state, playerSide);
   drawFlags(ctx, cam, state);
   drawTeamLabels(ctx, cam, state, settings);
 

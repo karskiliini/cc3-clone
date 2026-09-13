@@ -110,6 +110,15 @@ for (const side of SIDES) {
   }
 }
 
+for (const side of SIDES) {
+  const row = section(`Soldiers — ${side} / winter / friendly outline`);
+  for (const stance of STANCES) {
+    for (const facing of FACINGS) {
+      cellPair1x4x(row, `${stance} f${facing}`, getSoldierSprite(side, 'winter', stance, facing, 0, 'friendly'));
+    }
+  }
+}
+
 const walkRow = section('Soldier walk frames (standing, german, summer, facing 0/2/4/6)');
 for (const facing of [0, 2, 4, 6] as Facing8[]) {
   cellPair(walkRow, `f${facing} frame0`, getSoldierSprite('german', 'summer', 'standing', facing, 0));

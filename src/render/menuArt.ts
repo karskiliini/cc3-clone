@@ -47,7 +47,7 @@ function hexToRgb(hex: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-const STOPS = ['#2a0a06', '#7a1e10', '#c8501a', '#e8a040'].map(hexToRgb);
+const STOPS = ['#1a0505', '#4a0c0c', '#8b1a1a', '#c84a2a'].map(hexToRgb);
 
 function mixStops(t: number): [number, number, number] {
   const c = Math.max(0, Math.min(0.999999, t));
@@ -118,22 +118,10 @@ function drawScratches(ctx: CanvasRenderingContext2D, w: number, h: number): voi
 }
 
 // ---------------------------------------------------------------- warscene --
-// A backlit war-poster tableau along the lower third: a row of small marching
-// soldiers plus a tank in profile, silhouetted dark against the fire glow,
-// with wavering smoke columns rising behind them. Small, simple shapes read
-// far more convincingly at this scale than one giant abstract figure.
+// A war-poster tableau: one large painted soldier on the left, smoke rising
+// into the fire glow, and a small rubble scene with a couple of figures.
 const SIL_DARK = '#1d0c08';
 const SIL_RIM = '#7a3216';
-
-function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}
 
 /** One small marching-soldier silhouette: helmet (flattened ellipse + brim
  * ledge), head/neck rect, trapezoid torso, two angled mid-stride legs, and a
@@ -231,55 +219,6 @@ function drawMarchingSoldier(ctx: CanvasRenderingContext2D, gx: number, groundY:
   drawMarchingSoldierShape(ctx, gx, groundY, H, seed);
 }
 
-/** A tank in profile: hull trapezoid, rounded turret, long barrel, and a row
- * of road-wheel circles along the hull's underside. `x0` is the hull's left
- * edge, `groundY` its track line, `wPx` its overall width. */
-function drawTankShape(ctx: CanvasRenderingContext2D, x0: number, groundY: number, wPx: number): void {
-  const hullH = wPx * 0.26;
-  const hullY = groundY - hullH;
-  const turretW = wPx * 0.42;
-  const turretH = wPx * 0.17;
-  const turretX = x0 + wPx * 0.28;
-  const turretY = hullY - turretH * 0.85;
-  const barrelLen = wPx * 0.5;
-  const barrelH = wPx * 0.045;
-
-  // hull
-  ctx.beginPath();
-  ctx.moveTo(x0 + wPx * 0.06, hullY);
-  ctx.lineTo(x0 + wPx * 0.94, hullY);
-  ctx.lineTo(x0 + wPx, groundY);
-  ctx.lineTo(x0, groundY);
-  ctx.closePath();
-  ctx.fill();
-
-  // turret + barrel
-  roundRectPath(ctx, turretX, turretY, turretW, turretH, turretH * 0.4);
-  ctx.fill();
-  ctx.fillRect(turretX + turretW * 0.72, turretY + turretH * 0.38, barrelLen, barrelH);
-
-  // road wheels
-  const wheelR = hullH * 0.3;
-  const wheelY = groundY - wheelR * 0.5;
-  const wheelCount = 5;
-  for (let i = 0; i < wheelCount; i++) {
-    const wx = x0 + wPx * 0.1 + (i * (wPx * 0.8)) / (wheelCount - 1);
-    ctx.beginPath();
-    ctx.ellipse(wx, wheelY, wheelR, wheelR, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
-
-function drawTank(ctx: CanvasRenderingContext2D, x0: number, groundY: number, wPx: number): void {
-  ctx.save();
-  ctx.translate(1, -1);
-  ctx.fillStyle = SIL_RIM;
-  drawTankShape(ctx, x0, groundY, wPx);
-  ctx.restore();
-  ctx.fillStyle = SIL_DARK;
-  drawTankShape(ctx, x0, groundY, wPx);
-}
-
 /** One wavering column of smoke: overlapping soft radial-gradient puffs
  * (rather than discrete hard-edged circles) that grow and fade as they rise
  * toward the fire glow, spaced closely enough (~0.4x their own radius) to
@@ -315,36 +254,122 @@ function drawSmokeColumn(ctx: CanvasRenderingContext2D, x: number, baseY: number
   ctx.restore();
 }
 
-/** The full lower-third war-poster tableau: dark horizon ground, wavering
- * smoke columns rising into the fire glow, a tank silhouette at the left,
- * and a row of small marching soldiers (varied height/pose via hash) —
- * everything backlit and silhouetted, per the original's poster composition. */
-function drawWarScene(ctx: CanvasRenderingContext2D, w: number, h: number): void {
-  const groundY = h * 0.78;
+/** The big painted-soldier silhouette filling the left ~45% of the poster:
+ * helmet dome + brim, head, neck, broad shoulders, and a foreshortened arm
+ * pointing out at the viewer. Our own simple shapes — dark red-brown so it
+ * reads like the original's oxblood painted figure without copying it. */
+function drawHeroSoldierShape(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const sx = w / 800;
+  const sy = h / 600;
+  const X = (v: number) => v * sx;
+  const Y = (v: number) => v * sy;
+  // torso / shoulders
+  ctx.beginPath();
+  ctx.moveTo(X(0), Y(600));
+  ctx.lineTo(X(0), Y(420));
+  ctx.quadraticCurveTo(X(20), Y(360), X(95), Y(340));
+  ctx.lineTo(X(215), Y(338));
+  ctx.quadraticCurveTo(X(290), Y(352), X(318), Y(410));
+  ctx.lineTo(X(345), Y(600));
+  ctx.closePath();
+  ctx.fill();
+  // neck
+  ctx.fillRect(X(122), Y(290), X(72), Y(60));
+  // head
+  ctx.beginPath();
+  ctx.ellipse(X(158), Y(262), X(56), Y(68), 0, 0, Math.PI * 2);
+  ctx.fill();
+  // helmet dome
+  ctx.beginPath();
+  ctx.ellipse(X(160), Y(205), X(98), Y(95), 0, Math.PI, Math.PI * 2);
+  ctx.fill();
+  // helmet brim (slight downward flare)
+  ctx.beginPath();
+  ctx.ellipse(X(160), Y(210), X(122), Y(26), 0.05, 0, Math.PI * 2);
+  ctx.fill();
+  // pointing arm: a thick foreshortened sleeve from the right shoulder
+  // coming out toward the viewer, ending in a fist with the index finger
+  ctx.beginPath();
+  ctx.moveTo(X(200), Y(345));
+  ctx.quadraticCurveTo(X(270), Y(330), X(300), Y(300));
+  ctx.lineTo(X(338), Y(318));
+  ctx.quadraticCurveTo(X(318), Y(380), X(250), Y(430));
+  ctx.lineTo(X(210), Y(440));
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(X(318), Y(306), X(30), Y(24), -0.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.save();
+  ctx.translate(X(322), Y(290));
+  ctx.rotate(-0.9);
+  ctx.fillRect(0, -X(6), X(22), X(12));
+  ctx.restore();
+}
 
-  // smoke columns first, so the ground/figures drawn afterward occlude
-  // their base and they read as rising from behind the horizon
-  drawSmokeColumn(ctx, w * 0.13, groundY - 8, h * 0.08, 5);
-  drawSmokeColumn(ctx, w * 0.48, groundY - 8, h * 0.05, 19);
-  drawSmokeColumn(ctx, w * 0.8, groundY - 8, h * 0.12, 31);
+function drawHeroSoldier(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  // Render the opaque silhouette offscreen first so overlapping parts don't
+  // show alpha seams, then composite it at 0.85.
+  const layer = document.createElement('canvas');
+  layer.width = w;
+  layer.height = h;
+  const lc = layer.getContext('2d')!;
+  lc.save();
+  lc.translate(3, -2);
+  lc.fillStyle = '#9a3418';
+  drawHeroSoldierShape(lc, w, h);
+  lc.restore();
+  lc.fillStyle = '#2a0806';
+  drawHeroSoldierShape(lc, w, h);
+  // faint painted modelling on face / helmet dome, clipped to the figure
+  lc.globalCompositeOperation = 'source-atop';
+  const face = lc.createRadialGradient(w * (172 / 800), h * (258 / 600), 2, w * (172 / 800), h * (258 / 600), w * (60 / 800));
+  face.addColorStop(0, 'rgba(120,34,20,0.55)');
+  face.addColorStop(1, 'rgba(120,34,20,0)');
+  lc.fillStyle = face;
+  lc.fillRect(0, 0, w, h);
+  const dome = lc.createRadialGradient(w * (200 / 800), h * (150 / 600), 2, w * (200 / 800), h * (150 / 600), w * (70 / 800));
+  dome.addColorStop(0, 'rgba(140,44,24,0.5)');
+  dome.addColorStop(1, 'rgba(140,44,24,0)');
+  lc.fillStyle = dome;
+  lc.fillRect(0, 0, w, h);
+  ctx.save();
+  ctx.globalAlpha = 0.85;
+  ctx.drawImage(layer, 0, 0);
+  ctx.restore();
+}
 
-  // dark ground strip the figures stand on, with a thin fire-lit rim at the
-  // horizon line itself
-  ctx.fillStyle = 'rgba(12,7,5,0.6)';
-  ctx.fillRect(0, groundY, w, h - groundY);
-  ctx.fillStyle = 'rgba(255,154,60,0.3)';
-  ctx.fillRect(0, groundY - 1, w, 2);
-
-  drawTank(ctx, 0, groundY, 180);
-
-  const soldierCount = 7;
-  const startX = 216;
-  const endX = w - 30;
-  for (let i = 0; i < soldierCount; i++) {
-    const gx = startX + ((endX - startX) * i) / (soldierCount - 1);
-    const H = 70 + hash2(i, 7, 61) * 20;
-    drawMarchingSoldier(ctx, gx, groundY, H, i);
+/** Rubble mound in the lower right, below the button column, with 2 small
+ * figures silhouetted against the fire. */
+function drawRubble(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const baseY = h * 0.94;
+  ctx.save();
+  ctx.fillStyle = 'rgba(26,8,5,0.8)';
+  ctx.beginPath();
+  ctx.moveTo(w * 0.46, h);
+  let x = w * 0.46;
+  let i = 0;
+  while (x < w) {
+    const t = (x - w * 0.46) / (w * 0.54);
+    const ridge = baseY - Math.sin(t * Math.PI) * h * 0.08 - hash2(i, 3, 83) * h * 0.025;
+    ctx.lineTo(x, ridge);
+    x += 10 + hash2(i, 4, 83) * 12;
+    i++;
   }
+  ctx.lineTo(w, h);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+  drawMarchingSoldier(ctx, w * 0.66, h * 0.885, 34, 2);
+  drawMarchingSoldier(ctx, w * 0.72, h * 0.89, 30, 5);
+}
+
+/** Poster tableau: a couple of smoke columns rising into the fire glow, one
+ * large painted soldier on the left, and a small rubble scene lower right. */
+function drawWarScene(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  drawSmokeColumn(ctx, w * 0.86, h * 0.82, h * 0.14, 31);
+  drawRubble(ctx, w, h);
+  drawHeroSoldier(ctx, w, h);
 }
 
 /** 2-3 faint vertical "post" lines crossing the poster. */
@@ -386,12 +411,13 @@ function buildPosterBackground(w: number, h: number): HTMLCanvasElement {
   }
   ctx.putImageData(img, 0, 0);
 
-  // fire glow: strongest right along the horizon band so the war-scene
-  // silhouettes drawn on top read as backlit
-  const glow = ctx.createRadialGradient(w * 0.5, h * 0.76, 10, w * 0.5, h * 0.76, h * 0.68);
-  glow.addColorStop(0, 'rgba(255,154,60,0.7)');
-  glow.addColorStop(0.35, 'rgba(255,154,60,0.4)');
-  glow.addColorStop(1, 'rgba(0,0,0,0)');
+  // fire glow: a yellow-white bloom lower-centre-right, behind the lower
+  // menu buttons (the original's burning-building backdrop)
+  const glow = ctx.createRadialGradient(w * 0.62, h * 0.62, 4, w * 0.62, h * 0.62, w * 0.3);
+  glow.addColorStop(0, 'rgba(255,240,176,0.9)');
+  glow.addColorStop(0.3, 'rgba(250,180,80,0.75)');
+  glow.addColorStop(0.65, 'rgba(232,122,32,0.45)');
+  glow.addColorStop(1, 'rgba(232,122,32,0)');
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, w, h);
 

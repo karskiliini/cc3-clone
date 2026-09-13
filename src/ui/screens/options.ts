@@ -17,7 +17,7 @@ interface ToggleRow {
 
 export class OptionsScreen implements Screen {
   private returnTo: Screen;
-  private panel: Rect = { x: 60, y: 90, w: 680, h: 420 };
+  private panel: Rect = { x: 60, y: 110, w: 680, h: 250 };
 
   private volMinusR: Rect;
   private volPlusR: Rect;
@@ -32,21 +32,22 @@ export class OptionsScreen implements Screen {
   constructor(returnTo: Screen) {
     this.returnTo = returnTo;
     const p = this.panel;
-    this.volMinusR = { x: p.x + 150, y: p.y + 46, w: 22, h: 22 };
-    this.volPlusR = { x: p.x + 250, y: p.y + 46, w: 22, h: 22 };
-    this.labelsR = { x: p.x + 150, y: p.y + 86, w: 100, h: 22 };
-    this.losR = { x: p.x + 150, y: p.y + 126, w: 100, h: 22 };
-    this.speedR = { x: p.x + 150, y: p.y + 166, w: 100, h: 22 };
+    const rowY = (i: number) => p.y + 60 + i * 46;
+    this.volMinusR = { x: p.x + 150, y: rowY(0), w: 22, h: 22 };
+    this.volPlusR = { x: p.x + 250, y: rowY(0), w: 22, h: 22 };
+    this.labelsR = { x: p.x + 150, y: rowY(1), w: 100, h: 22 };
+    this.losR = { x: p.x + 150, y: rowY(2), w: 100, h: 22 };
+    this.speedR = { x: p.x + 150, y: rowY(3), w: 100, h: 22 };
 
     const s = game.settings;
-    const rowX = p.x + 400;
+    const rowX = p.x + 590;
     const rowY0 = p.y + 60;
     const rowStep = 46;
     this.realismRows = [
-      { label: 'Always See Enemy', rect: { x: rowX, y: rowY0, w: 70, h: 18 }, get: () => !!s.alwaysSeeEnemy, set: (v) => (s.alwaysSeeEnemy = v) },
-      { label: 'Never Act On Initiative', rect: { x: rowX, y: rowY0 + rowStep, w: 70, h: 18 }, get: () => !!s.neverActOnInitiative, set: (v) => (s.neverActOnInitiative = v) },
-      { label: 'Always Have Full Enemy Info', rect: { x: rowX, y: rowY0 + rowStep * 2, w: 70, h: 18 }, get: () => !!s.alwaysFullEnemyInfo, set: (v) => (s.alwaysFullEnemyInfo = v) },
-      { label: 'Always Obey Orders', rect: { x: rowX, y: rowY0 + rowStep * 3, w: 70, h: 18 }, get: () => !!s.alwaysObeyOrders, set: (v) => (s.alwaysObeyOrders = v) },
+      { label: 'Always See Enemy', rect: { x: rowX, y: rowY0, w: 70, h: 22 }, get: () => !!s.alwaysSeeEnemy, set: (v) => (s.alwaysSeeEnemy = v) },
+      { label: 'Never Act On Initiative', rect: { x: rowX, y: rowY0 + rowStep, w: 70, h: 22 }, get: () => !!s.neverActOnInitiative, set: (v) => (s.neverActOnInitiative = v) },
+      { label: 'Always Have Full Enemy Info', rect: { x: rowX, y: rowY0 + rowStep * 2, w: 70, h: 22 }, get: () => !!s.alwaysFullEnemyInfo, set: (v) => (s.alwaysFullEnemyInfo = v) },
+      { label: 'Always Obey Orders', rect: { x: rowX, y: rowY0 + rowStep * 3, w: 70, h: 22 }, get: () => !!s.alwaysObeyOrders, set: (v) => (s.alwaysObeyOrders = v) },
     ];
   }
 
@@ -100,23 +101,24 @@ export class OptionsScreen implements Screen {
       ctx.fillStyle = '#f0f0ec';
       ctx.fillText(text, x, y);
     };
-    label('VOLUME', p.x + 24, p.y + 40);
-    label(`${Math.round(s.volume * 100)}%`, p.x + 90, p.y + 40);
+    const baseline = (r: Rect) => r.y + 15;
+    label('VOLUME', p.x + 24, baseline(this.volMinusR));
+    label(`${Math.round(s.volume * 100)}%`, p.x + 190, baseline(this.volMinusR));
     drawSmallMetalButton(ctx, this.volMinusR, '-');
     drawSmallMetalButton(ctx, this.volPlusR, '+');
 
-    label('UNIT LABELS', p.x + 24, p.y + 80);
+    label('UNIT LABELS', p.x + 24, baseline(this.labelsR));
     drawSmallMetalButton(ctx, this.labelsR, s.unitLabels ? 'ON' : 'OFF');
 
-    label('LOS LINES', p.x + 24, p.y + 120);
+    label('LOS LINES', p.x + 24, baseline(this.losR));
     drawSmallMetalButton(ctx, this.losR, s.losLines ? 'ON' : 'OFF');
 
-    label('SPEED', p.x + 24, p.y + 160);
+    label('SPEED', p.x + 24, baseline(this.speedR));
     drawSmallMetalButton(ctx, this.speedR, `x${s.speed}`);
 
-    drawShadowText(ctx, 'REALISM', p.x + 400, p.y + 28, 'bold 16px Arial, Helvetica, sans-serif', '#f0d840');
+    drawShadowText(ctx, 'REALISM', p.x + 380, p.y + 28, 'bold 16px Arial, Helvetica, sans-serif', '#f0d840');
     for (const row of this.realismRows) {
-      label(row.label, p.x + 400, row.rect.y - 4);
+      label(row.label, p.x + 380, baseline(row.rect));
       drawSmallMetalButton(ctx, row.rect, row.get() ? 'ON' : 'OFF');
     }
 

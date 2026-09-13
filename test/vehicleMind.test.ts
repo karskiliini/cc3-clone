@@ -4,7 +4,7 @@ import type {
 } from '@/shared/types';
 import { Rng } from '@/shared/rng';
 import { createMind, baseMotivation } from '@/sim/mind';
-import { stepVehicleMinds, onVehicleHit } from '@/sim/vehicle';
+import { stepVehicleMinds, onVehicleHit, onVehicleNearMiss } from '@/sim/vehicle';
 import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';
 
@@ -215,5 +215,36 @@ describe('vehicle crew fear from non-penetrating hits (spec §10.2)', () => {
     stepVehicleMinds(state, rng, 0.1);
 
     expect(['calm', 'alert']).toContain(cmdr.mind.state);
+  });
+});
+
+describe('vehicle crew alarm from AT near misses (spec §10c)', () => {
+  it('a PaK round missing an unspotted tank alarms the crew and starts a reverse to cover', () => {
+    const map = makeMap((tiles) => setTile(tiles, 12, 10, 'buildingStone'));
+    const state = makeState(map);
+    const v = makeVehicle(1, 1, 'pz4gh', { pos: { x: 10.5, y: 10.5 }, hullFacing: 0 });
+    state.vehicles.set(v.id, v);
+    const cmdr = makeCommander(1, 1);
+    state.soldiers.set(cmdr.id, cmdr);
+    state.teams.set(1, makeTeam(1, v.id, [cmdr.id]));
+    const pakPos = { x: 10.5, y: 2.5 }; // never spotted
+
+    onVehicleNearMiss(state, v, WEAPONS.pak40, pakPos);
+    expect(cmdr.mind.threatLevel).toBeGreaterThanOrEqual(0.8);
+
+    const rng = new Rng(1);
+    for (let i = 0; i < 10; i++) stepVehicleMinds(state, rng, 0.5);
+    expect(v.pos.y).not.toBeCloseTo(10.5, 1);
+  });
+
+  it('small-arms misses do not alarm a tank crew', () => {
+    const state = makeState(makeMap());
+    const v = makeVehicle(1, 1, 'pz4gh');
+    state.vehicles.set(v.id, v);
+    const cmdr = makeCommander(1, 1);
+    state.soldiers.set(cmdr.id, cmdr);
+    state.teams.set(1, makeTeam(1, v.id, [cmdr.id]));
+    onVehicleNearMiss(state, v, WEAPONS.kar98k, { x: 10.5, y: 2.5 });
+    expect(cmdr.mind.threatLevel).toBe(0);
   });
 });

@@ -52,8 +52,8 @@ export class TeamGrid {
     const now = performance.now();
     for (let i = 0; i < COLS * ROWS; i++) {
       const r = boxRect(i);
-      if (hitRect(input.mouse, r)) this.hoverIndex = i;
-      if (i >= teams.length) continue;
+      if (hitRect(input.mouse, r) && !(i < teams.length && teams[i].outOfAction)) this.hoverIndex = i;
+      if (i >= teams.length || teams[i].outOfAction) continue;
       for (const c of input.clicks) {
         if (c.button === 0 && hitRect({ x: c.x, y: c.y }, r)) {
           const doubleClick = this.lastClickIndex === i && now - this.lastClickTime < DOUBLE_CLICK_MS;
@@ -120,10 +120,19 @@ export class TeamGrid {
     ctx.fillStyle = nameOnDark ? HUD.text : HUD.black;
     ctx.fillText(clipTextToWidth(ctx, team.name, barW - 4), Math.round(barX + 2), Math.round(barRect.y + 1));
 
-    setHudFont(ctx, 'small');
-    ctx.fillStyle = teamStatusTextColor(team.status);
+    setHudFont(ctx, 'label');
+    // Out-of-action boxes stay in the roster (greyed) so the player sees why a team is gone.
+    ctx.fillStyle = team.outOfAction ? HUD.red : teamStatusTextColor(team.status);
     const label = teamStatusLabel(team.status);
     ctx.fillText(clipTextToWidth(ctx, label, barW - 2), Math.round(barX + 1), Math.round(r.y + 16));
+
+    if (team.outOfAction) {
+      // Grey the icon + name bar of a knocked-out/destroyed team; the red status word stays readable.
+      ctx.fillStyle = 'rgba(40,36,34,0.6)';
+      ctx.fillRect(Math.round(r.x) + 1, Math.round(r.y) + 1, Math.round(r.w) - 2, 14);
+      ctx.fillRect(Math.round(r.x) + 1, Math.round(r.y) + 15, iconAreaW - 1, Math.round(r.h) - 16);
+      return;
+    }
 
     if (selected) {
       ctx.strokeStyle = HUD.gold;

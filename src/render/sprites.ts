@@ -8,7 +8,7 @@ import { TILE_PX, TILE_M } from '@/shared/types';
 import { hash2 } from '@/shared/rng';
 import { createCanvas, ctx2d } from '@/render/pixelUtil';
 import { buildVehicleHull, buildVehicleTurret } from '@/render/vehicleArt';
-import { buildSoldierArt, orientSoldierArt } from '@/render/soldierArt';
+import { buildSoldierArt, orientSoldierArt, type SoldierOutline } from '@/render/soldierArt';
 import { buildTeamIcon } from '@/render/teamIconArt';
 
 const PX_PER_M = TILE_PX / TILE_M; // 5 px/m
@@ -35,9 +35,10 @@ export function getSoldierSprite(
   stance: Stance | 'dead',
   facing: Facing8,
   frame: 0 | 1,
+  outline: SoldierOutline = 'enemy',
 ): HTMLCanvasElement {
-  const key = `soldier|${side}|${season}|${stance}|${facing}|${frame}`;
-  return cached(key, () => orientSoldierArt(buildSoldierArt(side, season, stance, frame), facing));
+  const key = `soldier|${side}|${season}|${stance}|${facing}|${frame}|${outline}`;
+  return cached(key, () => orientSoldierArt(buildSoldierArt(side, season, stance, frame, outline), facing));
 }
 
 // ============================================================================

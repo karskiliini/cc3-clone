@@ -6,10 +6,10 @@ import {
   FLASH_LIFE, SIDES, SIM_DT, SPOT_INTERVAL, TILE_M, TRACER_LIFE, otherSide,
 } from '@/shared/types';
 import { Rng } from '@/shared/rng';
-import { dist, pointInRect, vadd } from '@/shared/math';
+import { dist, pointInRect } from '@/shared/math';
 import { buildMap } from './map';
 import { isPassable } from './path';
-import { spawnTeam } from './spawn';
+import { spawnTeam, formationPos } from './spawn';
 import { applyOrder } from './orders';
 import { stepMovement } from './movement';
 import { stepVehicles } from './vehicle';
@@ -207,7 +207,7 @@ export class Battle {
     for (const sid of team.soldierIds) {
       const s = this.state.soldiers.get(sid);
       if (!s) continue;
-      s.pos = team.vehicleId != null ? { x: pos.x, y: pos.y } : vadd(pos, s.formationOffset);
+      s.pos = team.vehicleId != null ? { x: pos.x, y: pos.y } : formationPos(this.state.map, pos, s.formationOffset);
     }
     return true;
   }

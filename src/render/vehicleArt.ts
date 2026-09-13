@@ -86,11 +86,11 @@ function applyGradientWash(ctx: CanvasRenderingContext2D, x: number, y: number, 
 function drawWheel(g: Grid, cx: number, cy: number, trackW: number): void {
   if (trackW >= 3) {
     for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) put(g, cx + dx, cy + dy, 'W');
+      for (let dx = -1; dx <= 1; dx++) put(g, cx + dx, cy + dy, 'w');
     }
-    put(g, cx, cy, 'w');
+    put(g, cx, cy, 'T');
   } else {
-    put(g, cx, cy, 'W');
+    put(g, cx, cy, 'T');
   }
 }
 
@@ -123,14 +123,14 @@ function resize(g: Grid, tw: number, th: number): Grid {
 /** Mark the outer boundary of a filled shape ('.'-is-empty) as outline 'o',
  * without disturbing interior shading — used for turret bodies so a rounded
  * casting or slab reads with a crisp silhouette edge. */
-function outlineFill(g: Grid): void {
+function outlineFill(g: Grid, ch = 'o'): void {
   const h = g.length, w = g[0].length;
   const orig = g.map((r) => r.slice());
   const filled = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && orig[y][x] !== '.';
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       if (!filled(x, y)) continue;
-      if (!filled(x - 1, y) || !filled(x + 1, y) || !filled(x, y - 1) || !filled(x, y + 1)) g[y][x] = 'o';
+      if (!filled(x - 1, y) || !filled(x + 1, y) || !filled(x, y - 1) || !filled(x, y + 1)) g[y][x] = ch;
     }
   }
 }
@@ -198,13 +198,14 @@ const EARLY_GERMAN_PALETTE: VehPalette = makePalette('#5e6066');
 const LATE_GERMAN_PALETTE: VehPalette = makePalette('#a9956a', '#6f7a4d');
 const SOVIET_PALETTE: VehPalette = makePalette('#5d6a3f');
 
-const OUTLINE = '#0c0c0a'; // near-black, deliberately darker than any hullDark tone
 // Round-3: tracks pushed to near-black (were a dark grey-brown) so the light
 // wheel-rim discs (drawWheel's 'W', below) pop against them the way the
 // reference's tank tracks read as a flat dark band under a lit hull.
-const TRACK_DARK = '#141311';
-const TRACK_LIGHT = '#2b2924';
-const WHEEL_RIM = '#1c1b17';
+// wf4: tracks lifted back to a soft dark grey (~25% darker than the hull
+// deck, as in ref_cc3_1483); wheels slightly lighter than the run.
+const TRACK_DARK = '#3a3a34';
+const TRACK_LIGHT = '#57554d';
+const WHEEL_RIM = '#4a4840';
 const GRILLE = '#201f1c';
 const HATCH = '#d8d2b8';
 const MARK_WHITE = '#eceae0';
@@ -223,10 +224,10 @@ function colorMapFor(pal: VehPalette): Record<string, string> {
   // face they sit on.
   const hot = shade(pal.hullLight, 0.25);
   return {
-    o: OUTLINE, t: TRACK_DARK, T: TRACK_LIGHT, w: WHEEL_RIM, W: pal.hullLight,
+    o: shade(pal.hullDark, -0.45), t: TRACK_DARK, T: TRACK_LIGHT, w: WHEEL_RIM, W: pal.hullLight,
     h: pal.hullMid, H: pal.hullLight, d: pal.hullDark, g: GRILLE, x: HATCH,
     // Barrel reads as a lit cylinder: bright top edge, mid body, dark underside.
-    B: hot, b: pal.hullMid, n: pal.hullDark, k: OUTLINE,
+    B: hot, b: pal.hullMid, n: pal.hullDark, k: shade(pal.hullDark, -0.3),
     m: MARK_WHITE, c: MARK_BLACK, r: MARK_RED,
     a: pal.camoBand ?? pal.hullDark,
     s: 'rgba(6,6,4,0.4)',
@@ -439,7 +440,7 @@ function buildCasemateHull(
   const boxH = Math.round(h * 0.46);
   const bx0 = Math.round(w * 0.16), bx1 = w - 1 - Math.round(w * 0.16);
   shadeRect(body, bx0, 1, bx1, boxH);
-  strokeRect(body, bx0, 1, bx1, boxH, 'o');
+  strokeRect(body, bx0, 1, bx1, boxH, 'd');
   const midX = Math.floor((bx0 + bx1) / 2);
   drawHatchWithHinge(body, midX - 1, 3, midX + 1, 4, 'n');
   const barrel = blank(w, barrelLenPx);
@@ -509,7 +510,7 @@ function buildTurretGrid(tw: number, bodyH: number, barrelLenPx: number, barrelW
     const bx0 = Math.floor((tw - bw) / 2), bx1 = bx0 + bw - 1;
     shadeRect(g, bx0, barrelLenPx + bodyH, bx1, barrelLenPx + bodyH + bustle - 1);
   }
-  outlineFill(g);
+  outlineFill(g, 'd');
   // Barrel, extending "north" off the top of the turret body, as a lit
   // cylinder (light top edge / mid body / dark underside).
   const bcx = Math.floor(cx);
@@ -518,7 +519,7 @@ function buildTurretGrid(tw: number, bodyH: number, barrelLenPx: number, barrelW
     // Mantlet reads as a darker armored block bolted to the turret front.
     const my0 = Math.max(0, barrelLenPx - 2);
     fillRect(g, bcx - Math.floor(opts.mantletWpx / 2), my0, bcx + Math.floor(opts.mantletWpx / 2), my0 + 2, 'd');
-    strokeRect(g, bcx - Math.floor(opts.mantletWpx / 2), my0, bcx + Math.floor(opts.mantletWpx / 2), my0 + 2, 'o');
+    strokeRect(g, bcx - Math.floor(opts.mantletWpx / 2), my0, bcx + Math.floor(opts.mantletWpx / 2), my0 + 2, 'd');
   }
   if (opts.cupola) {
     const r = Math.max(1, Math.round(tw * 0.09));
@@ -598,7 +599,7 @@ function gridToCanvas(g: Grid, colorMap: Record<string, string>, shadowDx: numbe
   ctx.save();
   ctx.globalAlpha = 0.45;
   ctx.translate(HULL_PAD + shadowDx, HULL_PAD + shadowDy);
-  ctx.fillStyle = '#000000';
+  ctx.fillStyle = 'rgb(70,45,80)';
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       if (g[y][x] === '.') continue;
@@ -755,7 +756,7 @@ export function buildVehicleTurret(defId: string, lengthM: number, widthM: numbe
     const my0 = Math.max(0, barrelLenPx - 2);
     const mx0 = bcx - Math.floor(spec.mantletWpx / 2), mx1 = bcx + Math.floor(spec.mantletWpx / 2);
     fillRect(grid, mx0, my0, mx1, my0 + 2, 'd');
-    strokeRect(grid, mx0, my0, mx1, my0 + 2, 'o');
+    strokeRect(grid, mx0, my0, mx1, my0 + 2, 'd');
   }
   if (pal.camoBand) applyCamoBands(grid);
   const bodyCy = barrelLenPx + Math.floor((bodyH + bustleHpx) * 0.45);

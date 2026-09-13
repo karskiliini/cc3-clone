@@ -180,6 +180,8 @@ export interface SoldierMind {
   lastCoverSeekAt: number;
   /** hidden personality trait rolled at spawn (spec §11); undefined = no notable trait. */
   trait?: 'steady' | 'nervous' | 'brave' | 'reckless' | 'cautious' | 'stoic';
+  /** issuedAt of a team order this soldier refused (failed obedience); retried after hesitation. */
+  pendingOrderAt?: number;
 }
 
 export interface Soldier {

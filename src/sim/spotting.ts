@@ -11,7 +11,9 @@ const ALWAYS_SPOT_RANGE_M = 10;
 const DEG15 = (15 * Math.PI) / 180;
 const DEG90 = (90 * Math.PI) / 180;
 
-function stanceFactor(stance: Stance): number {
+/** Visual-signature multiplier by stance. Deliberately differs from ballistics.ts's
+ * exposureStanceFactor (prone 0.4 here vs 0.45 there); see that comment. */
+function visibilityStanceFactor(stance: Stance): number {
   switch (stance) {
     case 'standing': return 1;
     case 'crouching': return 0.7;
@@ -106,7 +108,7 @@ export function updateSpotting(state: BattleState, rng: Rng): void {
         if (dsq <= alwaysSq && visibility > 0) alwaysSpotted = true;
 
         const mindFactor = sp.soldier ? mindSpotFactor(sp.soldier, e.pos) : 1;
-        const p = visibility * stanceFactor(e.stance) * (isMoving(e.activity) ? 1.5 : 1) *
+        const p = visibility * visibilityStanceFactor(e.stance) * (isMoving(e.activity) ? 1.5 : 1) *
           (isFiringRecently(e, state.time) ? 3 : 1) * mindFactor;
         if (p > bestP) { bestP = p; bestSpotter = sp.soldier; }
       }

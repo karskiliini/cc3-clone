@@ -1,7 +1,7 @@
 // ============================================================================
 // palette.ts — all color constants for the game. Muted, painted, CC3-style.
 // ============================================================================
-import type { Season, Terrain, OrderType, Side, TeamStatusWord } from '@/shared/types';
+import type { Season, Terrain, OrderType, Side } from '@/shared/types';
 
 /** Chrome / UI colors (bottom panel, bevels, headings). */
 export const PALETTE = {
@@ -94,36 +94,6 @@ export const TERRAIN_COLORS: Record<Season, Record<Terrain, string[]>> = {
   },
 };
 
-/** Team status word -> HUD color. */
-export function STATUS_COLOR(word: TeamStatusWord): string {
-  switch (word) {
-    case 'Idle':
-    case 'Defending':
-    case 'Ambushing':
-      return PALETTE.green;
-    case 'Moving':
-    case 'Moving Fast':
-    case 'Sneaking':
-      return PALETTE.white;
-    case 'Firing':
-      return PALETTE.yellow;
-    case 'Pinned':
-    case 'Cowering':
-      return PALETTE.orange;
-    case 'Panicked':
-    case 'Routed':
-    case 'Broken':
-      return PALETTE.red;
-    case 'Destroyed':
-    case 'Knocked Out':
-      return PALETTE.dim;
-    case 'Surrendered':
-      return PALETTE.white;
-    default:
-      return PALETTE.text;
-  }
-}
-
 /** Soldier health / activity word colors used by soldier cards & tiny figures. */
 export const HEALTH_COLOR = {
   healthy: PALETTE.green,
@@ -162,6 +132,10 @@ export const HUD = {
   text: '#f0f0ec',
   gold: '#e8d83c',
   green: '#3fbf3f',
+  /** pale sage green of the original's Firing/Seeking Cover/Reloading status words (ref_cc3_1482) */
+  statusGreen: '#96c882',
+  /** soldier-monitor mind-state colour for berserk */
+  magenta: '#c040c0',
   yellow: '#e8d83c',
   red: '#d02020',
   darkRed: '#6e1616',

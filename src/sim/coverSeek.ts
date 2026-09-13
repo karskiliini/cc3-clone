@@ -83,10 +83,11 @@ function moveTo(state: BattleState, s: Soldier, tile: Vec2): void {
 
 const lookCoverMsgAt = new WeakMap<BattleState, Map<number, number>>();
 function maybeAnnounceLookingForCover(state: BattleState, team: Team): void {
+  if (team.side !== state.config.playerSide) return; // flavour text is player-side only (spec §11)
   let m = lookCoverMsgAt.get(state);
   if (!m) { m = new Map(); lookCoverMsgAt.set(state, m); }
   const last = m.get(team.id) ?? -Infinity;
-  if (state.time - last < 60) return;
+  if (state.time - last < 180) return;
   m.set(team.id, state.time);
   addMessage(state, `${team.name}\nis looking for cover.`, 'info');
 }
@@ -132,7 +133,12 @@ function seekForSoldier(state: BattleState, rng: Rng, s: Soldier): void {
     mind.lastCoverSeekAt = state.time;
     if (found && found.score - cur >= margin && dist(anchor, found.tile) <= 6) {
       moveTo(state, s, found.tile);
-      if (team) maybeAnnounceLookingForCover(state, team);
+      // Only announce under real danger: settling into cover behind a Defend/Ambush facing before
+      // any contact happens quietly.
+      const inDanger = mind.threatLevel > 0.3
+        || mind.beliefs.some((b) => b.confidence > 0.3)
+        || (state.time - mind.lastIncomingAt) < 30;
+      if (team && inDanger) maybeAnnounceLookingForCover(state, team);
     }
     return;
   }

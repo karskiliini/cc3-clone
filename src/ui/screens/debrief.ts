@@ -57,6 +57,7 @@ export class DebriefScreen implements Screen {
     ctx.fillStyle = color;
     ctx.font = 'bold 14px Arial, Helvetica, sans-serif';
     ctx.fillText(arrow, x + w, y);
+    ctx.textAlign = 'left';
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
@@ -115,6 +116,7 @@ export class DebriefScreen implements Screen {
     drawShadowText(ctx, 'YOUR TEAMS', teamsRect.x + 12, teamsRect.y + 20, 'bold 13px Arial, Helvetica, sans-serif', '#f0d840');
     let ty = teamsRect.y + 40;
     ctx.font = '11px Arial, Helvetica, sans-serif';
+    ctx.textAlign = 'left';
     for (const team of state.teams.values()) {
       if (team.side !== playerSide) continue;
       const alive = team.soldierIds.filter((id) => {

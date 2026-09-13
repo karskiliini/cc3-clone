@@ -154,6 +154,12 @@ function handleRouting(state: BattleState, s: Soldier, dt: number): void {
   }
 }
 
+/** Keep a nudged position inside the map (separation near an edge could push a soldier off it). */
+function clampToMap(state: BattleState, p: { x: number; y: number }): { x: number; y: number } {
+  const m = state.map;
+  return { x: Math.min(Math.max(p.x, 0.05), m.width - 0.05), y: Math.min(Math.max(p.y, 0.05), m.height - 0.05) };
+}
+
 function separateSoldiers(state: BattleState): void {
   const buckets = new Map<string, Soldier[]>();
   for (const s of state.soldiers.values()) {
@@ -170,8 +176,8 @@ function separateSoldiers(state: BattleState): void {
         const d = dist(a.pos, b.pos);
         if (d < 0.3) {
           const dir = d > 1e-4 ? vnorm(vsub(b.pos, a.pos)) : { x: 1, y: 0 };
-          a.pos = vsub(a.pos, vscale(dir, 0.05));
-          b.pos = vadd(b.pos, vscale(dir, 0.05));
+          a.pos = clampToMap(state, vsub(a.pos, vscale(dir, 0.05)));
+          b.pos = clampToMap(state, vadd(b.pos, vscale(dir, 0.05)));
         }
       }
     }

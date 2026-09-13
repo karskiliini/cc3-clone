@@ -6,7 +6,7 @@ import { idx, inBounds, setTile, tileAt } from './map';
 import { TERRAIN_PROPS } from './terrain';
 import { VEHICLE_DEFS } from '@/data/units';
 import { WEAPONS } from '@/data/weapons';
-import { losTrace } from './los';
+import { hasLOS, losTrace } from './los';
 import { isPassable } from './path';
 import { addStress, addOrMergeBelief } from './mind';
 import { expectedPenetrationChance } from './ballistics';
@@ -70,6 +70,54 @@ export function onVehicleHit(
     addStress(mind, base * mult);
     // spec §10.2: small arms alone never raise threatLevel above 0.3.
     if (category === 'smallArms' && !atAlarm) mind.threatLevel = Math.min(mind.threatLevel, 0.3);
+  }
+}
+
+/** True for weapons whose passing round alarms a vehicle crew (tank guns, AT guns/rockets/rifles). */
+function isAtWeapon(weapon: WeaponDef): boolean {
+  const c = weapon.cls;
+  return c === 'tankgun' || c === 'atgun' || c === 'atrocket' || c === 'atrifle';
+}
+
+interface NearMissRecord { pos: Vec2; weapon: WeaponDef; at: number }
+const nearMisses = new WeakMap<BattleState, Map<number, NearMissRecord>>();
+const NEAR_MISS_MEMORY_S = 15;
+
+function distToSegment(p: Vec2, a: Vec2, b: Vec2): number {
+  const abx = b.x - a.x, aby = b.y - a.y;
+  const len2 = abx * abx + aby * aby;
+  const t = len2 > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2)) : 0;
+  return Math.hypot(p.x - (a.x + abx * t), p.y - (a.y + aby * t));
+}
+
+function alarmCrewNearMiss(state: BattleState, v: Vehicle, weapon: WeaponDef, shooterPos: Vec2): void {
+  if (v.state === 'knockedOut' || v.state === 'burning' || v.state === 'abandoned') return;
+  const team = state.teams.get(v.teamId);
+  if (!team) return;
+  const commander = pickCommander(state, team);
+  if (!commander) return;
+  const mind = commander.mind;
+  mind.threatLevel = Math.max(mind.threatLevel, 0.8);
+  // Toward the shooter if the crew can see the muzzle; otherwise back along the tracer's line,
+  // which points the same way but gives no pinpointed position (no belief).
+  mind.threatDir = angleTo(v.pos, shooterPos);
+  if (hasLOS(state.map, v.pos, shooterPos)) addOrMergeBelief(mind, shooterPos, 'fired', 0.6, 1, state.time);
+  addStress(mind, 4);
+  let m = nearMisses.get(state);
+  if (!m) { m = new Map(); nearMisses.set(state, m); }
+  m.set(v.id, { pos: { ...shooterPos }, weapon, at: state.time });
+}
+
+/** Spec §10(c): an AT round that misses (passes close by) alarms the crew of the target vehicle and
+ * of any friendly vehicle within 3 tiles of the round's flight line, so a crew can reverse to cover
+ * before the killing shot instead of only after a hit. Called by combat.ts's miss branch. */
+export function onVehicleNearMiss(state: BattleState, vehicle: Vehicle, weapon: WeaponDef, shooterPos: Vec2): void {
+  const isHalftrack = VEHICLE_DEFS[vehicle.defId]?.kind === 'halftrack';
+  if (!isAtWeapon(weapon) && !categorizeVehicleHit(weapon, isHalftrack).atAlarm) return;
+  alarmCrewNearMiss(state, vehicle, weapon, shooterPos);
+  for (const other of state.vehicles.values()) {
+    if (other.id === vehicle.id || other.side !== vehicle.side) continue;
+    if (distToSegment(other.pos, shooterPos, vehicle.pos) <= 3) alarmCrewNearMiss(state, other, weapon, shooterPos);
   }
 }
 
@@ -150,7 +198,17 @@ function stepOneVehicleMind(state: BattleState, rng: Rng, dt: number, v: Vehicle
     const d = expectedPenetrationChance(th.weapon, th.distM, def.armor.front);
     if (d > topDanger || !top) { topDanger = d; top = th; }
   }
-  if (top) {
+  // Belief-only threat (spec §10c): an unseen AT shooter that just sent a round past us. Danger is
+  // estimated from the weapon that fired, so a near miss alone can start a reverse to cover.
+  if (!top) {
+    const nm = nearMisses.get(state)?.get(v.id);
+    if (nm && state.time - nm.at <= NEAR_MISS_MEMORY_S) {
+      const distM = dist(v.pos, nm.pos) * TILE_M;
+      top = { pos: { ...nm.pos }, distM, weapon: nm.weapon, theirArmor: null };
+      topDanger = expectedPenetrationChance(nm.weapon, distM, def.armor.front);
+    }
+  }
+  if (top && threats.length > 0) {
     mind.threatLevel = Math.max(mind.threatLevel, 0.7);
     mind.threatDir = angleTo(v.pos, top.pos);
     addOrMergeBelief(mind, top.pos, 'seen', 0.9, 1, state.time);

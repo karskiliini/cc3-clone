@@ -1,10 +1,11 @@
-import type { BattleState, Team, TeamDef, Side, Vec2, Soldier, Vehicle } from '@/shared/types';
+import type { BattleState, GameMap, Team, TeamDef, Side, Vec2, Soldier, Vehicle } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { angleTo, vadd } from '@/shared/math';
 import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';
 import { randomName } from '@/data/names';
 import { baseMotivation, createMind, rollTrait } from './mind';
+import { isPassable } from './path';
 
 const RELOAD_HEAVY = new Set(['mortar', 'atgun', 'atrocket']);
 
@@ -16,6 +17,20 @@ function formationOffset(index: number): Vec2 {
   const x = (col - 1.5) * 1.5;
   const y = row * 1.5;
   return { x, y };
+}
+
+/** Infantry soldier position = anchor + formation offset, clamped inside the map; if that tile is
+ * impassable for infantry, falls back to the (passable) team anchor. Keeps deploy/spawn from
+ * placing soldiers off-map, where findPath returns [] and they would be stuck forever. */
+export function formationPos(map: GameMap, anchor: Vec2, offset: Vec2): Vec2 {
+  const p = vadd(anchor, offset);
+  p.x = Math.min(Math.max(p.x, 0.5), map.width - 0.5);
+  p.y = Math.min(Math.max(p.y, 0.5), map.height - 0.5);
+  if (isPassable(map, Math.floor(p.x), Math.floor(p.y), 'infantry')) return p;
+  return {
+    x: Math.min(Math.max(anchor.x, 0.5), map.width - 0.5),
+    y: Math.min(Math.max(anchor.y, 0.5), map.height - 0.5),
+  };
 }
 
 /** Create a Team (and its soldiers, and its Vehicle if the def specifies one) at `pos`. */
@@ -83,7 +98,7 @@ export function spawnTeam(state: BattleState, def: TeamDef, side: Side, pos: Vec
     const experience = rng.range(20, 60);
     totalExp += experience;
     const offset = formationOffset(i);
-    const soldierPos = vehicle ? { x: vehicle.pos.x, y: vehicle.pos.y } : vadd(pos, offset);
+    const soldierPos = vehicle ? { x: vehicle.pos.x, y: vehicle.pos.y } : formationPos(state.map, pos, offset);
 
     const soldier: Soldier = {
       id: state.nextId++,

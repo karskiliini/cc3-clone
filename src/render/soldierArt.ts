@@ -73,7 +73,14 @@ const OUTLINE_COLOR = 'rgba(30,31,24,0.85)'; // '#1e1f18' @ 85%
 // handles the "sits on the ground" cue; this halo handles raw silhouette
 // contrast against any background tone).
 const HALO_COLOR = 'rgba(8,8,6,0.4)';
-const WINTER_SE_SHADE = '#b9bbb4';
+const WINTER_SE_SHADE = '#a9aba4';
+// wf4: the manual's bright yellow "soldier outline" that friendly winter
+// figures carry in ref_cc3_1482 — replaces the dark ring + halo for them.
+const FRIENDLY_WINTER_OUTLINE = 'rgba(216,200,96,0.9)';
+const FRIENDLY_WINTER_HALO = 'rgba(8,8,6,0.2)';
+
+/** Whose soldier this sprite is, relative to the viewing player. */
+export type SoldierOutline = 'friendly' | 'enemy';
 
 interface UniformPalette { u: string; s: string; helmetMid: string; helmetLight: string }
 // Round-3: shift German feldgrau slightly bluer and Soviet khaki slightly
@@ -82,7 +89,9 @@ interface UniformPalette { u: string; s: string; helmetMid: string; helmetLight:
 // two-toned opposing uniforms.
 const GERMAN_SUMMER: UniformPalette = { u: '#626f5e', s: '#485144', helmetMid: '#5a6052', helmetLight: '#737a6c' };
 const SOVIET_SUMMER: UniformPalette = { u: '#8f7f44', s: '#695b2e', helmetMid: '#71663a', helmetLight: '#897e4c' };
-const WINTER_SMOCK = { u: '#dcdcd4', s: '#a9aaa2' };
+// wf4: smock lowered below the snow ramp's brightest tones so the figure is
+// not a pure-white blob; WINTER_SE_SHADE stays darker than it.
+const WINTER_SMOCK = { u: '#c9cac2', s: '#a9aaa2' };
 const SOVIET_WINTER_HELMET_MID = '#d0d0c8';
 
 function darkenHex(hex: string, factor: number): string {
@@ -120,7 +129,7 @@ function paletteFor(side: Side, season: Season): UniformPalette {
  * ('h', and therefore its derived specular) is brightened, so the head reads
  * as a distinct disc and the body silhouette reads as a distinct shape at
  * battle zoom instead of blending into the ground ramp. */
-function colorsFor(side: Side, season: Season, dead: boolean): Record<string, string> {
+function colorsFor(side: Side, season: Season, dead: boolean, outline: SoldierOutline = 'enemy'): Record<string, string> {
   const pal = paletteFor(side, season);
   let u = pal.u;
   // Round-3 contrast pass: push the shoulder/torso dark edge and the helmet
@@ -143,45 +152,47 @@ function colorsFor(side: Side, season: Season, dead: boolean): Record<string, st
   }
   const rim = darkenHex(helmetMid, 0.62);
   const specular = lightenHex(helmetLight, 0.63);
+  const yellowRing = season === 'winter' && outline === 'friendly' && !dead;
   return {
     O: rim, H: helmetMid, h: helmetLight, P: specular,
     U: u, S: s, V: winterShade,
     W: weapon, K: stock, G: skin,
     b: boot, k: darkenHex(boot, 0.55),
     R: 'rgba(90,26,18,0.7)',
-    X: OUTLINE_COLOR,
-    Y: HALO_COLOR,
+    X: yellowRing ? FRIENDLY_WINTER_OUTLINE : OUTLINE_COLOR,
+    Y: yellowRing ? FRIENDLY_WINTER_HALO : HALO_COLOR,
   };
 }
 
 // ---------------------------------------------------------- stance grids --
 interface Built { grid: Grid; helmet: { cx: number; cy: number; r: number } }
 
-/** Standing / walking, north-facing: 6px helmet, 8-wide shoulders, a rifle
+/** Standing / walking, north-facing: 6px helmet, 6-wide shoulders, a rifle
  * held forward (north) from the right shoulder with a wood stock and a skin
- * pixel at the grip, and two alternating boots trailing behind. */
+ * pixel at the grip, and two long alternating legs trailing behind so the
+ * figure reads as an elongated striding silhouette along its facing. */
 function buildStandingGrid(frame: 0 | 1): Built {
-  const W = 20, H = 20;
+  const W = 20, H = 22;
   const g = blank(W, H);
   const helmet = { cx: 9, cy: 6, r: 3 };
   paintHelmet(g, helmet.cx, helmet.cy, helmet.r);
 
-  // Shoulders: 8px wide x 3 rows, darker edge columns.
-  const shY0 = 10, shY1 = 12, shX0 = 5, shX1 = 12;
+  // Shoulders: 6px wide x 3 rows, darker edge columns.
+  const shY0 = 10, shY1 = 12, shX0 = 6, shX1 = 11;
   fillRect(g, shX0, shY0, shX1, shY1, 'U');
   for (let y = shY0; y <= shY1; y++) { put(g, shX0, y, 'S'); put(g, shX1, y, 'S'); }
 
   // Weapon: 2px-wide, 9px barrel extending north from the right shoulder,
   // a 2px wood stock at the grip end, and a skin pixel at the hand.
-  const wx0 = 13, wx1 = 14;
+  const wx0 = 12, wx1 = 13;
   fillRect(g, wx0, 0, wx1, 8, 'W');
   fillRect(g, wx0, 9, wx1, 10, 'K');
   put(g, wx0, 11, 'G');
 
   // Legs: two 2px boots trailing the shoulders, alternating stride per frame.
   const bootY0 = 13;
-  const leftLen = frame === 0 ? 6 : 5;
-  const rightLen = frame === 0 ? 5 : 6;
+  const leftLen = frame === 0 ? 8 : 7;
+  const rightLen = frame === 0 ? 7 : 8;
   fillRect(g, 6, bootY0, 7, bootY0 + leftLen - 1, 'b');
   fillRect(g, 6, bootY0 + leftLen - 1, 7, bootY0 + leftLen - 1, 'k');
   fillRect(g, 10, bootY0, 11, bootY0 + rightLen - 1, 'b');
@@ -190,21 +201,22 @@ function buildStandingGrid(frame: 0 | 1): Built {
   return { grid: g, helmet };
 }
 
-/** Crouching, north-facing: larger 7px helmet, hunched 9-wide shoulders, a
- * shorter weapon, and a single tucked boot (the other knee is down and
- * hidden under the body from directly above). */
+/** Crouching, north-facing: larger 7px helmet, hunched 7-wide shoulders, a
+ * shorter weapon, a short tucked boot and a second bent leg trailing
+ * diagonally behind (the kneeling leg), so it reads differently from the
+ * straight two-legged standing figure at 1x. */
 function buildCrouchingGrid(frame: 0 | 1): Built {
   const W = 18, H = 18;
   const g = blank(W, H);
   const helmet = { cx: 9, cy: 6, r: 3.5 };
   paintHelmet(g, helmet.cx, helmet.cy, helmet.r);
 
-  const shY0 = 9, shY1 = 11, shX0 = 4, shX1 = 12;
+  const shY0 = 9, shY1 = 11, shX0 = 5, shX1 = 11;
   fillRect(g, shX0, shY0, shX1, shY1, 'U');
   for (let y = shY0; y <= shY1; y++) { put(g, shX0, y, 'S'); put(g, shX1, y, 'S'); }
 
   // Shorter weapon: 5px barrel + 2px stock + grip pixel.
-  const wx0 = 13, wx1 = 14;
+  const wx0 = 12, wx1 = 13;
   fillRect(g, wx0, 2, wx1, 6, 'W');
   fillRect(g, wx0, 7, wx1, 8, 'K');
   put(g, wx0, 9, 'G');
@@ -213,6 +225,11 @@ function buildCrouchingGrid(frame: 0 | 1): Built {
   const wob = frame === 1 ? 1 : 0;
   fillRect(g, 8 + wob, 12, 9 + wob, 14, 'b');
   fillRect(g, 8 + wob, 14, 9 + wob, 14, 'k');
+  // Kneeling leg: ~4px bent diagonally back and outward from the hip.
+  for (let i = 0; i < 4; i++) {
+    put(g, 10 + i, 12 + i, 'b');
+    put(g, 11 + i, 12 + i, i === 3 ? 'k' : 'b');
+  }
 
   return { grid: g, helmet };
 }
@@ -366,9 +383,9 @@ export interface SoldierArt {
 
 /** Build the north-facing (facing 0, "up") pixel art for one soldier
  * variant. Cached by the caller (sprites.ts) keyed on the same arguments. */
-export function buildSoldierArt(side: Side, season: Season, stance: Stance | 'dead', frame: 0 | 1): SoldierArt {
+export function buildSoldierArt(side: Side, season: Season, stance: Stance | 'dead', frame: 0 | 1, outline: SoldierOutline = 'enemy'): SoldierArt {
   const dead = stance === 'dead';
-  const colors = colorsFor(side, season, dead);
+  const colors = colorsFor(side, season, dead, outline);
   const built = dead ? buildDeadGrid()
     : stance === 'prone' ? buildProneGrid()
     : stance === 'crouching' ? buildCrouchingGrid(frame)

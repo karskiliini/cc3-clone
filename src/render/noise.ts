@@ -58,7 +58,7 @@ export function heightField(X: number, Y: number, seed: number): number {
  * read as dabbed-on paint patches instead of uniform speckle: `groundColorFbm` posterises this
  * into a handful of tonal steps and blends it in (see fix #2, round-3 critique). */
 export function fbmClump(X: number, Y: number, seed: number): number {
-  return fbm(X / 8, Y / 8, 3, seed + 4401);
+  return fbm(X / 5, Y / 5, 3, seed + 4401);
 }
 
 /** Slowly-varying angle field (radians), used to orient sparse directional grass-tuft strokes so

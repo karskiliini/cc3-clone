@@ -1,4 +1,4 @@
-import type { CursorKind, InputState, OrderType, Screen, Team, Vec2 } from '@/shared/types';
+import type { CursorKind, InputState, OrderType, Screen, Side, Team, Vec2 } from '@/shared/types';
 import { ORDER_DOT_COLOR, ORDER_HOTKEYS, ORDER_TYPES, VIEW_H, VIEW_W, otherSide } from '@/shared/types';
 import { game } from '@/game';
 import type { Battle } from '@/sim/battle';
@@ -35,6 +35,7 @@ const RIGHT_GESTURE_PX = 5;
 const RIGHT_GESTURE_MS = 400;
 const DOUBLE_CLICK_MS = 350;
 const HOVER_RING_R = 14;
+const FLEE_CONFIRM_MS = 2000;
 
 /** Big gold word on a 60%-black box, centred in the map viewport — used for
  * the PAUSED overlay and the end-of-battle result word. */
@@ -97,6 +98,8 @@ export class BattleScreen implements Screen {
   private hudHover = false;
   private lastMapClickTeamId: number | null = null;
   private lastMapClickTime = 0;
+  /** performance.now() deadline for the second Flee click; 0 = not armed. */
+  private fleeArmedUntil = 0;
 
   // F5/F6/F7 toggles, Ctrl+K show-dead toggle (original CC3 keyboard reference).
   private showTeamGrid = true;
@@ -114,6 +117,12 @@ export class BattleScreen implements Screen {
     const zone = map.def.deployZones[this.battle.playerSide()];
     centerCamera(game.cam, { x: zone.x + zone.w / 2, y: zone.y + zone.h / 2 });
     clampCamera(game.cam, map.width, map.height);
+  }
+
+  /** Team-grid roster: every team of `side`, including out-of-action ones (unlike
+   * battle.selectableTeams, which selection hotkeys/drag-select/orders rely on). */
+  private rosterTeams(side: Side): Team[] {
+    return [...this.battle.state.teams.values()].filter((t) => t.side === side).sort((a, b) => a.id - b.id);
   }
 
   private setSelection(ids: number[]): void {
@@ -360,8 +369,8 @@ export class BattleScreen implements Screen {
       this.pendingWaypoints = [];
     }
 
-    const teams = battle.selectableTeams(battle.playerSide());
-    const gridClick = this.teamGrid.update(input, teams);
+    // The roster keeps out-of-action teams (greyed, status in red); TeamGrid ignores clicks on them.
+    const gridClick = this.teamGrid.update(input, this.rosterTeams(battle.playerSide()));
     if (gridClick != null) {
       if (gridClick.shift) this.toggleInSelection(gridClick.id);
       else this.setSelection([gridClick.id]);
@@ -385,13 +394,23 @@ export class BattleScreen implements Screen {
     const selTeamForMonitor = this.selectedTeamId != null ? state.teams.get(this.selectedTeamId) ?? null : null;
     if (this.showSoldierMonitor) this.soldierMonitor.update(input, state, selTeamForMonitor);
 
+    if (this.fleeArmedUntil !== 0 && performance.now() >= this.fleeArmedUntil) this.fleeArmedUntil = 0;
+    this.bottomStrip.setFleeArmed(this.fleeArmedUntil !== 0);
     const action = this.bottomStrip.update(input);
     if (action === 'truce') {
       battle.offerTruce(battle.playerSide());
     } else if (action === 'flee') {
       // Per the manual, Flee ends the battle immediately with the enemy taking the map — it is
-      // not a per-team retreat order.
-      flee(state, battle.playerSide());
+      // not a per-team retreat order. Two-step: the first click arms it for 2 s so an overshoot
+      // from the adjacent order bar can't forfeit the battle.
+      const now = performance.now();
+      if (now < this.fleeArmedUntil) {
+        this.fleeArmedUntil = 0;
+        flee(state, battle.playerSide());
+      } else {
+        this.fleeArmedUntil = now + FLEE_CONFIRM_MS;
+        addMessage(state, 'Flee?\nClick again to confirm', 'warn');
+      }
     } else if (action === 'map') {
       this.showMinimap = !this.showMinimap;
     } else if (action === 'options') {
@@ -504,7 +523,7 @@ export class BattleScreen implements Screen {
     if (this.showSoldierMonitor) this.soldierMonitor.draw(ctx, state, selTeam);
 
     drawHudBase(ctx);
-    if (this.showTeamGrid) this.teamGrid.draw(ctx, battle.selectableTeams(battle.playerSide()), state, this.selectedTeamIds);
+    if (this.showTeamGrid) this.teamGrid.draw(ctx, this.rosterTeams(battle.playerSide()), state, this.selectedTeamIds);
     this.combatMessages.draw(ctx, state);
     this.bottomStrip.draw(ctx, state, selTeam);
     this.orderBar.draw(ctx, { enabled: this.selectedTeamIds.length > 0, pending: this.pendingOrder });

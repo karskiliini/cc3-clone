@@ -66,8 +66,9 @@ function drawWeaponGlyph(ctx: CanvasRenderingContext2D, x: number, y: number, cl
 
 const RIGHT_X = 1024;
 const WIDTH = 242;
-const ROW_H = 26;
-const MAX_ROWS = 6;
+const ROW_H = 32;
+const MAX_ROWS = 4;
+const CELL_H = 15;
 const HEADER_H = 14;
 const ARROW_W = 12;
 
@@ -127,12 +128,15 @@ function activityWord(s: Soldier, team: Team | null, vehicle: Vehicle | undefine
     case 'reloading': return 'Reloading';
     case 'defending': return vehicle ? crewFallbackWord(roleName) : 'Defending';
     case 'ambushing': return vehicle ? crewFallbackWord(roleName) : 'Ambushing';
-    case 'hiding': return 'Hiding';
-    case 'cowering': return 'Cowering';
-    case 'pinned': return 'Pinned';
-    case 'panicked': return 'Panicking';
+    // The mind state itself (Pinned/Cowering/Panicked/Broken/Berserk) is shown in the right-hand
+    // status column; line 2 keeps describing what the man is physically doing.
+    case 'hiding':
+    case 'cowering':
+    case 'pinned':
+      return 'Hiding';
+    case 'panicked': return 'Running';
     case 'routed': return 'Fleeing';
-    case 'berserk': return 'Berserk';
+    case 'berserk': return 'Charging';
     case 'surrendered': return 'Surrendered';
     case 'idle':
     default: {
@@ -147,27 +151,48 @@ function activityWord(s: Soldier, team: Team | null, vehicle: Vehicle | undefine
 function activityColor(s: Soldier): string {
   if (s.health === 'dead' || s.activity === 'dead') return HUD.red;
   if (s.health === 'incapacitated' || s.activity === 'incapacitated') return HUD.red;
-  // spec §7 colours: wary white, shaken yellow, pinned/cowering orange, panicked/broken red, berserk
-  // magenta (literal hex here: palette.ts is render/'s file, not touched by this feature).
-  switch (s.mind.state) {
-    case 'wary': return HUD.text;
-    case 'shaken': return HUD.yellow;
-    case 'pinned':
-    case 'cowering':
-      return '#e08020';
-    case 'panicked':
-    case 'broken':
-      return HUD.red;
-    case 'berserk': return '#c040c0';
-    default: break;
-  }
+  // spec §7 colours for the mind states still shown on line 2: wary white, shaken yellow.
+  if (s.mind.state === 'wary') return HUD.text;
+  if (s.mind.state === 'shaken') return HUD.yellow;
   switch (s.activity) {
-    case 'pinned': return HUD.yellow;
     case 'panicked':
     case 'routed':
       return HUD.red;
     default: return HUD.green;
   }
+}
+
+/** Right-hand status column: Dead/Incap. always win, then a severe mind state, else health. */
+function statusCell(s: Soldier): { word: string; color: string } {
+  if (s.health === 'dead' || s.health === 'incapacitated') return { word: healthWord(s), color: HUD.red };
+  switch (s.mind.state) {
+    case 'pinned': return { word: 'Pinned', color: HUD.yellow };
+    case 'cowering': return { word: 'Cowering', color: HUD.yellow };
+    case 'panicked': return { word: 'Panicked', color: HUD.red };
+    case 'broken': return { word: 'Broken', color: HUD.red };
+    case 'berserk': return { word: 'Berserk', color: HUD.magenta };
+    default: return { word: healthWord(s), color: healthColor(s) };
+  }
+}
+
+const HE_CLASSES = new Set<WeaponClass>(['mortar', 'atgun', 'tankgun']);
+
+/** Text in a bevelled cell; `align` centre is used for the raised role cell. */
+function cellText(ctx: CanvasRenderingContext2D, r: Rect, text: string, color: string, align: 'left' | 'center' | 'right' = 'left'): void {
+  ctx.fillStyle = color;
+  const maxW = r.w - 6;
+  const t = clipTextToWidth(ctx, text, maxW);
+  const ty = Math.round(r.y + (r.h - 12) / 2) + 1;
+  if (align === 'center') {
+    ctx.textAlign = 'center';
+    ctx.fillText(t, Math.round(r.x + r.w / 2), ty);
+  } else if (align === 'right') {
+    ctx.textAlign = 'right';
+    ctx.fillText(t, Math.round(r.x + r.w - 3), ty);
+  } else {
+    ctx.fillText(t, Math.round(r.x + 3), ty);
+  }
+  ctx.textAlign = 'left';
 }
 
 export class SoldierMonitorPopup {
@@ -222,7 +247,7 @@ export class SoldierMonitorPopup {
       const headerR: Rect = { x: r.x, y: r.y, w: r.w, h: HEADER_H };
       drawHudBevel(ctx, headerR, true);
       setHudFont(ctx, 'small');
-      ctx.fillStyle = HUD.text;
+      ctx.fillStyle = HUD.green;
       ctx.fillText('Main Gun', r.x + 6, r.y + 2);
       ctx.fillText('Operational', r.x + r.w - 80, r.y + 2);
       bodyY = r.y + HEADER_H;
@@ -230,40 +255,52 @@ export class SoldierMonitorPopup {
 
     const hasScroll = soldiers.length > MAX_ROWS;
     const contentX = r.x + (hasScroll ? ARROW_W : 2);
+    const rightX = r.x + r.w - 2;
+    const NAME_W = 70;
+    const ROLE_W = 66;
+    const RDS_CELL_W = 28;
 
     for (let i = 0; i < rows; i++) {
       const s = soldiers[this.scroll + i];
       const rowY = bodyY + i * ROW_H;
-      // line 1: surname | role | health
+      const y1 = rowY + 1;
+      const y2 = rowY + 1 + CELL_H + 1;
+      const roleName = role(vehicle, soldiers, this.scroll + i, s);
+
+      // line 1: [name] (role) [status]
+      const nameR: Rect = { x: contentX, y: y1, w: NAME_W, h: CELL_H };
+      const roleR: Rect = { x: contentX + NAME_W + 1, y: y1, w: ROLE_W, h: CELL_H };
+      const statusR: Rect = { x: roleR.x + ROLE_W + 1, y: y1, w: rightX - (roleR.x + ROLE_W + 1), h: CELL_H };
+      drawHudBevel(ctx, nameR, true, HUD.black);
+      drawHudBevel(ctx, roleR, false, HUD.face);
+      drawHudBevel(ctx, statusR, true, HUD.black);
+      setHudFont(ctx, 'small');
+      cellText(ctx, nameR, s.name, HUD.text);
+      const st = statusCell(s);
+      cellText(ctx, statusR, st.word, st.color, 'right');
+      setHudFont(ctx, 'map');
+      cellText(ctx, roleR, roleName, HUD.text, 'center');
+
+      // line 2: [activity]  glyph AP/HE   [N] rds.
+      const actR: Rect = { x: contentX, y: y2, w: NAME_W, h: CELL_H };
+      drawHudBevel(ctx, actR, true, HUD.black);
+      setHudFont(ctx, 'small');
+      cellText(ctx, actR, activityWord(s, team, vehicle, roleName), activityColor(s));
+      const w = WEAPONS[s.weaponId];
+      const glyphX = roleR.x + 6;
+      if (w) drawWeaponGlyph(ctx, glyphX, y2 + 3, w.cls);
+      setHudFont(ctx, 'label');
+      ctx.fillStyle = HUD.text;
+      ctx.fillText(w && HE_CLASSES.has(w.cls) ? 'HE' : 'AP', glyphX + GLYPH_SIZE + 5, y2 + 2);
       setHudFont(ctx, 'small');
       ctx.fillStyle = HUD.text;
-      ctx.fillText(clipTextToWidth(ctx, s.name, 70), contentX, rowY + 1);
-      ctx.fillStyle = HUD.text;
-      const roleName = role(vehicle, soldiers, this.scroll + i, s);
-      ctx.fillText(roleName, contentX + 76, rowY + 1);
-      ctx.fillStyle = healthColor(s);
       ctx.textAlign = 'right';
-      ctx.fillText(healthWord(s), r.x + r.w - 6, rowY + 1);
+      ctx.fillText('rds.', rightX - 2, y2 + 2);
       ctx.textAlign = 'left';
-
-      // line 2: activity | weapon | rounds
-      ctx.fillStyle = activityColor(s);
-      ctx.fillText(activityWord(s, team, vehicle, roleName), contentX, rowY + 13);
-      const w = WEAPONS[s.weaponId];
-      if (w) drawWeaponGlyph(ctx, contentX + 76, rowY + 11, w.cls);
-      ctx.fillStyle = HUD.dim;
-      ctx.fillText(clipTextToWidth(ctx, w?.name ?? s.weaponId, 50), contentX + 76 + GLYPH_SIZE + 3, rowY + 13);
-      ctx.textAlign = 'right';
-      ctx.fillText(`${s.ammo} rds.`, r.x + r.w - 6, rowY + 13);
-      ctx.textAlign = 'left';
-
-      if (i < rows - 1) {
-        ctx.strokeStyle = HUD.bevelDark;
-        ctx.beginPath();
-        ctx.moveTo(r.x + 2, rowY + ROW_H - 0.5);
-        ctx.lineTo(r.x + r.w - 2, rowY + ROW_H - 0.5);
-        ctx.stroke();
-      }
+      const rdsLabelW = ctx.measureText(' rds.').width;
+      const nR: Rect = { x: Math.round(rightX - 2 - rdsLabelW - RDS_CELL_W), y: y2, w: RDS_CELL_W, h: CELL_H };
+      drawHudBevel(ctx, nR, true, HUD.black);
+      cellText(ctx, nR, String(s.ammo), HUD.text, 'right');
     }
 
     if (hasScroll) {

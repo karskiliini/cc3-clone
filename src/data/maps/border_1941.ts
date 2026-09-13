@@ -69,15 +69,18 @@ function paintMap(p: MapPainter): void {
     { x: 0, y: 78 }, { x: 40, y: 74 }, { x: 80, y: 78 }, { x: 100, y: 75 },
     { x: 130, y: 72 }, { x: 165, y: 76 }, { x: 200, y: 78 },
   ];
-  p.road(mainRoad, 3, 'dirtroad');
+  // widths: ~2 tiles (~40px) for the main roads, 1.5 for farm tracks (ref_cc3_1479 roads are
+  // narrow tracks; 1.5 is the narrowest that still rasterises a 4-connected tile path on
+  // diagonals — half-width 0.75 > the 0.707 worst-case tile-centre distance).
+  p.road(mainRoad, 2, 'dirtroad');
   p.road([
     { x: 100, y: 5 }, { x: 96, y: 40 }, { x: 100, y: 75 }, { x: 104, y: 110 }, { x: 100, y: 145 },
-  ], 3, 'dirtroad');
-  p.road([{ x: 41, y: 48 }, { x: 60, y: 60 }, { x: 100, y: 75 }], 2, 'dirtroad'); // farm track
-  p.road([{ x: 58, y: 96 }, { x: 75, y: 85 }, { x: 100, y: 75 }], 2, 'dirtroad'); // farm track
+  ], 2, 'dirtroad');
+  p.road([{ x: 41, y: 48 }, { x: 60, y: 60 }, { x: 100, y: 75 }], 1.5, 'dirtroad'); // farm track
+  p.road([{ x: 58, y: 96 }, { x: 75, y: 85 }, { x: 100, y: 75 }], 1.5, 'dirtroad'); // farm track
   // bridge rect computed from the actual road/river intersection (round-3 fix: the old
   // hand-placed rect drifted off the true crossing and rendered as planks beside the road)
-  const crossing = p.bridgeAcross(mainRoad, 3, river, 3, { near: { x: 141, y: 75 } }) ?? { x: 141, y: 75 };
+  const crossing = p.bridgeAcross(mainRoad, 2, river, 3, { near: { x: 141, y: 75 } }) ?? { x: 141, y: 75 };
 
   // telegraph poles along the main road, and battle damage concentrated in the contested
   // middle third around the crossroads/bridge (round-3: sparser than the original's road

@@ -91,23 +91,19 @@ export function teamBarColor(team: Team): string {
 /** Team-status word -> status-text colour (independent of the bar colour). */
 export function teamStatusTextColor(word: TeamStatusWord): string {
   switch (word) {
-    case 'Ambushing':
-    case 'Idle':
-      return HUD.green;
     case 'Firing':
-      return HUD.yellow;
-    case 'Moving Fast':
-      return HUD.red;
+    case 'Cowering': // shown as 'Seeking Cover'
+      return HUD.statusGreen;
     case 'Pinned':
-    case 'Cowering':
       return HUD.yellow;
     case 'Broken':
     case 'Panicked':
     case 'Routed':
+      return HUD.red;
     case 'Destroyed':
     case 'Knocked Out':
-      return HUD.red;
-    default:
+      return HUD.dim;
+    default: // Idle/Ambushing/Defending/Moving/Moving Fast/Sneaking/Surrendered
       return HUD.text;
   }
 }
@@ -119,7 +115,6 @@ const STATUS_DISPLAY: Partial<Record<TeamStatusWord, string>> = {
   Routed: 'Fled',
   Destroyed: 'KIA',
   'Knocked Out': 'Destroyed',
-  Broken: 'Panicking',
 };
 export function teamStatusLabel(word: TeamStatusWord): string {
   return STATUS_DISPLAY[word] ?? word;

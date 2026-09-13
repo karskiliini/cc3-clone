@@ -561,6 +561,8 @@ export const TEAM_FLAVOR: Record<TeamType, string> = {
   engineer: 'Combat engineers carry satchel charges for clearing bunkers and fortified buildings, alongside their personal weapons.',
 };
 
+const SLOT_RANKS = ['1st Sergeant', '2nd Lieutenant', '1st Lieutenant', 'Captain', 'Major'];
+
 const ARMOR_TYPES: TeamType[] = ['tank', 'spg', 'halftrack'];
 
 // Deterministic per-weapon "composition" colour, so each team's stripe hints
@@ -662,7 +664,7 @@ export class ForcePicker {
   private regularBtn: Rect = { x: 60, y: 96, w: 110, h: 22 };
   private armorBtn: Rect = { x: 178, y: 96, w: 110, h: 22 };
   private poolListRect: Rect = { x: 60, y: 128, w: 330, h: 220 };
-  private infoRect: Rect = { x: 60, y: 368, w: 330, h: 96 };
+  private infoRect: Rect = { x: 60, y: 368, w: 330, h: 124 };
 
   // five roster action buttons, matching the original's Refit/Rest/Rename/
   // Retire row (we add Details in place of Rename; only Retire is wired up)
@@ -692,7 +694,7 @@ export class ForcePicker {
     this.poolIds = teamsForYear(this.side, this.year)
       .filter((d) => (this.category === 'armor' ? armor.has(d.type) : !armor.has(d.type)))
       .map((d) => d.id);
-    this.poolSelected = -1;
+    this.poolSelected = this.poolIds.length ? 0 : -1;
     this.poolScroll = 0;
   }
 
@@ -750,31 +752,37 @@ export class ForcePicker {
 
   private drawTab(ctx: CanvasRenderingContext2D, r: Rect, label: string, active: boolean): void {
     ctx.save();
-    if (active) {
-      ctx.fillStyle = '#e8dcc8';
-      ctx.fillRect(r.x, r.y, r.w, r.h);
-      ctx.strokeStyle = '#170a06';
-      ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
-      ctx.fillStyle = '#161208';
-    } else {
-      ctx.fillStyle = '#2a2a2a';
-      ctx.fillRect(r.x, r.y, r.w, r.h);
-      ctx.strokeStyle = '#0d0d0d';
-      ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
-      ctx.fillStyle = '#f0f0ec';
-    }
+    ctx.fillStyle = active ? '#8b1a1a' : '#5a1010';
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(r.x, r.y, r.w, 1);
+    ctx.strokeStyle = '#170a06';
+    ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+    ctx.fillStyle = '#f0e6d0';
     ctx.font = 'bold 12px Arial, Helvetica, sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText(label, r.x + 10, r.y + r.h / 2);
-    // small dropdown caret, right-padded
-    ctx.textAlign = 'right';
-    ctx.fillText('▾', r.x + r.w - 10, r.y + r.h / 2);
+    // small red down-arrow box on the right
+    const bs = r.h - 8;
+    const bx = r.x + r.w - bs - 4;
+    const by = r.y + 4;
+    ctx.fillStyle = active ? '#c83020' : '#8b1a1a';
+    ctx.fillRect(bx, by, bs, bs);
+    ctx.strokeStyle = '#f0e6d0';
+    ctx.strokeRect(bx + 0.5, by + 0.5, bs - 1, bs - 1);
+    ctx.fillStyle = '#f0e6d0';
+    ctx.beginPath();
+    ctx.moveTo(bx + 3, by + 5);
+    ctx.lineTo(bx + bs - 3, by + 5);
+    ctx.lineTo(bx + bs / 2, by + bs - 4);
+    ctx.closePath();
+    ctx.fill();
     ctx.restore();
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
-    drawVerticalStencil(ctx, 'FORCE POOL', 30, 372);
+    drawVerticalStencil(ctx, 'FORCE POOL', 52, 492, '#ff7a1a', 44, ['#ff6a00', '#ffc030'], 364);
     this.drawTab(ctx, this.regularBtn, 'Regular', this.category === 'regular');
     this.drawTab(ctx, this.armorBtn, 'Armor', this.category === 'armor');
 
@@ -838,21 +846,41 @@ export class ForcePicker {
     drawDarkPanel(ctx, this.infoRect);
     const selDef = this.poolSelected >= 0 ? TEAM_DEFS[this.poolIds[this.poolSelected]] : null;
     if (selDef) {
-      drawShadowText(ctx, selDef.name, this.infoRect.x + 10, this.infoRect.y + 18, 'bold 13px Arial, Helvetica, sans-serif', '#f0d840');
-      const lines = wordWrapCtx(ctx, TEAM_FLAVOR[selDef.type] ?? '', this.infoRect.w - 20, '11px Arial, Helvetica, sans-serif');
-      ctx.font = '11px Arial, Helvetica, sans-serif';
+      const ir = this.infoRect;
+      const icon = getTeamIcon(selDef.iconId);
+      const iconScale = iconFitScale(icon, 36, 24);
+      ctx.save();
+      ctx.translate(ir.x + 8, ir.y + 8 + (24 - icon.height * iconScale) / 2);
+      ctx.scale(iconScale, iconScale);
+      ctx.drawImage(icon, 0, 0);
+      ctx.restore();
+      const tx = ir.x + 8 + 36 + 8;
+      const costText = String(selDef.cost);
+      const cbW = 36;
+      const cb: Rect = { x: ir.x + ir.w - cbW - 8, y: ir.y + 8, w: cbW, h: 22 };
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(cb.x, cb.y, cb.w, cb.h);
+      ctx.strokeStyle = 'rgba(210,210,205,0.35)';
+      ctx.strokeRect(cb.x + 0.5, cb.y + 0.5, cb.w - 1, cb.h - 1);
+      ctx.font = 'bold 12px Arial, Helvetica, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#f0d840';
+      ctx.fillText(costText, cb.x + cb.w / 2, cb.y + 15);
       ctx.textAlign = 'left';
+      ctx.font = 'bold 13px Arial, Helvetica, sans-serif';
+      ctx.fillStyle = '#f0f0ec';
+      ctx.fillText(truncateToWidth(ctx, selDef.name, cb.x - tx - 6), tx, ir.y + 18);
+      ctx.font = 'bold italic 11px Arial, Helvetica, sans-serif';
+      ctx.fillStyle = '#e8a33d';
+      ctx.fillText(truncateToWidth(ctx, subtypeLabel(selDef), cb.x - tx - 6), tx, ir.y + 32);
+      const lines = wordWrapCtx(ctx, TEAM_FLAVOR[selDef.type] ?? '', ir.w - 20, '11px Arial, Helvetica, sans-serif');
+      ctx.font = '11px Arial, Helvetica, sans-serif';
       ctx.fillStyle = '#e8e8e0';
-      let ty = this.infoRect.y + 36;
-      for (const line of lines.slice(0, 4)) {
-        ctx.fillText(line, this.infoRect.x + 10, ty);
+      let ty = ir.y + 52;
+      for (const line of lines.slice(0, 5)) {
+        ctx.fillText(line, ir.x + 10, ty);
         ty += 14;
       }
-    } else {
-      ctx.font = '11px Arial, Helvetica, sans-serif';
-      ctx.fillStyle = '#a89890';
-      ctx.textAlign = 'left';
-      ctx.fillText('Select a unit from the force pool to see its description.', this.infoRect.x + 10, this.infoRect.y + 20);
     }
 
     if (this.winterMap) {
@@ -862,7 +890,7 @@ export class ForcePicker {
       ctx.fillText('* unit is equipped for winter combat', this.poolListRect.x, this.poolListRect.y + this.poolListRect.h + 12);
     }
 
-    drawVerticalStencil(ctx, 'ACTIVE ROSTER', 792, 372);
+    drawVerticalStencil(ctx, 'ACTIVE ROSTER', 434, 492, '#ff7a1a', 44, ['#ff6a00', '#ffc030'], 364);
     drawSmallMetalButton(ctx, this.refitBtn, 'Refit', { disabled: true });
     drawSmallMetalButton(ctx, this.restBtn, 'Rest', { disabled: true });
     drawSmallMetalButton(ctx, this.detailsBtn, 'Details', { disabled: true });
@@ -879,8 +907,26 @@ export class ForcePicker {
       const idx = this.rosterScroll + i;
       const ry = this.rosterListRect.y + i * this.rosterRowH;
       if (idx >= this.rosterIds.length) {
+        if (idx >= this.maxRosterSlots) break;
+        const rl = this.rosterListRect;
         ctx.fillStyle = 'rgba(0,0,0,0.25)';
-        ctx.fillRect(this.rosterListRect.x, ry, this.rosterListRect.w, this.rosterRowH - 1);
+        ctx.fillRect(rl.x, ry, rl.w, this.rosterRowH - 1);
+        // small grid icon
+        ctx.strokeStyle = 'rgba(232,192,64,0.55)';
+        ctx.lineWidth = 1;
+        for (let g = 0; g <= 3; g++) {
+          ctx.beginPath();
+          ctx.moveTo(rl.x + 8 + g * 6 + 0.5, ry + 6);
+          ctx.lineTo(rl.x + 8 + g * 6 + 0.5, ry + 20);
+          ctx.moveTo(rl.x + 8, ry + 6 + (g * 14) / 3 + 0.5);
+          ctx.lineTo(rl.x + 26, ry + 6 + (g * 14) / 3 + 0.5);
+          ctx.stroke();
+        }
+        ctx.font = '11px Arial, Helvetica, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#e8c040';
+        ctx.fillText(`Must be ${SLOT_RANKS[idx % SLOT_RANKS.length]} to fill this slot`, rl.x + rl.w / 2 + 12, ry + 17);
+        ctx.textAlign = 'left';
         continue;
       }
       const def = TEAM_DEFS[this.rosterIds[idx]];

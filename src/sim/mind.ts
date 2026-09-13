@@ -13,6 +13,7 @@ import { findPath } from './path';
 import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';
 import { addMessage } from './messages';
+import { applyOrderToSoldier } from './orders';
 
 // ---------------------------------------------------------------- motivation
 /** Motivation seed from experience (proxy for conscript/regular/elite quality bands) + leadership. */
@@ -55,20 +56,6 @@ export function createMind(motivation: number, time = 0, trait?: Trait): Soldier
     lastCoverSeekAt: -999,
     trait,
   };
-}
-
-export function mentalStateWord(s: MentalState): string {
-  switch (s) {
-    case 'calm': return 'Calm';
-    case 'alert': return 'Alert';
-    case 'wary': return 'Wary';
-    case 'shaken': return 'Shaken';
-    case 'pinned': return 'Pinned';
-    case 'cowering': return 'Cowering';
-    case 'panicked': return 'Panicked';
-    case 'broken': return 'Broken';
-    case 'berserk': return 'Berserk';
-  }
 }
 
 const SEVERITY: MentalState[] = ['calm', 'alert', 'wary', 'shaken', 'pinned', 'cowering', 'panicked', 'broken'];
@@ -139,6 +126,7 @@ function getSoldierTrack(track: MindTrack, id: number): SoldierTrack {
 
 /** Rate-limited (1 per 5 s per team) personality message, player-side flavour per spec §11. */
 function personalityMessage(state: BattleState, track: MindTrack, team: Team, text: string, kind: 'info' | 'bad' | 'good' = 'info'): void {
+  if (team.side !== state.config.playerSide) return; // personality messages are player-side only (spec §11)
   const last = track.lastMsgAt.get(team.id) ?? -Infinity;
   if (state.time - last < 5) return;
   track.lastMsgAt.set(team.id, state.time);
@@ -575,6 +563,9 @@ function escalate(mind: SoldierMind, experience: number, morale: number, suppres
   if (mind.state === 'alert' && mind.threatLevel > 0.5) mind.state = 'wary';
   if ((mind.state === 'wary' || mind.state === 'alert') && mind.fear > 40) mind.state = 'shaken';
   if (mind.state === 'shaken' && suppression > 60) mind.state = 'pinned';
+  // Raw suppression pins regardless of fear: a man under a hail of MG fire gets his head down
+  // even if he is not (yet) frightened. Panic still needs the fear/morale gates below.
+  if ((mind.state === 'calm' || mind.state === 'alert' || mind.state === 'wary') && suppression > 60) mind.state = 'pinned';
   if (mind.state === 'pinned' && (suppression > 85 || mind.fear > 70)) mind.state = 'cowering';
   // Balance tuning: the design brief's "fear>80 && (experience<50 || morale<25)" panic gate let
   // ~75% of the roster (experience is spawned 20-60, so <50 is most soldiers) panic the instant
@@ -665,7 +656,7 @@ function syncActivityForState(state: BattleState, s: Soldier, team: Team | undef
 
   if (isSevere) {
     s.activity = SEVERE_ACTIVITY[mind.state]!;
-    if (mind.state === 'panicked' || mind.state === 'cowering') s.path = [];
+    if (mind.state === 'panicked' || mind.state === 'cowering' || mind.state === 'pinned') s.path = [];
     if (mind.state === 'pinned' || mind.state === 'cowering') s.stance = 'prone';
   } else if (wasSevere) {
     resumeFromOrder(state, s, team);
@@ -690,6 +681,15 @@ function stepOneMind(state: BattleState, rng: Rng, dt: number, s: Soldier, track
   let hesitDt = dt;
   if (s.fatigue > 70) hesitDt = dt * 0.5; // fatigue doubles hesitation duration -> halves the decay rate
   mind.hesitation = Math.max(0, mind.hesitation - hesitDt);
+
+  // Retry a refused order once hesitation has run out (spec §4: "hesitates before retrying"),
+  // provided the order has not been replaced and the soldier is not in a severe state.
+  if (mind.pendingOrderAt !== undefined && mind.hesitation === 0 && team) {
+    if (!team.order || team.order.issuedAt !== mind.pendingOrderAt) mind.pendingOrderAt = undefined;
+    else if (SEVERE_ACTIVITY[mind.state] === undefined && mind.state !== 'berserk' && s.health !== 'dead' && s.health !== 'incapacitated') {
+      applyOrderToSoldier(state, team, s, rng);
+    }
+  }
 
   if (mind.state === 'berserk') {
     const until = track.berserkUntil.get(s.id) ?? 0;

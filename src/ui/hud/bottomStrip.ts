@@ -105,6 +105,12 @@ function drawAmmoBar(ctx: CanvasRenderingContext2D, label: string, labelPos: Vec
 export class BottomStrip {
   private mode: 'battle' | 'deploy';
   private hover: Set<string> = new Set();
+  private fleeArmed = false;
+
+  /** Battle screen tells the strip that Flee is armed (waiting for the confirming second click). */
+  setFleeArmed(armed: boolean): void {
+    this.fleeArmed = armed;
+  }
 
   constructor(mode: 'battle' | 'deploy' = 'battle') {
     this.mode = mode;
@@ -168,7 +174,7 @@ export class BottomStrip {
       ctx.fillStyle = nameOnDark ? HUD.text : HUD.black;
       ctx.fillText(clipTextToWidth(ctx, selectedTeam.name, NAME_BAR_R.w - 4), Math.round(NAME_BAR_R.x + 2), Math.round(NAME_BAR_R.y + 1));
 
-      setHudFont(ctx, 'small');
+      setHudFont(ctx, 'label');
       ctx.fillStyle = teamStatusTextColor(selectedTeam.status);
       ctx.fillText(clipTextToWidth(ctx, teamStatusLabel(selectedTeam.status), STATUS_R.w), Math.round(STATUS_R.x), Math.round(STATUS_R.y));
 
@@ -193,7 +199,16 @@ export class BottomStrip {
 
     if (this.mode === 'battle') {
       drawHudButton(ctx, RIGHT_BTN_1, 'Truce', { hot: this.hover.has('btn1') });
-      drawHudButton(ctx, RIGHT_BTN_2, 'Flee', { hot: this.hover.has('btn2') });
+      if (this.fleeArmed) {
+        drawHudBevel(ctx, RIGHT_BTN_2, true, HUD.red);
+        setHudFont(ctx, 'small');
+        ctx.fillStyle = HUD.text;
+        ctx.textAlign = 'center';
+        ctx.fillText('Flee', Math.round(RIGHT_BTN_2.x + RIGHT_BTN_2.w / 2), Math.round(RIGHT_BTN_2.y + (RIGHT_BTN_2.h - 11) / 2));
+        ctx.textAlign = 'left';
+      } else {
+        drawHudButton(ctx, RIGHT_BTN_2, 'Flee', { hot: this.hover.has('btn2') });
+      }
     } else {
       drawHudButton(ctx, RIGHT_BTN_1, 'Begin', { hot: this.hover.has('btn1') });
       drawHudButton(ctx, RIGHT_BTN_2, 'Auto', { hot: this.hover.has('btn2') });

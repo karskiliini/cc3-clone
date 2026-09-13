@@ -43,7 +43,9 @@ class BattleRequisitionScreen implements Screen {
     this.cfgBase = cfgBase;
     this.enemySide = enemySide;
     this.enemyForces = enemyForces;
-    const points = initialIds.reduce((sum, id) => sum + (TEAM_DEFS[id]?.cost ?? 0), 0);
+    // total budget: the default roster's cost plus 20 spare points, so the
+    // player starts with points remaining (the original showed 18)
+    const points = initialIds.reduce((sum, id) => sum + (TEAM_DEFS[id]?.cost ?? 0), 0) + 20;
     this.picker = new ForcePicker(side, year, points, initialIds, winterMap);
   }
 

@@ -206,50 +206,64 @@ export function drawPoster(ctx: CanvasRenderingContext2D): void {
   ctx.drawImage(getPosterBackground(), 0, 0);
 }
 
-/** Top-left "CLOSE|COMBAT" logotype: white stencil-ish letters, letter-spaced,
- * with a small orange vertical divider between the two words. */
-export function drawLogo(ctx: CanvasRenderingContext2D): void {
-  const x = 16;
-  const y = 42;
-  ctx.save();
-  ctx.font = '900 36px Impact, "Arial Black", Arial, sans-serif';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'alphabetic';
+const STENCIL_FONT = '"Stencil", "Stencil Std", "Arial Narrow", Impact, sans-serif';
+
+/** Draws `text` one glyph at a time with `spacing` px extra advance; returns
+ * the total advance. When `draw` is false only measures. */
+function spacedText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, spacing: number, draw: boolean, shadowOff = 1): number {
   let cx = x;
-  const drawWord = (word: string) => {
-    for (const ch of word) {
-      ctx.fillStyle = 'rgba(0,0,0,0.75)';
-      ctx.fillText(ch, cx + 3, y + 3);
+  for (const ch of text) {
+    if (draw) {
+      ctx.fillStyle = 'rgba(0,0,0,0.8)';
+      ctx.fillText(ch, cx + shadowOff, y + shadowOff);
       ctx.fillStyle = '#f4f4ee';
       ctx.fillText(ch, cx, y);
-      cx += ctx.measureText(ch).width + 2;
     }
-  };
-  drawWord('CLOSE');
-  cx += 8;
-  // divider: two beveled orange bars with rivet dots top/middle/bottom
-  for (const barX of [Math.round(cx), Math.round(cx) + 9]) {
-    ctx.fillStyle = '#a8420e';
-    ctx.fillRect(barX, y - 26, 6, 30);
-    ctx.fillStyle = '#e0611c';
-    ctx.fillRect(barX, y - 26, 6, 22);
-    ctx.fillStyle = 'rgba(255,255,255,0.35)';
-    ctx.fillRect(barX, y - 26, 6, 3);
-    ctx.fillStyle = '#2a0a06';
-    for (const dy of [y - 22, y - 12, y - 2]) {
-      ctx.beginPath();
-      ctx.arc(barX + 3, dy, 1.3, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    cx += ctx.measureText(ch).width + spacing;
   }
-  cx += 22;
-  drawWord('COMBAT');
+  return cx - x - spacing;
+}
+
+/** Top-left "CLOSE||COMBAT" logotype: thin, widely letter-spaced white
+ * stencil capitals with a pair of narrow yellow bars between the words.
+ * Spans roughly MENU x 10-233 (screen 122-345 at 1024x768). */
+export function drawLogo(ctx: CanvasRenderingContext2D): void {
+  const x = 10;
+  const y = 30;
+  const targetW = 223;
+  ctx.save();
+  ctx.font = `bold 22px ${STENCIL_FONT}`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  const gap = 6;
+  const barsW = 4 + 3 + 4;
+  const natural = spacedText(ctx, 'CLOSE', 0, 0, 5, false) + gap + barsW + gap + spacedText(ctx, 'COMBAT', 0, 0, 5, false);
+  const k = natural > 0 ? targetW / natural : 1;
+  ctx.translate(x, y);
+  ctx.scale(k, 1);
+  let cx = spacedText(ctx, 'CLOSE', 0, 0, 5, true, 1.5) + gap;
+  for (const barX of [cx, cx + 7]) {
+    ctx.fillStyle = '#f0c020';
+    ctx.fillRect(barX, -19, 4, 20);
+    ctx.fillStyle = '#b07a10';
+    ctx.fillRect(barX, -3, 4, 4);
+  }
+  cx += barsW + gap;
+  spacedText(ctx, 'COMBAT', cx, 0, 5, true, 1.5);
   ctx.restore();
 }
 
-/** Top-right screen-name label, e.g. 'MAIN', 'REQUISITION', 'BATTLE'. */
+/** Top-right screen-name label, e.g. 'MAIN', 'REQUISITION', 'BATTLE' —
+ * letter-spaced stencil face, right-aligned at MENU x 784. */
 export function drawScreenTitle(ctx: CanvasRenderingContext2D, text: string): void {
-  drawShadowText(ctx, text.toUpperCase(), 784, 40, 'bold 28px Arial, Helvetica, sans-serif', '#f5f5f0', 'rgba(0,0,0,0.75)', 'right');
+  ctx.save();
+  ctx.font = `bold 22px ${STENCIL_FONT}`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  const t = text.toUpperCase();
+  const total = spacedText(ctx, t, 0, 0, 2.5, false);
+  spacedText(ctx, t, 784 - total, 30, 2.5, true, 1.5);
+  ctx.restore();
 }
 
 export interface MetalButtonOpts {
@@ -343,22 +357,44 @@ export interface SmallButtonOpts {
   disabled?: boolean;
 }
 
-/** A small dark-grey bevelled button with bold 12px centred white text —
- * used for the bottom control strip present on every menu screen. */
+/** Ragged tab outline with a small (about +-1.5px) jag. */
+function raggedTabPath(ctx: CanvasRenderingContext2D, r: Rect, seed: number): void {
+  const { x, y, w, h } = r;
+  const jag = (i: number, salt: number) => (hash2(seed + i, salt) - 0.5) * 3;
+  const teethX = Math.max(4, Math.round(w / 6));
+  const teethY = 3;
+  ctx.beginPath();
+  ctx.moveTo(x, y + jag(0, 1));
+  for (let i = 1; i <= teethX; i++) ctx.lineTo(x + (w * i) / teethX, y + jag(i, 1));
+  for (let i = 1; i <= teethY; i++) ctx.lineTo(x + w + jag(i, 2), y + (h * i) / teethY);
+  for (let i = teethX - 1; i >= 0; i--) ctx.lineTo(x + (w * i) / teethX, y + h + jag(i, 3));
+  for (let i = teethY - 1; i >= 1; i--) ctx.lineTo(x + jag(i, 4), y + (h * i) / teethY);
+  ctx.closePath();
+}
+
+/** A small torn tab button for the bottom control strip: dark maroon fill,
+ * ragged tan border, light-grey bold text with a 1px black shadow. */
 export function drawSmallMetalButton(ctx: CanvasRenderingContext2D, r: Rect, label: string, opts: SmallButtonOpts = {}): void {
   const { hot = false, disabled = false } = opts;
+  const seed = buttonSeed(r);
   ctx.save();
   if (disabled) ctx.globalAlpha = 0.55;
-  drawBevelBox(ctx, r, false, disabled ? '#232323' : hot ? '#4c4c4e' : '#38383a');
-  const color = disabled ? '#5a5a5a' : hot ? '#f2d048' : '#f0f0ec';
+  const inner: Rect = { x: r.x + 1, y: r.y + 1, w: r.w - 2, h: r.h - 2 };
+  raggedTabPath(ctx, inner, seed);
+  ctx.fillStyle = hot && !disabled ? '#7a3a30' : '#3a1a14';
+  ctx.fill();
+  ctx.strokeStyle = '#c8b49a';
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'miter';
+  ctx.stroke();
   ctx.font = 'bold 12px Arial, Helvetica, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const cx = Math.round(r.x + r.w / 2);
-  const cy = Math.round(r.y + r.h / 2);
-  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  const cy = Math.round(r.y + r.h / 2) + 1;
+  ctx.fillStyle = '#000000';
   ctx.fillText(label, cx + 1, cy + 1);
-  ctx.fillStyle = color;
+  ctx.fillStyle = hot && !disabled ? '#f2d048' : '#c8c2ba';
   ctx.fillText(label, cx, cy);
   ctx.restore();
 }
@@ -381,7 +417,7 @@ export function drawBottomStrip(ctx: CanvasRenderingContext2D, buttons: BottomSt
 export function drawDarkPanel(ctx: CanvasRenderingContext2D, r: Rect): void {
   const x = Math.round(r.x), y = Math.round(r.y), w = Math.round(r.w), h = Math.round(r.h);
   ctx.save();
-  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillStyle = 'rgba(10,4,3,0.82)';
   ctx.fillRect(x, y, w, h);
   // beveled edges
   ctx.fillStyle = '#6b3a22';
@@ -410,23 +446,47 @@ export function drawDarkPanel(ctx: CanvasRenderingContext2D, r: Rect): void {
 
 /** Draws `text` rotated -90deg (bottom-to-top) in a chunky, letter-spaced
  * "stencil" treatment (heavy outline + gaps read as cut stencil lettering),
- * used for the vertical "FORCE POOL" / "ACTIVE ROSTER" labels. */
-export function drawVerticalStencil(ctx: CanvasRenderingContext2D, text: string, x: number, yBottom: number, color = '#ff7a1a'): void {
+ * used for the vertical "FORCE POOL" / "ACTIVE ROSTER" labels. Glyphs occupy
+ * roughly x-size*0.75 .. x on screen. Optional `size` sets the font px,
+ * `gradient` fills along the text run, and `maxLen` squeezes the run to fit. */
+export function drawVerticalStencil(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  yBottom: number,
+  color = '#ff7a1a',
+  size = 25,
+  gradient?: [string, string],
+  maxLen?: number,
+): void {
   ctx.save();
   ctx.translate(x, yBottom);
   ctx.rotate(-Math.PI / 2);
-  ctx.font = '900 25px Impact, "Arial Black", Arial, sans-serif';
+  ctx.font = `900 ${size}px Impact, "Arial Black", Arial, sans-serif`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
+  const spacing = Math.max(2, Math.round(size * 0.08));
+  let total = 0;
+  for (const ch of text) total += ctx.measureText(ch).width + spacing;
+  total -= spacing;
+  if (maxLen && total > maxLen) ctx.scale(maxLen / total, 1);
+  let fill: string | CanvasGradient = color;
+  if (gradient) {
+    const g = ctx.createLinearGradient(0, 0, total, 0);
+    g.addColorStop(0, gradient[0]);
+    g.addColorStop(1, gradient[1]);
+    fill = g;
+  }
   let cx = 0;
   for (const ch of text) {
     const w = ctx.measureText(ch).width;
-    ctx.lineWidth = 3;
+    ctx.lineWidth = size >= 36 ? 4 : 3;
+    ctx.lineJoin = 'round';
     ctx.strokeStyle = '#1a0a05';
     ctx.strokeText(ch, cx, 0);
-    ctx.fillStyle = color;
+    ctx.fillStyle = fill;
     ctx.fillText(ch, cx, 0);
-    cx += w + 2;
+    cx += w + spacing;
   }
   ctx.restore();
 }

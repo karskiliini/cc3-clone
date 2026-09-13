@@ -34,9 +34,34 @@ function fillCircle(ctx: CanvasRenderingContext2D, x: number, y: number, r: numb
   ctx.restore();
 }
 
-function drawPuff(ctx: CanvasRenderingContext2D, x: number, y: number, diameterPx: number, alpha: number): void {
+// Dark burning-vehicle smoke puff. Kept local (cache keyed `smokeDark|size`)
+// so the shared light getSmokePuff used by muzzle/explosion/terrain smoke is
+// untouched.
+const darkPuffCache = new Map<string, HTMLCanvasElement>();
+function getDarkSmokePuff(size: number): HTMLCanvasElement {
+  const key = `smokeDark|${size}`;
+  let c = darkPuffCache.get(key);
+  if (c) return c;
+  c = document.createElement('canvas');
+  c.width = size; c.height = size;
+  const g = c.getContext('2d')!;
+  const r = size / 2;
+  const grad = g.createRadialGradient(r, r, 0, r, r, r);
+  grad.addColorStop(0, 'rgba(55,50,45,0.9)');
+  grad.addColorStop(0.6, 'rgba(50,46,40,0.5)');
+  grad.addColorStop(1, 'rgba(40,38,35,0)');
+  g.fillStyle = grad;
+  g.beginPath();
+  g.arc(r, r, r, 0, Math.PI * 2);
+  g.fill();
+  darkPuffCache.set(key, c);
+  return c;
+}
+
+function drawPuff(ctx: CanvasRenderingContext2D, x: number, y: number, diameterPx: number, alpha: number, dark = false): void {
   if (alpha <= 0 || diameterPx <= 0) return;
-  const sprite = getSmokePuff(Math.max(2, Math.round(diameterPx)));
+  const size = Math.max(2, Math.round(diameterPx));
+  const sprite = dark ? getDarkSmokePuff(size) : getSmokePuff(size);
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.drawImage(sprite, Math.round(x - diameterPx / 2), Math.round(y - diameterPx / 2), diameterPx, diameterPx);
@@ -58,29 +83,62 @@ function drawFlashes(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     const p = worldToScreen(cam, f.pos);
     const sx = p.x + dx * cam.zoom;
     const sy = p.y + dy * cam.zoom;
-    // infantry: 10px star; tank gun: 22px star + a puff of muzzle smoke
-    const haloD = (big ? 22 : 10) * cam.zoom;
-    const coreD = (big ? 11 : 5) * cam.zoom;
-    ctx.save();
-    ctx.globalAlpha = alpha * 0.95;
-    ctx.fillStyle = '#ff9a3c';
-    ctx.beginPath();
-    ctx.arc(sx, sy, haloD / 2, 0, Math.PI * 2);
-    ctx.fill();
-    // star spikes for a "muzzle flash" silhouette, not just a blob
-    ctx.strokeStyle = '#ff9a3c';
-    ctx.lineWidth = big ? 2.5 : 1.5; // screen-space width — not scaled with zoom
-    const spike = haloD / 2 + (big ? 8 : 4) * cam.zoom;
-    ctx.beginPath();
-    ctx.moveTo(sx - spike, sy); ctx.lineTo(sx + spike, sy);
-    ctx.moveTo(sx, sy - spike); ctx.lineTo(sx, sy + spike);
-    ctx.stroke();
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = '#fff2b0';
-    ctx.beginPath();
-    ctx.arc(sx, sy, coreD / 2, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+    if (big) {
+      // tank gun: small irregular yellow-white flicker (no geometric cross)
+      const haloD = 12 * cam.zoom;
+      const coreD = 8 * cam.zoom;
+      const hx = Math.floor(f.pos.x * 4), hy = Math.floor(f.pos.y * 4);
+      ctx.save();
+      ctx.globalAlpha = alpha * 0.7;
+      ctx.fillStyle = '#ff9a3c';
+      ctx.beginPath();
+      ctx.arc(sx, sy, haloD / 2, 0, Math.PI * 2);
+      ctx.fill();
+      // 5-7 short spokes fanned roughly along the firing direction
+      const nSpokes = 5 + Math.floor(hash2(hx, hy, 31) * 3);
+      ctx.strokeStyle = '#ffd070';
+      ctx.lineWidth = 1; // screen-space width
+      ctx.globalAlpha = alpha * 0.9;
+      ctx.beginPath();
+      for (let i = 0; i < nSpokes; i++) {
+        const ang = f.facing + (hash2(hx, hy, i) - 0.5) * (Math.PI * 2 / 3);
+        const ux = Math.sin(ang), uy = -Math.cos(ang);
+        const start = coreD / 2 * 0.6;
+        const len = (2 + hash2(hy, hx, i + 11) * 4) * cam.zoom + haloD / 2 - start;
+        ctx.moveTo(sx + ux * start, sy + uy * start);
+        ctx.lineTo(sx + ux * (start + len), sy + uy * (start + len));
+      }
+      ctx.stroke();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = '#fff2b0';
+      ctx.beginPath();
+      ctx.arc(sx, sy, coreD / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      // infantry: 10px star
+      const haloD = 10 * cam.zoom;
+      const coreD = 5 * cam.zoom;
+      ctx.save();
+      ctx.globalAlpha = alpha * 0.95;
+      ctx.fillStyle = '#ff9a3c';
+      ctx.beginPath();
+      ctx.arc(sx, sy, haloD / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#ff9a3c';
+      ctx.lineWidth = 1.5; // screen-space width — not scaled with zoom
+      const spike = haloD / 2 + 4 * cam.zoom;
+      ctx.beginPath();
+      ctx.moveTo(sx - spike, sy); ctx.lineTo(sx + spike, sy);
+      ctx.moveTo(sx, sy - spike); ctx.lineTo(sx, sy + spike);
+      ctx.stroke();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = '#fff2b0';
+      ctx.beginPath();
+      ctx.arc(sx, sy, coreD / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
 
     if (big) {
       // a small puff of muzzle smoke lingers a bit longer than the flash itself
@@ -155,7 +213,7 @@ function drawExplosions(ctx: CanvasRenderingContext2D, cam: Camera, state: Battl
       const frac = clamp(e.t / EXPLOSION_LIFE_HE, 0, 1);
       if (frac >= 1) continue;
       // Peak fireball radius, reached around frac≈0.25 (t≈0.25s on a 0.9s life).
-      const maxR = Math.max(24, e.radiusM * 10) * cam.zoom;
+      const maxR = Math.max(16, e.radiusM * 6) * cam.zoom;
 
       // brief 40px flash ring right at detonation
       if (frac < 0.12) {
@@ -176,32 +234,43 @@ function drawExplosions(ctx: CanvasRenderingContext2D, cam: Camera, state: Battl
         ctx.restore();
       }
 
-      // solid, opaque fireball core: dark-red outer -> orange -> yellow-white
-      // inner rings, growing quickly to maxR then fading into the smoke ball.
+      // irregular fireball: overlapping jittered blobs (dark -> orange -> a
+      // little yellow), never concentric, handing over to smoke by frac 0.3.
       if (frac < 0.45) {
         const bf = clamp(frac / 0.28, 0, 1); // reaches full size by frac≈0.28
         const r = maxR * bf;
-        const fireAlpha = clamp(1 - Math.max(0, frac - 0.28) / 0.17, 0.15, 1);
-        fillCircle(ctx, p.x, p.y, r, '#5a1c10', fireAlpha);
-        fillCircle(ctx, p.x, p.y, r * 0.72, '#ff8a3c', fireAlpha);
-        fillCircle(ctx, p.x, p.y, r * 0.4, '#fff2c0', fireAlpha);
+        const fireAlpha = clamp(1 - Math.max(0, frac - 0.28) / 0.17, 0.15, 1) * (frac < 0.3 ? 1 : clamp(1 - (frac - 0.3) / 0.15, 0, 1));
+        const kx = Math.floor(e.pos.x * 4), ky = Math.floor(e.pos.y * 4);
+        const blob = (i: number, color: string, sMin: number, sMax: number, spread: number): void => {
+          const ox = (hash2(kx, ky, i * 3 + 1) - 0.5) * 2 * spread * r;
+          const oy = (hash2(ky, kx, i * 3 + 2) - 0.5) * 2 * spread * r;
+          const br = r * (sMin + hash2(kx + i, ky, 17) * (sMax - sMin));
+          fillCircle(ctx, p.x + ox, p.y + oy, br, color, 0.8 * fireAlpha);
+        };
+        const nDark = 3 + Math.floor(hash2(kx, ky, 41) * 2); // 3-4
+        const nOrange = 2 + Math.floor(hash2(ky, kx, 43) * 2); // 2-3
+        const nYellow = 1 + Math.floor(hash2(kx, ky, 47) * 2); // 1-2
+        let idx = 0;
+        for (let i = 0; i < nDark; i++) blob(idx++, '#6a2a14', 0.45, 0.6, 0.35);
+        for (let i = 0; i < nOrange; i++) blob(idx++, '#d86a2c', 0.35, 0.5, 0.35);
+        for (let i = 0; i < nYellow; i++) blob(idx++, '#ffd070', 0.15, 0.25, 0.25);
 
-        // 12-16 dark debris streaks flying outward
-        const n = 14;
+        // 6-8 short dark debris streaks
+        const n = 6 + Math.floor(hash2(kx, ky, 53) * 3);
         ctx.save();
         ctx.strokeStyle = '#241f1c';
-        ctx.lineWidth = 1.5; // screen-space width — not scaled with zoom
+        ctx.lineWidth = 1; // screen-space width — not scaled with zoom
         ctx.globalAlpha = fireAlpha;
+        ctx.beginPath();
         for (let i = 0; i < n; i++) {
-          const a = (i / n) * Math.PI * 2 + hash2(Math.floor(e.pos.x * 4), Math.floor(e.pos.y * 4), i) * 0.5;
-          const dr = r * (0.7 + hash2(i, Math.floor(e.pos.x * 4), 7) * 0.9);
-          const len = (5 + hash2(i, 3, Math.floor(e.pos.y * 4)) * 6) * cam.zoom;
+          const a = hash2(kx, ky, i + 60) * Math.PI * 2;
+          const dr = r * (0.6 + hash2(i, kx, 7) * 0.6);
+          const len = (2 + hash2(i, 3, ky) * 3) * cam.zoom;
           const ex = p.x + Math.cos(a) * dr, ey = p.y + Math.sin(a) * dr;
-          ctx.beginPath();
           ctx.moveTo(ex, ey);
           ctx.lineTo(ex + Math.cos(a) * len, ey + Math.sin(a) * len);
-          ctx.stroke();
         }
+        ctx.stroke();
         ctx.restore();
       }
 
@@ -217,6 +286,8 @@ function drawExplosions(ctx: CanvasRenderingContext2D, cam: Camera, state: Battl
             const jitter = (hash2(Math.floor(e.pos.x * 4), i, 3) - 0.5) * smokeR * 0.5;
             const jitterY = (hash2(Math.floor(e.pos.y * 4), i, 9) - 0.5) * smokeR * 0.5 - sf * 10 * cam.zoom;
             drawPuff(ctx, p.x + jitter, p.y + jitterY, smokeR * (0.8 + i * 0.12), smokeAlpha * (1 - i * 0.08));
+            // grey-brown tint: a darker puff under the first two light ones
+            if (i < 2) drawPuff(ctx, p.x + jitter, p.y + jitterY, smokeR * 0.7, smokeAlpha * 0.35, true);
           }
         }
       }
@@ -258,24 +329,32 @@ function drawBurningVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: 
     const p = worldToScreen(cam, veh.pos);
     if (veh.state === 'burning') {
       const t = veh.burnTimer;
-      // 3 flickering, fully-opaque flame layers at the engine deck: dark-red
-      // base, orange middle, yellow-hot core (12-16px), jittering independently.
-      const layers: { color: string; size: number; jitter: number; seed: number }[] = [
-        { color: '#7a1a0a', size: 16, jitter: 1.2, seed: 41 },
-        { color: '#ff8a3c', size: 13, jitter: 1.8, seed: 53 },
-        { color: '#ffe27a', size: 8, jitter: 2.2, seed: 67 },
-      ];
+      const z = cam.zoom;
+      // translucent heat bloom under the flames
       ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = '#8a4a20';
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y - 1 * z, 15 * z, 12 * z, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 3 non-concentric flickering flame layers (<=18px across): dark-red
+      // base ellipse, orange tongue offset toward the plume (NE), small yellow core.
+      const layers: { color: string; w: number; h: number; ox: number; oy: number; seed: number }[] = [
+        { color: '#7a1a0a', w: 16, h: 12, ox: 0, oy: 0, seed: 41 },
+        { color: '#ff8a3c', w: 12, h: 10, ox: 3, oy: -3, seed: 53 },
+        { color: '#ffe27a', w: 7, h: 6, ox: 4, oy: -4, seed: 67 },
+      ];
       for (const L of layers) {
-        const jx = (hash2(veh.id, L.seed, Math.floor(t * 9)) - 0.5) * L.jitter;
-        const jy = (hash2(veh.id, L.seed + 1, Math.floor(t * 11)) - 0.5) * L.jitter;
-        const flicker = 0.85 + hash2(veh.id, L.seed + 2, Math.floor(t * 14)) * 0.15;
+        const step = Math.floor(t * 8);
+        const jx = (hash2(veh.id, L.seed + 3, step) - 0.5) * 8;
+        const jy = (hash2(veh.id, L.seed + 4, step) - 0.5) * 8;
+        const flicker = 0.8 + hash2(veh.id, L.seed + 2, Math.floor(t * 14)) * 0.2;
+        const clampX = clamp(L.ox + jx * 0.5, -4, 5);
+        const clampY = clamp(L.oy + jy * 0.5, -5, 4);
         ctx.globalAlpha = flicker;
         ctx.fillStyle = L.color;
-        const sx = p.x + jx * cam.zoom;
-        const sy = p.y + jy * cam.zoom - 2 * cam.zoom;
         ctx.beginPath();
-        ctx.arc(sx, sy, (L.size / 2) * cam.zoom, 0, Math.PI * 2);
+        ctx.ellipse(p.x + clampX * z, p.y + (clampY - 2) * z, (L.w / 2) * z, (L.h / 2) * z, 0, 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.restore();
@@ -285,15 +364,15 @@ function drawBurningVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: 
       const puffCount = 11;
       for (let i = 0; i < puffCount; i++) {
         const phase = ((t * 0.3) + i / puffCount) % 1;
-        const alpha = clamp(1 - phase, 0, 1) * 0.75;
+        const alpha = clamp(1 - phase, 0, 1) * 0.9;
         if (alpha <= 0) continue;
         const rise = phase * 90;
         const drift = phase * 34;
         const jitter = (hash2(veh.id, i, 99) - 0.5) * 10;
-        const diam = (24 + phase * 16) * cam.zoom;
+        const diam = (30 + phase * 18) * cam.zoom;
         const sx = p.x + (drift + jitter) * cam.zoom;
         const sy = p.y - rise * cam.zoom;
-        drawPuff(ctx, sx, sy, diam, alpha);
+        drawPuff(ctx, sx, sy, diam, alpha, true);
       }
     } else if (veh.state === 'knockedOut' || veh.state === 'abandoned') {
       // knocked-out (not burning): a thin, slow wisp of smoke

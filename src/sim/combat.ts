@@ -1,5 +1,5 @@
 import type {
-  BattleEvent, BattleState, Health, Side, Soldier, Team, Vec2, Vehicle, WeaponDef,
+  BattleEvent, BattleMessage, BattleState, Health, Side, Soldier, Team, Vec2, Vehicle, WeaponDef,
 } from '@/shared/types';
 import { AMBUSH_TRIGGER_M, TILE_M, otherSide } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
@@ -13,7 +13,7 @@ import { VEHICLE_DEFS } from '@/data/units';
 import { addMessage } from './messages';
 import { coverFrom } from './cover';
 import { onIncomingFire, onExplosionNear, onOwnWound, onCasualtySeen, onGunnerHit, onFired, isFirstFireFrozen, addStress } from './mind';
-import { onVehicleHit } from './vehicle';
+import { onVehicleHit, onVehicleNearMiss } from './vehicle';
 
 export { hitChance, penetrates };
 
@@ -290,8 +290,26 @@ export function applyHit(
     const verb = result === 'dead' ? 'killed' : 'wounded';
     addMessage(state, `${victimTeam?.name ?? 'Report'}\n${victim.rank}. ${victim.name} has been ${verb}.`, 'bad');
   } else {
-    addMessage(state, `${killerTeam?.name ?? 'Report'}\nEnemy soldier killed.`, 'good');
+    reportEnemyKill(state, killerTeam);
   }
+}
+
+/** Coalesced "Enemy soldier killed." report: one line per killer team within 5 s; further kills in
+ * that window update the same line to "N enemy soldiers killed." instead of spamming the log. */
+const killReportAt = new WeakMap<BattleState, Map<number, { at: number; count: number; msg: BattleMessage }>>();
+function reportEnemyKill(state: BattleState, killerTeam: Team | undefined): void {
+  let m = killReportAt.get(state);
+  if (!m) { m = new Map(); killReportAt.set(state, m); }
+  const key = killerTeam?.id ?? -1;
+  const prev = m.get(key);
+  const name = killerTeam?.name ?? 'Report';
+  if (prev && state.time - prev.at < 5 && state.messages.includes(prev.msg)) {
+    prev.count++;
+    prev.msg.text = `${name}\n${prev.count} enemy soldiers killed.`;
+    return;
+  }
+  addMessage(state, `${name}\nEnemy soldier killed.`, 'good');
+  m.set(key, { at: state.time, count: 1, msg: state.messages[state.messages.length - 1] });
 }
 
 export function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: WeaponDef, shooterSide: Side): void {
@@ -370,6 +388,7 @@ function fireAtVehicle(
   const kind = tracerKindFor(weapon);
   if (!rng.chance(p)) {
     if (wantTracer) state.tracers.push({ from: { ...shooterPos }, to: { ...vehicle.pos }, t: 0, hit: false, kind });
+    onVehicleNearMiss(state, vehicle, weapon, shooterPos);
     return;
   }
   if (wantTracer) state.tracers.push({ from: { ...shooterPos }, to: { ...vehicle.pos }, t: 0, hit: true, kind });

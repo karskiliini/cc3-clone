@@ -13,12 +13,14 @@
 // interpolated at pixel resolution) are blended across a feathered band
 // rather than hard-thresholded, so borders look brushed.
 //
-// Memory/perf: chunks are 16x16 tiles (320x320 px) and are LAZILY baked on
-// first use, kept in an LRU cache capped at 48 canvases. `draw()` bakes at
-// most 2 new chunks per call (each bake is budgeted to stay under ~25ms);
-// chunks not yet baked are filled in from a cheap whole-map low-res (2px per
-// tile) canvas scaled up, so scrolling never stalls. `thumbnail()` never
-// bakes full-res chunks at all — it only ever scales that low-res canvas.
+// Memory/perf: chunks are 16x16 tiles (320x320 px at zoom 1) and are LAZILY
+// baked on first use, kept in a per-zoom LRU cache (see MAX_CACHED_CHUNKS_BY_ZOOM).
+// Measured bake cost (Berlin): ~5-11ms/chunk at 0.5x, ~20-50ms at 1x, ~80-115ms
+// at 2x. `draw()` bakes against a wall-clock budget (BAKE_BUDGET_MS) rather than
+// a chunk count, nearest-to-screen-centre first; chunks not yet baked fall back
+// to a cached bake at another zoom or the cheap whole-map low-res (2px per tile)
+// canvas, so scrolling never stalls for long. `thumbnail()` never bakes full-res
+// chunks at all — it only ever scales that low-res canvas.
 // ============================================================================
 import type { Camera, GameMap, BattleState, MapVectorFeature, Terrain, Season, Vec2 } from '@/shared/types';
 import { TILE_PX, VIEW_W, VIEW_H } from '@/shared/types';
@@ -32,18 +34,17 @@ import { worldToScreen, ZOOM_LEVELS } from '@/engine/camera';
 
 const CHUNK_TILES = 16;
 const CHUNK_PX = CHUNK_TILES * TILE_PX; // 320
-const MAX_CACHED_CHUNKS = 48;
-const BAKES_PER_DRAW = 2;
-/** Burst budget used when a camera jump (map open, teleport, big scroll) leaves more than 2
- * visible chunks unbaked at once — lets the whole viewport catch up within ~2-3 draw() calls
- * instead of trickling in at 2/frame, while a normal small scroll (<=2 new chunks) still only
- * pays the small per-frame budget. */
-const BAKES_PER_DRAW_BURST = 6;
-/** Zoom-2 chunks are 4x the pixels of a zoom-1 bake, but each bake still measures well under
- * the ~80ms/chunk budget (see bakeChunk's console.log) — allow a bigger per-frame budget than
- * zoom 1/0.5 so scrolling in at max zoom still catches up quickly. */
-const BAKES_PER_DRAW_ZOOM2 = 4;
-const BAKES_PER_DRAW_BURST_ZOOM2 = 8;
+/** Per-zoom LRU caps. Each must stay above the largest visible chunk count at that zoom
+ * (~40 at 0.5x, ~12 at 1x, ~6 at 2x). 0.5x holds all of Berlin (140 chunks, 160x160 each,
+ * ~3.6MB); 1x ~26MB; 2x (640x640) ~26MB. A zoom only ever evicts its own entries, so zooming
+ * in never throws away the cheap low-zoom working set. */
+const MAX_CACHED_CHUNKS_BY_ZOOM: Record<number, number> = { 0.5: 160, 1: 64, 2: 16 };
+/** Wall-clock bake budget per draw(): at least one chunk is always baked per frame when any
+ * are pending, further chunks only while under the deadline. A single 1x bake is ~20-50ms and
+ * a 2x bake ~80-115ms, so this caps a frame at roughly one chunk's cost instead of 6-8. */
+const BAKE_BUDGET_MS = 10;
+/** Larger budget used only when nothing is cached at any zoom yet (first open of a map). */
+const BAKE_BUDGET_COLD_MS = 40;
 const LOWRES_PX_PER_TILE = 2;
 
 const BUILDING_TERRAINS = new Set<Terrain>(['buildingWood', 'buildingStone', 'floor']);
@@ -86,19 +87,27 @@ const PAVED_RAMP = ['#4f4f4a', '#5f5f58', '#6f6f66', '#7c7b70'];
 const MUD_RAMP = ['#4b3d2b', '#5b4a33', '#6b593d', '#78664a'];
 const CROPS_RAMP = ['#8f7d3a', '#b09a47', '#c9b255', '#d9c465'];
 const WATER_RAMP = ['#3c5566', '#4a6578', '#5a7688', '#6a8698'];
-const ICE_RAMP = ['#b8c4cc', '#c8d2d9', '#d6dee4'];
+// Frozen river: a clearly darker steel blue-grey than the surrounding snow (ref_cc3_1482 river
+// avg ~(116,123,128)) — the old pale ramp sat only ~17 luminance units below snow and vanished.
+const ICE_RAMP = ['#6e8290', '#7d919e', '#8fa2ae', '#a6b6c0'];
+// Summer road/crops: warm saturated ochre/gold sampled against ref_cc3_1479 (dirt road ~(131,102,35),
+// wheat ~(162,125,31)). Separate from ROAD_RAMP/CROPS_RAMP, which autumn still uses.
+const SUMMER_ROAD_RAMP = ['#7a5c1e', '#8f6e26', '#a07a2c', '#b08a36'];
+const SUMMER_CROPS_RAMP = ['#6e5210', '#8a6a16', '#a27e1e', '#b89226', '#c8a230'];
 // grey-brown debris, not the pinkish-brown palette.ts default (that read as a paint spatter,
 // especially over snow) — used for all seasons since rubble is rubble regardless.
 const RUBBLE_RAMP = ['#6e675c', '#7a7266', '#847c70', '#8a8276'];
 
 const LOCAL_RAMPS: Partial<Record<Season, Partial<Record<Terrain, string[]>>>> = {
   summer: {
-    open: ['#7d7250', '#928660', '#a3976c', '#b0a479', '#c2b686'],
-    grass: ['#4f5e2b', '#66743a', '#7a8748', '#8d9a56', '#a8b06a'],
-    tallgrass: ['#6f7d3a', '#8a9648', '#a1ac57', '#b5bd66'],
-    crops: CROPS_RAMP,
+    // warm bare earth (ref_cc3_1479 bare ground ~(146,126,46)), not grey concrete
+    open: ['#86692e', '#9a7a36', '#ab8a40', '#ba984a', '#c6a656'],
+    // dark warm olive (ref open grass ~(107,99,26), sat ~0.78), not pale cool green
+    grass: ['#4a4c12', '#5c5f1a', '#6b6320', '#7d7726', '#8f8730'],
+    tallgrass: ['#6a6a1e', '#7e7c26', '#928c2e', '#a49a38'],
+    crops: SUMMER_CROPS_RAMP,
     mud: MUD_RAMP,
-    dirtroad: ROAD_RAMP,
+    dirtroad: SUMMER_ROAD_RAMP,
     pavedroad: PAVED_RAMP,
     water: WATER_RAMP,
     rubble: RUBBLE_RAMP,
@@ -116,8 +125,11 @@ const LOCAL_RAMPS: Partial<Record<Season, Partial<Record<Terrain, string[]>>>> =
   },
   winter: {
     snow: ['#c4c9d1', '#d6dae0', '#e6e9ee', '#f2f4f7'],
-    dirtroad: ['#7c7264', '#8c8072', '#98897a', '#a49484'],
-    pavedroad: ['#6a6c70', '#75777c', '#7d7f84', '#87898e'],
+    // snow-covered tracks: close to snow colour (ref_cc3_1484 main track ~(225,225,227)); the
+    // road is defined by its wheel ruts, not by a dark fill. Paved top stays ~10+ below snow so
+    // Berlin streets still read as streets.
+    dirtroad: ['#b9b0a3', '#c6bdb0', '#cfc7bb', '#d6cfc4'],
+    pavedroad: ['#b4b8bd', '#c4c8cd', '#d0d4d8', '#dadde1'],
     mud: ['#3a352e', '#4a4238', '#585044', '#635a4c'],
     water: ICE_RAMP,
     rubble: RUBBLE_RAMP,
@@ -208,8 +220,18 @@ function groundColorFbm(t: Terrain, season: Season, X: number, Y: number, seed: 
   const f64 = fbm64(X, Y, seed + th);
   const f14 = fbm14(X, Y, seed + th);
   const g = hash2(X, Y, seed + 31);
-  const bias = (t === 'grass' || t === 'open') ? 0.08 : 0;
-  const tt = clamp01(0.5 + bias + 0.9 * (f64 - 0.5) + 0.5 * (f14 - 0.5) + 0.18 * (g - 0.5));
+  if (t === 'grass' || t === 'open') {
+    // dense 2-5px stipple rather than a smooth 60px cloud wash (ref_cc3_1479 grass lumSD ~18-20):
+    // weaker large-scale term, stronger medium term, plus a ~3px fbm band. Summer drops the
+    // brightening bias and raises the per-pixel fine term for more luminance contrast.
+    const summer = season === 'summer';
+    const bias = summer ? 0 : 0.08;
+    const fine = summer ? 0.40 : 0.18;
+    const f3 = fbm(X / 3, Y / 3, 2, seed + th + 77);
+    const tt = clamp01(0.5 + bias + 0.45 * (f64 - 0.5) + 0.6 * (f14 - 0.5) + (summer ? 0.6 : 0.35) * (f3 - 0.5) + fine * (g - 0.5));
+    return rampLerp(ramp, tt);
+  }
+  const tt = clamp01(0.5 + 0.9 * (f64 - 0.5) + 0.5 * (f14 - 0.5) + 0.18 * (g - 0.5));
   return rampLerp(ramp, tt);
 }
 
@@ -240,10 +262,10 @@ function reliefFactor(X: number, Y: number, seed: number): number {
  * randomly. Returns a +-0.1 shade delta for pixels within ~0.7px of the stroke, else 0. Anchors
  * are kept 2px inset from the cell edge so a stroke never needs to be evaluated from a
  * neighbouring cell — one hash lookup per pixel, no neighbour scan. */
-function tuftShade(wpx: number, wpy: number, seed: number): number {
+function tuftShade(wpx: number, wpy: number, seed: number, chance = 0.22, amt = 0.1): number {
   const cellSize = 10;
   const ccx = Math.floor(wpx / cellSize), ccy = Math.floor(wpy / cellSize);
-  if (hash2(ccx, ccy, seed + 4601) > 0.22) return 0;
+  if (hash2(ccx, ccy, seed + 4601) > chance) return 0;
   const ax = ccx * cellSize + 2 + hash2(ccx, ccy, seed + 4602) * (cellSize - 4);
   const ay = ccy * cellSize + 2 + hash2(ccx, ccy, seed + 4603) * (cellSize - 4);
   const len = 3 + hash2(ccx, ccy, seed + 4604) * 4;
@@ -256,7 +278,7 @@ function tuftShade(wpx: number, wpy: number, seed: number): number {
   const cx2 = ax0 + t * ex, cy2 = ay0 + t * ey;
   const ddx = wpx - cx2, ddy = wpy - cy2;
   if (ddx * ddx + ddy * ddy > 0.49) return 0;
-  return hash2(ccx, ccy, seed + 4605) > 0.45 ? 0.1 : -0.1;
+  return hash2(ccx, ccy, seed + 4605) > 0.45 ? amt : -amt;
 }
 
 function setPixel(data: Uint8ClampedArray, w: number, x: number, y: number, c: RGB): void {
@@ -279,7 +301,7 @@ interface Grid { data: Float32Array; size: number; any: boolean }
  * loses its tile-stepped corners (not just the ~1-tile-wide edge band) — this is what makes
  * crops/mud/tallgrass/rubble patches read as soft amoeba blobs instead of staircases (fix #6).
  */
-function buildGrid(map: GameMap, x0: number, y0: number, tiles: number, classify: (t: Terrain) => boolean, blurR = 0): Grid {
+function buildGrid(map: GameMap, x0: number, y0: number, tiles: number, classify: (t: Terrain) => boolean, blurR = 0, sample: (tx: number, ty: number) => Terrain = (tx, ty) => tileAt(map, tx, ty)): Grid {
   const size = tiles + 3;
   const data = new Float32Array(size * size);
   let any = false;
@@ -288,7 +310,7 @@ function buildGrid(map: GameMap, x0: number, y0: number, tiles: number, classify
       const ty = y0 - 1 + gy;
       for (let gx = 0; gx < size; gx++) {
         const tx = x0 - 1 + gx;
-        const v = classify(tileAt(map, tx, ty)) ? 1 : 0;
+        const v = classify(sample(tx, ty)) ? 1 : 0;
         data[gy * size + gx] = v;
         if (v) any = true;
       }
@@ -304,7 +326,7 @@ function buildGrid(map: GameMap, x0: number, y0: number, tiles: number, classify
     const ty = y0 - 1 - rawPad + gy;
     for (let gx = 0; gx < rawSize; gx++) {
       const tx = x0 - 1 - rawPad + gx;
-      raw[gy * rawSize + gx] = classify(tileAt(map, tx, ty)) ? 1 : 0;
+      raw[gy * rawSize + gx] = classify(sample(tx, ty)) ? 1 : 0;
     }
   }
   // separable box blur (horizontal pass, then vertical) — O(n*(2R+1)) instead of O(n*(2R+1)^2).
@@ -377,7 +399,13 @@ function coverageAt(map: GameMap, classify: (t: Terrain) => boolean, tileXf: num
 // ============================================================================
 const VEC_FEATHER_PX = 6;
 
-interface VecSegW { ax: number; ay: number; bx: number; by: number; halfW: number }
+interface VecSegW {
+  ax: number; ay: number; bx: number; by: number; halfW: number;
+  /** owning polyline index + segment index within it (adjacency test for junction detection) */
+  poly: number; segIdx: number;
+  /** true when endpoint a / b is an OPEN end of its polyline (not an interior joint) */
+  aOpen: boolean; bOpen: boolean;
+}
 interface VecAreaField { segs: VecSegW[] }
 
 /** Builds a segment list (in world PIXEL coords) for every vector of `kind`+`terrain`, clipped
@@ -391,34 +419,47 @@ function buildAreaField(
   const minX = x0 * TILE_PX - pad, maxX = (x0 + tilesW) * TILE_PX + pad;
   const minY = y0 * TILE_PX - pad, maxY = (y0 + tilesH) * TILE_PX + pad;
   const segs: VecSegW[] = [];
-  for (const v of vectors) {
+  for (let vi = 0; vi < vectors.length; vi++) {
+    const v = vectors[vi];
     if (v.kind !== kind || v.terrain !== terrain) continue;
     const halfW = (v.width * TILE_PX) / 2;
+    const last = v.points.length - 2;
     for (let i = 0; i < v.points.length - 1; i++) {
       const a = v.points[i], b = v.points[i + 1];
       const ax = a.x * TILE_PX, ay = a.y * TILE_PX, bx = b.x * TILE_PX, by = b.y * TILE_PX;
       const sminX = Math.min(ax, bx) - halfW, smaxX = Math.max(ax, bx) + halfW;
       const sminY = Math.min(ay, by) - halfW, smaxY = Math.max(ay, by) + halfW;
       if (smaxX < minX || sminX > maxX || smaxY < minY || sminY > maxY) continue;
-      segs.push({ ax, ay, bx, by, halfW });
+      segs.push({ ax, ay, bx, by, halfW, poly: vi, segIdx: i, aOpen: i === 0, bOpen: i === last });
     }
   }
   return segs.length ? { segs } : null;
 }
 
-interface VecSample { cov: number; dist: number; halfW: number }
-const VEC_SAMPLE_NONE: VecSample = { cov: 0, dist: 0, halfW: 1 };
+interface VecSample {
+  cov: number; dist: number; halfW: number;
+  /** unclamped along-segment distance (px) from the best segment's nearest OPEN polyline end;
+   * negative past the end cap, Infinity when that segment has no open end. */
+  endDist: number;
+  /** true when 2+ non-adjacent segments cover this pixel (a road junction/crossing) */
+  junction: boolean;
+}
+const VEC_SAMPLE_NONE: VecSample = { cov: 0, dist: 0, halfW: 1, endDist: Infinity, junction: false };
 
 /** Coverage of a road/river vector field at world pixel (wpx,wpy): signed distance to the nearest
  * polyline segment (round joins, since it's a min over segments), smoothstep-feathered over
  * VEC_FEATHER_PX at a half-width modulated by low-amplitude coherent fbm so shoulders wander. */
 function sampleVecArea(field: VecAreaField, wpx: number, wpy: number, seed: number): VecSample {
-  let bestCov = 0, bestDist = 0, bestHalfW = 1;
+  // "best" = the segment with the smallest (dist - effHalf), NOT the highest clamped coverage:
+  // coverage saturates at 1 inside the road, so picking by coverage kept the FIRST segment's
+  // distance past its own end, bending rut iso-bands into hairpin loops at every joint.
+  let bestCov = 0, bestDist = 0, bestHalfW = 1, bestEnd = Infinity, bestScore = Infinity;
+  let coverPoly = -1, coverSeg = -1, junction = false;
   for (const s of field.segs) {
     const dx = s.bx - s.ax, dy = s.by - s.ay;
     const len2 = dx * dx + dy * dy;
-    let t = len2 > 1e-6 ? ((wpx - s.ax) * dx + (wpy - s.ay) * dy) / len2 : 0;
-    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const tRaw = len2 > 1e-6 ? ((wpx - s.ax) * dx + (wpy - s.ay) * dy) / len2 : 0;
+    const t = tRaw < 0 ? 0 : tRaw > 1 ? 1 : tRaw;
     const cx = s.ax + t * dx, cy = s.ay + t * dy;
     const ddx = wpx - cx, ddy = wpy - cy;
     // wobble amplitude is +-TILE_PX*0.25 and the feather band is VEC_FEATHER_PX either side of
@@ -427,15 +468,29 @@ function sampleVecArea(field: VecAreaField, wpx: number, wpy: number, seed: numb
     const dist2 = ddx * ddx + ddy * ddy;
     if (dist2 > margin * margin) continue; // cheap reject before paying for fbm
     const dist = Math.sqrt(dist2);
+    if (dist < s.halfW) {
+      if (coverPoly < 0) { coverPoly = s.poly; coverSeg = s.segIdx; }
+      else if (s.poly !== coverPoly || Math.abs(s.segIdx - coverSeg) > 1) junction = true;
+    }
     const wobble = (fbm(wpx / 40, wpy / 40, 2, seed) - 0.5) * TILE_PX * 0.5;
     const effHalf = s.halfW + wobble;
     const cov = clamp01(0.5 - (dist - effHalf) / VEC_FEATHER_PX);
-    if (cov > bestCov) { bestCov = cov; bestDist = dist; bestHalfW = s.halfW; }
+    const score = dist - effHalf;
+    if (cov > 0 && score < bestScore) {
+      bestScore = score;
+      bestCov = cov; bestDist = dist; bestHalfW = s.halfW;
+      const len = Math.sqrt(len2);
+      let e = Infinity;
+      if (s.aOpen) e = tRaw * len;
+      if (s.bOpen) e = Math.min(e, (1 - tRaw) * len);
+      bestEnd = e;
+    }
   }
-  return bestCov > 0 ? { cov: bestCov, dist: bestDist, halfW: bestHalfW } : VEC_SAMPLE_NONE;
+  return bestCov > 0 ? { cov: bestCov, dist: bestDist, halfW: bestHalfW, endDist: bestEnd, junction } : VEC_SAMPLE_NONE;
 }
 
 const isCrops = (t: Terrain) => t === 'crops';
+const isOpenGround = (t: Terrain) => t === 'open';
 const isMud = (t: Terrain) => t === 'mud';
 const isTallgrass = (t: Terrain) => t === 'tallgrass';
 const isPaved = (t: Terrain) => t === 'pavedroad';
@@ -452,6 +507,7 @@ function paintGroundAndFeatures(
   groundUnder: Terrain[], mapW: number, mapH: number,
   fieldId: Int32Array, fieldAxis: Map<number, FieldInfo>,
   cropsGrid: Grid, mudGrid: Grid, tallgrassGrid: Grid, pavedGrid: Grid, dirtGrid: Grid, waterGrid: Grid, rubbleGrid: Grid, dirtyGrid: Grid,
+  openGrid: Grid,
   pavedVec: VecAreaField | null, dirtVec: VecAreaField | null, waterVec: VecAreaField | null,
   tramRailY: number[],
   zoom: number, bpt: number,
@@ -519,9 +575,23 @@ function paintGroundAndFeatures(
             if (nC > bestS) { secondT = bestT; secondS = bestS; bestT = tC; bestS = nC; } else if (nC > secondS) { secondT = tC; secondS = nC; }
             if (nD > bestS) { secondT = bestT; secondS = bestS; bestT = tD; bestS = nD; } else if (nD > secondS) { secondT = tD; secondS = nD; }
             groundT = bestT;
-            color = groundColorFbm(bestT, season, wpx, wpy, seed);
+            const bestGO = bestT === 'grass' || bestT === 'open';
+            if (bestGO && openGrid.any) {
+              // grass<->open: cross-fade over a blurred coverage field (sampled from the ground-
+              // under map, so roads don't punch "grass" holes into open ground) instead of the
+              // 4-corner pick, whose narrow feather left 20px tile stair-steps at 1:1.
+              const covOpen = sampleGrid(openGrid, tx, px, ty, py, wpx, wpy, seed + 3031, 0.05, bpt);
+              const ob = smooth01(covOpen, 0.32, 0.68);
+              if (ob <= 0.003) color = groundColorFbm('grass', season, wpx, wpy, seed);
+              else if (ob >= 0.997) color = groundColorFbm('open', season, wpx, wpy, seed);
+              else color = lerpRGB(groundColorFbm('grass', season, wpx, wpy, seed), groundColorFbm('open', season, wpx, wpy, seed), ob);
+              groundT = ob > 0.5 ? 'open' : 'grass';
+            } else {
+              color = groundColorFbm(bestT, season, wpx, wpy, seed);
+            }
             // feathered 6px-ish blend band near borders (only pay for a second sample when close)
-            if (secondT !== bestT && bestS - secondS < 0.3) {
+            const secondGO = secondT === 'grass' || secondT === 'open';
+            if (secondT !== bestT && bestS - secondS < 0.3 && !(bestGO && secondGO && openGrid.any)) {
               const blend = clamp01(0.5 - (bestS - secondS) / 0.6) * 0.85;
               color = lerpRGB(color, groundColorFbm(secondT, season, wpx, wpy, seed), blend);
             }
@@ -550,6 +620,7 @@ function paintGroundAndFeatures(
           if (tgBlend > 0.003) {
             let tg = groundColorFbm('tallgrass', season, wpx, wpy, seed);
             if (covTallgrass < 0.62) tg = shade(tg, -0.08); // feathered inner edge, slightly duller
+            if (season === 'summer') tg = shade(tg, (hash2(wpx, wpy, seed + 9121) - 0.5) * 0.3 + (hash2(Math.floor(wpx / 2), Math.floor(wpy / 3), seed + 9122) - 0.5) * 0.16); // stalk stipple
             color = lerpRGB(color, tg, tgBlend);
             if (tgBlend > 0.5) groundT = 'tallgrass';
           }
@@ -562,7 +633,12 @@ function paintGroundAndFeatures(
           }
 
           // -------------------------------------------------------- crops
-          const cropBlend = smooth01(covCrop, 0.32, 0.68);
+          // summer/autumn fields get a firm, ragged edge: coherent ~7px fbm jitter on the coverage
+          // value and a narrow blend band, instead of a 20px soft feather (ref wheat has a crisp
+          // lobed outline with a dark rim). Winter keeps the soft blend (fields ~= snow anyway).
+          const cropEdge = season === 'winter' || covCrop <= 0.15 || covCrop >= 0.85
+            ? covCrop : covCrop + (fbm(wpx / 7, wpy / 7, 2, seed + 4250) - 0.5) * 0.35;
+          const cropBlend = season === 'winter' ? smooth01(covCrop, 0.32, 0.68) : smooth01(cropEdge, 0.44, 0.52);
           if (cropBlend > 0.003) {
             // Row axis: ONE base angle for the whole MAP (see fieldBaseAngleDeg — hashed from
             // the map id to 0/90/occasionally 45 degrees), and each contiguous field (flood-
@@ -573,15 +649,29 @@ function paintGroundAndFeatures(
             const fid = fieldId[wy * mapW + wx];
             const info = fid >= 0 ? fieldAxis.get(fid) : undefined;
             const sinT = info ? info.sin : 0, cosT = info ? info.cos : 1;
-            const cropBase = groundColorFbm('crops', season, wpx, wpy, seed);
             // slight low-frequency fbm wobble along the row so lines don't look ruler-straight,
-            // then 3px-spaced rows at +-7% brightness.
+            // then 3px-spaced rows — kept very faint: the reference wheat shows dense stipple, not
+            // a visible barcode of rows.
             const wobSeed = seed + (fid >= 0 ? fid * 131 : 0) + 7701;
             const wobble = (fbm(wpx / 60, wpy / 60, 1, wobSeed) - 0.5) * 4;
             const perp = -wpx * sinT + wpy * cosT + wobble;
             const rowPhase = ((Math.floor(perp / 3) % 2) + 2) % 2; // guard against negative perp
-            let color2 = shade(cropBase, rowPhase === 0 ? 0.07 : -0.07);
-            if (covCrop < 0.65) color2 = shade(color2, -0.14); // darker headland near the field edge
+            let color2: RGB;
+            if (season === 'winter') {
+              // snowbound field: within a few percent of open snow, broken faint furrows, sparse
+              // stubble specks — no blue-grey corduroy sheet.
+              const cropBase = lerpRGB(groundColorFbm('snow', season, wpx, wpy, seed), groundColorFbm('crops', season, wpx, wpy, seed), 0.2);
+              color2 = cropBase;
+              if (hash2(Math.floor(wpx / 4), Math.floor(wpy / 4), seed + 7710) > 0.35) color2 = shade(color2, rowPhase === 0 ? 0.015 : -0.015);
+              const stub = hash2(wpx, wpy, seed + 7720);
+              if (stub < 0.04) color2 = lerpRGB(color2, { r: 138, g: 120, b: 92 }, 0.3 + stub * 5);
+              if (covCrop < 0.65) color2 = shade(color2, -0.04);
+            } else {
+              const cropBase = groundColorFbm('crops', season, wpx, wpy, seed);
+              color2 = shade(cropBase, (hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4242) - 0.5) * 0.4); // 2px stipple
+              color2 = shade(color2, rowPhase === 0 ? 0.03 : -0.03);
+              if (cropEdge < 0.58) color2 = shade(color2, -0.22); // thin dark headland rim
+            }
             color = lerpRGB(color, color2, cropBlend);
           }
 
@@ -604,18 +694,23 @@ function paintGroundAndFeatures(
               // snow blends into the gutters over ~3px instead of a dark kerb line, and two
               // soft wheel-track bands read as slightly darker either side of the centreline.
               const ratio = pavedRes ? pavedRes.dist / pavedRes.halfW : 1 - covPaved;
-              if (ratio > 0.78) {
-                const snowBlend = clamp01((ratio - 0.78) / 0.22) * 0.8;
+              if (ratio > 0.7) {
+                const snowBlend = clamp01((ratio - 0.7) / 0.30) * 0.8;
                 rc = lerpRGB(rc, groundColorFbm('snow', season, wpx, wpy, seed), snowBlend);
               }
+              // two thin, broken dark-brown wheel ruts (no dark fill): faded at open road ends
+              // and junctions so they never loop around an end cap or cross through each other.
               const trackOff = pavedRes ? Math.abs(pavedRes.dist - 0.4 * pavedRes.halfW) : Math.abs(ratio - 0.4) * 6;
-              if (trackOff < 1.6) rc = shade(rc, -0.14);
+              const rutOk = !pavedRes || (pavedRes.endDist >= pavedRes.halfW && !pavedRes.junction);
+              if (rutOk && trackOff < 1.2 && hash2(Math.floor(wpx / 3), Math.floor(wpy / 3), seed + 4530) > 0.15) {
+                rc = lerpRGB(rc, { r: 96, g: 84, b: 70 }, 0.75);
+              }
             } else {
               if (atGutter) rc = shade(rc, -0.32); // dark gutter line right at the edge
               else if (nearEdge) rc = shade(rc, -0.16); // kerb
+              const crackBlockX = Math.floor(wpx / 3), crackBlockY = Math.floor(wpy / 3);
+              if (hash2(crackBlockX, crackBlockY, seed + 4501) < 0.02) rc = shade(rc, -0.24);
             }
-            const crackBlockX = Math.floor(wpx / 3), crackBlockY = Math.floor(wpy / 3);
-            if (hash2(crackBlockX, crackBlockY, seed + 4501) < 0.02) rc = shade(rc, -0.24);
             // tram rails: two 1px dark lines 4px apart, where a tramwire decor line runs
             for (let i = 0; i < tramRailY.length; i++) {
               const off = wpy - tramRailY[i];
@@ -629,18 +724,29 @@ function paintGroundAndFeatures(
             // ~40-60px) for wetter contrast. From vector geometry this is a proper distance
             // iso-band at +-0.35*halfwidth; from the tile-grid fallback it's an approximation
             // via the coverage value itself.
-            const inRutBand = dirtRes
-              ? Math.abs(dirtRes.dist - 0.35 * dirtRes.halfW) < 1.6
-              : covDirt >= 0.6 && covDirt <= 0.72;
-            if (inRutBand && hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4602) > 0.2) {
+            // The rut distance wobbles a little (fbm) so tracks meander instead of reading as
+            // ruler-straight rails, and ruts fade out within one half-width of an OPEN polyline
+            // end and wherever two non-adjacent segments overlap (junctions) — otherwise the
+            // clamped distance iso-band wraps round the end cap into a hairpin loop.
+            const rutWob = (fbm(wpx / 30, wpy / 30, 2, seed + 4620) - 0.5) * 2;
+            const rutOk = !dirtRes || (dirtRes.endDist >= dirtRes.halfW && !dirtRes.junction);
+            const inRutBand = rutOk && (dirtRes
+              ? Math.abs(dirtRes.dist + rutWob - 0.35 * dirtRes.halfW) < 1.6
+              : covDirt >= 0.6 && covDirt <= 0.72);
+            const rutHit = inRutBand && hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4602) > 0.2;
+            if (season === 'winter') {
+              // snow-covered track: pale snow with thin dark-brown ruts, no puddles
+              if (rutHit) rc = lerpRGB(rc, { r: 112, g: 84, b: 56 }, 0.7);
+              else rc = lerpRGB(rc, groundColorFbm('snow', season, wpx, wpy, seed), 0.6);
+            } else if (rutHit) {
               const puddleBucketX = Math.floor(wpx / 45), puddleBucketY = Math.floor(wpy / 45);
               if (hash2(puddleBucketX, puddleBucketY, seed + 4603) < 0.15) {
-                rc = lerpRGB(rc, { r: 66, g: 80, b: 86 }, 0.55); // wet puddle fleck in the rut
+                rc = lerpRGB(rc, { r: 92, g: 72, b: 40 }, 0.35); // darker damp earth in the rut
               } else {
-                rc = shade(rc, -0.18);
+                rc = shade(rc, -0.10);
               }
             }
-            if (hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4610) < 0.02) rc = shade(rc, -0.2); // sparse stones
+            if (season !== 'winter' && hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4610) < 0.02) rc = shade(rc, -0.2); // sparse stones (buried under snow in winter)
             color = rc;
           }
 
@@ -650,10 +756,17 @@ function paintGroundAndFeatures(
             let wc = groundColorFbm('water', season, wpx, wpy, seed);
             const bankRatio = waterRes ? waterRes.dist / waterRes.halfW : null;
             if (season === 'winter') {
-              const crackBlockX = Math.floor(wpx / 5), crackBlockY = Math.floor(wpy / 5);
-              if (hash2(crackBlockX, crackBlockY, seed + 4801) < 0.03) wc = shade(wc, -0.18);
-              const atBank = bankRatio !== null ? bankRatio > 0.66 : covWater < 0.66;
-              if (atBank) wc = lerpRGB(wc, { r: 236, g: 240, b: 244 }, 0.5); // snow drift at the bank
+              // wind-scoured pale ice/snow patches inside the dark steel-grey ice, a dark-brown
+              // reed/scrub line along each bank, and a narrow snow band just inside it.
+              const ice = fbm(wpx / 18, wpy / 18, 2, seed + 4805);
+              if (ice > 0.66) wc = lerpRGB(wc, { r: 214, g: 222, b: 228 }, clamp01((ice - 0.66) / 0.15) * 0.55);
+              if (bankRatio !== null) {
+                if (bankRatio > 0.86) wc = lerpRGB(wc, { r: 96, g: 78, b: 58 }, 0.55);
+                else if (bankRatio > 0.7) wc = lerpRGB(wc, { r: 225, g: 230, b: 234 }, 0.35);
+              } else {
+                if (covWater < 0.6) wc = lerpRGB(wc, { r: 96, g: 78, b: 58 }, 0.55);
+                else if (covWater < 0.7) wc = lerpRGB(wc, { r: 225, g: 230, b: 234 }, 0.35);
+              }
             } else if (bankRatio !== null) {
               if (bankRatio > 0.82) wc = shade(wc, -0.3); // dark bank line
               else if (bankRatio > 0.62) wc = shade(wc, 0.18); // bank highlight band
@@ -705,11 +818,19 @@ function paintGroundAndFeatures(
             const clump = clamp01(fbmClump(wpx, wpy, seed));
             const posterized = Math.round(clump * 3) / 3;
             const soft = lerp(clump, posterized, 0.6);
-            color = shade(color, (soft - 0.5) * 0.24);
+            const isSnowGround = groundT === 'snow';
+            color = shade(color, (soft - 0.5) * (isSnowGround ? 0.24 : 0.40));
             // (c) sparse directional strokes 3-7px long ("grass tufts"), following a slowly
-            // varying angle field, at ~3% area density, +-10% brightness.
-            const tuft = tuftShade(wpx, wpy, seed);
+            // varying angle field. Grass/open get denser, stronger tufts plus sparse dark-brown
+            // earth flecks (ref grass stipple); snow keeps the subtler original values.
+            const tuft = isSnowGround ? tuftShade(wpx, wpy, seed) : tuftShade(wpx, wpy, seed, 0.4, 0.16);
             if (tuft !== 0) color = shade(color, tuft);
+            if (!isSnowGround && hash2(wpx, wpy, seed + 9100) < 0.06) color = lerpRGB(color, { r: 92, g: 70, b: 38 }, 0.35);
+            // summer: dense fine stipple — ref_cc3_1479 grass has ~2x our luminance SD at 1:1.
+            // Mostly 1px with a weaker 2px term so it doesn't read as a 2px checkerboard.
+            if (season === 'summer' && !isSnowGround) {
+              color = shade(color, (hash2(wpx, wpy, seed + 9111) - 0.5) * 0.34 + (hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 9110) - 0.5) * 0.14);
+            }
           }
 
           // -------------------------------------------------------- relief + grain + brush
@@ -735,6 +856,15 @@ function craterRimColor(season: Season): string { return season === 'winter' ? '
 function paintCraterAt(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, seed: number, season: Season): void {
   const steps = 10;
   ctx.save();
+  if (season === 'winter') {
+    // wide grey scorch halo blown over the snow around the blast (ref_cc3_1485) — painted
+    // before the rim clip below, or it would be clipped away.
+    const halo = ctx.createRadialGradient(cx, cy, r, cx, cy, r * 2.2);
+    halo.addColorStop(0, 'rgba(50,46,42,0.45)');
+    halo.addColorStop(1, 'rgba(50,46,42,0)');
+    ctx.fillStyle = halo;
+    ctx.fillRect(cx - r * 2.2, cy - r * 2.2, r * 4.4, r * 4.4);
+  }
   ctx.beginPath();
   for (let a = 0; a <= steps; a++) {
     const ang = (a / steps) * Math.PI * 2;
@@ -788,8 +918,17 @@ function paintCraterAt(ctx: CanvasRenderingContext2D, cx: number, cy: number, r:
   }
 }
 
-function paintCraterTile(ctx: CanvasRenderingContext2D, ox: number, oy: number, seed: number, season: Season): void {
-  const cx = ox + TILE_PX / 2, cy = oy + TILE_PX / 2, r = TILE_PX / 2 - 1;
+/** An isolated crater tile (no 4-neighbour crater — e.g. craterLine's single-tile shell holes)
+ * renders as a proper ~26px blast stain rather than a 9px dot; clustered crater tiles (patch()
+ * blobs) keep the 1-tile size so they don't merge into one smear. */
+function isIsolatedCrater(map: GameMap, wx: number, wy: number): boolean {
+  return tileAt(map, wx + 1, wy) !== 'crater' && tileAt(map, wx - 1, wy) !== 'crater'
+    && tileAt(map, wx, wy + 1) !== 'crater' && tileAt(map, wx, wy - 1) !== 'crater';
+}
+const BIG_CRATER_R = TILE_PX * 0.65;
+
+function paintCraterTile(ctx: CanvasRenderingContext2D, ox: number, oy: number, seed: number, season: Season, big = false): void {
+  const cx = ox + TILE_PX / 2, cy = oy + TILE_PX / 2, r = big ? BIG_CRATER_R : TILE_PX / 2 - 1;
   paintCraterAt(ctx, cx, cy, r, seed, season);
 }
 
@@ -876,12 +1015,46 @@ function paintRubbleDebris(ctx: CanvasRenderingContext2D, wx: number, wy: number
   }
 }
 
+/** Solid wooden deck with plank seams across the direction of travel, side rails where the deck
+ * ends, and a shadow cast onto the water on the SE side. Travel direction = the bridge rect's
+ * long axis (length of the contiguous bridge run through this tile in each direction). */
 function paintBridge(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number): void {
-  const horiz = tileAt(map, wx, wy - 1) !== 'bridge' && tileAt(map, wx, wy + 1) !== 'bridge';
-  if (horiz) {
-    for (let px = 0; px < TILE_PX; px += 3) { ctx.fillStyle = px % 6 === 0 ? '#7a5f3a' : '#5a4626'; ctx.fillRect(ox + px, oy, 2, TILE_PX); }
+  const run = (dx: number, dy: number): number => {
+    let n = 0;
+    for (let k = 1; k < 64 && tileAt(map, wx + dx * k, wy + dy * k) === 'bridge'; k++) n++;
+    return n;
+  };
+  const lenH = 1 + run(1, 0) + run(-1, 0);
+  const lenV = 1 + run(0, 1) + run(0, -1);
+  const travelH = lenH >= lenV;
+  ctx.fillStyle = '#6a5232';
+  ctx.fillRect(ox, oy, TILE_PX, TILE_PX);
+  ctx.fillStyle = '#4a3618';
+  if (travelH) { for (let x = ((wx * TILE_PX) % 3 + 3) % 3; x < TILE_PX; x += 3) ctx.fillRect(ox + x, oy, 1, TILE_PX); }
+  else { for (let y = ((wy * TILE_PX) % 3 + 3) % 3; y < TILE_PX; y += 3) ctx.fillRect(ox, oy + y, TILE_PX, 1); }
+  const isWaterT = (t: Terrain) => t === 'water';
+  if (travelH) {
+    const north = tileAt(map, wx, wy - 1), south = tileAt(map, wx, wy + 1);
+    if (north !== 'bridge') {
+      ctx.fillStyle = '#3a2a14'; ctx.fillRect(ox, oy, TILE_PX, 2);
+      ctx.fillStyle = '#8a6c40'; ctx.fillRect(ox, oy + 2, TILE_PX, 1);
+    }
+    if (south !== 'bridge') {
+      ctx.fillStyle = '#3a2a14'; ctx.fillRect(ox, oy + TILE_PX - 2, TILE_PX, 2);
+      ctx.fillStyle = '#8a6c40'; ctx.fillRect(ox, oy + TILE_PX - 3, TILE_PX, 1);
+      if (isWaterT(south)) { ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(ox, oy + TILE_PX, TILE_PX, 3); }
+    }
   } else {
-    for (let py = 0; py < TILE_PX; py += 3) { ctx.fillStyle = py % 6 === 0 ? '#7a5f3a' : '#5a4626'; ctx.fillRect(ox, oy + py, TILE_PX, 2); }
+    const west = tileAt(map, wx - 1, wy), east = tileAt(map, wx + 1, wy);
+    if (west !== 'bridge') {
+      ctx.fillStyle = '#3a2a14'; ctx.fillRect(ox, oy, 2, TILE_PX);
+      ctx.fillStyle = '#8a6c40'; ctx.fillRect(ox + 2, oy, 1, TILE_PX);
+    }
+    if (east !== 'bridge') {
+      ctx.fillStyle = '#3a2a14'; ctx.fillRect(ox + TILE_PX - 2, oy, 2, TILE_PX);
+      ctx.fillStyle = '#8a6c40'; ctx.fillRect(ox + TILE_PX - 3, oy, 1, TILE_PX);
+      if (isWaterT(east)) { ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(ox + TILE_PX, oy, 3, TILE_PX); }
+    }
   }
 }
 
@@ -953,19 +1126,33 @@ function paintStonewall(ctx: CanvasRenderingContext2D, map: GameMap, wx: number,
   else { for (let y = 0; y < TILE_PX; y += 3) ctx.fillRect(ox + c - 2, oy + y, 4, 1); }
 }
 
-function paintHedge(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number, seed: number): void {
+/** Winter hedges are leafless brown scrub lines with snow flecks (ref winter scrub), not green. */
+const HEDGE_WINTER = { core: '#5c4632', shadow: 'rgba(20,14,8,0.45)', lobe: '#8a7256', snow: '#e8ecf0' };
+
+function paintHedge(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number, seed: number, season: Season): void {
+  const winter = season === 'winter';
   const stubs = linearStubs(map, wx, wy, (t) => t === 'hedge');
-  ctx.globalAlpha = 0.25;
-  drawBand(ctx, ox + 1, oy + 1, 6, stubs, '#0a1408');
-  ctx.globalAlpha = 1;
-  drawBand(ctx, ox, oy, 6, stubs, '#2c3d22');
+  if (winter) {
+    ctx.globalAlpha = 1;
+    drawBand(ctx, ox + 1, oy + 1, 6, stubs, HEDGE_WINTER.shadow);
+  } else {
+    ctx.globalAlpha = 0.25;
+    drawBand(ctx, ox + 1, oy + 1, 6, stubs, '#0a1408');
+    ctx.globalAlpha = 1;
+  }
+  drawBand(ctx, ox, oy, 6, stubs, winter ? HEDGE_WINTER.core : '#2c3d22');
   // lighter bumpy top pixels
   const c = TILE_PX / 2;
-  ctx.fillStyle = '#4c6a34';
   for (let i = 0; i < TILE_PX; i += 2) {
     const bump = hash2(wx * 4 + i, wy * 4 + i, seed + 71) > 0.5 ? 1 : 0;
+    ctx.fillStyle = winter ? HEDGE_WINTER.lobe : '#4c6a34';
     if (stubs.r || stubs.l) ctx.fillRect(ox + i, oy + c - 3 + bump, 2, 1);
     else ctx.fillRect(ox + c - 3 + bump, oy + i, 1, 2);
+    if (winter && hash2(wx * 5 + i, wy * 5 + i, seed + 72) > 0.6) {
+      ctx.fillStyle = HEDGE_WINTER.snow;
+      if (stubs.r || stubs.l) ctx.fillRect(ox + i, oy + c - 4 + bump, 1, 1);
+      else ctx.fillRect(ox + c - 4 + bump, oy + i, 1, 1);
+    }
   }
 }
 
@@ -981,15 +1168,15 @@ function paintFence(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy:
 }
 
 function paintTrench(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number, seed: number): void {
+  // a brown dug channel with light tan spoil banks, not a solid black bar
   const stubs = linearStubs(map, wx, wy, (t) => t === 'trench');
-  ctx.globalAlpha = 0.3;
-  drawBand(ctx, ox, oy, 7, stubs, '#786c54'); // lighter spoil either side
-  ctx.globalAlpha = 1;
-  const jag = (hash2(wx, wy, seed + 601) - 0.5) * 2;
-  const c = TILE_PX / 2 + jag;
-  ctx.fillStyle = '#161410';
-  if (stubs.r || stubs.l) ctx.fillRect(ox, oy + Math.round(c) - 2, TILE_PX, 5);
-  else ctx.fillRect(ox + Math.round(c) - 2, oy, 5, TILE_PX);
+  drawBand(ctx, ox, oy, 12, stubs, 'rgba(160,140,96,0.45)'); // spoil either side
+  drawBand(ctx, ox, oy, 4, stubs, '#4a3a22'); // channel
+  void seed;
+  const c = TILE_PX / 2;
+  ctx.fillStyle = '#1e1810';
+  if (stubs.r || stubs.l) ctx.fillRect(ox, oy + c - 0.75, TILE_PX, 1.5);
+  else ctx.fillRect(ox + c - 0.75, oy, 1.5, TILE_PX);
 }
 
 // ---------------------------------------------------------------- buildings
@@ -1197,10 +1384,11 @@ function paintRoof(ctx: CanvasRenderingContext2D, map: GameMap, bb: BuildingBBox
   }
 
   // soft shadow cast onto the ground beyond the wall, ~6px wide, in two alpha steps.
-  ctx.fillStyle = 'rgba(8,8,6,0.35)';
+  // (winter: a stronger bluish shadow on the snow, ref_cc3_1484)
+  ctx.fillStyle = snowy ? 'rgba(24,32,52,0.45)' : 'rgba(8,8,6,0.35)';
   ctx.fillRect(left + w + WALL_PX, top, 2, h + WALL_PX);
   ctx.fillRect(left, top + h + WALL_PX, w + WALL_PX, 2);
-  ctx.fillStyle = 'rgba(8,8,6,0.18)';
+  ctx.fillStyle = snowy ? 'rgba(24,32,52,0.22)' : 'rgba(8,8,6,0.18)';
   ctx.fillRect(left + w + WALL_PX + 2, top, 4, h + WALL_PX);
   ctx.fillRect(left, top + h + WALL_PX + 2, w + WALL_PX, 4);
 
@@ -1272,8 +1460,11 @@ function paintRoof(ctx: CanvasRenderingContext2D, map: GameMap, bb: BuildingBBox
     const variants = stone ? STONE_ROOF_VARIANTS : WOOD_ROOF_VARIANTS;
     const v = variants[Math.floor(hash2(bb.id, bb.minX + bb.minY, seed + 602) * variants.length)];
     const ridgeHoriz = wTiles >= hTiles; // ridge runs along the longer axis
-    const litFill = snowy ? SNOW_LIT : v.light;
-    const shadeFill = snowy ? SNOW_SHADE : v.dark;
+    // Winter: the roof material stays legible under a frosted tone (shaded slope reads as dark
+    // material, lit slope a frosted tone clearly darker than ground snow) with snow patches on
+    // top, instead of a SNOW_LIT/SNOW_SHADE box that vanished into the ground snow.
+    const litFill = snowy ? mixHex(v.light, SNOW_LIT, 0.55) : v.light;
+    const shadeFill = snowy ? mixHex(v.dark, SNOW_SHADE, 0.25) : v.dark;
 
     // shaded (unlit) slope first, full footprint
     ctx.fillStyle = shadeFill;
@@ -1287,7 +1478,7 @@ function paintRoof(ctx: CanvasRenderingContext2D, map: GameMap, bb: BuildingBBox
     // meets the short walls. In winter this must stay a darker SNOW tone (a faint blue-grey),
     // not the bare roof material's dark colour — using v.dark unconditionally painted a solid
     // brown/stone wedge over the snow-covered shaded slope.
-    ctx.fillStyle = snowy ? shadeHex(SNOW_SHADE, -0.15) : shadeHex(v.dark, -0.18);
+    ctx.fillStyle = snowy ? shadeHex(shadeFill, -0.2) : shadeHex(v.dark, -0.18);
     if (ridgeHoriz) {
       const g = Math.min(h * 0.4, w * 0.25);
       ctx.beginPath(); ctx.moveTo(left, top + h / 2); ctx.lineTo(left + g, top + h); ctx.lineTo(left, top + h); ctx.closePath(); ctx.fill();
@@ -1299,9 +1490,28 @@ function paintRoof(ctx: CanvasRenderingContext2D, map: GameMap, bb: BuildingBBox
     }
 
     // plank/tile lines perpendicular to the ridge, -8% brightness
-    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.fillStyle = snowy ? 'rgba(0,0,0,0.28)' : 'rgba(0,0,0,0.18)';
     if (ridgeHoriz) { for (let x = 2; x < w; x += 3) ctx.fillRect(left + x, top, 1, h); }
     else { for (let y = 2; y < h; y += 3) ctx.fillRect(left, top + y, w, 1); }
+
+    if (snowy) {
+      // snow lying in patches on the lit slope, plus a strip along the lit side of the ridge
+      const litX = left, litY = top;
+      const litW = ridgeHoriz ? w : Math.ceil(w / 2), litH = ridgeHoriz ? Math.ceil(h / 2) : h;
+      ctx.save();
+      ctx.beginPath(); ctx.rect(litX, litY, litW, litH); ctx.clip();
+      ctx.fillStyle = SNOW_LIT;
+      const patchN = Math.max(3, Math.floor((w * h) / 160));
+      for (let i = 0; i < patchN; i++) {
+        const sx = litX + hash2(bb.id * 61 + i, i, 830) * litW;
+        const sy = litY + hash2(bb.id * 61 + i, i, 831) * litH;
+        const sz = 3 + Math.floor(hash2(bb.id * 67 + i, i, 832) * 3);
+        ctx.fillRect(Math.round(sx - sz / 2), Math.round(sy - sz / 2), sz, Math.max(2, sz - 1));
+      }
+      if (ridgeHoriz) ctx.fillRect(left, top + Math.floor(h / 2) - 2, w, 2);
+      else ctx.fillRect(left + Math.ceil(w / 2) - 2, top, 2, h);
+      ctx.restore();
+    }
 
     // ridge line: always the roof material's own dark tone, so it (and the eave outline below)
     // stay visible against a snow-covered roof rather than disappearing into it.
@@ -1513,11 +1723,13 @@ function paintEaveNotches(ctx: CanvasRenderingContext2D, map: GameMap, wx: numbe
 }
 
 // --------------------------------------------------------------------- trees
-function paintTreeShadow(ctx: CanvasRenderingContext2D, cx: number, cy: number, rx: number, ry: number): void {
+function paintTreeShadow(ctx: CanvasRenderingContext2D, cx: number, cy: number, rx: number, ry: number, season: Season = 'autumn'): void {
   ctx.save();
-  ctx.translate(cx + 4, cy + 6);
+  // summer: a stronger, longer SE shadow so trees stand off the darker olive ground
+  const summer = season === 'summer';
+  ctx.translate(cx + (summer ? 6 : 4), cy + (summer ? 8 : 6));
   for (let i = 0; i < 3; i++) {
-    ctx.globalAlpha = 0.12;
+    ctx.globalAlpha = summer ? 0.2 : 0.12;
     ctx.beginPath();
     ctx.ellipse(0, 0, rx * (1 - i * 0.15), ry * (1 - i * 0.15), 0, 0, Math.PI * 2);
     ctx.fillStyle = '#000000';
@@ -1530,8 +1742,8 @@ function paintTreeShadow(ctx: CanvasRenderingContext2D, cx: number, cy: number, 
 /** A soft lightening on the NW third of the canopy so individual trees pop against the ground
  * ramp instead of reading as a flat dark disc (round-2 critique: trees don't read as trees). */
 function paintCanopyHighlight(ctx: CanvasRenderingContext2D, cx: number, cy: number, dw: number, dh: number, season: Season): void {
-  ctx.globalAlpha = season === 'winter' ? 0.22 : 0.28;
-  ctx.fillStyle = season === 'winter' ? '#eef2f6' : '#a8c06a';
+  ctx.globalAlpha = season === 'winter' ? 0.22 : 0.45;
+  ctx.fillStyle = season === 'winter' ? '#eef2f6' : '#b8d060';
   ctx.beginPath();
   ctx.ellipse(cx - dw * 0.16, cy - dh * 0.18, dw * 0.28, dh * 0.22, 0, 0, Math.PI * 2);
   ctx.fill();
@@ -1539,16 +1751,18 @@ function paintCanopyHighlight(ctx: CanvasRenderingContext2D, cx: number, cy: num
 }
 
 /** Winter leafless scrub tree: a spiky brown starburst with a small dark centre. */
-function paintScrubTree(ctx: CanvasRenderingContext2D, cx: number, cy: number, seed: number, size: number): void {
-  ctx.globalAlpha = 0.2;
-  ctx.beginPath();
-  ctx.ellipse(cx + 3, cy + 4, size * 0.5, size * 0.2, 0, 0, Math.PI * 2);
-  ctx.fillStyle = '#000000';
-  ctx.fill();
-  ctx.globalAlpha = 1;
+function paintScrubTree(ctx: CanvasRenderingContext2D, cx: number, cy: number, seed: number, size: number, stroke = '#5a4530', lineWidth = 1, ownShadow = true): void {
+  if (ownShadow) {
+    ctx.globalAlpha = 0.2;
+    ctx.beginPath();
+    ctx.ellipse(cx + 3, cy + 4, size * 0.5, size * 0.2, 0, 0, Math.PI * 2);
+    ctx.fillStyle = '#000000';
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
   const n = 6 + Math.floor(hash2(Math.round(cx), Math.round(cy), seed) * 5);
-  ctx.strokeStyle = '#5a4530';
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = lineWidth;
   for (let i = 0; i < n; i++) {
     const ang = (i / n) * Math.PI * 2 + hash2(Math.round(cx) + i, Math.round(cy), seed + 1) * 0.6;
     const len = size * (0.4 + hash2(Math.round(cx), Math.round(cy) + i, seed + 2) * 0.6);
@@ -1563,7 +1777,48 @@ function paintScrubTree(ctx: CanvasRenderingContext2D, cx: number, cy: number, s
 
 function paintTrees(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number, season: Season, seed: number): void {
   const t = tileAt(map, wx, wy);
-  if (t === 'woods') {
+  if (t === 'woods' && season === 'winter') {
+    // Winter wood = INDIVIDUAL trees with snow showing between them (ref_cc3_1482): 1-2 per
+    // tile, mostly brown leafless crowns mixed with a few snow-crusted conifer canopies, each
+    // with a long soft blue-grey shadow streak running down-left.
+    // ~0.5 trees/tile (1-2 on half the tiles): at a full 1-2 on every tile the trees merged into
+    // a continuous thicket with no snow between them (checked against ref_cc3_1482 spacing).
+    const hc = hash2(wx, wy, seed + 101);
+    const count = hc < 0.38 ? 1 : hc < 0.5 ? 2 : 0;
+    for (let i = 0; i < count; i++) {
+      const jxT = (hash2(wx * 13 + i, wy * 13 + i, seed + 103) - 0.5) * 1.4;
+      const jyT = (hash2(wx * 13 + i + 5, wy * 13 + i + 5, seed + 107) - 0.5) * 1.4;
+      if (coverageAt(map, isWoody, wx + 0.5 + jxT, wy + 0.5 + jyT, seed + 8801) < 0.5) continue;
+      const cx = ox + (0.5 + jxT) * TILE_PX, cy = oy + (0.5 + jyT) * TILE_PX;
+      const kindH = hash2(wx * 17 + i, wy * 17 + i, seed + 109);
+      const leafless = kindH < 0.6;
+      let s: number;
+      let sprite: HTMLCanvasElement | null = null;
+      if (leafless) {
+        s = 18 + hash2(wx * 23 + i, wy * 23 + i, seed + 121) * 10;
+      } else {
+        sprite = getTreeSprite(Math.floor(kindH * 5) % 3, season);
+        s = sprite.width * (0.6 + hash2(wx * 23 + i, wy * 23 + i, seed + 121) * 0.2);
+      }
+      ctx.save();
+      ctx.translate(cx - s * 0.55, cy + s * 0.35);
+      ctx.rotate(-0.6);
+      ctx.fillStyle = 'rgba(70,80,100,0.30)';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, s * 0.9, s * 0.18, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      if (leafless) {
+        // a soft brown twig-mass under the branches so the crown reads as a fuzzy ball, not sticks
+        ctx.fillStyle = 'rgba(74,54,38,0.4)';
+        ctx.beginPath(); ctx.ellipse(cx, cy - s * 0.08, s * 0.34, s * 0.3, 0, 0, Math.PI * 2); ctx.fill();
+        paintScrubTree(ctx, cx, cy, seed + 131 + i, s, '#4a3626', 1.5, false);
+      } else if (sprite) {
+        ctx.drawImage(sprite, Math.round(cx - s / 2), Math.round(cy - s / 2), s, s);
+        paintCanopyHighlight(ctx, cx, cy, s, s, season);
+      }
+    }
+  } else if (t === 'woods') {
     const count = hash2(wx, wy, seed + 101) < 0.4 ? 3 : 5;
     for (let i = 0; i < count; i++) {
       const jxT = (hash2(wx * 13 + i, wy * 13 + i, seed + 103) - 0.5) * 1.4;
@@ -1575,10 +1830,11 @@ function paintTrees(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy:
       // snow-crusted winter variant already built in sprites.ts — so it reads as a mass of
       // trees; only the sparser 'scatteredtrees' fringe uses the leafless scrub look.
       const variant = Math.floor(hash2(wx * 17 + i, wy * 17 + i, seed + 109) * 3);
-      const scale = 0.8 + hash2(wx * 23 + i, wy * 23 + i, seed + 121) * 0.5;
+      const hScale = hash2(wx * 23 + i, wy * 23 + i, seed + 121);
+      const scale = season === 'summer' ? 1.15 + 0.5 * hScale : 0.8 + hScale * 0.5;
       const sprite = getTreeSprite(variant, season);
       const dw = sprite.width * scale, dh = sprite.height * scale;
-      paintTreeShadow(ctx, cx, cy, dw * 0.45, dh * 0.25);
+      paintTreeShadow(ctx, cx, cy, dw * 0.45, dh * 0.25, season);
       ctx.drawImage(sprite, Math.round(cx - dw / 2), Math.round(cy - dh / 2), dw, dh);
       paintCanopyHighlight(ctx, cx, cy, dw, dh, season);
     }
@@ -1595,10 +1851,11 @@ function paintTrees(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy:
           paintScrubTree(ctx, cx, cy, seed + 123, size);
         } else {
           const variant = Math.floor(hash2(wx * 29, wy * 29, seed + 119) * 3);
-          const scale = 0.85 + hash2(wx * 31, wy * 31, seed + 123) * 0.4;
+          const hScale = hash2(wx * 31, wy * 31, seed + 123);
+          const scale = season === 'summer' ? 1.15 + 0.5 * hScale : 0.85 + hScale * 0.4;
           const sprite = getTreeSprite(variant, season);
           const dw = sprite.width * scale, dh = sprite.height * scale;
-          paintTreeShadow(ctx, cx, cy, dw * 0.45, dh * 0.25);
+          paintTreeShadow(ctx, cx, cy, dw * 0.45, dh * 0.25, season);
           ctx.drawImage(sprite, Math.round(cx - dw / 2), Math.round(cy - dh / 2), dw, dh);
           paintCanopyHighlight(ctx, cx, cy, dw, dh, season);
         }
@@ -1617,9 +1874,9 @@ function paintDetail(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy
   switch (t) {
     case 'mud': paintMud(ctx, wx, wy, ox, oy, seed); break;
     case 'rubble': paintRubbleDebris(ctx, wx, wy, ox, oy, seed, season); break;
-    case 'crater': paintCraterTile(ctx, ox, oy, seed, season); break;
+    case 'crater': if (!isIsolatedCrater(map, wx, wy)) paintCraterTile(ctx, ox, oy, seed, season); break; // isolated: padded pass in bakeChunk
     case 'trench': if (!vectorLineTerrains.has('trench')) paintTrench(ctx, map, wx, wy, ox, oy, seed); break;
-    case 'hedge': if (!vectorLineTerrains.has('hedge')) paintHedge(ctx, map, wx, wy, ox, oy, seed); break;
+    case 'hedge': if (!vectorLineTerrains.has('hedge')) paintHedge(ctx, map, wx, wy, ox, oy, seed, season); break;
     case 'fence': if (!vectorLineTerrains.has('fence')) paintFence(ctx, map, wx, wy, ox, oy); break;
     case 'stonewall': if (!vectorLineTerrains.has('stonewall')) paintStonewall(ctx, map, wx, wy, ox, oy); break;
     case 'bridge': paintBridge(ctx, map, wx, wy, ox, oy); break;
@@ -1664,14 +1921,16 @@ function walkPolylineWorld(points: Vec2[], spacingPx: number, cb: (wx: number, w
   }
 }
 
-function paintLineVector(ctx: CanvasRenderingContext2D, v: MapVectorFeature, x0: number, y0: number, seed: number): void {
+function paintLineVector(ctx: CanvasRenderingContext2D, v: MapVectorFeature, x0: number, y0: number, seed: number, season: Season): void {
   const pts = v.points;
   if (pts.length < 2) return;
   if (v.terrain === 'hedge') {
     // a slim (6px) bumpy line, not a flat wide bar: a plain core stroke, a 1px shadow line
     // offset to the SE, and lobed lighter blobs every ~6px on the NW side for a leafy silhouette.
-    strokePolylineWorld(ctx, pts, x0, y0, 6, '#2c3d22');
-    ctx.strokeStyle = 'rgba(6,10,4,0.45)';
+    // Winter: leafless brown scrub with snow flecks instead of summer green.
+    const winter = season === 'winter';
+    strokePolylineWorld(ctx, pts, x0, y0, 6, winter ? HEDGE_WINTER.core : '#2c3d22');
+    ctx.strokeStyle = winter ? HEDGE_WINTER.shadow : 'rgba(6,10,4,0.45)';
     ctx.lineWidth = 1;
     walkPolylineWorld(pts, 4, (wx, wy, ux, uy) => {
       const lx = wx - x0 * TILE_PX, ly = wy - y0 * TILE_PX;
@@ -1682,15 +1941,19 @@ function paintLineVector(ctx: CanvasRenderingContext2D, v: MapVectorFeature, x0:
       ctx.lineTo(lx + px_ * 3.5, ly + py_ * 3.5);
       ctx.stroke();
     });
-    ctx.fillStyle = '#5c7a3e';
     walkPolylineWorld(pts, 6, (wx, wy, ux, uy) => {
       let px_ = -uy, py_ = ux;
       if (px_ + py_ > 0) { px_ = -px_; py_ = -py_; } // NW-ish perpendicular
       const lx = wx - x0 * TILE_PX + px_ * 2.2, ly = wy - y0 * TILE_PX + py_ * 2.2;
       const r = 1.6 + hash2(Math.round(wx), Math.round(wy), seed + 881) * 1.2;
+      ctx.fillStyle = winter ? HEDGE_WINTER.lobe : '#5c7a3e';
       ctx.beginPath();
       ctx.ellipse(lx, ly, r, r * 0.7, 0, 0, Math.PI * 2);
       ctx.fill();
+      if (winter) {
+        ctx.fillStyle = HEDGE_WINTER.snow;
+        ctx.fillRect(Math.round(lx - r * 0.6), Math.round(ly - r * 0.6), 1, 1);
+      }
     });
   } else if (v.terrain === 'stonewall') {
     strokePolylineWorld(ctx, pts, x0, y0, 6, 'rgba(16,16,8,0.3)');
@@ -1713,8 +1976,10 @@ function paintLineVector(ctx: CanvasRenderingContext2D, v: MapVectorFeature, x0:
       ctx.fillRect(lx - 1, ly - 1, 3, 3);
     });
   } else if (v.terrain === 'trench') {
-    strokePolylineWorld(ctx, pts, x0, y0, 10, 'rgba(120,108,84,0.28)'); // lighter spoil either side
-    strokePolylineWorld(ctx, pts, x0, y0, 6, '#161410');
+    // brown dug channel with light tan spoil banks (CC3), not a thick black marker line
+    strokePolylineWorld(ctx, pts, x0, y0, 12, 'rgba(160,140,96,0.45)');
+    strokePolylineWorld(ctx, pts, x0, y0, 4, '#4a3a22');
+    strokePolylineWorld(ctx, pts, x0, y0, 1.5, '#1e1810');
   } else {
     void seed;
   }
@@ -1726,8 +1991,10 @@ export class TerrainRenderer {
   private seed: number;
   private chunksX: number;
   private chunksY: number;
-  /** Insertion-ordered LRU cache: oldest-used key is first. */
-  private chunks = new Map<string, HTMLCanvasElement>();
+  /** Per-zoom insertion-ordered LRU caches (oldest-used key first), keyed by chunkKey. */
+  private chunksByZoom = new Map<number, Map<string, { canvas: HTMLCanvasElement; cx: number; cy: number }>>();
+  /** Most-recently-used key per zoom, so draw() can skip the delete+set re-insert for it. */
+  private mruKey = new Map<number, string>();
   private buildingBBoxes = new Map<number, BuildingBBox>();
   /** Roof-off interior canvases, cached per building id the first time it's occupied by a
    * friendly soldier (see drawOverlays) — building geometry never changes mid-battle so one
@@ -1753,7 +2020,8 @@ export class TerrainRenderer {
     this.chunksY = Math.max(1, Math.ceil(map.height / CHUNK_TILES));
     this.fieldId = new Int32Array(map.width * map.height).fill(-1);
     const angleRoll = hash2(0, 0, this.seed + 909);
-    this.fieldBaseAngleDeg = angleRoll < 0.15 ? 45 : angleRoll < 0.575 ? 0 : 90;
+    // 0 or 90 only — a 45 degree roll produced a diagonal chevron barcode at zoom 2.
+    this.fieldBaseAngleDeg = angleRoll < 0.5 ? 0 : 90;
     this.computeBuildingBBoxes();
     this.computeFields();
     this.groundUnder = this.computeGroundUnder();
@@ -1941,23 +2209,49 @@ export class TerrainRenderer {
     }
   }
 
-  private chunkKey(cx: number, cy: number, zoom: number): string { return `${cx},${cy}@${zoom}`; }
+  private chunkKey(cx: number, cy: number): string { return `${cx},${cy}`; }
+
+  private zoomCache(zoom: number): Map<string, { canvas: HTMLCanvasElement; cx: number; cy: number }> {
+    let m = this.chunksByZoom.get(zoom);
+    if (!m) { m = new Map(); this.chunksByZoom.set(zoom, m); }
+    return m;
+  }
 
   invalidateTile(x: number, y: number): void {
     const cx = Math.floor(x / CHUNK_TILES);
     const cy = Math.floor(y / CHUNK_TILES);
     // a tile edit invalidates the bake at every zoom level it might be cached at.
-    for (const z of ZOOM_LEVELS) this.chunks.delete(this.chunkKey(cx, cy, z));
+    const key = this.chunkKey(cx, cy);
+    for (const m of this.chunksByZoom.values()) m.delete(key);
     this.updateLowResTile(x, y);
   }
 
-  /** Move `key` to the most-recently-used end; evict the oldest entry past the cap. */
-  private touchChunk(key: string, canvas: HTMLCanvasElement): void {
-    if (this.chunks.has(key)) this.chunks.delete(key);
-    this.chunks.set(key, canvas);
-    if (this.chunks.size > MAX_CACHED_CHUNKS) {
-      const oldest = this.chunks.keys().next().value;
-      if (oldest !== undefined) this.chunks.delete(oldest);
+  /** Move `key` to the most-recently-used end of its zoom's LRU. */
+  private touchChunk(zoom: number, key: string): void {
+    if (this.mruKey.get(zoom) === key) return;
+    const m = this.zoomCache(zoom);
+    const e = m.get(key);
+    if (!e) return;
+    m.delete(key);
+    m.set(key, e);
+    this.mruKey.set(zoom, key);
+  }
+
+  /** Inserts a fresh bake and evicts this zoom's oldest entries past its cap, never evicting a
+   * chunk inside the currently visible chunk rectangle. */
+  private insertChunk(zoom: number, cx: number, cy: number, canvas: HTMLCanvasElement,
+    vis: { x0: number; y0: number; x1: number; y1: number }): void {
+    const m = this.zoomCache(zoom);
+    const key = this.chunkKey(cx, cy);
+    m.delete(key);
+    m.set(key, { canvas, cx, cy });
+    this.mruKey.set(zoom, key);
+    const cap = MAX_CACHED_CHUNKS_BY_ZOOM[zoom] ?? 32;
+    if (m.size <= cap) return;
+    for (const [k, e] of m) {
+      if (m.size <= cap) break;
+      if (e.cx >= vis.x0 && e.cx <= vis.x1 && e.cy >= vis.y0 && e.cy <= vis.y1) continue;
+      m.delete(k);
     }
   }
 
@@ -1988,7 +2282,8 @@ export class TerrainRenderer {
     // blob rather than a tile-stepped stamp (fix #6); road/paved/water grids stay unblurred
     // since they're only a rare fallback when a map lacks vector geometry for that feature.
     const AREA_BLUR = 2;
-    const cropsGrid = buildGrid(map, x0, y0, CHUNK_TILES, isCrops, AREA_BLUR);
+    // crops use a smaller blur than mud/tallgrass so the field edge stays firm and ragged
+    const cropsGrid = buildGrid(map, x0, y0, CHUNK_TILES, isCrops, 1);
     const mudGrid = buildGrid(map, x0, y0, CHUNK_TILES, isMud, AREA_BLUR);
     const tallgrassGrid = buildGrid(map, x0, y0, CHUNK_TILES, isTallgrass, AREA_BLUR);
     const pavedGrid = buildGrid(map, x0, y0, CHUNK_TILES, isPaved);
@@ -1997,7 +2292,14 @@ export class TerrainRenderer {
     // rubble spreads only ~1 tile past its footprint (not the wider AREA_BLUR used for
     // crops/mud/tallgrass), so debris reads as a collapsed building, not a blanket stain.
     const rubbleGrid = buildGrid(map, x0, y0, CHUNK_TILES, isRubble, 1);
-    const dirtyGrid = season === 'winter' ? buildGrid(map, x0, y0, CHUNK_TILES, isDirtySource) : cropsGrid;
+    // blurred so the dirty-snow shoulder doesn't show tile stair-steps along road edges
+    const dirtyGrid = season === 'winter' ? buildGrid(map, x0, y0, CHUNK_TILES, isDirtySource, 1) : cropsGrid;
+    const gu = this.groundUnder, mw = map.width, mh = map.height;
+    const openGrid = buildGrid(map, x0, y0, CHUNK_TILES, isOpenGround, 1, (tx, ty) => {
+      const cx2 = tx < 0 ? 0 : tx >= mw ? mw - 1 : tx;
+      const cy2 = ty < 0 ? 0 : ty >= mh ? mh - 1 : ty;
+      return gu[cy2 * mw + cx2];
+    });
 
     // ------------------------------------------------------ vector geometry (smooth roads/rivers)
     const pavedVec = buildAreaField(map.def.vectors, 'road', 'pavedroad', x0, y0, CHUNK_TILES, CHUNK_TILES);
@@ -2024,7 +2326,7 @@ export class TerrainRenderer {
     paintGroundAndFeatures(
       img.data, chunkPx, map, season, this.seed, x0, y0, CHUNK_TILES, CHUNK_TILES,
       this.groundUnder, map.width, map.height, this.fieldId, this.fieldAxis,
-      cropsGrid, mudGrid, tallgrassGrid, pavedGrid, dirtGrid, waterGrid, rubbleGrid, dirtyGrid,
+      cropsGrid, mudGrid, tallgrassGrid, pavedGrid, dirtGrid, waterGrid, rubbleGrid, dirtyGrid, openGrid,
       pavedVec, dirtVec, waterVec, tramRailY, zoom, bpt,
     );
     reliefCache = null;
@@ -2050,13 +2352,27 @@ export class TerrainRenderer {
       }
     }
 
+    // ------------------------------------------------------------ isolated (big) craters
+    // Their stain + halo reaches past the owning tile, so paint from a 1-tile padded window
+    // (same trick as trees below) so a crater straddling a chunk edge is drawn in both chunks.
+    for (let ty = -1; ty <= CHUNK_TILES; ty++) {
+      const wy = y0 + ty;
+      if (wy < 0 || wy >= map.height) continue;
+      for (let tx = -1; tx <= CHUNK_TILES; tx++) {
+        const wx = x0 + tx;
+        if (wx < 0 || wx >= map.width) continue;
+        if (tileAt(map, wx, wy) !== 'crater' || !isIsolatedCrater(map, wx, wy)) continue;
+        paintCraterTile(ctx, tx * TILE_PX, ty * TILE_PX, this.seed, season, true);
+      }
+    }
+
     // ------------------------------------------------------------ smooth vector line features
     // (hedge/fence/stonewall/trench) drawn once per chunk as a stroked path, replacing the
     // per-tile bands skipped above for terrains that have vector geometry on this map.
     if (map.def.vectors && this.vectorLineTerrains.size) {
       for (const v of map.def.vectors) {
         if (v.kind !== 'line') continue;
-        paintLineVector(ctx, v, x0, y0, this.seed);
+        paintLineVector(ctx, v, x0, y0, this.seed, season);
       }
     }
 
@@ -2198,61 +2514,83 @@ export class TerrainRenderer {
     const endCx = Math.min(this.chunksX - 1, Math.floor((cam.x + viewTilesW) / CHUNK_TILES));
     const startCy = Math.max(0, Math.floor(cam.y / CHUNK_TILES));
     const endCy = Math.min(this.chunksY - 1, Math.floor((cam.y + viewTilesH) / CHUNK_TILES));
-    let pending = 0;
+    const vis = { x0: startCx, y0: startCy, x1: endCx, y1: endCy };
+    const cache = this.zoomCache(cam.zoom);
+
+    // ---- bake pending visible chunks against a wall-clock budget, nearest the screen centre
+    // first (measured: ~20-50ms per chunk at 1x, ~80-115ms at 2x — a count-based budget of 6-8
+    // bakes per draw produced 150-360ms frame stalls). At least one chunk is baked per frame so
+    // the view always converges; the rest fall back to another zoom's bake or the low-res map.
+    const pendingList: { cx: number; cy: number; d: number }[] = [];
+    const centreCx = (cam.x + viewTilesW / 2) / CHUNK_TILES - 0.5;
+    const centreCy = (cam.y + viewTilesH / 2) / CHUNK_TILES - 0.5;
     for (let cy = startCy; cy <= endCy; cy++) {
       for (let cx = startCx; cx <= endCx; cx++) {
-        if (!this.chunks.has(this.chunkKey(cx, cy, cam.zoom))) pending++;
+        if (!cache.has(this.chunkKey(cx, cy))) {
+          const dx = cx - centreCx, dy = cy - centreCy;
+          pendingList.push({ cx, cy, d: dx * dx + dy * dy });
+        }
       }
     }
-    const isZoom2 = cam.zoom >= 2;
-    const baseBudget = pending > 2
-      ? (isZoom2 ? BAKES_PER_DRAW_BURST_ZOOM2 : BAKES_PER_DRAW_BURST)
-      : (isZoom2 ? BAKES_PER_DRAW_ZOOM2 : BAKES_PER_DRAW);
-    // Guarantee every chunk visible after a camera jump (map open, teleport, zoom change) is
-    // baked within at most 3 draw() calls, however many chunks that is, rather than trickling in
-    // at a fixed per-frame rate that could take many frames to catch up on a big viewport — this
-    // is what closes the "seam persists" half of round-3 fix #1 (the tone-matching half is
-    // `paintLowResTile`, above). BAKES_PER_DRAW*_BURST* remain the floor for small scrolls.
-    let bakeBudget = Math.max(baseBudget, Math.ceil(pending / 3));
+    if (pendingList.length) {
+      let anyCached = false;
+      for (const m of this.chunksByZoom.values()) if (m.size) { anyCached = true; break; }
+      const budget = anyCached ? BAKE_BUDGET_MS : BAKE_BUDGET_COLD_MS;
+      const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      const deadline = now() + budget;
+      pendingList.sort((p1, p2) => p1.d - p2.d);
+      let bakedThisFrame = 0;
+      for (const pc of pendingList) {
+        if (bakedThisFrame > 0 && now() >= deadline) break;
+        this.insertChunk(cam.zoom, pc.cx, pc.cy, this.bakeChunk(pc.cx, pc.cy, cam.zoom), vis);
+        bakedThisFrame++;
+      }
+    }
+
+    // ---- blit. Chunk rects are derived from ONE rounded origin so neighbouring chunks always
+    // share exact integer edges at any zoom/fractional camera position — separately rounding
+    // each chunk's position and size left a 1px dark hairline at chunk seams while panning.
+    const originX = Math.round(-cam.x * px);
+    const originY = Math.round(-cam.y * px);
+    const chunkScreenPx = CHUNK_TILES * px;
     const lowRes = this.ensureLowRes();
     for (let cy = startCy; cy <= endCy; cy++) {
+      const top = Math.round(originY + cy * chunkScreenPx);
+      const bottom = Math.round(originY + (cy + 1) * chunkScreenPx);
       for (let cx = startCx; cx <= endCx; cx++) {
-        const key = this.chunkKey(cx, cy, cam.zoom);
-        let chunk = this.chunks.get(key);
-        if (chunk) {
-          this.touchChunk(key, chunk);
-        } else if (bakeBudget > 0) {
-          chunk = this.bakeChunk(cx, cy, cam.zoom);
-          this.touchChunk(key, chunk);
-          bakeBudget--;
+        const left = Math.round(originX + cx * chunkScreenPx);
+        const right = Math.round(originX + (cx + 1) * chunkScreenPx);
+        const dw = right - left, dh = bottom - top;
+        const key = this.chunkKey(cx, cy);
+        const entry = cache.get(key);
+        if (entry) {
+          this.touchChunk(cam.zoom, key);
+          ctx.drawImage(entry.canvas, left, top, dw, dh);
+          continue;
         }
-        const s = worldToScreen(cam, { x: cx * CHUNK_TILES, y: cy * CHUNK_TILES });
-        const size = CHUNK_PX * cam.zoom;
-        if (chunk) {
-          ctx.drawImage(chunk, s.x, s.y, size, size);
+        // Not yet baked at this zoom level. Prefer scaling a bake of the SAME chunk at a
+        // DIFFERENT zoom level, if one is cached — same ground pass, same seed, same world
+        // pixel coords, just a different output resolution, so it is tonally identical (unlike
+        // the flat-fill low-res painter) and only ever a scale-blur, never a seam. Only fall
+        // back to the cheap whole-map low-res painter when no bake of this chunk exists yet at
+        // any zoom.
+        let otherZoomChunk: HTMLCanvasElement | undefined;
+        for (const z of ZOOM_LEVELS) {
+          if (z === cam.zoom) continue;
+          const other = this.chunksByZoom.get(z)?.get(key);
+          if (other) { otherZoomChunk = other.canvas; break; }
+        }
+        if (otherZoomChunk) {
+          ctx.drawImage(otherZoomChunk, left, top, dw, dh);
         } else {
-          // Not yet baked at this zoom level. Prefer scaling a bake of the SAME chunk at a
-          // DIFFERENT zoom level, if one is cached — same ground pass, same seed, same world
-          // pixel coords, just a different output resolution, so it is tonally identical (unlike
-          // the flat-fill low-res painter) and only ever a scale-blur, never a seam. Only fall
-          // back to the cheap whole-map low-res painter when no bake of this chunk exists yet at
-          // any zoom (round-3 critique #1 — "never show a fallback for a chunk baked at another
-          // zoom level").
-          let otherZoomChunk: HTMLCanvasElement | undefined;
-          for (const z of ZOOM_LEVELS) {
-            if (z === cam.zoom) continue;
-            const other = this.chunks.get(this.chunkKey(cx, cy, z));
-            if (other) { otherZoomChunk = other; break; }
-          }
-          if (otherZoomChunk) {
-            ctx.drawImage(otherZoomChunk, s.x, s.y, size, size);
-          } else {
-            const sx = cx * CHUNK_TILES * LOWRES_PX_PER_TILE;
-            const sy = cy * CHUNK_TILES * LOWRES_PX_PER_TILE;
-            const sw = Math.min(CHUNK_TILES * LOWRES_PX_PER_TILE, lowRes.width - sx);
-            const sh = Math.min(CHUNK_TILES * LOWRES_PX_PER_TILE, lowRes.height - sy);
-            if (sw > 0 && sh > 0) ctx.drawImage(lowRes, sx, sy, sw, sh, s.x, s.y, size, size);
-          }
+          const sx = cx * CHUNK_TILES * LOWRES_PX_PER_TILE;
+          const sy = cy * CHUNK_TILES * LOWRES_PX_PER_TILE;
+          const full = CHUNK_TILES * LOWRES_PX_PER_TILE;
+          const sw = Math.min(full, lowRes.width - sx);
+          const sh = Math.min(full, lowRes.height - sy);
+          // partial edge chunks: scale the destination by the same fraction so the low-res map
+          // isn't stretched over the whole chunk rect
+          if (sw > 0 && sh > 0) ctx.drawImage(lowRes, sx, sy, sw, sh, left, top, dw * (sw / full), dh * (sh / full));
         }
       }
     }

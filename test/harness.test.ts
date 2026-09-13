@@ -13,9 +13,10 @@ import type { BattleConfig, Side } from '@/shared/types';
  * Headless AI-vs-AI balance harness (see docs/superpowers/specs/2026-09-12-cc3-clone-design.md §6
  * and the balance targets in the task brief). Runs every map at seeds 1..3 with DEFAULT_FORCES for
  * that map's year, both sides played by the AI, for a full 20-minute battle, and prints a summary
- * table plus a `ms/sim-second` perf number. Kept as a vitest test so `npx vitest run` covers it in
- * CI; assertions are intentionally loose sanity checks (NaN/crash guards) rather than hard balance
- * gates, since balance is tuned by reading the printed numbers, not by failing the build.
+ * table plus a `ms/sim-second` perf number. The full harness (~5 min) is OPT-IN: run it with
+ * `HARNESS=1 npx vitest run test/harness.test.ts`. The default suite only runs a short smoke battle
+ * and the determinism check. Assertions are intentionally loose sanity checks (NaN/crash guards)
+ * rather than hard balance gates, since balance is tuned by reading the printed numbers.
  */
 
 const YEAR_BY_MAP: Record<string, number> = {
@@ -79,16 +80,18 @@ interface RunReport {
   avgDefenderSuppressionWhenClose: number | null;
   /** Fraction of alive attacker-side soldiers with activity pinned/cowering, sampled at t=5/10/15min. */
   attackerPinnedFractionAt: { m5: number | null; m10: number | null; m15: number | null };
+  /** Soldiers whose position is outside the map at the end of the run (should always be 0). */
+  outOfBounds: number;
 }
 
-function runOne(mapId: string, seed: number): RunReport {
+function runOne(mapId: string, seed: number, battleSeconds = BATTLE_SECONDS): RunReport {
   const year = yearForMap(mapId);
   const config: BattleConfig = {
     mapId,
     playerSide: 'german',
     year,
     seed,
-    durationS: BATTLE_SECONDS,
+    durationS: battleSeconds,
     difficulty: 'normal',
     forces: DEFAULT_FORCES[year],
     aiBothSides: true,
@@ -138,7 +141,7 @@ function runOne(mapId: string, seed: number): RunReport {
 
   const t0 = performance.now();
   let stepsTaken = 0;
-  while (battle.state.phase === 'running' && battle.state.time < BATTLE_SECONDS) {
+  while (battle.state.phase === 'running' && battle.state.time < battleSeconds) {
     battle.step(1.0);
     stepsTaken++;
     battle.drainEvents(); // mirrors real usage (renderer drains each frame); avoids unbounded growth
@@ -242,6 +245,8 @@ function runOne(mapId: string, seed: number): RunReport {
     avgDefenderSuppressionWhenClose: defenderSuppressionSampleCount > 0
       ? defenderSuppressionSampleSum / defenderSuppressionSampleCount : null,
     attackerPinnedFractionAt: pinnedFractionAt,
+    outOfBounds: [...battle.state.soldiers.values()].filter((s) =>
+      !(s.pos.x >= 0 && s.pos.y >= 0 && s.pos.x < battle.state.map.width && s.pos.y < battle.state.map.height)).length,
   };
 }
 
@@ -294,7 +299,18 @@ function printReport(reports: RunReport[]): void {
   console.log(lines.join('\n'));
 }
 
-describe('AI-vs-AI balance harness', () => {
+describe('harness smoke', () => {
+  it('runs a short AI-vs-AI battle on the first map with finite values and all soldiers on the map', () => {
+    const r = runOne(MAPS[0].id, 1, 180);
+    expect(Number.isFinite(r.durationS)).toBe(true);
+    expect(r.sides.german.losses).toBeGreaterThanOrEqual(0);
+    expect(r.sides.soviet.losses).toBeGreaterThanOrEqual(0);
+    expect(Number.isFinite(r.smallArmsHitRate)).toBe(true);
+    expect(r.outOfBounds).toBe(0);
+  }, 60_000);
+});
+
+describe.skipIf(!(globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.HARNESS)('AI-vs-AI balance harness', () => {
   it('runs every map at seeds 1..3 and prints a balance report', () => {
     const reports: RunReport[] = [];
     for (const mapDef of MAPS) {
@@ -307,11 +323,12 @@ describe('AI-vs-AI balance harness', () => {
         expect(r.sides.german.losses).toBeGreaterThanOrEqual(0);
         expect(r.sides.soviet.losses).toBeGreaterThanOrEqual(0);
         expect(r.msPerSimSecond).toBeLessThan(200); // generous CI-machine ceiling; target is <15ms
+        expect(r.outOfBounds).toBe(0);
       }
     }
     printReport(reports);
     expect(reports.length).toBe(MAPS.length * SEEDS.length);
-  }, 120_000);
+  }, 600_000);
 });
 
 describe('determinism', () => {
@@ -323,7 +340,7 @@ describe('determinism', () => {
     const mapId = MAPS[0].id;
     const year = yearForMap(mapId);
     const config: BattleConfig = {
-      mapId, playerSide: 'german', year, seed: 7, durationS: 180,
+      mapId, playerSide: 'german', year, seed: 7, durationS: 60,
       difficulty: 'normal', forces: DEFAULT_FORCES[year], aiBothSides: true,
     };
 

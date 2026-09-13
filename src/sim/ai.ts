@@ -269,9 +269,21 @@ export function aiDeploy(state: BattleState, side: Side, rng: Rng, battle: AIBat
     let best: Vec2 | null = null;
     let bestScore = -Infinity;
 
+    // Keep anchors off the MAP edge: formation rows extend +/-2.25 tiles in x and up to +4.5 tiles
+    // in +y from the anchor, so an anchor on the map's edge rows would put soldiers outside the map.
+    // Interior zone edges are left alone (restricting those shifted AI deployment and harness
+    // balance for no benefit; deployTeam also clamps each soldier into the map).
+    const W = state.map.width, H = state.map.height;
+    const zx0 = Math.max(zone.x, 0), zx1 = Math.min(zone.x + zone.w, W);
+    const zy0 = Math.max(zone.y, 0), zy1 = Math.min(zone.y + zone.h, H);
+    const xLo = Math.max(zx0, 3), xHi = Math.min(zx1, W - 3);
+    const yHi = Math.min(zy1, H - 5);
+    const sx0 = xHi > xLo ? xLo : zx0, sx1 = xHi > xLo ? xHi : zx1;
+    const sy0 = zy0, sy1 = yHi > zy0 ? yHi : zy1;
+
     for (let i = 0; i < 40; i++) {
-      const x = Math.floor(rng.range(zone.x, zone.x + zone.w));
-      const y = Math.floor(rng.range(zone.y, zone.y + zone.h));
+      const x = Math.floor(rng.range(sx0, sx1));
+      const y = Math.floor(rng.range(sy0, sy1));
       if (!inBounds(state.map, x, y)) continue;
       if (!isPassable(state.map, x, y, mover)) continue;
       const pos = { x: x + 0.5, y: y + 0.5 };
@@ -285,8 +297,8 @@ export function aiDeploy(state: BattleState, side: Side, rng: Rng, battle: AIBat
 
     if (!best) {
       for (let i = 0; i < 60 && !best; i++) {
-        const x = Math.floor(rng.range(zone.x, zone.x + zone.w));
-        const y = Math.floor(rng.range(zone.y, zone.y + zone.h));
+        const x = Math.floor(rng.range(sx0, sx1));
+        const y = Math.floor(rng.range(sy0, sy1));
         if (isPassable(state.map, x, y, mover)) best = { x: x + 0.5, y: y + 0.5 };
       }
     }
