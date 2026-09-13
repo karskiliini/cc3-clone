@@ -388,7 +388,6 @@ export class BattleScreen implements Screen {
     const action = this.bottomStrip.update(input);
     if (action === 'truce') {
       battle.offerTruce(battle.playerSide());
-      addMessage(state, 'You have offered a truce', 'info');
     } else if (action === 'flee') {
       // Per the manual, Flee ends the battle immediately with the enemy taking the map — it is
       // not a per-team retreat order.

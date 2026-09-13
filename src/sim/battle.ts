@@ -160,6 +160,7 @@ export class Battle {
       this.aiAccum -= AI_INTERVAL;
       const aiSide = otherSide(state.config.playerSide);
       stepAI(state, this.rng, this, aiSide);
+      this.evaluateTruce();
       if (state.config.aiBothSides) stepAI(state, this.rng, this, state.config.playerSide);
     }
 
@@ -213,14 +214,31 @@ export class Battle {
 
   offerTruce(side: Side): void {
     const state = this.state;
+    if (state.sides[side].truceOffered) {
+      // second click withdraws the standing offer
+      state.sides[side].truceOffered = false;
+      state.sides[side].truceAccepted = false;
+      addMessage(state, 'Truce offer withdrawn.', 'info');
+      return;
+    }
     state.sides[side].truceOffered = true;
     state.sides[side].truceAccepted = true;
+    addMessage(state, 'You have offered a truce.', 'info');
+    this.evaluateTruce();
+  }
 
-    const other = otherSide(side);
-    if (state.sides[other].morale < 50 || state.sides[other].score < state.sides[side].score) {
-      state.sides[other].truceOffered = true;
-      state.sides[other].truceAccepted = true;
-      addMessage(state, 'Both sides have agreed to a truce.', 'info');
+  /** A standing truce offer is re-evaluated by the AI side every AI tick (manual: both sides must agree). */
+  private evaluateTruce(): void {
+    const state = this.state;
+    const ai = otherSide(state.config.playerSide);
+    const player = state.config.playerSide;
+    if (!state.sides[player].truceOffered || state.sides[ai].truceAccepted) return;
+    const s = state.sides;
+    const losing = s[ai].morale < 50 || s[ai].score < s[player].score || s[ai].losses > s[player].losses * 1.5;
+    if (losing) {
+      s[ai].truceOffered = true;
+      s[ai].truceAccepted = true;
+      addMessage(state, 'The enemy has accepted the truce.', 'info');
     }
   }
 
