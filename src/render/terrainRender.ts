@@ -67,7 +67,8 @@ interface BuildingBBox {
   id: number;
 }
 
-interface FieldInfo { horiz: boolean }
+/** sin/cos of the field's row angle, precomputed once per field so rendering never redoes trig. */
+interface FieldInfo { sin: number; cos: number }
 
 // ============================================================================
 // color ramps — 4-shade dark->light ramps for the painterly ground pass.
@@ -507,18 +508,22 @@ function paintGroundAndFeatures(
 
           // -------------------------------------------------------- crops
           if (covCrop > 0.5) {
-            // One row axis per contiguous field (flood-filled in computeFields), not per-pixel
-            // or per-tile, so rows run continuously across the whole field instead of quilting.
+            // Row axis: ONE base angle for the whole MAP (see fieldBaseAngleDeg — hashed from
+            // the map id to 0/90/occasionally 45 degrees), and each contiguous field (flood-
+            // filled in computeFields, small fields inheriting their nearest large field's
+            // angle) only adds a small +-12 degree wobble on top. This is what keeps adjacent
+            // wheat patches from ever showing perpendicular rows next to each other — no
+            // per-field coin-flip between "horizontal" and "vertical" any more.
             const fid = fieldId[wy * mapW + wx];
             const info = fid >= 0 ? fieldAxis.get(fid) : undefined;
-            const horiz = info ? info.horiz : true;
+            const sinT = info ? info.sin : 0, cosT = info ? info.cos : 1;
             const cropBase = groundColorFbm('crops', season, wpx, wpy, seed);
             // slight low-frequency fbm wobble along the row so lines don't look ruler-straight,
             // then 3px-spaced rows at +-7% brightness.
             const wobSeed = seed + (fid >= 0 ? fid * 131 : 0) + 7701;
             const wobble = (fbm(wpx / 60, wpy / 60, 1, wobSeed) - 0.5) * 4;
-            const perp = horiz ? wpy + wobble : wpx + wobble;
-            const rowPhase = Math.floor(perp / 3) % 2;
+            const perp = -wpx * sinT + wpy * cosT + wobble;
+            const rowPhase = ((Math.floor(perp / 3) % 2) + 2) % 2; // guard against negative perp
             let color2 = shade(cropBase, rowPhase === 0 ? 0.07 : -0.07);
             if (covCrop < 0.65) color2 = shade(color2, -0.14); // darker headland near the field edge
             color = color2;
@@ -1550,6 +1555,11 @@ export class TerrainRenderer {
   private buildingBBoxes = new Map<number, BuildingBBox>();
   private fieldId: Int32Array;
   private fieldAxis = new Map<number, FieldInfo>();
+  /** One row-axis angle (degrees) for every crop field on this map, hashed from the map id —
+   * 0 or 90 most of the time, occasionally 45. Individual fields only wobble a little around
+   * this shared angle (see computeFields), so adjacent wheat patches never show perpendicular
+   * rows next to each other. */
+  private fieldBaseAngleDeg = 0;
   private groundUnder: Terrain[];
   private lowRes: HTMLCanvasElement | null = null;
   /** Terrains (hedge/fence/stonewall/trench) fully covered by a 'line' vector on this map — the
@@ -1562,6 +1572,8 @@ export class TerrainRenderer {
     this.chunksX = Math.max(1, Math.ceil(map.width / CHUNK_TILES));
     this.chunksY = Math.max(1, Math.ceil(map.height / CHUNK_TILES));
     this.fieldId = new Int32Array(map.width * map.height).fill(-1);
+    const angleRoll = hash2(0, 0, this.seed + 909);
+    this.fieldBaseAngleDeg = angleRoll < 0.15 ? 45 : angleRoll < 0.575 ? 0 : 90;
     this.computeBuildingBBoxes();
     this.computeFields();
     this.groundUnder = this.computeGroundUnder();
@@ -1695,15 +1707,56 @@ export class TerrainRenderer {
       }
     }
 
-    // Only real crop tiles get a fieldId (the dilation halo cells are discarded — they were
-    // only a connectivity bridge); one hashed axis per connected component.
+    // Tile count + centroid per component (over real crop tiles only — the dilation halo cells
+    // were purely a connectivity bridge and never get a fieldId of their own).
+    const compCount = new Array<number>(nextId).fill(0);
+    const compSumX = new Array<number>(nextId).fill(0);
+    const compSumY = new Array<number>(nextId).fill(0);
+    for (let i = 0; i < n; i++) {
+      if (!isCrop[i]) continue;
+      const id = compId[i];
+      compCount[id]++;
+      compSumX[id] += i % w;
+      compSumY[id] += Math.floor(i / w);
+    }
+
+    // One shared base angle for the whole map (this.fieldBaseAngleDeg); "large" fields (>=40
+    // tiles) each get that angle plus a small +-12 degree wobble of their own. Small fields
+    // (<40 tiles — stray satellite patches, farmyard vegetable plots) don't roll their own
+    // angle at all: they inherit whichever large field's centroid is nearest, so a small patch
+    // sitting right next to a big wheat field never shows a jarringly different row direction.
+    const LARGE_MIN_TILES = 40;
+    const angleDeg = new Array<number>(nextId).fill(this.fieldBaseAngleDeg);
+    const isLarge = new Array<boolean>(nextId).fill(false);
+    for (let id = 0; id < nextId; id++) {
+      if (compCount[id] < LARGE_MIN_TILES) continue;
+      isLarge[id] = true;
+      const wobble = (hash2(id, 777, this.seed + 303) - 0.5) * 24; // +-12 degrees
+      angleDeg[id] = this.fieldBaseAngleDeg + wobble;
+    }
+    for (let id = 0; id < nextId; id++) {
+      if (isLarge[id] || compCount[id] === 0) continue;
+      const cx = compSumX[id] / compCount[id], cy = compSumY[id] / compCount[id];
+      let bestId = -1, bestDist = Infinity;
+      for (let j = 0; j < nextId; j++) {
+        if (!isLarge[j]) continue;
+        const jx = compSumX[j] / compCount[j], jy = compSumY[j] / compCount[j];
+        const dx = jx - cx, dy = jy - cy;
+        const d = dx * dx + dy * dy;
+        if (d < bestDist) { bestDist = d; bestId = j; }
+      }
+      // no large field anywhere on the map (rare) — still just wobble around the shared base
+      // angle rather than rolling an unrelated one.
+      angleDeg[id] = bestId >= 0 ? angleDeg[bestId] : this.fieldBaseAngleDeg + (hash2(id, 778, this.seed + 304) - 0.5) * 24;
+    }
+
     for (let i = 0; i < n; i++) {
       if (!isCrop[i]) continue;
       const id = compId[i];
       this.fieldId[i] = id;
       if (!this.fieldAxis.has(id)) {
-        const x = i % w, y = Math.floor(i / w);
-        this.fieldAxis.set(id, { horiz: hash2(x, y, this.seed + 303) < 0.5 });
+        const rad = (angleDeg[id] * Math.PI) / 180;
+        this.fieldAxis.set(id, { sin: Math.sin(rad), cos: Math.cos(rad) });
       }
     }
   }
