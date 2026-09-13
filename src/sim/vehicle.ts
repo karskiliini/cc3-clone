@@ -100,13 +100,13 @@ function gatherArmorThreats(state: BattleState, v: Vehicle): ArmorThreat[] {
   return out;
 }
 
-interface ReverseTrack { target: Vec2 | null }
+interface ReverseTrack { target: Vec2 | null; fleeingSince: number | null; cooldownUntil: number }
 const reverseTracks = new WeakMap<BattleState, Map<number, ReverseTrack>>();
 function getReverseTrack(state: BattleState, vehicleId: number): ReverseTrack {
   let m = reverseTracks.get(state);
   if (!m) { m = new Map(); reverseTracks.set(state, m); }
   let t = m.get(vehicleId);
-  if (!t) { t = { target: null }; m.set(vehicleId, t); }
+  if (!t) { t = { target: null, fleeingSince: null, cooldownUntil: -Infinity }; m.set(vehicleId, t); }
   return t;
 }
 
@@ -196,6 +196,23 @@ function stepOneVehicleMind(state: BattleState, rng: Rng, dt: number, v: Vehicle
   }
   // panicked crews flee regardless (driver bails/reverses blind, spec §10.2).
   if (mind.state === 'panicked') shouldFlee = true;
+
+  // Balance fix (suspect d): an unbounded flee/reverse cycle could keep pulling a tank out of the
+  // fight indefinitely whenever ANY armor threat lingered (e.g. a spotted AT gun it can't easily
+  // silence), taking it out of the attacker's/defender's line for the whole battle. Cap continuous
+  // reversing at 20s, then force a 10s cooldown during which the vehicle must re-engage from
+  // wherever it ended up (even if the threat is still live) before it's allowed to flee again.
+  if (shouldFlee && state.time < track.cooldownUntil) shouldFlee = false;
+  if (shouldFlee) {
+    if (track.fleeingSince === null) track.fleeingSince = state.time;
+    else if (state.time - track.fleeingSince >= 20) {
+      shouldFlee = false;
+      track.fleeingSince = null;
+      track.cooldownUntil = state.time + 10;
+    }
+  } else {
+    track.fleeingSince = null;
+  }
 
   if (!shouldFlee || !top) {
     track.target = null;

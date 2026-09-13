@@ -328,7 +328,22 @@ export function onIncomingFire(
       const leader = team ? state.soldiers.get(team.leaderId) : undefined;
       const leaderNear5 = !!leader && leader.id !== soldier.id && leader.health !== 'dead' && leader.health !== 'incapacitated'
         && dist(leader.pos, soldier.pos) * TILE_M <= 5;
-      if (!leaderNear5) {
+      // Balance fix (suspect c): first-fire shock used to freeze every green soldier independently
+      // the instant he was fired upon, so a whole conscript squad taking its first incoming rounds
+      // together could freeze almost as one — no one left firing back to justify the freeze. Cap it
+      // to at most 30% of the squad concurrently frozen; once that quota is full the rest still take
+      // the stress hit (already applied above) but keep acting.
+      let squadFrozenCount = 0;
+      if (team) {
+        for (const id of team.soldierIds) {
+          if (id === soldier.id) continue;
+          const ot = track.soldiers.get(id);
+          if (ot && state.time < ot.freezeUntil) squadFrozenCount++;
+        }
+      }
+      const squadSize = team ? team.soldierIds.length : 1;
+      const frozenQuotaOk = squadFrozenCount < Math.max(1, Math.ceil(squadSize * 0.3));
+      if (!leaderNear5 && frozenQuotaOk) {
         mind.state = 'shaken';
         mind.stateSince = state.time;
         t.freezeUntil = state.time + rng.range(3, 8);

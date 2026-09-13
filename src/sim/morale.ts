@@ -98,6 +98,10 @@ function stepSoldierMorale(state: BattleState, s: Soldier, dt: number, track: Mo
   const leaderNotSuppressed = leaderAlive && leader ? leader.suppression <= 60 : false;
 
   // -------------------------------------------------------- suppression decay
+  // Tried raising this (5->6 / 8->10) to let attackers recover fire sooner; harness showed it made
+  // the attacker win rate WORSE (31%->27% combined with the throttle loosening below), presumably by
+  // letting defenders (who take far less suppression to begin with) recover just as fast and keep
+  // outshooting the attacker regardless. Reverted to the original rates.
   const decayRate = leaderNearM && leaderNotSuppressed ? 8 : 5;
   s.suppression = clamp(s.suppression - decayRate * dt, 0, 100);
 

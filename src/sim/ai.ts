@@ -69,6 +69,7 @@ function findClusterTarget(state: BattleState, side: Side): Vec2 | null {
     }
     if (count > bestCount) { bestCount = count; best = s.pos; }
   }
+  // Reverted along with combat.ts's findEnemyCluster — see that comment.
   return bestCount >= 3 ? best : null;
 }
 
@@ -88,6 +89,33 @@ function findDefendedObjective(state: BattleState, side: Side, sorted: VictoryLo
     if (enemySoldiers.some((ep) => dist(ep, p) <= 15)) return vl;
   }
   return null;
+}
+
+/** Nearest spotted enemy-of-`side` soldier position within `radiusTiles` of `point`, or `point`
+ * itself if none — used so mortar/tank prep fire on a defended VL lands on the actual defenders
+ * near it rather than the bare VL coordinate, which is often a few tiles off from where the
+ * defending team's cover position (bestCoverWithin) actually put them. */
+function preciseFireTarget(state: BattleState, side: Side, point: Vec2, radiusTiles: number): Vec2 {
+  let best: Vec2 | null = null;
+  let bestD = Infinity;
+  for (const id of state.spotted[side]) {
+    const s = state.soldiers.get(id);
+    if (!s || s.health === 'dead' || s.health === 'incapacitated') continue;
+    const d = dist(s.pos, point);
+    if (d <= radiusTiles && d < bestD) { bestD = d; best = s.pos; }
+  }
+  return best ?? point;
+}
+
+/** Count of enemy-of-`side` soldiers spotted within `radiusM` of `point` (for flanking decisions). */
+function countSpottedEnemiesNear(state: BattleState, side: Side, point: Vec2, radiusM: number): number {
+  let n = 0;
+  for (const id of state.spotted[side]) {
+    const s = state.soldiers.get(id);
+    if (!s || s.health === 'dead' || s.health === 'incapacitated') continue;
+    if (dist(s.pos, point) * TILE_M <= radiusM) n++;
+  }
+  return n;
 }
 
 /** Closest any attacking team is currently to `point`, in metres (Infinity if there are none). */
@@ -155,7 +183,9 @@ function goodCoverNearRoad(state: BattleState, centre: Vec2, rng: Rng): Vec2 {
   return best ?? centre;
 }
 
-function chooseWaypoint(state: BattleState, from: Vec2, objective: Vec2, rng: Rng, preferConcealment = false): Vec2 {
+function chooseWaypoint(
+  state: BattleState, from: Vec2, objective: Vec2, rng: Rng, preferConcealment = false, flankBiasRad = 0,
+): Vec2 {
   // Sample within a forward cone toward the objective (not a full 0..2pi circle) and weight net
   // progress far more heavily than cover. The old formula (cover*2 - dObj/50) let a ~1.0 cover
   // bonus at a random nearby tile outweigh tens of tiles of distance-to-objective difference, so
@@ -167,7 +197,11 @@ function chooseWaypoint(state: BattleState, from: Vec2, objective: Vec2, rng: Rn
   // still preferring covered ground when the forward options are comparable.
   const toObjective = dist(from, objective);
   if (toObjective < 1) return objective;
-  const bearing = angleTo(from, objective);
+  // Balance fix (suspect e): flankBiasRad shifts the approach cone off the direct line to the
+  // objective (spec ask: ±45deg when 2+ defenders are spotted there) so attackers don't all funnel
+  // straight down the defender's prepared line of fire — the cone width stays the same, just
+  // re-centred on the flanking bearing.
+  const bearing = angleTo(from, objective) + flankBiasRad;
   const maxR = Math.min(25, Math.max(4, toObjective));
   let best: Vec2 | null = null;
   let bestScore = -Infinity;
@@ -362,7 +396,12 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
         if (defended) {
           const distToDefended = nearestAttackerDistToPoint(attackerTeams, { x: defended.x, y: defended.y });
           if (distToDefended > 150) {
-            tryIssueOrder(state, battle, track, team, { type: 'fire', target: { x: defended.x, y: defended.y }, issuedAt: state.time });
+            // Balance fix: aim at the actual defenders spotted near the VL, not the bare VL tile —
+            // defending teams' cover position (bestCoverWithin, up to 8 tiles from the VL) rarely
+            // sits exactly on it, so HE aimed at the VL coordinate was landing on empty ground most
+            // of the time (harness: avgDefSuppr(<=150m) stayed ~0 even with mortarHE rounds fired).
+            const preciseTarget = preciseFireTarget(state, side, { x: defended.x, y: defended.y }, 10);
+            tryIssueOrder(state, battle, track, team, { type: 'fire', target: preciseTarget, issuedAt: state.time });
           } else {
             tryIssueOrder(state, battle, track, team, { type: 'smoke', target: { x: defended.x, y: defended.y }, issuedAt: state.time });
           }
@@ -464,6 +503,11 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
     // fire at the nearest visible enemy — instead of every team either freezing forever or all
     // closing the whole distance at once with nobody providing suppression. `n` (this side's
     // stepAI call count) flips the two halves every tick so they leapfrog each other.
+    // Tried shifting this to a 1-in-3 advance/2-in-3 hold split (more return fire per tick) but the
+    // harness showed it made things WORSE (attacker win rate 31%->19%): slowing the advance kept
+    // attacker infantry exposed in the open for longer against defenders who are almost always
+    // stationary and free to fire at full range, and the extra time in the open outweighed the extra
+    // return-fire volume. Reverted to the original 50/50 leapfrog.
     if (nearestEnemy && nearestEnemyDistM <= 250 && teamHasLOSToEnemy(state, team, nearestEnemy.pos)) {
       const bounding = (aIdx + n) % 2 === 0;
       if (!bounding) {
@@ -476,7 +520,13 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
     // coordinator's "sneak along hedges/woods when available" ask — not just when already
     // sneaking, but for the whole final approach band where being seen matters.
     const preferConcealment = nearestEnemyDistM <= 150;
-    const waypoint = chooseWaypoint(state, team.pos, objective, rng, preferConcealment);
+    // Balance fix (suspect e): when the objective has 2+ defenders spotted, approach off a ±45deg
+    // flanking bearing instead of walking straight down their prepared line of fire. The sign is
+    // fixed per team (by id parity) so a team commits to one flank rather than oscillating tick to
+    // tick between left/right.
+    const defendersSpotted = countSpottedEnemiesNear(state, side, objective, 60);
+    const flankBiasRad = defendersSpotted >= 2 ? (team.id % 2 === 0 ? 1 : -1) * (Math.PI / 4) : 0;
+    const waypoint = chooseWaypoint(state, team.pos, objective, rng, preferConcealment, flankBiasRad);
     let orderType: OrderType = 'move';
     if (nearestEnemyDistM > 150) orderType = 'moveFast';
     else if (nearestEnemyDistM <= 60) orderType = 'sneak';
@@ -516,7 +566,10 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
         const distM = dist(vehicle.pos, point) * TILE_M;
         const attackersFar = nearestAttackerDistToPoint(attackerTeams, point) > 150;
         if (attackersFar && distM <= mainWeapon.rangeM) {
-          tryIssueOrder(state, battle, track, team, { type: 'fire', target: point, issuedAt: state.time });
+          // Balance fix: same precision-targeting fix as the mortar's prep fire above — aim at the
+          // spotted defenders near the VL, not the bare VL tile.
+          const preciseTarget = preciseFireTarget(state, side, point, 10);
+          tryIssueOrder(state, battle, track, team, { type: 'fire', target: preciseTarget, issuedAt: state.time });
           continue;
         }
       }

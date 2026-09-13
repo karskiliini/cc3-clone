@@ -135,7 +135,10 @@ function pickTarget(state: BattleState, soldier: Soldier, team: Team | undefined
 
   let maxRangeM = weapon.rangeM;
   if (soldier.activity === 'sneaking') maxRangeM = Math.min(maxRangeM, 20);
-  else if (soldier.activity === 'moving') maxRangeM = Math.min(maxRangeM, 60);
+  // Balance fix (suspect b follow-up): 60m capped a 'moving' attacker's return fire well short of
+  // where the defender (stationary, unrestricted weapon range) could already be hitting them —
+  // raised to 100m so an advancing team can shoot back for more of its approach.
+  else if (soldier.activity === 'moving') maxRangeM = Math.min(maxRangeM, 100);
 
   const order = team?.order;
   if (order?.type === 'ambush') maxRangeM = Math.min(maxRangeM, AMBUSH_TRIGGER_M);
@@ -569,6 +572,10 @@ function stepSoldierCombat(state: BattleState, rng: Rng, dt: number, soldier: So
   // canSoldierFire) rather than the raw suppression number, which used to race ahead of the state
   // machine by a tick.
   if (soldier.mind.state !== 'berserk') {
+    // Tried loosening 30%->40% and >85->90 (paired with the suppression-decay change above);
+    // harness showed the combination made attacker win rate worse, not better. Reverted to the
+    // original spec §6.7 thresholds — the shot-volume gap turned out to be dominated by the AI's
+    // move/fire-eligibility split (see ai.ts bounding overwatch), not this throttle.
     if (soldier.mind.state === 'pinned' && !rng.chance(0.3)) return;
     if (soldier.suppression > 85) return;
     if (soldier.suppression > 60 && !rng.chance(0.3)) return;
@@ -640,6 +647,8 @@ function findEnemyCluster(state: BattleState, side: Side): Vec2 | null {
     }
     if (count > bestCount) { bestCount = count; best = s.pos; }
   }
+  // Tried lowering this to 2 (more mortar targets on spread-out defenses); harness showed it made
+  // the attacker win rate slightly worse (31%->27%), so reverted to the original threshold.
   return bestCount >= 3 ? best : null;
 }
 

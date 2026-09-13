@@ -74,9 +74,21 @@ export function hitChance(
   const st = stanceFactor(targetStance);
   const sf = shooterFactor(shooter);
   const movingTargetTerm = targetMoving ? 0.6 : 1;
-  const movingShooterTerm = shooter.activity === 'moving' || shooter.activity === 'movingFast' ? 0.4 : 1;
+  // Balance fix (suspect b follow-up): 'movingFast' shooters never reach this function at all
+  // (pickTarget returns null for that activity), so this penalty only ever hits 'moving' soldiers —
+  // the attacker's normal advance-under-fire state. 0.4 made their return fire close to
+  // decorative; loosened to 0.6 so advancing infantry can still meaningfully threaten a defender,
+  // not just soak up the defender's free fire.
+  const movingShooterTerm = shooter.activity === 'moving' || shooter.activity === 'movingFast' ? 0.6 : 1;
   const p = weapon.accuracy * rf * coverTerm * st * sf * movingTargetTerm * movingShooterTerm;
-  return clamp(p, 0.02, 0.95);
+  // Balance fix (suspect a): directional cover (up to ~0.85-1.0) stacked with prone (x0.45) and the
+  // suppression/experience shooterFactor could push p toward the 0.02 global floor at almost any
+  // range <=100m, making dug-in defenders effectively untouchable and stalling the attacker's whole
+  // suppression/attrition loop. Floor close-range hit chance at 25% of raw accuracy*rangeFactor
+  // (ignoring cover/stance/shooter-state reductions) so a defender in the best cover is still hittable
+  // at a meaningful rate, while cover/stance/suppression still matter well above that floor.
+  const closeFloor = distM <= 100 ? weapon.accuracy * rf * 0.25 : 0;
+  return clamp(Math.max(p, closeFloor), 0.02, 0.95);
 }
 
 /** pen = penetrationMm * max(0.4, 1 - dist/1000); spread = gauss()*0.12; penetrates if pen*(1+spread) > armorMm. */
