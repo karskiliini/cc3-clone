@@ -172,3 +172,34 @@ export function stepCoverSeeking(state: BattleState, rng: Rng, dt: number): void
     seekForSoldier(state, rng, s);
   }
 }
+
+/** Arrival settling for move orders: the best tile within `radius` of a soldier's formation `slot`,
+ * scored with the same directional cover model as automatic cover seeking (his threat set plus the
+ * direction of travel at weight 0.5 — an advancing squad expects the enemy ahead) minus a small
+ * distance penalty, so an arriving squad spreads along hedges, walls and craters instead of
+ * standing in its formation pattern. `taken(tx, ty)` rejects tiles already claimed by teammates.
+ * Returns the slot itself when it is passable and nothing nearby is clearly better. Pure function
+ * of the map and soldier state (no rng), at most ~13 tiles x coverScore. */
+export function settleTile(
+  state: BattleState, s: Soldier, slot: Vec2, headingRad: number, radius: number,
+  taken: (tx: number, ty: number) => boolean,
+): Vec2 | null {
+  const map = state.map;
+  const team = state.teams.get(s.teamId);
+  const threats = buildThreatSet(state, s, team);
+  threats.unshift({ dirRad: headingRad, weight: 0.5 });
+  const sx = Math.floor(slot.x), sy = Math.floor(slot.y);
+  let best: Vec2 | null = null;
+  let bestScore = -Infinity;
+  for (const tile of tilesWithinRadius(slot, radius)) {
+    const tx = Math.floor(tile.x), ty = Math.floor(tile.y);
+    if (!inBounds(map, tx, ty) || !isPassable(map, tx, ty, 'infantry') || taken(tx, ty)) continue;
+    const own = tx === sx && ty === sy;
+    // off-slot tiles keep the slot's sub-tile jitter (softened) so men never line up on tile centres
+    const p = own ? slot : { x: tx + 0.5 + (slot.x - sx - 0.5) * 0.6, y: ty + 0.5 + (slot.y - sy - 0.5) * 0.6 };
+    // own tile gets a small stickiness bonus so open ground keeps the loose formation shape
+    const score = coverScore(map, tile, threats) - 0.06 * dist(slot, tile) + (own ? 0.05 : 0);
+    if (score > bestScore + 1e-9) { bestScore = score; best = { x: p.x, y: p.y }; }
+  }
+  return best;
+}

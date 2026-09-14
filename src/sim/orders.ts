@@ -4,6 +4,9 @@ import { clamp, dist, facingTo, vadd, vnorm, vscale, vsub } from '@/shared/math'
 import { findPath, isPassable } from './path';
 import { teamHasSmoke } from './team';
 import { isFirstFireFrozen, isLeaderless } from './mind';
+import { angleTo } from '@/shared/math';
+import { formationBaseHeading, rotateOffset } from './spawn';
+import { settleTile } from './coverSeek';
 
 const INCAPABLE_ACTIVITIES = new Set(['pinned', 'cowering', 'panicked', 'routed', 'surrendered']);
 
@@ -56,15 +59,101 @@ function effectiveType(team: Team, order: Order): OrderKind {
   return order.type;
 }
 
-/** Follower path derived from the leader's path shifted by the formation offset (one short A* to
- * join it) instead of a full A* per soldier. Returns null when the shifted path is not usable. */
-function followerPathFromLeader(state: BattleState, s: Soldier, leaderPath: Vec2[]): Vec2[] | null {
+// ------------------------------------------------------------------ formation geometry
+/** Radius (tiles) around a soldier's formation slot in which he settles onto the best cover tile. */
+const SETTLE_RADIUS = 2;
+/** Per-axis cap on a follower's wandering drift while moving (slot + drift stays within ~4 tiles). */
+const DRIFT_MAX = 1.8;
+
+/** Direction of travel for each move order, fixed when the order is first applied so hesitant
+ * soldiers who obey later rotate the formation the same way. */
+const orderHeading = new WeakMap<Order, number>();
+/** Destination tiles already claimed under an order (soldier id -> tile index): no two teammates
+ * settle onto the same tile. */
+const orderClaims = new WeakMap<Order, Map<number, number>>();
+
+function headingFor(state: BattleState, team: Team, order: Order): number {
+  const known = orderHeading.get(order);
+  if (known != null) return known;
+  const leader = state.soldiers.get(team.leaderId);
+  const from = leader && leader.health !== 'dead' && leader.health !== 'incapacitated' ? leader.pos : team.pos;
+  const h = dist(from, order.target) > 0.5 ? angleTo(from, order.target) : formationBaseHeading(state.map, team.side);
+  orderHeading.set(order, h);
+  return h;
+}
+
+/** A soldier's formation offset rotated so the formation's front faces the order's direction of
+ * travel (wedge point forward, skirmish line perpendicular). Stored offsets are baked at the deploy
+ * heading, so the rotation is by the difference. */
+export function orderSlotOffset(state: BattleState, team: Team, s: Soldier, order: Order): Vec2 {
+  return rotateOffset(s.formationOffset, headingFor(state, team, order) - formationBaseHeading(state.map, team.side));
+}
+
+const tileEq = (a: Vec2, b: Vec2) => Math.floor(a.x) === Math.floor(b.x) && Math.floor(a.y) === Math.floor(b.y);
+
+/** The soldier's rotated slot at the order target, settled onto the best directional cover tile
+ * within SETTLE_RADIUS that no teammate has claimed. */
+function destinationFor(state: BattleState, team: Team, s: Soldier, order: Order, slotOffset: Vec2): Vec2 {
+  const map = state.map;
+  const slot = {
+    x: clamp(order.target.x + slotOffset.x, 0.5, map.width - 0.5),
+    y: clamp(order.target.y + slotOffset.y, 0.5, map.height - 0.5),
+  };
+  let claims = orderClaims.get(order);
+  if (!claims) { claims = new Map(); orderClaims.set(order, claims); }
+  claims.delete(s.id);
+  const taken = new Set<number>();
+  for (const [id, tile] of claims) {
+    const o = state.soldiers.get(id);
+    if (o && o.health !== 'dead' && o.health !== 'incapacitated') taken.add(tile);
+  }
+  const dest = settleTile(state, s, slot, headingFor(state, team, order), SETTLE_RADIUS, (tx, ty) => taken.has(ty * map.width + tx)) ?? slot;
+  return dest;
+}
+
+function claim(state: BattleState, order: Order, s: Soldier, p: Vec2): void {
+  const claims = orderClaims.get(order);
+  if (claims) claims.set(s.id, Math.floor(p.y) * state.map.width + Math.floor(p.x));
+}
+
+/** Extend `path` (or a soldier standing at `from`) with a short hop onto `dest`, ending exactly on
+ * the destination point so men do not all stop on tile centres. Returns the end point reached. */
+function withArrivalHop(state: BattleState, from: Vec2, path: Vec2[], dest: Vec2): { path: Vec2[]; end: Vec2 } {
+  const end = path.length > 0 ? path[path.length - 1] : from;
+  if (tileEq(end, dest)) {
+    if (path.length === 0) return { path, end: from };
+    const out = path.slice(0, -1);
+    out.push({ x: dest.x, y: dest.y });
+    return { path: out, end: dest };
+  }
+  const tail = findPath(state.map, end, dest, 'infantry', 120);
+  if (tail.length === 0 || !tileEq(tail[tail.length - 1], dest)) return { path, end };
+  tail[tail.length - 1] = { x: dest.x, y: dest.y };
+  return { path: path.concat(tail), end: dest };
+}
+
+/** Follower path derived from the leader's path shifted by the (rotated) formation offset, plus a
+ * small per-soldier drift that wanders over the route (a damped random walk, tapering to zero over
+ * the last waypoints) so the squad does not march in lockstep. One short A* to join it instead of
+ * a full A* per soldier. Returns null when the shifted path is not usable. */
+function followerPathFromLeader(state: BattleState, s: Soldier, leaderPath: Vec2[], shift: Vec2, rng: Rng): Vec2[] | null {
   if (leaderPath.length === 0) return null;
   const map = state.map;
   const shifted: Vec2[] = [];
-  for (const w of leaderPath) {
-    const p = vadd(w, s.formationOffset);
-    if (!isPassable(map, Math.floor(p.x), Math.floor(p.y), 'infantry')) return null;
+  let dx = 0, dy = 0;
+  const n = leaderPath.length;
+  for (let i = 0; i < n; i++) {
+    const w = leaderPath[i];
+    dx = clamp(dx * 0.85 + rng.range(-0.45, 0.45), -DRIFT_MAX, DRIFT_MAX);
+    dy = clamp(dy * 0.85 + rng.range(-0.45, 0.45), -DRIFT_MAX, DRIFT_MAX);
+    const taper = Math.min(1, (n - 1 - i) / 4);
+    const base = vadd(w, shift);
+    let p = { x: base.x + dx * taper, y: base.y + dy * taper };
+    if (!isPassable(map, Math.floor(p.x), Math.floor(p.y), 'infantry')) {
+      dx = 0; dy = 0;
+      p = base;
+      if (!isPassable(map, Math.floor(p.x), Math.floor(p.y), 'infantry')) return null;
+    }
     shifted.push(p);
   }
   const first = shifted[0];
@@ -85,7 +174,6 @@ function followLeaderRoute(state: BattleState, s: Soldier, leaderPath: Vec2[], s
   if (leaderPath.length === 0) return null;
   const map = state.map;
   const first = leaderPath[0];
-  const tileEq = (a: Vec2, b: Vec2) => Math.floor(a.x) === Math.floor(b.x) && Math.floor(a.y) === Math.floor(b.y);
   let route: Vec2[];
   if (tileEq(first, s.pos)) route = leaderPath.slice();
   else {
@@ -119,16 +207,22 @@ export function applyOrderToSoldier(state: BattleState, team: Team, s: Soldier, 
       s.activity = activity === 'sneaking' ? 'moving' : (activity as Soldier['activity']);
       return;
     }
+    const offset = orderSlotOffset(state, team, s, order);
+    const dest = destinationFor(state, team, s, order, offset);
     let path: Vec2[] | null = null;
     if (s.id === team.leaderId) {
       path = leaderPath ?? findPath(state.map, s.pos, order.target, 'infantry');
     } else {
-      if (leaderPath) path = followerPathFromLeader(state, s, leaderPath) ?? followLeaderRoute(state, s, leaderPath, vadd(order.target, s.formationOffset));
+      if (leaderPath) path = followerPathFromLeader(state, s, leaderPath, offset, rng) ?? followLeaderRoute(state, s, leaderPath, dest);
       if (!path) {
-        path = findPath(state.map, s.pos, vadd(order.target, s.formationOffset), 'infantry');
+        path = findPath(state.map, s.pos, dest, 'infantry');
         if (path.length === 0) path = findPath(state.map, s.pos, order.target, 'infantry');
       }
     }
+    const hop = withArrivalHop(state, s.pos, path, dest);
+    path = hop.path;
+    claim(state, order, s, hop.end);
+    s.mind.anchor = { x: hop.end.x, y: hop.end.y };
     s.path = path;
     s.activity = activity as Soldier['activity'];
     s.stance = type === 'sneak' ? 'prone' : 'standing';
@@ -163,7 +257,7 @@ export function applyOrderToSoldier(state: BattleState, team: Team, s: Soldier, 
       const dir = vnorm(vsub(order.target, team.pos));
       const shortM = 25 / 2;
       const approach = vadd(team.pos, vscale(dir, Math.max(0, d - shortM)));
-      s.path = findPath(state.map, s.pos, vadd(approach, s.formationOffset), 'infantry');
+      s.path = findPath(state.map, s.pos, vadd(approach, orderSlotOffset(state, team, s, order)), 'infantry');
       s.activity = 'moving';
       s.stance = 'standing';
       s.targetPoint = order.target;

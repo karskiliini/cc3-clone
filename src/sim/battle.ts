@@ -9,7 +9,7 @@ import { Rng } from '@/shared/rng';
 import { dist, pointInRect } from '@/shared/math';
 import { buildMap } from './map';
 import { isPassable } from './path';
-import { spawnTeam, formationPos } from './spawn';
+import { spawnTeam, layoutTeamPositions } from './spawn';
 import { applyOrder } from './orders';
 import { stepMovement } from './movement';
 import { stepVehicles } from './vehicle';
@@ -204,11 +204,12 @@ export class Battle {
       const veh = this.state.vehicles.get(team.vehicleId);
       if (veh) veh.pos = { x: pos.x, y: pos.y };
     }
-    for (const sid of team.soldierIds) {
-      const s = this.state.soldiers.get(sid);
-      if (!s) continue;
-      s.pos = team.vehicleId != null ? { x: pos.x, y: pos.y } : formationPos(this.state.map, pos, s.formationOffset);
-    }
+    const members = team.soldierIds.map((sid) => this.state.soldiers.get(sid)).filter((s): s is Soldier => !!s);
+    // Natural formation shape (spawn.ts), each man on his own passable tile.
+    const slots = team.vehicleId != null ? null : layoutTeamPositions(this.state.map, pos, members.map((s) => s.formationOffset));
+    members.forEach((s, i) => {
+      s.pos = slots ? slots[i] : { x: pos.x, y: pos.y };
+    });
     return true;
   }
 
