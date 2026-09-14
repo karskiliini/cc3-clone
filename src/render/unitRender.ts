@@ -13,6 +13,14 @@ import { getSoldierSprite, getVehicleSprite, getFlagSprite, unitSpriteScale } fr
 import { drawText, textWidth } from '@/render/pixelfont';
 import { VEHICLE_DEFS } from '@/data/units';
 import { teamBarColor } from '@/ui/hud/hudChrome';
+import { attackPhase } from '@/sim/orders';
+import { getWeaponSprite } from '@/render/sprites';
+import { getCrewPoseSprite, type CrewPose } from '@/render/soldierArt';
+import { weaponMuzzleM, weaponTowLengthM } from '@/render/weaponArt';
+import { CREW_LAYOUT, crewServedClass, crewWeaponView, weaponFramePoint } from '@/sim/crewWeapon';
+import { FLASH_LIFE, TILE_M } from '@/shared/types';
+import type { CrewWeaponState, Vec2 } from '@/shared/types';
+import { dist, facingFromAngle } from '@/shared/math';
 
 /** One morale bar per friendly team (manual: "Team information bars only
  * visible at normal zoom level"): a solid 30x4 bar centred above the team,
@@ -180,6 +188,184 @@ function drawSoldierDotClusters(ctx: CanvasRenderingContext2D, cam: Camera, stat
   }
 }
 
+// ------------------------------------------------------------ crew-served weapons (wf9) ---
+// Mortars, HMGs and AT guns are drawn as weapons on the ground (weaponArt.ts) with their crew
+// posed around them (soldierArt.ts crew poses). Purely visual: the sim keeps the weapon pivot,
+// facing and set-up phase in Team.crewWeapon (sim/crewWeapon.ts); crewmen standing still near
+// their role slot are drawn at the slot.
+
+/** Visual override for one crew soldier this frame. `pose` null = the normal stance sprite. */
+interface CrewSoldierDraw { pose: CrewPose | null; stance?: 'crouching' | 'prone'; pos: Vec2; facing: Facing8; frame: 0 | 1 }
+
+/** A crewman further than this (tiles) from his slot is drawn where he really is. */
+const CREW_PULL_TILES = 4;
+const PTRD_GUNNER_M: Vec2 = { x: 0.35, y: 1.4 };
+
+function crewFleeing(s: Soldier): boolean {
+  return s.activity === 'panicked' || s.activity === 'routed' || s.activity === 'surrendered' || s.activity === 'cowering';
+}
+
+function crewVariant(cw: CrewWeaponState): 'ready' | 'half' | 'packed' {
+  const frac = cw.phaseTotal > 0 ? 1 - cw.timer / cw.phaseTotal : 1;
+  if (cw.phase === 'ready') return 'ready';
+  if (cw.phase === 'settingUp') return cw.abandoned ? 'half' : frac < 0.35 ? 'packed' : frac < 0.75 ? 'half' : 'ready';
+  if (cw.phase === 'packing') return frac < 0.3 ? 'ready' : frac < 0.7 ? 'half' : 'packed';
+  return 'packed';
+}
+
+/** Per-frame crew pose / position overrides, keyed by soldier id. */
+function crewSoldierDraws(state: BattleState): Map<number, CrewSoldierDraw> {
+  const out = new Map<number, CrewSoldierDraw>();
+  for (const team of state.teams.values()) {
+    if (team.vehicleId != null) continue;
+    const cw = crewWeaponView(state, team);
+    if (!cw) continue;
+    const cls = crewServedClass(cw.weaponId);
+    if (!cls) continue;
+    const gunner = state.soldiers.get(cw.gunnerId);
+    const crew: Soldier[] = [];
+    for (const id of team.soldierIds) {
+      const s = state.soldiers.get(id);
+      if (!s || s.health === 'dead' || s.health === 'incapacitated' || s.vehicleId != null || crewFleeing(s)) continue;
+      if (gunner && s.id === gunner.id) continue;
+      crew.push(s);
+    }
+    crew.sort((a, b) => Number(a.isLeader) - Number(b.isLeader)); // the leader spots, others serve
+    const gunnerOk = !!gunner && gunner.health !== 'dead' && gunner.health !== 'incapacitated' && !crewFleeing(gunner);
+    const fired = gunnerOk && state.time - gunner!.lastFiredAt < 0.6;
+    const f8 = facingFromAngle(cw.facing);
+    if (cw.abandoned) continue;
+    if (cw.phase === 'packed') {
+      // on the move: carry the parts / haul the gun
+      const carry: [CrewPose, CrewPose] = cls === 'mortar' ? ['carryTube', 'carryPlate'] : cls === 'hmg' ? ['carryMg', 'carryTripod'] : ['haul', 'haul'];
+      const movers = gunnerOk ? [gunner!, ...crew] : crew;
+      movers.slice(0, 2).forEach((s, i) => {
+        if (s.path.length === 0 && i > 0) return;
+        out.set(s.id, { pose: carry[i], pos: s.pos, facing: s.facing, frame: (Math.floor(s.animFrame) % 2 === 0 ? 0 : 1) });
+      });
+      continue;
+    }
+    const L = CREW_LAYOUT[cls];
+    const busy = cw.phase !== 'ready';
+    const roles: [Soldier | undefined, Vec2, CrewPose | null][] = [
+      [gunnerOk ? gunner : undefined, L.gunner, busy ? 'gunnerKneel' : cls === 'hmg' ? 'mgProne' : 'gunnerKneel'],
+      [crew[0], L.loader, busy ? 'gunnerKneel' : cls === 'mortar' ? 'loaderRound' : cls === 'atgun' ? 'loaderShell' : 'gunnerKneel'],
+      [crew[1], L.assistant, busy ? 'gunnerKneel' : null],
+      // the team leader (or a fourth man) spots from the other side, a little back
+      [crew[2], { x: -L.assistant.x, y: L.assistant.y + 0.4 }, null],
+    ];
+    roles.forEach(([s, off, pose], i) => {
+      if (!s) return;
+      const slot = weaponFramePoint(cw.pos, cw.facing, off);
+      if (s.path.length > 0 || dist(s.pos, slot) > CREW_PULL_TILES) return;
+      // firing cues: the loader drops the bomb / rams the shell, the gunner lays the gun
+      const frame: 0 | 1 = i === 1 ? (fired ? 1 : 0) : i === 0 && fired && cls !== 'hmg' ? 1 : 0;
+      out.set(s.id, { pose, stance: 'crouching', pos: slot, facing: f8, frame });
+    });
+  }
+  // lone AT riflemen: PTRD on its bipod, gunner prone behind it
+  for (const s of state.soldiers.values()) {
+    if (s.weaponId !== 'ptrd' || s.health === 'dead' || s.health === 'incapacitated' || s.vehicleId != null) continue;
+    if (s.path.length > 0 || crewFleeing(s)) continue;
+    out.set(s.id, { pose: 'mgProne', pos: s.pos, facing: s.facing, frame: 0 });
+  }
+  return out;
+}
+
+function crewTeamVisible(state: BattleState, team: Team, playerSide: Side): boolean {
+  if (team.side === playerSide) return true;
+  return team.soldierIds.some((id) => state.spotted[playerSide].has(id));
+}
+
+/** Weapons on the ground (under the crew), their firing cues, and the zoom-0.5 weapon symbol.
+ * Also moves this frame's muzzle flashes / tracer origins from the gunner to the weapon muzzle. */
+function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side): void {
+  const season = state.map.def.season;
+  const scale = unitSpriteScale(cam.zoom);
+  const px = (m: number) => (m / TILE_M) * 20 * cam.zoom; // metres -> screen px
+  for (const team of state.teams.values()) {
+    if (team.vehicleId != null) continue;
+    const cw = crewWeaponView(state, team);
+    if (!cw) continue;
+    const cls = crewServedClass(cw.weaponId);
+    if (!cls) continue;
+    const gunner = state.soldiers.get(cw.gunnerId);
+    const gunnerOk = !!gunner && gunner.health !== 'dead' && gunner.health !== 'incapacitated';
+    const muzzle = weaponFramePoint(cw.pos, cw.facing, weaponMuzzleM(cw.weaponId));
+    if (gunnerOk && !cw.abandoned) {
+      for (const f of state.flashes) {
+        if (f.t < FLASH_LIFE && dist(f.pos, gunner!.pos) < 0.02) { f.pos = { ...muzzle }; f.facing = cw.facing; }
+      }
+      for (const t of state.tracers) {
+        if (t.t < 0.1 && dist(t.from, gunner!.pos) < 0.02) t.from = { ...muzzle };
+      }
+    }
+    if (!crewTeamVisible(state, team, playerSide) || !visible(cw.pos, cam)) continue;
+    const dir = { x: Math.sin(cw.facing), y: -Math.cos(cw.facing) };
+    if (cam.zoom <= 0.5) {
+      // small distinct symbol beside the team's dot cluster: a short dark barrel with a dot
+      const c = worldToScreen(cam, team.pos);
+      const bx = Math.round(c.x + 6), by = Math.round(c.y + 1);
+      ctx.fillStyle = '#141410';
+      ctx.fillRect(bx - 1, by - 1, 2, 2);
+      ctx.strokeStyle = '#141410';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(bx + 0.5, by + 0.5);
+      ctx.lineTo(bx + 0.5 + dir.x * 5, by + 0.5 + dir.y * 5);
+      ctx.stroke();
+      continue;
+    }
+    if (cw.phase === 'packed' && !cw.abandoned && cls !== 'atgun') continue; // carried on the crew's backs
+    let pos = cw.pos;
+    let rot = cw.facing;
+    if (cw.phase === 'packed' && !cw.abandoned) {
+      // AT gun towed trail-first behind the hauling crew
+      const back = (weaponTowLengthM(cw.weaponId) + 0.5) / TILE_M;
+      pos = { x: cw.pos.x - dir.x * back, y: cw.pos.y - dir.y * back };
+      rot = cw.facing + Math.PI;
+    }
+    const sprite = getWeaponSprite(cw.weaponId, crewVariant(cw), rot, team.side, season, scale);
+    let p = worldToScreen(cam, pos);
+    const since = gunnerOk ? state.time - gunner!.lastFiredAt : 99;
+    if (cls === 'atgun' && cw.phase === 'ready' && since >= 0 && since < 0.45) {
+      // recoil: kick back ~2 px and run out again
+      const k = since < 0.06 ? since / 0.06 : 1 - (since - 0.06) / 0.39;
+      p = { x: p.x - dir.x * 2 * cam.zoom * k, y: p.y - dir.y * 2 * cam.zoom * k };
+    }
+    const { dw, dh } = spriteDrawSize(sprite, cam.zoom, scale);
+    ctx.drawImage(sprite, Math.round(p.x - dw / 2), Math.round(p.y - dh / 2), dw, dh);
+    if (cls === 'mortar' && since >= 0 && since < 0.8) {
+      // muzzle puff drifting off the tube
+      const m = worldToScreen(cam, muzzle);
+      const t = since / 0.8;
+      ctx.save();
+      for (let i = 0; i < 3; i++) {
+        ctx.fillStyle = `rgba(214,210,196,${(0.55 * (1 - t) * (1 - i * 0.25)).toFixed(3)})`;
+        ctx.beginPath();
+        ctx.arc(m.x + dir.x * px(0.3 + i * 0.25) * t + i * px(0.1), m.y + dir.y * px(0.3 + i * 0.25) * t - i * px(0.1), px(0.25 + 0.35 * t) * (1 - i * 0.2), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+  // PTRD rifles on their bipods in front of their prone gunners
+  if (cam.zoom > 0.5) {
+    for (const s of state.soldiers.values()) {
+      if (s.weaponId !== 'ptrd' || s.health === 'dead' || s.health === 'incapacitated' || s.vehicleId != null) continue;
+      if (s.path.length > 0 || crewFleeing(s) || !isEnemyVisible(state, playerSide, s.side, s.id, false)) continue;
+      const rad = facingAngle(s.facing);
+      const r = { x: PTRD_GUNNER_M.x, y: PTRD_GUNNER_M.y };
+      const pivot = weaponFramePoint(s.pos, rad, { x: -r.x, y: -r.y });
+      if (!visible(pivot, cam)) continue;
+      const sprite = getWeaponSprite('ptrd', 'ready', rad, s.side, season, scale);
+      const p = worldToScreen(cam, pivot);
+      const { dw, dh } = spriteDrawSize(sprite, cam.zoom, scale);
+      ctx.drawImage(sprite, Math.round(p.x - dw / 2), Math.round(p.y - dh / 2), dw, dh);
+    }
+  }
+}
+
 function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side, selectedTeamIds: readonly number[]): void {
   if (cam.zoom <= 0.5) {
     drawSoldierDotClusters(ctx, cam, state, playerSide);
@@ -187,17 +373,21 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
   }
   const season = state.map.def.season;
   const scale = unitSpriteScale(cam.zoom);
+  const crewDraws = crewSoldierDraws(state);
   for (const s of state.soldiers.values()) {
     if (s.health === 'dead') continue;
     if (s.vehicleId != null) continue;
     if (!isEnemyVisible(state, playerSide, s.side, s.id, false)) continue;
     if (!visible(s.pos, cam)) continue;
-    const p = worldToScreen(cam, s.pos);
+    const crewDraw = s.health === 'incapacitated' ? undefined : crewDraws.get(s.id);
+    const p = worldToScreen(cam, crewDraw ? crewDraw.pos : s.pos);
     const selected = selectedTeamIds.includes(s.teamId);
     if (selected) drawSelectionRing(ctx, p);
-    const stance = s.health === 'incapacitated' ? 'prone' : s.stance;
+    const stance = s.health === 'incapacitated' ? 'prone' : crewDraw?.pose === 'mgProne' ? 'prone' : crewDraw?.stance ?? s.stance;
     const outline = s.side === playerSide ? 'friendly' : 'enemy';
-    const sprite = getSoldierSprite(s.side, season, stance, s.facing, frameOf(s), outline, scale);
+    const sprite = crewDraw?.pose
+      ? getCrewPoseSprite(s.side, season, crewDraw.pose, crewDraw.facing, crewDraw.frame, outline, scale)
+      : getSoldierSprite(s.side, season, stance, crewDraw ? crewDraw.facing : s.facing, frameOf(s), outline, scale);
     const { dw, dh } = spriteDrawSize(sprite, cam.zoom, scale);
     if (stance !== 'prone') drawSoldierShadow(ctx, p, dw, dh, cam.zoom);
     ctx.drawImage(sprite, Math.round(p.x - dw / 2), Math.round(p.y - dh / 2), dw, dh);
@@ -291,9 +481,58 @@ function orderColor(team: Team): string {
   return ORDER_DOT_COLOR[order.type];
 }
 
-function drawOrderLine(ctx: CanvasRenderingContext2D, cam: Camera, team: Team): void {
+/** Attack-unit Fire order: a red line to the tracked target and a red dot that follows it every
+ * frame (small red rings on the targeted enemy's spotted men/hull); while the target is lost the
+ * dot is drawn hollow and dimmed at the last known position. */
+function drawAttackOrder(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, team: Team): void {
+  const order = team.order!;
+  const lost = attackPhase(state, order) !== 'tracking';
+  const color = ORDER_DOT_COLOR.fire;
+  const from = worldToScreen(cam, team.pos);
+  const to = worldToScreen(cam, order.target);
+  ctx.save();
+  ctx.globalAlpha = lost ? 0.55 : 1;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  if (lost) ctx.setLineDash([3, 3]);
+  ctx.beginPath();
+  ctx.moveTo(from.x, from.y);
+  ctx.lineTo(to.x, to.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.arc(to.x, to.y, lost ? 3 : 2.5, 0, Math.PI * 2);
+  if (lost) ctx.stroke();
+  else { ctx.fillStyle = color; ctx.fill(); }
+  const target = order.targetTeamId != null ? state.teams.get(order.targetTeamId) : undefined;
+  if (target && !lost) {
+    ctx.globalAlpha = 0.8;
+    if (target.vehicleId != null) {
+      const v = state.vehicles.get(target.vehicleId);
+      if (v && state.spottedVehicles[team.side].has(v.id)) {
+        const p = worldToScreen(cam, v.pos);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 12 * cam.zoom, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    } else {
+      for (const id of target.soldierIds) {
+        const s = state.soldiers.get(id);
+        if (!s || s.health === 'dead' || s.health === 'incapacitated' || !state.spotted[team.side].has(id)) continue;
+        const p = worldToScreen(cam, s.pos);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 5 * cam.zoom, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+  }
+  ctx.restore();
+}
+
+function drawOrderLine(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, team: Team): void {
   const order = team.order;
   if (!order) return;
+  if (order.type === 'fire' && order.targetTeamId != null) { drawAttackOrder(ctx, cam, state, team); return; }
   const color = orderColor(team);
   const from = worldToScreen(cam, team.pos);
   if (order.type === 'defend' || order.type === 'ambush') {
@@ -347,6 +586,7 @@ export function drawUnits(
 
   drawCorpses(ctx, cam, state, playerSide, showDead);
   drawVehicles(ctx, cam, state, playerSide);
+  drawCrewWeapons(ctx, cam, state, playerSide);
   drawSoldiers(ctx, cam, state, playerSide, selectedTeamIds);
   drawTeamBars(ctx, cam, state, playerSide);
   drawFlags(ctx, cam, state);
@@ -354,7 +594,7 @@ export function drawUnits(
 
   for (const id of selectedTeamIds) {
     const team = state.teams.get(id);
-    if (team && team.side === playerSide) drawOrderLine(ctx, cam, team);
+    if (team && team.side === playerSide) drawOrderLine(ctx, cam, state, team);
   }
 
   ctx.restore();

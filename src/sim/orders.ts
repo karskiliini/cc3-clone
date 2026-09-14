@@ -1,4 +1,7 @@
-import type { BattleState, Team, Order, Soldier, Vec2 } from '@/shared/types';
+import type { BattleState, Team, Order, Side, Soldier, Vec2 } from '@/shared/types';
+import { TILE_M, otherSide } from '@/shared/types';
+import { VEHICLE_DEFS } from '@/data/units';
+import { addMessage } from './messages';
 import type { Rng } from '@/shared/rng';
 import { clamp, dist, facingTo, vadd, vnorm, vscale, vsub } from '@/shared/math';
 import { findPath, isPassable } from './path';
@@ -309,15 +312,7 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
       leaderPath = leader ? findPath(state.map, leader.pos, order.target, 'infantry') : [];
     }
   } else if (type === 'fire') {
-    let targetTeamId: number | undefined;
-    for (const other of state.teams.values()) {
-      if (other.side === team.side || other.outOfAction) continue;
-      const spottedSet = state.spotted[team.side];
-      const spottedHere = other.soldierIds.some((id) => spottedSet.has(id));
-      if (!spottedHere) continue;
-      if (dist(other.pos, order.target) <= 1.5) { targetTeamId = other.id; break; }
-    }
-    if (targetTeamId != null) order.targetTeamId = targetTeamId;
+    initAttackOrder(state, team, order);
     if (vehicle) {
       vehicle.path = [];
       vehicle.targetPoint = order.target;
@@ -339,5 +334,142 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
     const s = state.soldiers.get(sid);
     if (!s) continue;
     applyOrderToSoldier(state, team, s, rng, leaderPath);
+  }
+}
+
+// ------------------------------------------------------------------ attack-unit fire orders
+/** Soldier click tolerance (tiles) for an attack-unit Fire order. */
+export const ATTACK_PICK_SOLDIER_TILES = 1.2;
+/** Extra tolerance (tiles) beyond a vehicle's half-length. */
+export const ATTACK_PICK_VEHICLE_PAD_TILES = 0.5;
+/** Seconds of suppressive fire at the last known position after the target is lost. */
+export const ATTACK_LOST_SUPPRESS_S = 12;
+
+export type AttackPhase = 'tracking' | 'suppress' | 'hold';
+
+const livingActive = (s: Soldier | undefined): s is Soldier =>
+  !!s && s.health !== 'dead' && s.health !== 'incapacitated' && s.activity !== 'surrendered' && s.activity !== 'routed';
+
+/** The enemy team (of `enemySide`) the viewing side can target at `p`: the nearest soldier SPOTTED by
+ * the viewer within ATTACK_PICK_SOLDIER_TILES, or a spotted vehicle whose hull (+ pad) contains the
+ * point. Unspotted enemies are never returned, so a click can't leak hidden positions. */
+export function spottedEnemyTeamAt(state: BattleState, p: Vec2, enemySide: Side): Team | null {
+  const viewer = otherSide(enemySide);
+  let best: Team | null = null;
+  let bd = Infinity;
+  for (const id of state.spotted[viewer]) {
+    const s = state.soldiers.get(id);
+    if (!s || s.side !== enemySide || s.vehicleId != null) continue;
+    if (s.health === 'dead' || s.health === 'incapacitated') continue;
+    const d = dist(s.pos, p);
+    if (d <= ATTACK_PICK_SOLDIER_TILES && d < bd) {
+      const t = state.teams.get(s.teamId);
+      if (t && !t.outOfAction) { bd = d; best = t; }
+    }
+  }
+  for (const vid of state.spottedVehicles[viewer]) {
+    const v = state.vehicles.get(vid);
+    if (!v || v.side !== enemySide) continue;
+    if (v.state === 'knockedOut' || v.state === 'burning' || v.state === 'abandoned') continue;
+    const def = VEHICLE_DEFS[v.defId];
+    const half = def ? def.lengthM / TILE_M / 2 : 1;
+    const d = dist(v.pos, p);
+    if (d <= half + ATTACK_PICK_VEHICLE_PAD_TILES && d < bd) {
+      const t = state.teams.get(v.teamId);
+      if (t && !t.outOfAction) { bd = d; best = t; }
+    }
+  }
+  return best;
+}
+
+/** Current centre of the target team as seen by `viewer`, or null when nothing of it is spotted. */
+export function spottedTargetCentre(state: BattleState, viewer: Side, target: Team): Vec2 | null {
+  if (target.vehicleId != null) {
+    const v = state.vehicles.get(target.vehicleId);
+    if (!v || !state.spottedVehicles[viewer].has(v.id)) return null;
+    return { x: v.pos.x, y: v.pos.y };
+  }
+  let x = 0, y = 0, n = 0;
+  for (const id of target.soldierIds) {
+    if (!state.spotted[viewer].has(id)) continue;
+    const s = state.soldiers.get(id);
+    if (!livingActive(s)) continue;
+    x += s.pos.x; y += s.pos.y; n++;
+  }
+  return n > 0 ? { x: x / n, y: y / n } : null;
+}
+
+/** True when nothing of the target team can fight any more (all dead/incapacitated/surrendered/
+ * routed, or its vehicle knocked out/burning/abandoned). */
+export function attackTargetDestroyed(state: BattleState, target: Team | undefined): boolean {
+  if (!target) return true;
+  if (target.vehicleId != null) {
+    const v = state.vehicles.get(target.vehicleId);
+    if (!v || v.state === 'knockedOut' || v.state === 'burning' || v.state === 'abandoned') return true;
+  }
+  return !target.soldierIds.some((id) => livingActive(state.soldiers.get(id)));
+}
+
+/** Tracking while spotted; suppressing the last known position for ATTACK_LOST_SUPPRESS_S after
+ * losing it; then holding and watching. Area-fire orders are always 'tracking'. */
+export function attackPhase(state: BattleState, order: Order): AttackPhase {
+  if (order.targetTeamId == null || order.lastSeenAt == null) return 'tracking';
+  const lost = state.time - order.lastSeenAt;
+  if (lost <= 1e-6) return 'tracking';
+  return lost <= ATTACK_LOST_SUPPRESS_S ? 'suppress' : 'hold';
+}
+
+/** Validates/infers the attack-unit target of a freshly issued Fire order: a given targetTeamId is
+ * kept only if that enemy team is currently spotted by the ordering side; otherwise the order becomes
+ * area fire unless a spotted enemy stands at the clicked point. */
+function initAttackOrder(state: BattleState, team: Team, order: Order): void {
+  order.target = { x: order.target.x, y: order.target.y }; // never share the click point between teams
+  const enemySide = otherSide(team.side);
+  let target: Team | null = null;
+  if (order.targetTeamId != null) {
+    const t = state.teams.get(order.targetTeamId);
+    if (t && t.side === enemySide && !t.outOfAction && !attackTargetDestroyed(state, t) && spottedTargetCentre(state, team.side, t)) target = t;
+  }
+  if (!target) target = spottedEnemyTeamAt(state, order.target, enemySide);
+  delete order.targetTeamId;
+  delete order.targetVehicleId;
+  delete order.lastSeenAt;
+  delete order.lastKnownPos;
+  if (!target) return;
+  const centre = spottedTargetCentre(state, team.side, target);
+  if (!centre) return;
+  order.targetTeamId = target.id;
+  if (target.vehicleId != null) order.targetVehicleId = target.vehicleId;
+  order.target = centre;
+  order.lastKnownPos = { ...centre };
+  order.lastSeenAt = state.time;
+}
+
+/** Per sim step: attack-unit Fire orders follow their target while it is spotted, keep the last
+ * known position when it is lost, and complete (Defend facing it, "Target destroyed.") once the
+ * target is out of the fight. */
+export function stepAttackOrders(state: BattleState, rng: Rng): void {
+  for (const team of state.teams.values()) {
+    const order = team.order;
+    if (!order || order.type !== 'fire' || order.targetTeamId == null || team.outOfAction) continue;
+    const target = state.teams.get(order.targetTeamId);
+    const last = order.lastKnownPos ?? order.target;
+    if (attackTargetDestroyed(state, target)) {
+      if (team.side === state.config.playerSide) addMessage(state, `${team.name}\nTarget destroyed.`, 'good');
+      applyOrder(state, team, { type: 'defend', target: { x: last.x, y: last.y }, issuedAt: state.time }, rng);
+      continue;
+    }
+    const centre = spottedTargetCentre(state, team.side, target!);
+    if (centre) {
+      // mutate in place: soldiers' targetPoint shares this object
+      order.target.x = centre.x; order.target.y = centre.y;
+      order.lastKnownPos = { ...centre };
+      order.lastSeenAt = state.time;
+      team.facing = facingTo(team.pos, centre);
+      const v = team.vehicleId != null ? state.vehicles.get(team.vehicleId) : undefined;
+      if (v) v.targetPoint = order.target;
+    } else if (order.lastKnownPos) {
+      order.target.x = order.lastKnownPos.x; order.target.y = order.lastKnownPos.y;
+    }
   }
 }

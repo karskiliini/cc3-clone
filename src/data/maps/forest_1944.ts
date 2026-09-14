@@ -70,6 +70,13 @@ function paintMap(p: MapPainter): void {
   p.decorLine(mainRoad, 'pole', 9);
   p.craterLine(mainRoad, { tStart: 0.3, tEnd: 0.75, seedOffset: 90 });
 
+  // German rifle pits dug into the west bank between the bridge and the ford, facing the Soviet
+  // approach from the east, in two small staggered groups clear of both crossings' VLs
+  const SOVIET_APPROACH = { x: 190, y: 80 };
+  const riverClear = [{ x: 101, y: 53, r: 7 }, { x: 95, y: 117, r: 7 }];
+  p.foxholeLine([{ x: 91, y: 66 }, { x: 88, y: 84 }], SOVIET_APPROACH, { spacing: 5, stagger: 1.2, seedOffset: 7, keepClear: riverClear });
+  p.foxholeLine([{ x: 92, y: 92 }, { x: 87, y: 106 }], SOVIET_APPROACH, { spacing: 5, stagger: 1.2, seedOffset: 8, keepClear: riverClear });
+
   // stumps/log piles ringing the big wood masses where logging has bitten into their edges,
   // and a wrecked vehicle bogged near the ford
   p.scatterDecor('stump', 30, 55, 30, 30, 10, 46);

@@ -30,6 +30,10 @@ import { idx, tileAt, inBounds } from '@/sim/map';
 import { TERRAIN_COLORS } from '@/render/palette';
 import { getTreeSprite, getTreeShadowSprite, getSmokePuff, TREE_SPRITE_WORLD_PX, TREE_VARIANTS, type TreeShape } from '@/render/sprites';
 import { drawDecorItem } from '@/render/decorSprites';
+import {
+  paintCrater, paintFoxhole, paintTrenches, buildTrenchDraw, craterExtentPx, foxholeExtentPx, oldCraterDiameter,
+  type CraterDraw, type FoxholeDraw, type TrenchDraw,
+} from '@/render/craterArt';
 import { worldToScreen, ZOOM_LEVELS } from '@/engine/camera';
 
 const CHUNK_TILES = 16;
@@ -65,6 +69,12 @@ function hashStrCached(s: string): number {
   let v = hashStrCacheMap.get(s);
   if (v === undefined) { v = hashStr(s); hashStrCacheMap.set(s, v); }
   return v;
+}
+
+interface ChunkEntry {
+  canvas: HTMLCanvasElement; cx: number; cy: number;
+  /** map.craterMarks already drawn into this canvas */
+  marks: number;
 }
 
 interface BuildingBBox {
@@ -1041,88 +1051,6 @@ function paintGroundAndFeatures(
   }
 }
 
-// ------------------------------------------------------------------ crater
-function craterRimColor(season: Season): string { return season === 'winter' ? '#8a8f92' : '#a08f68'; }
-
-function paintCraterAt(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, seed: number, season: Season): void {
-  const steps = 10;
-  ctx.save();
-  if (season === 'winter') {
-    // wide grey scorch halo blown over the snow around the blast (ref_cc3_1485) — painted
-    // before the rim clip below, or it would be clipped away.
-    const halo = ctx.createRadialGradient(cx, cy, r, cx, cy, r * 2.2);
-    halo.addColorStop(0, 'rgba(50,46,42,0.45)');
-    halo.addColorStop(1, 'rgba(50,46,42,0)');
-    ctx.fillStyle = halo;
-    ctx.fillRect(cx - r * 2.2, cy - r * 2.2, r * 4.4, r * 4.4);
-  }
-  ctx.beginPath();
-  for (let a = 0; a <= steps; a++) {
-    const ang = (a / steps) * Math.PI * 2;
-    const rr = r * (0.85 + hash2(a, Math.round(cx * 3), seed) * 0.3);
-    const x = cx + Math.cos(ang) * rr, y = cy + Math.sin(ang) * rr;
-    if (a === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-  }
-  ctx.closePath();
-  ctx.clip();
-  const grad = ctx.createRadialGradient(cx - r * 0.15, cy - r * 0.15, r * 0.08, cx, cy, r);
-  grad.addColorStop(0, '#221d16');
-  grad.addColorStop(0.55, '#3a2f22');
-  grad.addColorStop(0.85, craterRimColor(season));
-  ctx.globalAlpha = 0.72;
-  ctx.fillStyle = grad;
-  ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
-  // NW highlight / SE shadow for a raised-rim look
-  ctx.globalAlpha = 0.22;
-  ctx.fillStyle = '#ffffff';
-  ctx.beginPath(); ctx.ellipse(cx - r * 0.3, cy - r * 0.3, r * 0.55, r * 0.4, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.globalAlpha = 0.28;
-  ctx.fillStyle = '#000000';
-  ctx.beginPath(); ctx.ellipse(cx + r * 0.3, cy + r * 0.3, r * 0.55, r * 0.4, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.restore();
-  ctx.globalAlpha = 1;
-
-  // splash/spoil rays radiating a short way beyond the rim, and occasional grass regrowth at
-  // the outer lip — matches the reference's craters, which never read as an isolated clean disc.
-  const rayN = 4 + Math.floor(hash2(Math.round(cx), Math.round(cy), seed + 71) * 3);
-  ctx.strokeStyle = craterRimColor(season);
-  ctx.lineWidth = 1;
-  ctx.globalAlpha = 0.35;
-  for (let i = 0; i < rayN; i++) {
-    const ang = hash2(Math.round(cx) + i, Math.round(cy) + i, seed + 72) * Math.PI * 2;
-    const r0 = r * (1.0 + hash2(i, Math.round(cx), seed + 73) * 0.1);
-    const r1 = r * (1.15 + hash2(i, Math.round(cy), seed + 74) * 0.25);
-    ctx.beginPath();
-    ctx.moveTo(cx + Math.cos(ang) * r0, cy + Math.sin(ang) * r0);
-    ctx.lineTo(cx + Math.cos(ang) * r1, cy + Math.sin(ang) * r1);
-    ctx.stroke();
-  }
-  ctx.globalAlpha = 1;
-  if (season !== 'winter' && hash2(Math.round(cx), Math.round(cy), seed + 75) < 0.15) {
-    ctx.globalAlpha = 0.25;
-    ctx.strokeStyle = '#7a8748';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r * 1.05, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
-}
-
-/** An isolated crater tile (no 4-neighbour crater — e.g. craterLine's single-tile shell holes)
- * renders as a proper ~26px blast stain rather than a 9px dot; clustered crater tiles (patch()
- * blobs) keep the 1-tile size so they don't merge into one smear. */
-function isIsolatedCrater(map: GameMap, wx: number, wy: number): boolean {
-  return tileAt(map, wx + 1, wy) !== 'crater' && tileAt(map, wx - 1, wy) !== 'crater'
-    && tileAt(map, wx, wy + 1) !== 'crater' && tileAt(map, wx, wy - 1) !== 'crater';
-}
-const BIG_CRATER_R = TILE_PX * 0.65;
-
-function paintCraterTile(ctx: CanvasRenderingContext2D, ox: number, oy: number, seed: number, season: Season, big = false): void {
-  const cx = ox + TILE_PX / 2, cy = oy + TILE_PX / 2, r = big ? BIG_CRATER_R : TILE_PX / 2 - 1;
-  paintCraterAt(ctx, cx, cy, r, seed, season);
-}
-
 function paintMud(ctx: CanvasRenderingContext2D, wx: number, wy: number, ox: number, oy: number, seed: number): void {
   for (let i = 0; i < 3; i++) {
     const px = Math.floor(hash2(wx * 9 + i, wy * 9 + i, seed + 61) * TILE_PX);
@@ -1358,18 +1286,6 @@ function paintFence(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy:
     ctx.fillStyle = '#3a2c18';
     ctx.fillRect(ox + c - 1, oy + c - 1, 3, 3);
   }
-}
-
-function paintTrench(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number, seed: number): void {
-  // a brown dug channel with light tan spoil banks, not a solid black bar
-  const stubs = linearStubs(map, wx, wy, (t) => t === 'trench');
-  drawBand(ctx, ox, oy, 12, stubs, 'rgba(160,140,96,0.45)'); // spoil either side
-  drawBand(ctx, ox, oy, 4, stubs, '#4a3a22'); // channel
-  void seed;
-  const c = TILE_PX / 2;
-  ctx.fillStyle = '#1e1810';
-  if (stubs.r || stubs.l) ctx.fillRect(ox, oy + c - 0.75, TILE_PX, 1.5);
-  else ctx.fillRect(ox + c - 0.75, oy, 1.5, TILE_PX);
 }
 
 // ---------------------------------------------------------------- buildings
@@ -2339,8 +2255,8 @@ function paintDetail(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy
   switch (t) {
     case 'mud': paintMud(ctx, wx, wy, ox, oy, seed); break;
     case 'rubble': paintRubbleDebris(ctx, wx, wy, ox, oy, seed, season); break;
-    case 'crater': if (!isIsolatedCrater(map, wx, wy)) paintCraterTile(ctx, ox, oy, seed, season); break; // isolated: padded pass in bakeChunk
-    case 'trench': if (!vectorLineTerrains.has('trench')) paintTrench(ctx, map, wx, wy, ox, oy, seed); break;
+    case 'crater': break; // drawn by the earthwork pass (craterArt) in bakeChunk
+    case 'trench': break; // likewise: trench vectors, foxholes, or an auto-foxhole per stray tile
     case 'hedge': if (!vectorLineTerrains.has('hedge')) paintHedge(ctx, map, wx, wy, ox, oy, seed, season); break;
     case 'fence': if (!vectorLineTerrains.has('fence')) paintFence(ctx, map, wx, wy, ox, oy); break;
     case 'stonewall': if (!vectorLineTerrains.has('stonewall')) paintStonewall(ctx, map, wx, wy, ox, oy); break;
@@ -2441,10 +2357,7 @@ function paintLineVector(ctx: CanvasRenderingContext2D, v: MapVectorFeature, x0:
       ctx.fillRect(lx - 1, ly - 1, 3, 3);
     });
   } else if (v.terrain === 'trench') {
-    // brown dug channel with light tan spoil banks (CC3), not a thick black marker line
-    strokePolylineWorld(ctx, pts, x0, y0, 12, 'rgba(160,140,96,0.45)');
-    strokePolylineWorld(ctx, pts, x0, y0, 4, '#4a3a22');
-    strokePolylineWorld(ctx, pts, x0, y0, 1.5, '#1e1810');
+    // drawn as a shaded, crenellated earthwork by craterArt.paintTrenches (see bakeChunk)
   } else {
     void seed;
   }
@@ -2457,7 +2370,14 @@ export class TerrainRenderer {
   private chunksX: number;
   private chunksY: number;
   /** Per-zoom insertion-ordered LRU caches (oldest-used key first), keyed by chunkKey. */
-  private chunksByZoom = new Map<number, Map<string, { canvas: HTMLCanvasElement; cx: number; cy: number }>>();
+  private chunksByZoom = new Map<number, Map<string, ChunkEntry>>();
+  /** Map-placed (old) craters, trench centrelines and foxholes, in zoom-1 world px. */
+  private oldCraters: (CraterDraw & { r: number })[] = [];
+  private trenches: TrenchDraw[] = [];
+  private foxholes: FoxholeDraw[] = [];
+  /** Tile indexes that were already 'crater' when the map was built — the rest came from battle
+   * explosions (and are drawn from map.craterMarks instead). */
+  private mapCraterTiles = new Set<number>();
   /** Most-recently-used key per zoom, so draw() can skip the delete+set re-insert for it. */
   private mruKey = new Map<number, string>();
   private buildingBBoxes = new Map<number, BuildingBBox>();
@@ -2493,6 +2413,156 @@ export class TerrainRenderer {
     this.groundUnder = this.computeGroundUnder();
     if (map.def.vectors) {
       for (const v of map.def.vectors) if (v.kind === 'line') this.vectorLineTerrains.add(v.terrain);
+    }
+    this.computeEarthworks();
+  }
+
+  /** Collects every map-placed earthwork: crater-tile clusters (one crater per isolated tile, a
+   * few overlapping ones per cluster), 'shellhole' decor, trench line vectors (crenellated), and
+   * 'foxhole' decor plus an auto-foxhole for any trench tile no trench line or foxhole covers. */
+  private computeEarthworks(): void {
+    const map = this.map;
+    const w = map.width, h = map.height;
+    const runtime = new Set(map.craters);
+    const zones = map.def.deployZones;
+    const az = zones[map.def.attacker];
+    const toward = { x: (az.x + az.w / 2) * TILE_PX, y: (az.y + az.h / 2) * TILE_PX };
+    const seen = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+      if (map.tiles[i] !== 'crater' || runtime.has(i) || seen[i]) continue;
+      const comp: number[] = [];
+      const stack = [i];
+      seen[i] = 1;
+      while (stack.length) {
+        const c = stack.pop()!;
+        comp.push(c);
+        const cx = c % w, cy = (c / w) | 0;
+        const nb = [cx > 0 ? c - 1 : -1, cx < w - 1 ? c + 1 : -1, cy > 0 ? c - w : -1, cy < h - 1 ? c + w : -1];
+        for (const q of nb) if (q >= 0 && !seen[q] && map.tiles[q] === 'crater' && !runtime.has(q)) { seen[q] = 1; stack.push(q); }
+      }
+      for (const c of comp) this.mapCraterTiles.add(c);
+      const count = comp.length === 1 ? 1 : Math.min(4, Math.max(2, Math.round(comp.length / 7)));
+      const order = comp.slice().sort((a, b) => hash2(a, 1, this.seed + 7101) - hash2(b, 1, this.seed + 7101));
+      for (let k = 0; k < count; k++) {
+        const c = order[k];
+        const seed = (this.seed + c * 31 + k) | 0;
+        const x = ((c % w) + 0.5 + (hash2(c, 2, this.seed + 7102) - 0.5) * 0.5) * TILE_PX;
+        const y = (((c / w) | 0) + 0.5 + (hash2(c, 3, this.seed + 7103) - 0.5) * 0.5) * TILE_PX;
+        const diameterM = comp.length === 1 ? oldCraterDiameter(seed, 2.4, 3.6) : oldCraterDiameter(seed, 2.8, 4.8);
+        this.addOldCrater({ x, y, diameterM, kind: 'shell', old: true, seed });
+      }
+    }
+    const foxTiles = new Set<number>();
+    for (const d of map.def.decor ?? []) {
+      if (d.kind === 'shellhole') {
+        // craterLine drops a shellhole beside the crater tile it marks — the same shell hole, so
+        // don't paint a second overlapping crater next to it
+        let dup = false;
+        for (let yy = Math.floor(d.y) - 2; yy <= Math.floor(d.y) + 2 && !dup; yy++) {
+          for (let xx = Math.floor(d.x) - 2; xx <= Math.floor(d.x) + 2; xx++) {
+            if (xx >= 0 && yy >= 0 && xx < w && yy < h && this.mapCraterTiles.has(yy * w + xx)) { dup = true; break; }
+          }
+        }
+        if (dup) continue;
+        const seed = (this.seed + Math.round(d.x * 977) + Math.round(d.y * 131)) | 0;
+        const v = d.variant ?? 0;
+        this.addOldCrater({ x: d.x * TILE_PX, y: d.y * TILE_PX, diameterM: 1.3 + (v % 3) * 0.45 + hash2(v, 5, seed) * 0.4, kind: 'shell', old: true, seed });
+      } else if (d.kind === 'foxhole') {
+        const x = d.x * TILE_PX, y = d.y * TILE_PX;
+        const v = d.variant ?? 0;
+        const angle = d.angle ?? Math.atan2(toward.y - y, toward.x - x);
+        this.foxholes.push({ x, y, angle, variant: (v >> 1) % 3, men: v & 1 ? 2 : 1, seed: (this.seed + Math.round(x * 13) + Math.round(y * 7)) | 0 });
+        foxTiles.add(Math.floor(d.y) * w + Math.floor(d.x));
+      }
+    }
+    const trenchLines: Vec2[][] = [];
+    let ti = 0;
+    for (const v of map.def.vectors ?? []) {
+      if (v.kind !== 'line' || v.terrain !== 'trench' || v.points.length < 2) continue;
+      trenchLines.push(v.points);
+      this.trenches.push(buildTrenchDraw(v.points, TILE_PX, toward, (this.seed + 9311 * ++ti) | 0));
+    }
+    // stray trench tiles (e.g. a dug-in rect) that no line or foxhole explains: a foxhole each
+    for (let i = 0; i < w * h; i++) {
+      if (map.tiles[i] !== 'trench' || foxTiles.has(i)) continue;
+      const tx = i % w + 0.5, ty = ((i / w) | 0) + 0.5;
+      let near = false;
+      for (const pts of trenchLines) {
+        for (let s = 0; s < pts.length - 1 && !near; s++) {
+          const a = pts[s], b = pts[s + 1];
+          const abx = b.x - a.x, aby = b.y - a.y;
+          const L2 = abx * abx + aby * aby || 1;
+          const t = Math.max(0, Math.min(1, ((tx - a.x) * abx + (ty - a.y) * aby) / L2));
+          if (Math.hypot(tx - a.x - abx * t, ty - a.y - aby * t) < 1.25) near = true;
+        }
+        if (near) break;
+      }
+      if (near) continue;
+      const x = tx * TILE_PX, y = ty * TILE_PX;
+      const seed = (this.seed + i * 17) | 0;
+      this.foxholes.push({ x, y, angle: Math.atan2(toward.y - y, toward.x - x), variant: Math.floor(hash2(i, 9, this.seed + 7104) * 3), men: hash2(i, 10, this.seed + 7105) < 0.5 ? 1 : 2, seed });
+    }
+  }
+
+  private addOldCrater(c: CraterDraw): void {
+    // never on/against water, bridges or buildings (a shell hole's bowl would paint over them)
+    const map = this.map;
+    const R = Math.ceil(c.diameterM / 2 / 2);
+    const tx = Math.floor(c.x / TILE_PX), ty = Math.floor(c.y / TILE_PX);
+    for (let yy = ty - R; yy <= ty + R; yy++) {
+      for (let xx = tx - R; xx <= tx + R; xx++) {
+        const t = tileAt(map, xx, yy);
+        if (t === 'water' || t === 'bridge' || t === 'buildingWood' || t === 'buildingStone' || t === 'floor') return;
+      }
+    }
+    this.oldCraters.push({ ...c, r: craterExtentPx(c) });
+  }
+
+  /** Draws every earthwork touching the chunk whose zoom-1 world px origin is (ox, oy). Craters
+   * first (under trenches), then trenches, foxholes, and this battle's fresh blast marks. */
+  private paintEarthworks(ctx: CanvasRenderingContext2D, ox: number, oy: number, zoom: number, marksUpTo: number): void {
+    const season = this.map.def.season;
+    const span = CHUNK_PX;
+    for (const c of this.oldCraters) {
+      if (c.x + c.r < ox || c.x - c.r > ox + span || c.y + c.r < oy || c.y - c.r > oy + span) continue;
+      paintCrater(ctx, c, season, ox, oy, zoom);
+    }
+    paintTrenches(ctx, this.trenches, season, ox, oy, zoom);
+    const fr = foxholeExtentPx();
+    for (const f of this.foxholes) {
+      if (f.x + fr < ox || f.x - fr > ox + span || f.y + fr < oy || f.y - fr > oy + span) continue;
+      paintFoxhole(ctx, f, season, ox, oy, zoom);
+    }
+    const marks = this.map.craterMarks;
+    if (marks) for (let k = 0; k < marksUpTo && k < marks.length; k++) this.paintMark(ctx, k, ox, oy, zoom);
+  }
+
+  private markDraw(k: number): CraterDraw {
+    const m = this.map.craterMarks![k];
+    return { x: m.x * TILE_PX, y: m.y * TILE_PX, diameterM: m.sizeM, kind: m.kind, old: false, seed: (this.seed + k * 7919 + Math.round(m.x * 101)) | 0 };
+  }
+
+  private paintMark(ctx: CanvasRenderingContext2D, k: number, ox: number, oy: number, zoom: number): void {
+    const c = this.markDraw(k);
+    const r = craterExtentPx(c);
+    if (c.x + r < ox || c.x - r > ox + CHUNK_PX || c.y + r < oy || c.y - r > oy + CHUNK_PX) return;
+    paintCrater(ctx, c, this.map.def.season, ox, oy, zoom);
+  }
+
+  /** Stamps blast marks added since the last frame straight into every cached chunk they touch
+   * (at every zoom), so a fresh crater appears immediately without re-baking the chunk. Chunks
+   * baked later include all marks up to their bake time (ChunkEntry.marks) — never both. */
+  private stampNewMarks(): void {
+    const marks = this.map.craterMarks;
+    if (!marks || !marks.length) return;
+    for (const [zoom, m] of this.chunksByZoom) {
+      for (const e of m.values()) {
+        if (e.marks >= marks.length) continue;
+        const ox = e.cx * CHUNK_PX, oy = e.cy * CHUNK_PX;
+        const ctx = e.canvas.getContext('2d')!;
+        for (let k = e.marks; k < marks.length; k++) this.paintMark(ctx, k, ox, oy, zoom);
+        e.marks = marks.length;
+      }
     }
   }
 
@@ -2677,7 +2747,7 @@ export class TerrainRenderer {
 
   private chunkKey(cx: number, cy: number): string { return `${cx},${cy}`; }
 
-  private zoomCache(zoom: number): Map<string, { canvas: HTMLCanvasElement; cx: number; cy: number }> {
+  private zoomCache(zoom: number): Map<string, ChunkEntry> {
     let m = this.chunksByZoom.get(zoom);
     if (!m) { m = new Map(); this.chunksByZoom.set(zoom, m); }
     return m;
@@ -2710,7 +2780,7 @@ export class TerrainRenderer {
     const m = this.zoomCache(zoom);
     const key = this.chunkKey(cx, cy);
     m.delete(key);
-    m.set(key, { canvas, cx, cy });
+    m.set(key, { canvas, cx, cy, marks: this.map.craterMarks?.length ?? 0 });
     this.mruKey.set(zoom, key);
     const cap = MAX_CACHED_CHUNKS_BY_ZOOM[zoom] ?? 32;
     if (m.size <= cap) return;
@@ -2822,19 +2892,10 @@ export class TerrainRenderer {
       }
     }
 
-    // ------------------------------------------------------------ isolated (big) craters
-    // Their stain + halo reaches past the owning tile, so paint from a 1-tile padded window
-    // (same trick as trees below) so a crater straddling a chunk edge is drawn in both chunks.
-    for (let ty = -1; ty <= CHUNK_TILES; ty++) {
-      const wy = y0 + ty;
-      if (wy < 0 || wy >= map.height) continue;
-      for (let tx = -1; tx <= CHUNK_TILES; tx++) {
-        const wx = x0 + tx;
-        if (wx < 0 || wx >= map.width) continue;
-        if (tileAt(map, wx, wy) !== 'crater' || !isIsolatedCrater(map, wx, wy)) continue;
-        paintCraterTile(ctx, tx * TILE_PX, ty * TILE_PX, this.seed, season, true);
-      }
-    }
+    // ------------------------------------------------------------ earthworks: craters, trenches,
+    // foxholes, blast marks (per-pixel height-field shading at true output resolution; each
+    // feature is culled against the chunk and drawn whole, so seams match between chunks)
+    this.paintEarthworks(ctx, x0 * TILE_PX, y0 * TILE_PX, zoom, map.craterMarks?.length ?? 0);
 
     // ------------------------------------------------------------ smooth vector line features
     // (hedge/fence/stonewall/trench) drawn once per chunk as a stroked path, replacing the
@@ -2915,6 +2976,7 @@ export class TerrainRenderer {
     const decor = this.map.def.decor;
     if (!decor || !decor.length) return;
     for (const d of decor) {
+      if (d.kind === 'shellhole' || d.kind === 'foxhole') continue; // earthwork pass
       if (d.x < x0 - 1 || d.x >= x0 + CHUNK_TILES + 1 || d.y < y0 - 1 || d.y >= y0 + CHUNK_TILES + 1) continue;
       const cx = (d.x - x0) * TILE_PX;
       const cy = (d.y - y0) * TILE_PX;
@@ -3103,7 +3165,6 @@ export class TerrainRenderer {
     ctx.clip();
     ctx.imageSmoothingEnabled = false;
     const map = state.map;
-    const season = map.def.season;
     const px = TILE_PX * cam.zoom;
 
     if (map.dirtyTiles && map.dirtyTiles.length) {
@@ -3138,13 +3199,8 @@ export class TerrainRenderer {
       ctx.drawImage(interior, s0.x, s0.y, dw, dh);
     }
 
-    for (const ti of map.craters) {
-      const cx = ti % map.width, cy = Math.floor(ti / map.width);
-      const s = worldToScreen(cam, { x: cx + 0.5, y: cy + 0.5 });
-      if (s.x < -px || s.x > VIEW_W + px || s.y < -px || s.y > VIEW_H + px) continue;
-      const r = px / 2 - 1;
-      paintCraterAt(ctx, s.x, s.y, r, this.seed + ti, season);
-    }
+    // fresh blast marks are stamped into the baked chunks (not redrawn every frame)
+    this.stampNewMarks();
 
     ctx.globalAlpha = 0.6;
     ctx.fillStyle = '#5a1a12';

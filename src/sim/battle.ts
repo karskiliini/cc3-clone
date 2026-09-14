@@ -10,7 +10,7 @@ import { dist, pointInRect } from '@/shared/math';
 import { buildMap } from './map';
 import { isPassable } from './path';
 import { spawnTeam, layoutTeamPositions } from './spawn';
-import { applyOrder } from './orders';
+import { applyOrder, stepAttackOrders, spottedEnemyTeamAt } from './orders';
 import { stepMovement } from './movement';
 import { stepVehicles } from './vehicle';
 import { stepVictory } from './victory';
@@ -150,6 +150,7 @@ export class Battle {
 
     stepMinds(state, this.rng, dt);
 
+    stepAttackOrders(state, this.rng);
     stepCombat(state, this.rng, dt);
     stepMorale(state, this.rng, dt);
     stepVictory(state, dt);
@@ -262,7 +263,11 @@ export class Battle {
     return best;
   }
 
+  /** Team of `side` at `p`. For the enemy of the player this is forgiving but spotted-only (nearest
+   * spotted soldier within ~1.2 tiles or a spotted hull + 0.5 tile), so a Fire click near a visible
+   * enemy becomes an attack-unit order and a click on a hidden enemy stays area fire. */
   teamAt(p: Vec2, side: Side): Team | null {
+    if (side !== this.state.config.playerSide) return spottedEnemyTeamAt(this.state, p, side);
     const s = this.soldierAt(p, side);
     if (s) return this.state.teams.get(s.teamId) ?? null;
     for (const v of this.state.vehicles.values()) {

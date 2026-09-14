@@ -6,6 +6,7 @@ import { coverAt, tileAt } from './map';
 import { TERRAIN_PROPS } from './terrain';
 import { findPath } from './path';
 import { isFirstFireFrozen } from './mind';
+import { stepCrewWeapons, isHeldForPacking } from './crewWeapon';
 
 const SPEEDS: Record<string, number> = {
   moving: 1.4,
@@ -21,6 +22,9 @@ const NEAR_ENEMY_RADIUS_TILES = 15;
 /** Advances all soldiers along their current paths, drives panicked/routed flight behaviour,
  * updates facing/animation/fatigue/cover, and gently separates overlapping soldiers. */
 export function stepMovement(state: BattleState, rng: Rng, dt: number): void {
+  // Crew-served weapons: set-up/packing transitions and the fire gate (before anyone moves, so a
+  // crew that has just been ordered off holds still while it packs).
+  stepCrewWeapons(state, dt);
   for (const s of state.soldiers.values()) {
     if (s.health === 'dead' || s.health === 'incapacitated') continue;
 
@@ -41,7 +45,7 @@ export function stepMovement(state: BattleState, rng: Rng, dt: number): void {
     applyMindStanceAndFacing(state, s);
 
     const speed = SPEEDS[s.activity];
-    if (speed != null && s.path.length > 0) {
+    if (speed != null && s.path.length > 0 && !isHeldForPacking(state, s)) {
       const fatigueFast = s.mind.state !== 'panicked' && s.mind.state !== 'broken' && s.fatigue > 70 && s.activity === 'movingFast';
       moveAlongPath(state, s, fatigueFast ? SPEEDS.moving : speed, dt);
       if (Math.floor(state.time / 0.3) % 2 === 0) s.animFrame = 0; else s.animFrame = 1;

@@ -82,6 +82,11 @@ function paintMap(p: MapPainter): void {
   p.line([{ x: 140, y: 63 }, { x: 140, y: 68 }], 'stonewall');
   p.line([{ x: 168, y: 108 }, { x: 174, y: 108 }], 'rubble');
 
+  // Volkssturm fighting holes dug into the snow verge behind the Barricade, facing the Soviet
+  // push from the east (small staggered group; the barricade VL itself stays clear)
+  p.foxholeLine([{ x: 45, y: 88 }, { x: 45.5, y: 108 }], { x: 205, y: 90 }, { spacing: 5, stagger: 1, seedOffset: 9, keepClear: [{ x: 43, y: 98, r: 3 }] });
+  p.foxholeLine([{ x: 145, y: 57 }, { x: 145.5, y: 72 }], { x: 205, y: 70 }, { spacing: 4.5, stagger: 1, seedOffset: 10, keepClear: [{ x: 129, y: 63, r: 5 }] });
+
   // decor: wrecks, barrels/crates, snow drifts, war debris (round-3: heavier street furniture
   // than the other maps, matching the ruined-city density of ref_cc3_1484/1485.png)
   p.addDecor('wreck', 42, 32);

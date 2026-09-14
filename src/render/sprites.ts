@@ -10,6 +10,7 @@ import { createCanvas, ctx2d } from '@/render/pixelUtil';
 import { buildVehicleHull, buildVehicleTurret } from '@/render/vehicleArt';
 import { buildSoldierSprite, type SoldierOutline } from '@/render/soldierArt';
 import { buildTeamIcon } from '@/render/teamIconArt';
+import { buildWeaponSprite, WEAPON_FACINGS, type WeaponVariant } from '@/render/weaponArt';
 
 const PX_PER_M = TILE_PX / TILE_M; // 5 px/m
 
@@ -133,6 +134,24 @@ export function getVehicleSprite(defId: string, part: 'hull' | 'turret', state: 
       ? buildVehicleHull(defId, lengthM, widthM, state, sc)
       : buildVehicleTurret(defId, lengthM, widthM, state, sc);
   });
+}
+
+// ============================================================================
+// CREW-SERVED WEAPONS (mortars, HMGs, AT guns, AT rifles) — art in weaponArt.ts
+// ============================================================================
+const WEAPON_CACHE_CAP = 240;
+const weaponCaches: Record<UnitSpriteScale, LruCache> = { 1: new LruCache(WEAPON_CACHE_CAP), 2: new LruCache(WEAPON_CACHE_CAP) };
+
+/** Weapon sprite rotated to `facingRad` (0 = muzzle north, clockwise; quantised to 16 steps),
+ * pivot at the canvas centre, authored at `scale` px per 1x px: draw at `width * zoom / scale`. */
+export function getWeaponSprite(
+  weaponId: string, variant: WeaponVariant, facingRad: number, side: Side, season: Season, scale: number = 1,
+): HTMLCanvasElement {
+  const sc = unitSpriteScale(scale);
+  const f = ((Math.round((facingRad / (Math.PI * 2)) * WEAPON_FACINGS) % WEAPON_FACINGS) + WEAPON_FACINGS) % WEAPON_FACINGS;
+  const winter = season === 'winter';
+  const key = `${weaponId}|${variant}|${f}|${side}|${winter ? 'w' : 's'}`;
+  return weaponCaches[sc].get(key, () => buildWeaponSprite(weaponId, variant, f, side, winter ? 'winter' : 'summer', sc));
 }
 
 // ============================================================================

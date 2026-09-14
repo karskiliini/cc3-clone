@@ -6,6 +6,7 @@
 import type { DecorKind, Season } from '@/shared/types';
 import { createCanvas, ctx2d } from '@/render/pixelUtil';
 import { hash2 } from '@/shared/rng';
+import { paintCrater, paintFoxhole, craterExtentPx, foxholeExtentPx, type CraterDraw } from '@/render/craterArt';
 
 const cache = new Map<string, HTMLCanvasElement>();
 function cached(key: string, build: () => HTMLCanvasElement): HTMLCanvasElement {
@@ -134,62 +135,22 @@ function buildLog(): HTMLCanvasElement {
   return c;
 }
 
-/** A flat crater: an irregular ring (raised rim, lit NW / shadowed SE) around a darker pit,
- * rather than the old solid dark ellipse that read as a grey sphere. `variant` both jitters the
- * rim shape and sets size (8-12px); in winter the rim reads dirty grey with a snow-dusted outer
- * edge instead of the summer dirt-brown tones. */
+/** A small old shell hole (1.3-2.2 m by variant), drawn with the shared height-field earthwork
+ * art (craterArt.ts) so a stand-alone sprite matches the craters baked into terrain chunks. */
 function buildShellhole(variant: number, season: Season): HTMLCanvasElement {
-  const size = 8 + (variant % 3) * 2; // 8, 10, 12
-  const c = createCanvas(size, size);
-  const ctx = ctx2d(c);
-  const cx = size / 2, cy = size / 2;
-  const rOuter = size / 2 - 0.5;
-  const rInner = rOuter * 0.5;
-  const winter = season === 'winter';
-  const rimLight = winter ? '#9a9690' : '#8a7548';
-  const rimMid = winter ? '#6c6c66' : '#5a4830';
-  const rimDark = winter ? '#3c3e3c' : '#2a2018';
-  const centerColor = winter ? '#484a48' : '#221c14';
+  const c: CraterDraw = { x: 0, y: 0, diameterM: 1.3 + (variant % 3) * 0.45, kind: 'shell', old: true, seed: 4471 + variant * 31 };
+  const r = Math.ceil(craterExtentPx(c));
+  const canvas = createCanvas(r * 2, r * 2);
+  paintCrater(ctx2d(canvas), c, season, -r, -r, 1);
+  return canvas;
+}
 
-  const ring = (r: number, seedOffset: number): void => {
-    const steps = 10;
-    ctx.beginPath();
-    for (let i = 0; i <= steps; i++) {
-      const a = (i / steps) * Math.PI * 2;
-      const jitter = 0.8 + hash2(i, variant, 4471 + seedOffset) * 0.35;
-      const rx = cx + Math.cos(a) * r * jitter;
-      const ry = cy + Math.sin(a) * r * jitter;
-      if (i === 0) ctx.moveTo(rx, ry); else ctx.lineTo(rx, ry);
-    }
-    ctx.closePath();
-  };
-
-  ctx.globalAlpha = 0.7;
-  // raised rim: irregular ring, lit on the NW side and shadowed SE via a diagonal gradient
-  ring(rOuter, 0);
-  const grad = ctx.createLinearGradient(0, 0, size, size);
-  grad.addColorStop(0, rimLight);
-  grad.addColorStop(0.55, rimMid);
-  grad.addColorStop(1, rimDark);
-  ctx.fillStyle = grad;
-  ctx.fill();
-
-  // darker pit at the centre
-  ring(rInner, 1000);
-  ctx.fillStyle = centerColor;
-  ctx.fill();
-
-  if (winter) {
-    // snow dusted onto the outer edge of the rim, mostly the lit NW arc
-    ctx.globalAlpha = 0.5;
-    ctx.strokeStyle = 'rgba(232,238,242,0.65)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, rOuter * 0.9, rOuter * 0.78, -Math.PI / 4, Math.PI * 0.9, Math.PI * 1.7);
-    ctx.stroke();
-  }
-  ctx.globalAlpha = 1;
-  return c;
+/** A 1-2 man foxhole facing south (variant bit 0 = 2-man, bits 1-2 = parapet). */
+function buildFoxhole(variant: number, season: Season): HTMLCanvasElement {
+  const r = Math.ceil(foxholeExtentPx());
+  const canvas = createCanvas(r * 2, r * 2);
+  paintFoxhole(ctx2d(canvas), { x: 0, y: 0, angle: Math.PI / 2, variant: (variant >> 1) % 3, men: variant & 1 ? 2 : 1, seed: 90 + variant }, season, -r, -r, 1);
+  return canvas;
 }
 
 function buildGrave(): HTMLCanvasElement {
@@ -293,6 +254,7 @@ function build(kind: DecorKind, variant: number, season: Season): HTMLCanvasElem
     case 'puddle': return buildPuddle();
     case 'flowers': return buildFlowers(variant);
     case 'tramwire': return buildTramwire();
+    case 'foxhole': return buildFoxhole(variant, season);
     default: return createCanvas(1, 1);
   }
 }
@@ -305,7 +267,7 @@ export function getDecorSprite(kind: DecorKind, variant = 0, season: Season = 's
 
 /** True if this decor kind casts a visible 1px dark shadow when drawn. */
 export function decorHasShadow(kind: DecorKind): boolean {
-  return kind !== 'tramwire' && kind !== 'puddle' && kind !== 'shellhole';
+  return kind !== 'tramwire' && kind !== 'puddle' && kind !== 'shellhole' && kind !== 'foxhole';
 }
 
 /** Draw one decor item centred at world pixel (cx, cy) with its shadow. */

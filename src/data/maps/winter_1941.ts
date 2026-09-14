@@ -120,6 +120,12 @@ function paintMap(p: MapPainter): void {
   p.line([
     { x: 174, y: 5 }, { x: 184, y: 32 }, { x: 177, y: 62 }, { x: 186, y: 92 }, { x: 178, y: 122 }, { x: 185, y: 150 },
   ], 'fence'); // wire entanglement in front of the trenches
+  // Soviet rifle pits covering the Railway Halt and the gap north of the trench line, facing
+  // the German advance from the west; a loose staggered group, clear of the VL itself
+  const GERMAN_APPROACH = { x: 20, y: 75 };
+  const moscowClear = [{ x: 157, y: 37, r: 5 }, { x: 130, y: 81, r: 5 }];
+  p.foxholeLine([{ x: 150, y: 24 }, { x: 148, y: 50 }], GERMAN_APPROACH, { spacing: 5, stagger: 1.5, seedOffset: 5, keepClear: moscowClear });
+  p.foxholeLine([{ x: 168, y: 100 }, { x: 170, y: 118 }], GERMAN_APPROACH, { spacing: 5, stagger: 1.2, seedOffset: 6, keepClear: moscowClear });
   p.patch(180, 33, 2.5, 'crater');
   p.patch(184, 92, 2.5, 'crater');
   p.patch(178, 122, 2, 'crater');

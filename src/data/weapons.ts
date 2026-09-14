@@ -30,23 +30,23 @@ export const WEAPONS: Record<string, WeaponDef> = {
   mg34: w({ id: 'mg34', name: 'MG34', cls: 'lmg', rangeM: 800, rate: 3, burst: 5, accuracy: 0.3, lethality: 0.5, suppression: 0.35, penetrationMm: 0, heRadiusM: 0, ammo: 50, reloadS: 4 }),
   mg42: w({ id: 'mg42', name: 'MG42', cls: 'lmg', rangeM: 800, rate: 4, burst: 7, accuracy: 0.3, lethality: 0.5, suppression: 0.35, penetrationMm: 0, heRadiusM: 0, ammo: 50, reloadS: 4 }),
   dp28: w({ id: 'dp28', name: 'DP-28', cls: 'lmg', rangeM: 800, rate: 2, burst: 4, accuracy: 0.3, lethality: 0.5, suppression: 0.35, penetrationMm: 0, heRadiusM: 0, ammo: 47, reloadS: 4 }),
-  mg34_hmg: w({ id: 'mg34_hmg', name: 'MG34 (tripod)', cls: 'hmg', rangeM: 1000, rate: 3, burst: 8, accuracy: 0.35, lethality: 0.5, suppression: 0.4, penetrationMm: 0, heRadiusM: 0, ammo: 250, reloadS: 6 }),
-  mg42_hmg: w({ id: 'mg42_hmg', name: 'MG42 (tripod)', cls: 'hmg', rangeM: 1000, rate: 4, burst: 9, accuracy: 0.35, lethality: 0.5, suppression: 0.42, penetrationMm: 0, heRadiusM: 0, ammo: 250, reloadS: 6 }),
-  maxim: w({ id: 'maxim', name: 'Maxim M1910', cls: 'hmg', rangeM: 1000, rate: 3, burst: 8, accuracy: 0.3, lethality: 0.5, suppression: 0.4, penetrationMm: 0, heRadiusM: 0, ammo: 250, reloadS: 6 }),
+  mg34_hmg: w({ id: 'mg34_hmg', name: 'MG34 (tripod)', cls: 'hmg', rangeM: 1000, rate: 3, burst: 8, accuracy: 0.35, lethality: 0.5, suppression: 0.4, penetrationMm: 0, heRadiusM: 0, ammo: 250, reloadS: 6, setupS: 5, packS: 3 }),
+  mg42_hmg: w({ id: 'mg42_hmg', name: 'MG42 (tripod)', cls: 'hmg', rangeM: 1000, rate: 4, burst: 9, accuracy: 0.35, lethality: 0.5, suppression: 0.42, penetrationMm: 0, heRadiusM: 0, ammo: 250, reloadS: 6, setupS: 5, packS: 3 }),
+  maxim: w({ id: 'maxim', name: 'Maxim M1910', cls: 'hmg', rangeM: 1000, rate: 3, burst: 8, accuracy: 0.3, lethality: 0.5, suppression: 0.4, penetrationMm: 0, heRadiusM: 0, ammo: 250, reloadS: 6, setupS: 6, packS: 3 }),
 
   // ---------------------------------------------------------- coax weapons
   coax_mg34: w({ id: 'coax_mg34', name: 'MG34 (coax)', cls: 'coaxmg', rangeM: 800, rate: 3, burst: 5, accuracy: 0.3, lethality: 0.5, suppression: 0.35, penetrationMm: 0, heRadiusM: 0, ammo: 250, reloadS: 4 }),
   coax_dt: w({ id: 'coax_dt', name: 'DT (coax)', cls: 'coaxmg', rangeM: 800, rate: 2, burst: 4, accuracy: 0.3, lethality: 0.5, suppression: 0.35, penetrationMm: 0, heRadiusM: 0, ammo: 250, reloadS: 4 }),
 
   // ------------------------------------------------------------- mortars
-  mortar81: w({ id: 'mortar81', name: '8cm GrW 34', cls: 'mortar', rangeM: 1000, minRangeM: 60, rate: 0.15, burst: 1, accuracy: 0.15, lethality: 0.6, suppression: 0.6, penetrationMm: 0, heRadiusM: 6, ammo: 3, reloadS: 8, smoke: true, indirect: true }),
-  mortar82: w({ id: 'mortar82', name: '82-BM-37', cls: 'mortar', rangeM: 1000, minRangeM: 60, rate: 0.15, burst: 1, accuracy: 0.15, lethality: 0.6, suppression: 0.6, penetrationMm: 0, heRadiusM: 6, ammo: 3, reloadS: 8, smoke: true, indirect: true }),
+  mortar81: w({ id: 'mortar81', name: '8cm GrW 34', cls: 'mortar', rangeM: 1000, minRangeM: 60, rate: 0.15, burst: 1, accuracy: 0.15, lethality: 0.6, suppression: 0.6, penetrationMm: 0, heRadiusM: 6, ammo: 3, reloadS: 8, smoke: true, indirect: true, setupS: 8, packS: 3 }),
+  mortar82: w({ id: 'mortar82', name: '82-BM-37', cls: 'mortar', rangeM: 1000, minRangeM: 60, rate: 0.15, burst: 1, accuracy: 0.15, lethality: 0.6, suppression: 0.6, penetrationMm: 0, heRadiusM: 6, ammo: 3, reloadS: 8, smoke: true, indirect: true, setupS: 8, packS: 3 }),
 
   // ----------------------------------------------------------- at guns
-  pak38: w({ id: 'pak38', name: '5cm PaK 38', cls: 'atgun', rangeM: 800, rate: 0.25, burst: 1, accuracy: 0.6, lethality: 0.7, suppression: 0.3, penetrationMm: 60, heRadiusM: 3, ammo: 20, reloadS: 4 }),
-  pak40: w({ id: 'pak40', name: '7.5cm PaK 40', cls: 'atgun', rangeM: 1200, rate: 0.25, burst: 1, accuracy: 0.55, lethality: 0.75, suppression: 0.35, penetrationMm: 110, heRadiusM: 4, ammo: 20, reloadS: 4.5 }),
-  zis3: w({ id: 'zis3', name: 'ZiS-3 76mm', cls: 'atgun', rangeM: 1200, rate: 0.3, burst: 1, accuracy: 0.5, lethality: 0.7, suppression: 0.35, penetrationMm: 75, heRadiusM: 5, ammo: 24, reloadS: 4 }),
-  m1937_45mm: w({ id: 'm1937_45mm', name: '45mm M1937', cls: 'atgun', rangeM: 900, rate: 0.3, burst: 1, accuracy: 0.5, lethality: 0.65, suppression: 0.3, penetrationMm: 45, heRadiusM: 3, ammo: 20, reloadS: 4 }),
+  pak38: w({ id: 'pak38', name: '5cm PaK 38', cls: 'atgun', rangeM: 800, rate: 0.25, burst: 1, accuracy: 0.6, lethality: 0.7, suppression: 0.3, penetrationMm: 60, heRadiusM: 3, ammo: 20, reloadS: 4, setupS: 9, packS: 3 }),
+  pak40: w({ id: 'pak40', name: '7.5cm PaK 40', cls: 'atgun', rangeM: 1200, rate: 0.25, burst: 1, accuracy: 0.55, lethality: 0.75, suppression: 0.35, penetrationMm: 110, heRadiusM: 4, ammo: 20, reloadS: 4.5, setupS: 10, packS: 3 }),
+  zis3: w({ id: 'zis3', name: 'ZiS-3 76mm', cls: 'atgun', rangeM: 1200, rate: 0.3, burst: 1, accuracy: 0.5, lethality: 0.7, suppression: 0.35, penetrationMm: 75, heRadiusM: 5, ammo: 24, reloadS: 4, setupS: 10, packS: 3 }),
+  m1937_45mm: w({ id: 'm1937_45mm', name: '45mm M1937', cls: 'atgun', rangeM: 900, rate: 0.3, burst: 1, accuracy: 0.5, lethality: 0.65, suppression: 0.3, penetrationMm: 45, heRadiusM: 3, ammo: 20, reloadS: 4, setupS: 9, packS: 3 }),
 
   // ------------------------------------------------------------ tank guns
   kwk39_50: w({ id: 'kwk39_50', name: '5cm KwK 39', cls: 'tankgun', rangeM: 900, rate: 0.35, burst: 1, accuracy: 0.5, lethality: 0.7, suppression: 0.3, penetrationMm: 70, heRadiusM: 2.5, ammo: 90, reloadS: 3 }),

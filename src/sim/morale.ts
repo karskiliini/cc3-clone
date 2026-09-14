@@ -6,6 +6,7 @@ import type { Rng } from '@/shared/rng';
 import { clamp, dist } from '@/shared/math';
 import { VEHICLE_DEFS } from '@/data/units';
 import { addMessage } from './messages';
+import { crewWeaponStatus } from './crewWeapon';
 
 // ============================================================================
 // morale.ts — team-level morale aggregation, casualty morale hits, tank-scare,
@@ -204,7 +205,14 @@ function computeTeamStatus(state: BattleState, team: Team): { status: TeamStatus
   for (const [a, n] of counts) {
     if (n > bestN) { best = a; bestN = n; }
   }
-  return { status: ACTIVITY_TO_STATUS[best] ?? 'Idle', outOfAction, morale };
+  const word = ACTIVITY_TO_STATUS[best] ?? 'Idle';
+  // crew-served weapon being assembled (sim/crewWeapon.ts) reads 'Setting up' unless the crew is
+  // doing something more urgent than waiting on it
+  if (word === 'Idle' || word === 'Defending' || word === 'Ambushing' || word === 'Firing') {
+    const crew = crewWeaponStatus(team);
+    if (crew) return { status: crew, outOfAction, morale };
+  }
+  return { status: word, outOfAction, morale };
 }
 
 function teamCenterPos(state: BattleState, team: Team): Vec2 {

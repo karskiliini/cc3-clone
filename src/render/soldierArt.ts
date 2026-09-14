@@ -513,3 +513,169 @@ export function buildSoldierSprite(
   growRings(n, cells, s);
   return paint(n, cells, colorsFor(side, season, stance === 'dead', stance === 'dead' ? 'enemy' : outline));
 }
+
+// ============================================================================
+// CREW POSES — gun, mortar and HMG crews working their weapon (the weapon
+// itself is drawn by weaponArt.ts on the ground under them), plus the carry /
+// haul poses of a crew moving with a packed weapon. Same shape primitives and
+// rasteriser as the infantry stances above.
+// ============================================================================
+
+export type CrewPose =
+  | 'gunnerKneel'   // kneeling at the sight, both hands forward on the weapon
+  | 'loaderRound'   // crouched holding a mortar bomb (frame 1: dropping it down the tube)
+  | 'loaderShell'   // crouched holding an AT shell (frame 1: ramming it into the breech)
+  | 'mgProne'       // prone behind a tripod / wheeled MG, hands on the grips
+  | 'carryTube'     // walking with the mortar tube across the back
+  | 'carryPlate'    // walking with the mortar baseplate on the back
+  | 'carryMg'       // walking with the MG over the shoulder
+  | 'carryTripod'   // walking with the folded tripod on the back
+  | 'haul';         // walking, both arms back on the gun trail (towing an AT gun)
+
+export const CREW_POSES: CrewPose[] = ['gunnerKneel', 'loaderRound', 'loaderShell', 'mgProne', 'carryTube', 'carryPlate', 'carryMg', 'carryTripod', 'haul'];
+
+/** Kneeling body (boot, bent leg, torso, belt kit, helmet) without arms or weapon. */
+function kneelBodyOps(side: Side, frame: 0 | 1): Op[] {
+  const ops: Op[] = [];
+  const wob = frame === 1 ? 0.5 : 0;
+  ops.push(rect(7 + wob, 12, 9 + wob, 14, 'b', { max: 1 }), rect(7 + wob, 14, 9 + wob, 15, 'k', { max: 1 }));
+  ops.push(rect(7 + wob, 12, 9 + wob, 15, 'b', { edge: 'k', lit: 'B', min: 2, round: 0.75 }));
+  ops.push(seg(10.3, 12, 13.3, 14.8, 1.9, 'b', { max: 1 }), rect(13.5, 14.5, 14.5, 15.5, 'k', { max: 1 }));
+  ops.push(seg(10.3, 11.8, 12.3, 13.8, 2, 'T', { min: 2 }), seg(12.1, 13.6, 13.7, 15.1, 1.9, 'b', { min: 2 }), seg(13.4, 14.9, 13.9, 15.4, 1, 'k', { min: 2 }));
+  ops.push(rect(5, 8, 12.5, 12.5, 'U', { edge: 'S', lit: 'L', round: 1.5 }));
+  ops.push(...beltKitOps(side, 5, 12.5, 8.5, 12.5));
+  return ops;
+}
+
+/** Standing / walking body without arms or weapon (legs swap with the walk frame). */
+function walkBodyOps(side: Side, frame: 0 | 1): Op[] {
+  const ops: Op[] = [];
+  ops.push(...legOps(6, 12.5, frame === 0 ? 7 : 6), ...legOps(10, 12.5, frame === 0 ? 6 : 7));
+  ops.push(rect(5.5, 8.5, 12.5, 13.5, 'U', { edge: 'S', lit: 'L', round: 1.5 }));
+  ops.push(...beltKitOps(side, 5.5, 12.5, 9, 13.5));
+  return ops;
+}
+
+/** Two arms from the shoulders to hands at (lx,ly) and (rx,ry): sleeves + skin at 2x, sleeve
+ * nubs at 1x. */
+function armsTo(shY: number, lx: number, ly: number, rx: number, ry: number): Op[] {
+  return [
+    seg(6.2, shY, lx, ly, 1.5, 'S', { min: 2 }), seg(11.8, shY, rx, ry, 1.5, 'U', { min: 2 }),
+    rect(lx - 0.5, ly - 0.5, lx + 0.5, ly + 0.5, 'G', { min: 2 }), rect(rx - 0.5, ry - 0.5, rx + 0.5, ry + 0.5, 'G', { min: 2 }),
+    seg(6.2, shY, lx, ly, 2, 'U', { max: 1 }), seg(11.8, shY, rx, ry, 2, 'U', { max: 1 }),
+  ];
+}
+
+function crewFigure(side: Side, pose: CrewPose, frame: 0 | 1): Figure {
+  switch (pose) {
+    case 'gunnerKneel': {
+      const ops = kneelBodyOps(side, 0);
+      // hands forward on the sight / traverse wheel; frame 1 nudges the hands (laying the gun)
+      ops.push(...armsTo(9, 5.4, frame ? 1.4 : 2.0, 12.6, frame ? 2.4 : 1.8));
+      ops.push(helmetOf(9, 7, 4, side));
+      // hands reach out past the helmet onto the sight / traverse wheel
+      ops.push(rect(4.9, frame ? 0.9 : 1.5, 5.9, frame ? 1.9 : 2.5, 'G'), rect(12.1, frame ? 1.9 : 1.3, 13.1, frame ? 2.9 : 2.3, 'G'));
+      return { ops, px: 9, py: 9, extent: 9.5 };
+    }
+    case 'loaderRound': {
+      const ops = kneelBodyOps(side, 0);
+      const by = frame ? -1.6 : 0.4;
+      ops.push(...armsTo(9, 6.6, by + 2.2, 11.4, by + 2.2));
+      ops.push(helmetOf(9, 7, 4, side));
+      // mortar bomb held out in front (frame 1: lowered into the muzzle): olive body, brass fuze, fins
+      ops.push(ell(9, by, 1.2, 2.0, 'M'));
+      ops.push(rect(8.6, by - 2.5, 9.4, by - 1.7, 'N'));
+      ops.push(rect(8.1, by + 1.7, 9.9, by + 2.4, 'k'));
+      ops.push(rect(6.1, by + 1.7, 7.1, by + 2.7, 'G'), rect(10.9, by + 1.7, 11.9, by + 2.7, 'G'));
+      return { ops, px: 9, py: 9, extent: 10.5 };
+    }
+    case 'loaderShell': {
+      const ops = kneelBodyOps(side, 0);
+      const sy = frame ? 0 : 2;
+      ops.push(...armsTo(9, 6.4, sy + 1.2, 11.6, sy + 1.2));
+      ops.push(helmetOf(9, 7.2, 4, side));
+      // brass case with a dark projectile, carried in both hands pointing forward
+      ops.push(rect(8.1, sy - 1, 9.9, sy + 3.4, 'N', { edge: 'n' }));
+      ops.push(rect(8.3, sy - 3, 9.7, sy - 1, 'W'));
+      ops.push(rect(8.7, sy - 3.7, 9.3, sy - 3, 'W', { min: 2 }));
+      ops.push(rect(5.9, sy + 0.7, 6.9, sy + 1.7, 'G'), rect(11.1, sy + 0.7, 12.1, sy + 1.7, 'G'));
+      return { ops, px: 9, py: 9, extent: 10.5 };
+    }
+    case 'mgProne': {
+      const ops = proneBody(side);
+      ops.push(rect(3, 9, 5, 11, 'U', { max: 1 }), rect(8, 9, 10, 11, 'U', { max: 1 }));
+      ops.push(seg(3.5, 13, 5, 7.5, 1.6, 'U', { min: 2 }), seg(9.5, 13, 8, 7.5, 1.6, 'U', { min: 2 }));
+      ops.push(rect(4.5, 6.5, 5.5, 7.5, 'G', { min: 2 }), rect(7.5, 6.5, 8.5, 7.5, 'G', { min: 2 }));
+      ops.push(helmetOf(6.5, 10, 3.5, side));
+      return { ops, px: 6, py: 12, extent: 12.2 };
+    }
+    case 'carryTube': {
+      const ops = walkBodyOps(side, frame);
+      ops.push(...armsTo(9.5, 5.4, 12.6, 12.6, 6.8));
+      ops.push(seg(4.2, 15.5, 13.4, 5.2, 2.2, 'W'));
+      ops.push(seg(4.6, 15.1, 13, 5.6, 0.6, 'w', { min: 2 }));
+      ops.push(ell(13.4, 5.2, 1.1, 1.1, 'k', { min: 2 }));
+      ops.push(helmetOf(9, 7.5, 3.5, side));
+      return { ops, px: 9.5, py: 10.5, extent: 11.5 };
+    }
+    case 'carryPlate': {
+      const ops = walkBodyOps(side, frame);
+      ops.push(...armsTo(9.5, 5, 11, 13, 11));
+      ops.push(ell(9, 12.8, 3.6, 3.3, 'W', { edge: 'k' }));
+      ops.push(ell(9, 12.8, 2.2, 2.0, 'w', { min: 2 }));
+      ops.push(ell(9, 12.8, 1.6, 1.4, 'W', { min: 2 }));
+      ops.push(helmetOf(9, 7.5, 3.5, side));
+      return { ops, px: 9.5, py: 10.5, extent: 11.5 };
+    }
+    case 'carryMg': {
+      const ops = walkBodyOps(side, frame);
+      ops.push(...armsTo(9.5, 6, 12.5, 12.8, 5.2));
+      // MG over the right shoulder, muzzle forward, butt behind
+      ops.push(rect(12.1, -0.5, 13.5, 8, 'W'));
+      ops.push(rect(12.3, 8, 13.3, 15.5, 'W'));
+      ops.push(rect(12.4, 0.5, 13.2, 7, 'w', { min: 2 }));
+      ops.push(helmetOf(9, 7.5, 3.5, side));
+      return { ops, px: 9.5, py: 10.5, extent: 11.5 };
+    }
+    case 'carryTripod': {
+      const ops = walkBodyOps(side, frame);
+      ops.push(...armsTo(9.5, 5.2, 12, 12.8, 12));
+      ops.push(seg(5.5, 16.5, 12.5, 4.5, 1.7, 'w'));
+      ops.push(seg(7.5, 17, 13.5, 6.5, 1.1, 'W'));
+      ops.push(ell(5.5, 16.5, 0.9, 0.9, 'k', { min: 2 }), ell(7.5, 17, 0.8, 0.8, 'k', { min: 2 }));
+      ops.push(helmetOf(9, 7.5, 3.5, side));
+      return { ops, px: 9.5, py: 10.5, extent: 11.5 };
+    }
+    case 'haul': {
+      const ops = walkBodyOps(side, frame);
+      // leaning into it: both arms reaching back to the trail behind him
+      ops.push(...armsTo(10, 6.5, 17.2, 11.5, 17.2));
+      ops.push(helmetOf(9, 6.8, 3.5, side));
+      return { ops, px: 9.5, py: 10.5, extent: 11.5 };
+    }
+  }
+}
+
+const crewPoseCache = new Map<string, HTMLCanvasElement>();
+const CREW_POSE_CACHE_CAP = 700;
+
+/** Oriented crew-pose sprite (square, centred on the soldier, `scale` px per 1x px — draw at
+ * `width * zoom / scale`), cached here with a simple bounded LRU. */
+export function getCrewPoseSprite(
+  side: Side, season: Season, pose: CrewPose, facing: Facing8, frame: 0 | 1,
+  outline: SoldierOutline = 'enemy', scale = 1,
+): HTMLCanvasElement {
+  const s = scale >= 2 ? 2 : 1;
+  const winter = season === 'winter';
+  const key = `${side}|${winter ? 'w' : 's'}|${pose}|${facing}|${frame}|${outline}|${s}`;
+  const hit = crewPoseCache.get(key);
+  if (hit) { crewPoseCache.delete(key); crewPoseCache.set(key, hit); return hit; }
+  const fig = crewFigure(side, pose, frame);
+  const { n, cells } = rasterise(fig, facing, s, winter);
+  growRings(n, cells, s);
+  const colors = { ...colorsFor(side, season, false, outline), M: '#56594a', N: '#b39a52', n: '#7c6a34' };
+  const c = paint(n, cells, colors);
+  crewPoseCache.set(key, c);
+  if (crewPoseCache.size > CREW_POSE_CACHE_CAP) crewPoseCache.delete(crewPoseCache.keys().next().value as string);
+  return c;
+}

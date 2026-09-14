@@ -69,6 +69,13 @@ function paintMap(p: MapPainter): void {
   p.line([{ x: 10, y: 36 }, { x: 225, y: 36 }], 'fence');
   p.scatterDecor('shellhole', 5, 30, 230, 20, 22, 30);
   p.scatterDecor('shellhole', 20, 55, 210, 40, 16, 31);
+  // dug-in rifle pits along the balka's southern lip, facing the German line to the north: a
+  // forward outpost line the Soviet assault fights through and then holds (small staggered
+  // groups, clear of the Balka VL)
+  const GERMAN_LINE = { x: 110, y: 20 };
+  const balkaClear = [{ x: 115, y: 118, r: 6 }];
+  p.foxholeLine([{ x: 70, y: 126 }, { x: 95, y: 121 }], GERMAN_LINE, { spacing: 5, stagger: 1.2, seedOffset: 3, keepClear: balkaClear });
+  p.foxholeLine([{ x: 130, y: 118 }, { x: 150, y: 114 }], GERMAN_LINE, { spacing: 5, stagger: 1.2, seedOffset: 4, keepClear: balkaClear });
   p.patch(70, 58, 3, 'crater');
   p.patch(150, 44, 2.5, 'crater');
   p.patch(105, 60, 2, 'crater');
@@ -123,6 +130,8 @@ const { decor, vectors }: { decor: DecorItem[]; vectors: MapVectorFeature[] } = 
   paintMap(p);
   const decor = p.decor.filter((d) => {
     const t = tiles[Math.floor(d.y) * WIDTH + Math.floor(d.x)];
+    // a foxhole later painted over (e.g. by the balka's tallgrass fields) no longer exists
+    if (d.kind === 'foxhole' && t !== 'trench') return false;
     return t !== 'water' && t !== 'buildingWood' && t !== 'buildingStone' && t !== 'floor';
   });
   return { decor, vectors: p.vectors };

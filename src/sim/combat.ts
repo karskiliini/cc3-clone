@@ -1,6 +1,7 @@
 import type {
   BattleEvent, BattleMessage, BattleState, Health, Side, Soldier, Team, Vec2, Vehicle, WeaponDef,
 } from '@/shared/types';
+import type { GameMap, Terrain } from '@/shared/types';
 import { AMBUSH_TRIGGER_M, TILE_M, otherSide } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { clamp, dist, facingAngle, facingTo, angleTo, turnTowards, wrapAngle } from '@/shared/math';
@@ -14,6 +15,8 @@ import { addMessage } from './messages';
 import { coverFrom } from './cover';
 import { onIncomingFire, onExplosionNear, onOwnWound, onCasualtySeen, onGunnerHit, onFired, isFirstFireFrozen, addStress } from './mind';
 import { onVehicleHit, onVehicleNearMiss } from './vehicle';
+import { attackPhase } from './orders';
+import type { Order } from '@/shared/types';
 
 export { hitChance, penetrates };
 
@@ -85,7 +88,7 @@ export function getCombatInstrumentation(state: BattleState): {
 }
 
 // ------------------------------------------------------------------ target
-type Target =
+export type Target =
   | { kind: 'soldier'; soldier: Soldier }
   | { kind: 'vehicle'; vehicle: Vehicle }
   | { kind: 'point'; pos: Vec2 };
@@ -129,6 +132,76 @@ function gatherCandidates(state: BattleState, side: Side): { soldiers: Soldier[]
   return { soldiers, vehicles };
 }
 
+// ------------------------------------------------------- attack-unit targeting
+/** Weapons that may put suppressive fire on a last known / unseen position (not single-shot AT). */
+/** Attack-unit order: a soldier with no shot at his target still engages enemies this close. */
+const SELF_DEFENCE_M = 50;
+const AREA_FIRE_CLASSES = new Set(['rifle', 'smg', 'lmg', 'hmg', 'coaxmg', 'mortar', 'tankgun']);
+/** MG gunners rotate their bursts across the best few members of the target team. */
+const mgSpread = new WeakMap<BattleState, Map<number, number>>();
+
+function exposureScore(state: BattleState, shooterPos: Vec2, victim: Soldier): number {
+  const cover = coverFrom(state.map, victim.pos, angleTo(victim.pos, shooterPos));
+  const st = victim.stance === 'standing' ? 1 : victim.stance === 'crouching' ? 0.7 : 0.45;
+  const moving = victim.activity === 'moving' || victim.activity === 'movingFast' || victim.activity === 'sneaking';
+  const dM = dist(shooterPos, victim.pos) * TILE_M;
+  return (1 - cover * 0.8) * st * (moving ? 1.2 : 1) / (1 + dM / 100);
+}
+
+/** Target selection for a soldier under an attack-unit Fire order: the best member of the target
+ * team HE can engage (spotted, in range, LOS from his own position); otherwise suppress the tracked
+ * / last known position with an area weapon, or wait. Returns 'free' in the hold phase so normal
+ * (defend-like) selection applies. */
+function pickAttackUnitTarget(
+  state: BattleState, soldier: Soldier, weapon: WeaponDef, order: Order, inRangeLOS: (p: Vec2) => boolean,
+): Target | null | 'free' {
+  const phase = attackPhase(state, order);
+  if (phase === 'hold') return 'free';
+  const tgt = state.teams.get(order.targetTeamId!);
+  if (!tgt) return 'free';
+  if (phase === 'tracking') {
+    if (tgt.vehicleId != null) {
+      const v = state.vehicles.get(tgt.vehicleId);
+      const def = v ? VEHICLE_DEFS[v.defId] : undefined;
+      const canHurt = AT_WEAPON_CLASSES.has(weapon.cls)
+        || ((weapon.cls === 'rifle' || weapon.cls === 'smg' || weapon.cls === 'lmg' || weapon.cls === 'hmg') && !!def && def.armor.side < 20);
+      if (v && canHurt && state.spottedVehicles[soldier.side].has(v.id) && v.state !== 'knockedOut' && inRangeLOS(v.pos)) {
+        return { kind: 'vehicle', vehicle: v };
+      }
+      return null; // no point hosing armour with small arms; wait for a shot
+    }
+    const cands: { s: Soldier; score: number }[] = [];
+    for (const id of tgt.soldierIds) {
+      if (!state.spotted[soldier.side].has(id)) continue;
+      const e = state.soldiers.get(id);
+      if (!e || e.health === 'dead' || e.health === 'incapacitated' || e.activity === 'surrendered') continue;
+      if (!inRangeLOS(e.pos)) continue;
+      cands.push({ s: e, score: exposureScore(state, soldier.pos, e) });
+    }
+    if (cands.length > 0) {
+      cands.sort((a, b) => b.score - a.score || a.s.id - b.s.id);
+      let i = 0;
+      if (weapon.cls === 'lmg' || weapon.cls === 'hmg') {
+        let m = mgSpread.get(state);
+        if (!m) { m = new Map(); mgSpread.set(state, m); }
+        const n = (m.get(soldier.id) ?? 0) + 1;
+        m.set(soldier.id, n);
+        i = n % Math.min(cands.length, 3);
+      }
+      return { kind: 'soldier', soldier: cands[i].s };
+    }
+  }
+  // no personal shot at a member (tracking) or target lost (suppress): area fire at the ball
+  if (AREA_FIRE_CLASSES.has(weapon.cls) && inRangeLOS(order.target)) return { kind: 'point', pos: order.target };
+  return null;
+}
+
+/** Test hook: the target a soldier would engage right now (same rules as stepSoldierCombat). */
+export function pickSoldierTargetForTest(state: BattleState, soldier: Soldier): Target | null {
+  const weapon = WEAPONS[soldier.weaponId];
+  return weapon ? pickTarget(state, soldier, state.teams.get(soldier.teamId), weapon) : null;
+}
+
 function pickTarget(state: BattleState, soldier: Soldier, team: Team | undefined, weapon: WeaponDef): Target | null {
   const map = state.map;
   if (soldier.activity === 'movingFast') return null;
@@ -153,7 +226,17 @@ function pickTarget(state: BattleState, soldier: Soldier, team: Team | undefined
   const { soldiers: cands, vehicles: vcands } = gatherCandidates(state, soldier.side);
   const preferVehicles = AT_WEAPON_CLASSES.has(weapon.cls);
 
-  if (order?.type === 'fire' && order.target) {
+  if (order?.type === 'fire' && order.target && order.targetTeamId != null) {
+    const picked = pickAttackUnitTarget(state, soldier, weapon, order, inRangeLOS);
+    if (picked) {
+      if (picked !== 'free') return picked;
+      // 'hold' phase: watch the last known position but defend against anything that shows up
+    } else {
+      // No shot at the target unit: he keeps his position and waits, but still defends himself
+      // against an enemy at close range (SELF_DEFENCE_M) rather than ignoring it.
+      maxRangeM = Math.min(maxRangeM, SELF_DEFENCE_M);
+    }
+  } else if (order?.type === 'fire' && order.target) {
     const nearPoint = (pos: Vec2) => dist(pos, order.target) <= 3;
     let best: Soldier | Vehicle | null = null;
     let bestD = Infinity;
@@ -343,15 +426,62 @@ export function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: W
   const kind = weapon.heRadiusM >= 3 ? 'he' : 'small';
   state.explosions.push({ pos: { ...pos }, radiusM: weapon.heRadiusM, t: 0, kind });
   state.events.push({ kind: 'explosion', pos: { ...pos }, side: shooterSide, weaponId: weapon.id });
-  if (weapon.heRadiusM >= 4) {
-    const tx = Math.floor(pos.x), ty = Math.floor(pos.y);
-    const t = tileAt(map, tx, ty);
-    const craterable = new Set(['open', 'grass', 'tallgrass', 'crops', 'snow', 'mud', 'dirtroad']);
-    if (craterable.has(t)) {
-      setTile(map, tx, ty, 'crater');
-      map.craters.push(idx(map, tx, ty));
+  leaveCrater(state, pos, weapon);
+}
+
+/** Blast mark size by explosive: grenade ~1 m scorched hole, AT rocket a small scorch, mortar
+ * ~2.5 m, tank/AT gun HE 2.6-3.8 m by calibre (heRadiusM), heavy (122 mm+) ~5 m. */
+export function craterForWeapon(weapon: WeaponDef): { sizeM: number; kind: 'shell' | 'grenade' } | null {
+  if (weapon.heRadiusM <= 0 || weapon.cls === 'flamethrower') return null;
+  if (weapon.cls === 'grenade') return { sizeM: 1, kind: 'grenade' };
+  if (weapon.cls === 'atrocket') return { sizeM: 1.2, kind: 'grenade' };
+  if (weapon.cls === 'mortar') return { sizeM: 2.5, kind: 'shell' };
+  const r = weapon.heRadiusM;
+  return { sizeM: r >= 8 ? 5 : r >= 5 ? 3.8 : r >= 4 ? 3.2 : 2.6, kind: 'shell' };
+}
+
+/** Ground a blast leaves a visible mark on (never buildings, water, bridges or inside woods). */
+const MARKABLE_TERRAIN = new Set<Terrain>(['open', 'grass', 'tallgrass', 'crops', 'snow', 'mud', 'dirtroad', 'pavedroad', 'crater', 'trench', 'scatteredtrees', 'rubble']);
+/** Ground a blast of heRadiusM >= 4 digs a real 'crater' tile into (crater cover, passable — a
+ * dirt road tile stays passable as a crater). This tile rule is deliberately the long-standing,
+ * balance-tuned one (the AI harness is sensitive to crater cover near assaults); only the
+ * VISIBLE mark is sized by weapon. */
+const CRATERABLE_TERRAIN = new Set<Terrain>(['open', 'grass', 'tallgrass', 'crops', 'snow', 'mud', 'dirtroad']);
+
+function leaveCrater(state: BattleState, pos: Vec2, weapon: WeaponDef): void {
+  const map: GameMap = state.map;
+  const c = craterForWeapon(weapon);
+  if (!c) return;
+  const tx = Math.floor(pos.x), ty = Math.floor(pos.y);
+  const t = tileAt(map, tx, ty);
+  if (!MARKABLE_TERRAIN.has(t)) return;
+  let onVehicle = false;
+  for (const v of state.vehicles.values()) if (dist(v.pos, pos) < 1.2) { onVehicle = true; break; }
+  // the visible bowl + ejecta must not spill over a wall, roof or river bank: shrink it to fit
+  let sizeM = c.sizeM;
+  const reach = Math.ceil(sizeM / TILE_M);
+  for (let dy = -reach; dy <= reach; dy++) {
+    for (let dx = -reach; dx <= reach; dx++) {
+      const nt = tileAt(map, tx + dx, ty + dy);
+      if (nt !== 'buildingStone' && nt !== 'buildingWood' && nt !== 'floor' && nt !== 'water' && nt !== 'bridge') continue;
+      // distance (m) from the blast to the nearest edge of that tile, and the rim that fits
+      const ex = Math.max(tx + dx - pos.x, 0, pos.x - (tx + dx + 1));
+      const ey = Math.max(ty + dy - pos.y, 0, pos.y - (ty + dy + 1));
+      sizeM = Math.min(sizeM, Math.hypot(ex, ey) * TILE_M * 0.9);
     }
   }
+  sizeM = Math.max(0.8, sizeM);
+  const marks = (map.craterMarks ??= []);
+  // repeated rounds into the same spot deepen one hole rather than stacking identical marks
+  // (a round bursting on a vehicle's hull only scorches the ground under it)
+  const kind = onVehicle ? 'grenade' : c.kind;
+  if (onVehicle) sizeM = Math.min(sizeM, 1.2);
+  if (!marks.some((m) => m.kind === kind && m.sizeM >= sizeM && dist(m, pos) < 0.35)) {
+    marks.push({ x: pos.x, y: pos.y, sizeM: Math.round(sizeM * 100) / 100, kind });
+  }
+  if (weapon.heRadiusM < 4 || !CRATERABLE_TERRAIN.has(t)) return;
+  setTile(map, tx, ty, 'crater');
+  map.craters.push(idx(map, tx, ty));
 }
 
 function koCrew(state: BattleState, vehicle: Vehicle, rng: Rng, fullKO: boolean): void {
@@ -710,7 +840,7 @@ function stepMortarTeam(state: BattleState, rng: Rng, dt: number, team: Team, tr
   const isSmokeOrder = order?.type === 'smoke' && weapon.smoke;
 
   let target: Vec2 | null = null;
-  if (order?.type === 'fire' && order.target) target = order.target;
+  if (order?.type === 'fire' && order.target) target = attackPhase(state, order) === 'hold' ? findEnemyCluster(state, team.side) : order.target;
   else if (isSmokeOrder) target = order!.target;
   else target = findEnemyCluster(state, team.side);
   if (!target) return;
@@ -792,9 +922,66 @@ function pickNearestInfantry(state: BattleState, vehicle: Vehicle, rangeM: numbe
   return best;
 }
 
+/** Main-gun target for a vehicle on an attack-unit Fire order: AP at the target vehicle, HE at the
+ * best visible member of a target infantry team, HE on the tracked/last known position otherwise. */
+function pickVehicleAttackTarget(state: BattleState, vehicle: Vehicle, weapon: WeaponDef | null, order: Order): Target | null | 'free' {
+  const phase = attackPhase(state, order);
+  if (phase === 'hold') return 'free';
+  const tgt = state.teams.get(order.targetTeamId!);
+  if (!tgt) return 'free';
+  const rangeM = weapon ? weapon.rangeM : 400;
+  if (phase === 'tracking') {
+    if (tgt.vehicleId != null) {
+      const v = state.vehicles.get(tgt.vehicleId);
+      if (v && v.state !== 'knockedOut' && state.spottedVehicles[vehicle.side].has(v.id) && dist(vehicle.pos, v.pos) * TILE_M <= rangeM) return { kind: 'vehicle', vehicle: v };
+      return null;
+    }
+    let best: Soldier | null = null;
+    let bestScore = -Infinity;
+    for (const id of tgt.soldierIds) {
+      if (!state.spotted[vehicle.side].has(id)) continue;
+      const e = state.soldiers.get(id);
+      if (!e || e.health === 'dead' || e.health === 'incapacitated' || e.activity === 'surrendered') continue;
+      if (dist(vehicle.pos, e.pos) * TILE_M > rangeM || !hasLOS(state.map, vehicle.pos, e.pos)) continue;
+      const sc = exposureScore(state, vehicle.pos, e);
+      if (sc > bestScore) { bestScore = sc; best = e; }
+    }
+    if (best) return { kind: 'soldier', soldier: best };
+  }
+  if (weapon && weapon.heRadiusM > 0 && dist(vehicle.pos, order.target) * TILE_M <= rangeM) return { kind: 'point', pos: order.target };
+  return null;
+}
+
+/** Coax MG target: members of an attack-unit target infantry team first, else nearest spotted. */
+function pickCoaxTarget(state: BattleState, vehicle: Vehicle, rangeM: number): Soldier | null {
+  const order = state.teams.get(vehicle.teamId)?.order;
+  if (order?.type === 'fire' && order.targetTeamId != null && attackPhase(state, order) === 'tracking') {
+    const tgt = state.teams.get(order.targetTeamId);
+    if (tgt && tgt.vehicleId == null) {
+      let best: Soldier | null = null;
+      let bestD = Infinity;
+      for (const id of tgt.soldierIds) {
+        if (!state.spotted[vehicle.side].has(id)) continue;
+        const e = state.soldiers.get(id);
+        if (!e || e.health === 'dead' || e.health === 'incapacitated' || e.activity === 'surrendered') continue;
+        const d = dist(vehicle.pos, e.pos) * TILE_M;
+        if (d > rangeM || d >= bestD || !hasLOS(state.map, vehicle.pos, e.pos)) continue;
+        bestD = d; best = e;
+      }
+      if (best) return best;
+    }
+  }
+  return pickNearestInfantry(state, vehicle, rangeM);
+}
+
 function pickVehicleTarget(state: BattleState, vehicle: Vehicle): Target | null {
   const def = VEHICLE_DEFS[vehicle.defId];
   const weapon = def?.mainWeaponId ? WEAPONS[def.mainWeaponId] : null;
+  const order = state.teams.get(vehicle.teamId)?.order;
+  if (order?.type === 'fire' && order.targetTeamId != null) {
+    const picked = pickVehicleAttackTarget(state, vehicle, weapon, order);
+    if (picked !== 'free') return picked;
+  }
 
   if (weapon && weapon.penetrationMm > 0) {
     let best: Vehicle | null = null;
@@ -885,7 +1072,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
 
   if (def.coaxWeaponId && vehicle.coaxAmmo > 0) {
     const coax = WEAPONS[def.coaxWeaponId];
-    const infTarget = pickNearestInfantry(state, vehicle, 400);
+    const infTarget = pickCoaxTarget(state, vehicle, 400);
     if (infTarget && vehicle.coaxFireTimer <= 0 && hasLOS(state.map, vehicle.pos, infTarget.pos)) {
       vehicle.coaxFireTimer = 1 / coax.rate;
       state.events.push({ kind: 'shot', pos: { ...vehicle.pos }, weaponId: coax.id, side: vehicle.side });

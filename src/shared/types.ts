@@ -66,9 +66,12 @@ export interface VictoryLocation {
 
 export type DecorKind =
   | 'haystack' | 'well' | 'cart' | 'bush' | 'stump' | 'pole' | 'rocks' | 'log'
-  | 'shellhole' | 'grave' | 'sign' | 'barrel' | 'crate' | 'wreck' | 'woodpile' | 'puddle' | 'flowers' | 'tramwire';
-/** Purely visual map dressing (no sim effect). Position in tile coords (may be fractional). */
-export interface DecorItem { kind: DecorKind; x: number; y: number; variant?: number }
+  | 'shellhole' | 'grave' | 'sign' | 'barrel' | 'crate' | 'wreck' | 'woodpile' | 'puddle' | 'flowers' | 'tramwire'
+  | 'foxhole';
+/** Purely visual map dressing (no sim effect — except 'foxhole', whose tile the map DSL also
+ * paints as 'trench' so it gives trench cover). Position in tile coords (may be fractional).
+ * `angle` (radians, 0 = east, PI/2 = south) is the direction a foxhole faces (toward the enemy). */
+export interface DecorItem { kind: DecorKind; x: number; y: number; variant?: number; angle?: number }
 
 /** Vector source geometry recorded by the map DSL so the renderer can paint smooth curves (tiles remain the sim truth). */
 export interface MapVectorFeature {
@@ -111,9 +114,15 @@ export interface GameMap {
   smoke: Float32Array;
   /** crater decals: tile indexes */
   craters: number[];
+  /** visual blast marks left by explosions this battle (sub-tile position, size by weapon); the
+   * renderer stamps them into its baked terrain. Render-only: never read by the sim. */
+  craterMarks?: CraterMark[];
   /** tile indexes changed since last render bake (e.g. vehicle crushing terrain); renderer clears this */
   dirtyTiles?: number[];
 }
+
+/** A blast mark from one explosion: centre in tile coords, rim diameter in metres. */
+export interface CraterMark { x: number; y: number; sizeM: number; kind: 'shell' | 'grenade' }
 
 // ------------------------------------------------------------------ weapons
 export type WeaponClass =
@@ -137,6 +146,10 @@ export interface WeaponDef {
   reloadS: number;
   smoke?: boolean;            // can fire smoke rounds
   indirect?: boolean;         // mortar
+  /** crew-served weapons (mortar/hmg/atgun): seconds to set up after the crew stops (see sim/crewWeapon.ts) */
+  setupS?: number;
+  /** crew-served weapons: seconds to pack up before the crew can move off */
+  packS?: number;
 }
 
 // ----------------------------------------------------------------- soldiers
@@ -305,7 +318,7 @@ export type TeamMoraleWord = 'Fanatic' | 'Confident' | 'Steady' | 'Shaken' | 'Br
 export type TeamStatusWord =
   | 'Idle' | 'Moving' | 'Moving Fast' | 'Sneaking' | 'Firing' | 'Defending'
   | 'Ambushing' | 'Pinned' | 'Cowering' | 'Panicked' | 'Routed' | 'Broken'
-  | 'Destroyed' | 'Surrendered' | 'Knocked Out';
+  | 'Destroyed' | 'Surrendered' | 'Knocked Out' | 'Setting up';
 
 export interface TeamDef {
   id: string;                 // "ger_rifle_41"
@@ -343,6 +356,31 @@ export interface Team {
   kills: number;
   /** for AI */
   aiObjective: Vec2 | null;
+  /** crew-served weapon (mortar/HMG/AT gun) on the ground or carried; managed by sim/crewWeapon.ts */
+  crewWeapon?: CrewWeaponState;
+}
+
+/** packed = carried/limbered (or lying unassembled); settingUp/packing = transition timers running. */
+export type CrewWeaponPhase = 'packed' | 'settingUp' | 'ready' | 'packing';
+
+export interface CrewWeaponState {
+  weaponId: string;
+  /** weapon pivot (baseplate / tripod / gun axle), tile coords; follows the gunner while packed */
+  pos: Vec2;
+  /** radians, 0 = north, clockwise (muzzle direction) */
+  facing: number;
+  phase: CrewWeaponPhase;
+  /** seconds left in settingUp/packing */
+  timer: number;
+  /** full length of the current settingUp/packing transition */
+  phaseTotal: number;
+  /** soldier currently serving the weapon */
+  gunnerId: number;
+  /** crew ran off or the gunner fell: the weapon stays where it is until a crewman re-mans it */
+  abandoned: boolean;
+  abandonedAt: number;
+  /** battle seconds the weapon was last set down (a move order issued before this does not pack it) */
+  setAt: number;
 }
 
 // ------------------------------------------------------------------- battle

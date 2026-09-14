@@ -2,6 +2,8 @@ import type { DecorItem, DecorKind, MapVectorFeature, Terrain, Vec2 } from '@/sh
 import { hash2 } from '@/shared/rng';
 
 const NON_DECOR_TILES = new Set<Terrain>(['water', 'buildingWood', 'buildingStone', 'floor']);
+/** Ground a foxhole can be dug into. */
+const FOXHOLE_GROUND = new Set<Terrain>(['open', 'grass', 'tallgrass', 'crops', 'snow', 'mud', 'scatteredtrees']);
 
 /** Deterministic terrain painter DSL used by map definitions. */
 export class MapPainter {
@@ -433,6 +435,53 @@ export class MapPainter {
       }
       travelled += seg.len;
     }
+  }
+
+  /** A dug-in 1-2 man foxhole centred in tile (x,y), facing `toward` (tile coords). The tile
+   * becomes 'trench' (so it gives trench cover and soldiers seek it) and a 'foxhole' decor records
+   * its facing for the renderer. Only dug into soft ground: returns false (and places nothing) on
+   * roads, water, buildings, walls, woods, or an existing trench/crater. `variant` bit 0 = 2-man,
+   * bits 1-2 = parapet (0 spoil only, 1 sandbags, 2 logs); hashed when omitted. */
+  foxhole(x: number, y: number, toward: Vec2, variant?: number): boolean {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const t = this.get(xi, yi);
+    if (t === null || !FOXHOLE_GROUND.has(t)) return false;
+    const h1 = hash2(xi, yi, this.seed + 9701), h2 = hash2(xi, yi, this.seed + 9702), h3 = hash2(xi, yi, this.seed + 9703);
+    const v = variant ?? ((h1 < 0.55 ? 1 : 0) | ((h2 < 0.55 ? 0 : h2 < 0.8 ? 1 : 2) << 1));
+    const cx = xi + 0.5, cy = yi + 0.5;
+    const angle = Math.atan2(toward.y - cy, toward.x - cx) + (h3 - 0.5) * 0.5;
+    this.tiles[yi * this.w + xi] = 'trench';
+    this.decor.push({ kind: 'foxhole', x: cx, y: cy, variant: v, angle });
+    return true;
+  }
+
+  /** A loose, staggered line of foxholes along `points` (tile coords), roughly `spacing` tiles
+   * apart, alternately set forward/back by up to `stagger` tiles and all facing `toward`. Spots
+   * within `keepClear` circles (e.g. victory locations, deploy-zone exits) are skipped, as are
+   * random gaps (`gapProb`) so the line reads as individual dug-in positions. */
+  foxholeLine(points: Vec2[], toward: Vec2, opts: { spacing?: number; stagger?: number; seedOffset?: number; gapProb?: number; keepClear?: { x: number; y: number; r: number }[] } = {}): number {
+    const { spacing = 5, stagger = 1.5, seedOffset = 0, gapProb = 0.15, keepClear = [] } = opts;
+    let placed = 0, n = 0;
+    for (let s = 0; s < points.length - 1; s++) {
+      const a = points[s], b = points[s + 1];
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      if (len <= 0) continue;
+      const ux = (b.x - a.x) / len, uy = (b.y - a.y) / len;
+      // perpendicular pointing toward the enemy, for the forward/back stagger
+      let px = -uy, py = ux;
+      if ((toward.x - a.x) * px + (toward.y - a.y) * py < 0) { px = -px; py = -py; }
+      for (let d = spacing * 0.5; d < len; n++) {
+        const hs = this.seed + seedOffset + 9710;
+        const off = (n % 2 === 0 ? 1 : -1) * stagger * (0.4 + hash2(n, 1, hs) * 0.6);
+        const along = (hash2(n, 2, hs) - 0.5) * spacing * 0.3;
+        const x = a.x + ux * (d + along) + px * off, y = a.y + uy * (d + along) + py * off;
+        d += spacing * (0.8 + hash2(n, 3, hs) * 0.4);
+        if (hash2(n, 4, hs) < gapProb) continue;
+        if (keepClear.some((c) => Math.hypot(c.x - x, c.y - y) < c.r)) continue;
+        if (this.foxhole(x, y, toward)) placed++;
+      }
+    }
+    return placed;
   }
 
   /** A bombed-out building footprint: a rubble mound with 2-4 standing wall SEGMENTS (short

@@ -23,6 +23,8 @@ const cyOverride = qs.has('cy') ? Number(qs.get('cy')) : null;
 // edges/ruts staying smooth rather than blockily upscaled).
 const ZOOM_QS = qs.has('zoom') ? Number(qs.get('zoom')) : 1;
 const previewZoom = [0.5, 1, 2].includes(ZOOM_QS) ? ZOOM_QS : 1;
+// ?map=steppe_1943 renders only that map (faster art QA / headless capture).
+const mapFilter = qs.get('map');
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -102,7 +104,8 @@ function main(): void {
     root.textContent = 'No maps found in @/data/maps.';
     return;
   }
-  for (const def of MAPS) renderMap(root, def.id);
+  for (const def of MAPS) if (!mapFilter || def.id === mapFilter) renderMap(root, def.id);
+  document.body.dataset.ready = '1';
 }
 
 main();

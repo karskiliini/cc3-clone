@@ -9,7 +9,11 @@ import {
   getCursorSprite,
   getSmokePuff,
   getTreeSprite,
+  getWeaponSprite,
 } from '@/render/sprites';
+import { getCrewPoseSprite, CREW_POSES } from '@/render/soldierArt';
+import { weaponTowLengthM } from '@/render/weaponArt';
+import { CREW_LAYOUT, crewServedClass } from '@/sim/crewWeapon';
 import { drawText, textWidth, FONT_SMALL_H, FONT_BIG_H } from '@/render/pixelfont';
 import { PALETTE, TERRAIN_COLORS, SIDE_COLOR, ORDER_COLOR } from '@/render/palette';
 
@@ -96,6 +100,84 @@ function cellPair1x4x(row: HTMLElement, label: string, src: HTMLCanvasElement): 
   span.textContent = `${label} (1x/4x)`;
   c.appendChild(span);
   row.appendChild(c);
+}
+
+// ----------------------------------------------- crew-served weapons (wf9) --
+// Every crew-served weapon at 1x and 2x, 8 facings, set up (crew posed around it at the
+// CREW_LAYOUT role slots) and packed (carry poses / AT gun towed trail-first by its crew).
+{
+  const CREW_WEAPONS: [string, Side][] = [
+    ['mortar81', 'german'], ['mortar82', 'soviet'], ['mg34_hmg', 'german'], ['mg42_hmg', 'german'], ['maxim', 'soviet'],
+    ['pak38', 'german'], ['pak40', 'german'], ['m1937_45mm', 'soviet'], ['zis3', 'soviet'], ['ptrd', 'soviet'],
+  ];
+  const clsOf = (id: string): 'mortar' | 'hmg' | 'atgun' | null => crewServedClass(id);
+  /** A small scene: weapon + crew, drawn at true size for `scale` (1 = zoom 1, 2 = zoom 2). */
+  const scene = (weaponId: string, side: Side, season: Season, facing8: number, packed: boolean, scale: 1 | 2, fire = false): HTMLCanvasElement => {
+    const W = 90 * scale;
+    const c = document.createElement('canvas');
+    c.width = W; c.height = W;
+    const ctx = c.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = season === 'winter' ? '#d4d6d2' : '#6f7a45';
+    ctx.fillRect(0, 0, W, W);
+    const rad = (facing8 * Math.PI) / 4;
+    const pxPerM = 10 * scale;
+    const at = (m: { x: number; y: number }) => {
+      const r = { x: m.x * Math.cos(rad) - m.y * Math.sin(rad), y: m.x * Math.sin(rad) + m.y * Math.cos(rad) };
+      return { x: W / 2 + r.x * pxPerM, y: W / 2 + r.y * pxPerM };
+    };
+    const blit = (sp: HTMLCanvasElement, p: { x: number; y: number }) => ctx.drawImage(sp, Math.round(p.x - sp.width / 2), Math.round(p.y - sp.height / 2));
+    const f8 = facing8 as Facing8;
+    const cls = clsOf(weaponId);
+    if (!cls) {
+      // PTRD: rifle on its bipod, gunner prone behind it
+      blit(getWeaponSprite(weaponId, 'ready', rad, side, season, scale), at({ x: 0, y: -0.6 }));
+      blit(getCrewPoseSprite(side, season, 'mgProne', f8, 0, 'friendly', scale), at({ x: 0.35, y: 0.7 }));
+      return c;
+    }
+    const L = CREW_LAYOUT[cls];
+    if (packed) {
+      if (cls === 'atgun') {
+        const tow = weaponTowLengthM(weaponId);
+        blit(getWeaponSprite(weaponId, 'packed', rad + Math.PI, side, season, scale), at({ x: 0, y: tow + 0.2 - tow / 2 }));
+        blit(getCrewPoseSprite(side, season, 'haul', f8, 0, 'friendly', scale), at({ x: -0.55, y: -tow / 2 }));
+        blit(getCrewPoseSprite(side, season, 'haul', f8, 1, 'friendly', scale), at({ x: 0.6, y: -tow / 2 + 0.3 }));
+      } else {
+        const a = cls === 'mortar' ? 'carryTube' : 'carryMg';
+        const b = cls === 'mortar' ? 'carryPlate' : 'carryTripod';
+        blit(getCrewPoseSprite(side, season, a, f8, 0, 'friendly', scale), at({ x: -0.9, y: -0.6 }));
+        blit(getCrewPoseSprite(side, season, b, f8, 1, 'friendly', scale), at({ x: 0.9, y: 0.9 }));
+      }
+      return c;
+    }
+    blit(getWeaponSprite(weaponId, 'ready', rad, side, season, scale), at({ x: 0, y: 0 }));
+    const gunnerPose = cls === 'hmg' ? 'mgProne' : 'gunnerKneel';
+    const loaderPose = cls === 'mortar' ? 'loaderRound' : cls === 'atgun' ? 'loaderShell' : 'gunnerKneel';
+    blit(getCrewPoseSprite(side, season, gunnerPose, f8, 0, 'friendly', scale), at(L.gunner));
+    blit(getCrewPoseSprite(side, season, loaderPose, f8, fire ? 1 : 0, 'friendly', scale), at(L.loader));
+    blit(getSoldierSprite(side, season, 'crouching', f8, 0, 'friendly', scale), at(L.assistant));
+    return c;
+  };
+  const addCanvas = (row: HTMLElement, label: string, cv: HTMLCanvasElement, zoom = 1) => cell(row, label, cv, zoom);
+  for (const [weaponId, side] of CREW_WEAPONS) {
+    const row1 = section(`Crew-served weapon — ${weaponId} (${side}) — 1x (zoom 1), 8 facings: set up / packed`);
+    for (let f = 0; f < 8; f++) addCanvas(row1, `f${f} set up`, scene(weaponId, side, 'summer', f, false, 1), 2);
+    for (let f = 0; f < 8; f += 2) addCanvas(row1, `f${f} packed`, scene(weaponId, side, 'summer', f, true, 1), 2);
+    const row2 = section(`Crew-served weapon — ${weaponId} (${side}) — 2x (zoom 2), 8 facings: set up / packed`);
+    for (let f = 0; f < 8; f++) addCanvas(row2, `f${f} set up`, scene(weaponId, side, 'summer', f, false, 2), 1);
+    for (let f = 0; f < 8; f += 2) addCanvas(row2, `f${f} packed`, scene(weaponId, side, 'summer', f, true, 2), 1);
+    addCanvas(row2, 'winter f1', scene(weaponId, side, 'winter', 1, false, 2), 1);
+  }
+  const vRow = section('Crew-served weapons — sprite variants (ready / half / packed) at 2x, weapon only, x2 magnified');
+  for (const [weaponId, side] of CREW_WEAPONS) {
+    for (const v of ['ready', 'half', 'packed'] as const) cell(vRow, `${weaponId} ${v}`, getWeaponSprite(weaponId, v, Math.PI / 4, side, 'summer', 2), 2);
+  }
+  const pRow = section('Crew poses (german summer, facing 0, 1x | 2x x2)');
+  for (const pose of CREW_POSES) {
+    for (const fr of [0, 1] as const) {
+      zoomCompareCell(pRow, `${pose} fr${fr}`, getCrewPoseSprite('german', 'summer', pose, 0, fr, 'friendly', 1), getCrewPoseSprite('german', 'summer', pose, 0, fr, 'friendly', 2), '#6f7a45');
+    }
+  }
 }
 
 // ------------------------------------------------------ wf5: zoom 2 (2x) --

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Crater Preview</title>
+    <style>
+      html, body { margin: 0; background: #14150f; color: #e8e8e0; font: 12px monospace; }
+      h1 { font-size: 14px; margin: 12px 16px 4px; color: #d8b448; }
+      h2 { font-size: 12px; margin: 14px 16px 4px; color: #c8c0a0; }
+      .row { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 16px; align-items: flex-start; }
+      canvas { display: block; image-rendering: pixelated; border: 1px solid #4a4f44; }
+      .cap { color: #9a9c94; margin-top: 2px; }
+    </style>
+  </head>
+  <body>
+    <h1>CC3 Clone — Craters, grenade holes, foxholes, trenches</h1>
+    <div id="root"></div>
+    <script type="module" src="/tools/craterPreview.ts"></script>
+  </body>
+</html>
