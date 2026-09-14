@@ -13,7 +13,7 @@ import { findPath } from './path';
 import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';
 import { addMessage } from './messages';
-import { applyOrderToSoldier } from './orders';
+import { applyOrderToSoldier, orderRoutePoints, routeVia } from './orders';
 
 // ---------------------------------------------------------------- motivation
 /** Motivation seed from experience (proxy for conscript/regular/elite quality bands) + leadership. */
@@ -544,7 +544,7 @@ function resumeFromOrder(state: BattleState, s: Soldier, team: Team | undefined)
   s.path = [];
   const order = team?.order;
   if (order && (order.type === 'move' || order.type === 'moveFast' || order.type === 'sneak')) {
-    s.path = findPath(state.map, s.pos, order.target, 'infantry');
+    s.path = routeVia(state, s.pos, orderRoutePoints(order), 'infantry');
     s.activity = order.type === 'moveFast' ? 'movingFast' : order.type === 'sneak' ? 'sneaking' : 'moving';
   } else if (order && order.type === 'ambush') {
     s.activity = 'ambushing';

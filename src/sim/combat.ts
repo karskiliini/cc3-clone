@@ -16,6 +16,9 @@ import { coverFrom } from './cover';
 import { onIncomingFire, onExplosionNear, onOwnWound, onCasualtySeen, onGunnerHit, onFired, isFirstFireFrozen, addStress } from './mind';
 import { onVehicleHit, onVehicleNearMiss } from './vehicle';
 import { attackPhase } from './orders';
+import { fireMissionWait, onMissionRound } from './crewWeapon';
+import { observerVisibility } from './spotting';
+import { applyBlastDamage } from './structures';
 import type { Order } from '@/shared/types';
 
 export { hitChance, penetrates };
@@ -427,6 +430,7 @@ export function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: W
   state.explosions.push({ pos: { ...pos }, radiusM: weapon.heRadiusM, t: 0, kind });
   state.events.push({ kind: 'explosion', pos: { ...pos }, side: shooterSide, weaponId: weapon.id });
   leaveCrater(state, pos, weapon);
+  applyBlastDamage(state, pos, weapon);
 }
 
 /** Blast mark size by explosive: grenade ~1 m scorched hole, AT rocket a small scorch, mortar
@@ -732,8 +736,19 @@ function stepSoldierCombat(state: BattleState, rng: Rng, dt: number, soldier: So
 
   const target = pickTarget(state, soldier, team, weapon);
   if (!target) return;
+  // crew-served weapons (HMG / AT gun): lay and load before the first round of a new fire mission
+  if (team?.crewWeapon) {
+    const wait = fireMissionWait(state, team, soldier, {
+      aim: targetPosOf(target),
+      targetTeamId: target.kind === 'soldier' ? target.soldier.teamId
+        : target.kind === 'vehicle' ? target.vehicle.teamId
+          : team.order?.type === 'fire' ? team.order.targetTeamId ?? null : null,
+    });
+    if (wait > 0) { soldier.fireTimer = Math.min(wait, 0.5); return; }
+  }
   onFired(state, rng, soldier);
   fireBurst(state, rng, soldier, weapon, target);
+  onMissionRound(team, soldier);
 }
 
 // ------------------------------------------------------------------ grenades
@@ -772,18 +787,125 @@ function stepGrenades(state: BattleState, rng: Rng, dt: number, track: CombatTra
 }
 
 // ------------------------------------------------------------------- mortars
-function teamHasLOSTo(state: BattleState, side: Side, target: Vec2): boolean {
-  for (const s of state.soldiers.values()) {
-    if (s.side !== side) continue;
-    if (s.health === 'dead' || s.health === 'incapacitated') continue;
-    if (hasLOS(state.map, s.pos, target)) return true;
-  }
-  return false;
+// Indirect fire (manual: "Mortars, rockets: can fire over obstacles via indirect fire; LOS not
+// required, though LOS improves accuracy"). A mortar fires at
+//  (a) an ordered point anywhere between its minimum and maximum range, seen or not;
+//  (b) an attack-unit target while any soldier of its side spots that team (the aim follows it),
+//      then its last known position for the suppression period;
+//  (c) with no fire order: a spotted enemy cluster, else a strong belief held by the gunner or the
+//      team leader (suppression).
+// Dispersion depends on who observes the fall of shot, re-evaluated for every round:
+//  1. 'spotted': a friendly soldier sees the impact area AND enemy soldiers his side has spotted
+//     within MORTAR_SPOTTED_AREA_M of the aim point, which he himself can see: walks in to x1.0;
+//  2. 'area': someone sees the impact area but no spotted enemy there: x1.6, walks in to x1.4;
+//  3. 'none': nobody sees it: x2.5, no walk-in.
+// The best spotter's distance and state scale the tier's multiplier; a spotter from outside the
+// mortar team costs a correction delay before the first round. A tier change restarts walk-in.
+
+/** Gaussian sigma of a mortar round (metres) before observation multipliers. */
+export function mortarBaseDispersionM(distM: number): number {
+  return 3 + distM / 100;
+}
+export type MortarObservation = 'spotted' | 'area' | 'none';
+/** Multiplier per round fired in the current tier (the last entry repeats). */
+export const MORTAR_TIER_WALK: Record<MortarObservation, readonly number[]> = {
+  spotted: [1.6, 1.3, 1.1, 1.0],
+  area: [1.6, 1.5, 1.4],
+  none: [2.5],
+};
+/** Spotter correction delay before the first round (seconds) by his experience: 4 green, 2 veteran.
+ * None when the mortar crew itself spots. */
+export const MORTAR_SPOTTER_DELAY_S: [number, number] = [2, 4];
+/** Spotted enemies this close to the aim point make it a spotted target. */
+export const MORTAR_SPOTTED_AREA_M = 25;
+/** Spotter distance scaling: x1.0 up to NEAR, rising linearly to x1.25 at MAX; beyond MAX not a spotter. */
+export const MORTAR_SPOTTER_NEAR_M = 150;
+export const MORTAR_SPOTTER_MAX_M = 600;
+export const MORTAR_SPOTTER_FAR_MUL = 1.25;
+export const MORTAR_SPOTTER_SHAKEN_MUL = 1.15;
+export const MORTAR_SPOTTER_PINNED_MUL = 1.3;
+/** Belief suppression (c): only beliefs this confident, fired on every 2nd opportunity. */
+const MORTAR_BELIEF_CONFIDENCE = 0.6;
+
+/** Sigma (metres) of a mortar round: range, observation tier, rounds already fired in that tier,
+ * and the spotter quality multiplier (distance/state; 1 for unobserved fire). */
+export function mortarDispersionM(distM: number, obs: MortarObservation, roundsInTier: number, spotterMul = 1): number {
+  const walk = MORTAR_TIER_WALK[obs];
+  const m = walk[Math.min(Math.max(0, roundsInTier), walk.length - 1)];
+  return mortarBaseDispersionM(distM) * m * (obs === 'none' ? 1 : spotterMul);
 }
 
-function findEnemyCluster(state: BattleState, side: Side): Vec2 | null {
+/** Can this soldier act as a spotter at all (alive, on foot, not cowering/panicked/fleeing)? */
+function canSpot(s: Soldier | undefined): s is Soldier {
+  if (!s || s.health === 'dead' || s.health === 'incapacitated' || s.vehicleId != null) return false;
+  if (s.activity === 'panicked' || s.activity === 'routed' || s.activity === 'surrendered' || s.activity === 'cowering') return false;
+  const st = s.mind?.state;
+  return st !== 'panicked' && st !== 'cowering' && st !== 'broken';
+}
+
+/** Spotter quality multiplier from distance to the aim point and his state. */
+export function spotterQualityMul(s: Soldier, aim: Vec2): number {
+  const dM = dist(s.pos, aim) * TILE_M;
+  const far = clamp((dM - MORTAR_SPOTTER_NEAR_M) / (MORTAR_SPOTTER_MAX_M - MORTAR_SPOTTER_NEAR_M), 0, 1);
+  let m = 1 + (MORTAR_SPOTTER_FAR_MUL - 1) * far;
+  if (s.mind?.state === 'pinned' || s.activity === 'pinned') m *= MORTAR_SPOTTER_PINNED_MUL;
+  else if (s.mind?.state === 'shaken') m *= MORTAR_SPOTTER_SHAKEN_MUL;
+  return m;
+}
+
+export interface MortarObservationResult {
+  obs: MortarObservation;
+  spotter: Soldier | null;
+  /** spotter quality multiplier (1 when unobserved) */
+  mul: number;
+  /** the spotter belongs to the mortar team (no correction delay) */
+  own: boolean;
+}
+
+/** Observation of the impact area at `aim` for `team`'s mortar right now (same LOS/visibility rules as
+ * spotting.ts). Best tier wins; within it the best spotter: team leader and command teams first,
+ * then highest experience, then nearest to the aim point. */
+export function mortarObservation(state: BattleState, team: Team, aim: Vec2): MortarObservationResult {
+  const areaTiles = MORTAR_SPOTTED_AREA_M / TILE_M;
+  const enemiesNear: Soldier[] = [];
+  for (const id of state.spotted[team.side]) {
+    const e = state.soldiers.get(id);
+    if (!e || e.health === 'dead' || e.health === 'incapacitated' || e.vehicleId != null) continue;
+    if (dist(e.pos, aim) <= areaTiles) enemiesNear.push(e);
+  }
+  let best: Soldier | null = null;
+  let bestTier = 0; // 2 spotted, 1 area
+  let bestKey: [number, number, number] = [0, 0, 0];
+  for (const s of state.soldiers.values()) {
+    if (s.side !== team.side || !canSpot(s)) continue;
+    const observer = { pos: s.pos, soldier: s };
+    if (observerVisibility(state, observer, aim, MORTAR_SPOTTER_MAX_M) <= 0) continue;
+    let tier = 1;
+    for (const e of enemiesNear) {
+      if (observerVisibility(state, observer, e.pos, MORTAR_SPOTTER_MAX_M) > 0) { tier = 2; break; }
+    }
+    const sTeam = state.teams.get(s.teamId);
+    const priority = (s.teamId === team.id && s.id === team.leaderId) || sTeam?.type === 'command' ? 1 : 0;
+    const key: [number, number, number] = [priority, s.experience, -dist(s.pos, aim)];
+    const better = !best || tier > bestTier
+      || (tier === bestTier && (key[0] > bestKey[0] || (key[0] === bestKey[0] && (key[1] > bestKey[1] || (key[1] === bestKey[1] && key[2] > bestKey[2])))));
+    if (better) { best = s; bestTier = tier; bestKey = key; }
+  }
+  if (!best) return { obs: 'none', spotter: null, mul: 1, own: false };
+  return { obs: bestTier === 2 ? 'spotted' : 'area', spotter: best, mul: spotterQualityMul(best, aim), own: best.teamId === team.id };
+}
+
+/** Rounds fired in the current observation tier, per mission (a tier change restarts walk-in). */
+const tierWalk = new WeakMap<object, { tier: MortarObservation; rounds: number }>();
+
+/** Test/HUD hook: the observation tier of the team's last mortar round and rounds fired in it. */
+export function mortarWalkState(team: Team): { tier: MortarObservation; rounds: number } | null {
+  return tierWalk.get(team.crewWeapon?.mission ?? team) ?? null;
+}
+
+function findEnemyCluster(state: BattleState, side: Side): Soldier | null {
   const ids = Array.from(state.spotted[side]);
-  let best: Vec2 | null = null;
+  let best: Soldier | null = null;
   let bestCount = 0;
   for (const id of ids) {
     const s = state.soldiers.get(id);
@@ -794,7 +916,7 @@ function findEnemyCluster(state: BattleState, side: Side): Vec2 | null {
       if (!s2 || s2.health === 'dead') continue;
       if (dist(s.pos, s2.pos) <= 5) count++;
     }
-    if (count > bestCount) { bestCount = count; best = s.pos; }
+    if (count > bestCount) { bestCount = count; best = s; }
   }
   // Tried lowering this to 2 (more mortar targets on spread-out defenses); harness showed it made
   // the attacker win rate slightly worse (31%->27%), so reverted to the original threshold.
@@ -811,11 +933,77 @@ function findGunner(state: BattleState, team: Team): Soldier | null {
   return null;
 }
 
+function inMortarRange(gunner: Soldier, weapon: WeaponDef, p: Vec2): boolean {
+  const dM = dist(gunner.pos, p) * TILE_M;
+  return dM >= (weapon.minRangeM ?? 0) && dM <= weapon.rangeM;
+}
+
+/** Strongest belief (gunner's or team leader's) worth suppressing, in range. */
+function mortarBeliefTarget(state: BattleState, team: Team, gunner: Soldier, weapon: WeaponDef): Vec2 | null {
+  let best: Vec2 | null = null;
+  let bestScore = 0;
+  const leader = state.soldiers.get(team.leaderId);
+  for (const s of [gunner, leader]) {
+    if (!s || s.health === 'dead' || s.health === 'incapacitated') continue;
+    for (const b of s.mind.beliefs) {
+      if (b.confidence < MORTAR_BELIEF_CONFIDENCE || !inMortarRange(gunner, weapon, b.pos)) continue;
+      const score = b.confidence * Math.max(1, b.count);
+      if (score > bestScore) { bestScore = score; best = b.pos; }
+    }
+  }
+  return best;
+}
+
+/** AI hook: a belief of this mortar team's gunner or leader worth an area fire mission, or null. */
+export function mortarBeliefAimFor(state: BattleState, team: Team): Vec2 | null {
+  const gunner = findGunner(state, team);
+  const weapon = gunner ? WEAPONS[gunner.weaponId] : undefined;
+  return gunner && weapon ? mortarBeliefTarget(state, team, gunner, weapon) : null;
+}
+
+export interface MortarAim { pos: Vec2; trackedTeamId: number | null; kind: 'ordered' | 'tracked' | 'lastKnown' | 'cluster' | 'belief' | 'smoke' }
+
+/** Where this mortar would fire right now (null = hold fire). Pure except for the belief throttle. */
+export function pickMortarAim(state: BattleState, team: Team, gunner: Soldier, weapon: WeaponDef, track?: CombatTrack): MortarAim | null {
+  const order = team.order;
+  if (order?.type === 'smoke') {
+    if (!weapon.smoke) return null;
+    return inMortarRange(gunner, weapon, order.target) ? { pos: order.target, trackedTeamId: null, kind: 'smoke' } : null;
+  }
+  if (order?.type === 'fire' && order.target) {
+    if (order.targetTeamId == null) {
+      return inMortarRange(gunner, weapon, order.target) ? { pos: order.target, trackedTeamId: null, kind: 'ordered' } : null;
+    }
+    const phase = attackPhase(state, order);
+    if (phase !== 'hold') {
+      // tracking: the side spots the team (stepAttackOrders keeps order.target on it);
+      // suppress: its last known position
+      if (!inMortarRange(gunner, weapon, order.target)) return null;
+      return { pos: order.target, trackedTeamId: order.targetTeamId, kind: phase === 'tracking' ? 'tracked' : 'lastKnown' };
+    }
+  }
+  const cluster = findEnemyCluster(state, team.side);
+  if (cluster && inMortarRange(gunner, weapon, cluster.pos)) {
+    return { pos: cluster.pos, trackedTeamId: cluster.teamId, kind: 'cluster' };
+  }
+  if (order?.type === 'ambush') return null; // ambushers hold fire on mere suspicion
+  const belief = mortarBeliefTarget(state, team, gunner, weapon);
+  if (!belief) return null;
+  if (track) {
+    const n = (track.beliefFireCounter.get(gunner.id) ?? 0) + 1;
+    track.beliefFireCounter.set(gunner.id, n);
+    if (n % 2 !== 0) { gunner.fireTimer = 1 / weapon.rate; return null; }
+  }
+  return { pos: belief, trackedTeamId: null, kind: 'belief' };
+}
+
 function stepMortarTeam(state: BattleState, rng: Rng, dt: number, team: Team, track: CombatTrack): void {
   const gunner = findGunner(state, team);
   if (!gunner) return;
   const weapon = WEAPONS[gunner.weaponId];
   if (!weapon) return;
+  // soldier-mind rules: panicked / cowering / frozen crews do not work the mortar
+  if (!canSoldierFire(gunner, state)) return;
 
   gunner.fireTimer -= dt;
   if (gunner.ammo <= 0) {
@@ -836,18 +1024,25 @@ function stepMortarTeam(state: BattleState, rng: Rng, dt: number, team: Team, tr
   }
   if (gunner.fireTimer > 0) return;
 
-  const order = team.order;
-  const isSmokeOrder = order?.type === 'smoke' && weapon.smoke;
-
-  let target: Vec2 | null = null;
-  if (order?.type === 'fire' && order.target) target = attackPhase(state, order) === 'hold' ? findEnemyCluster(state, team.side) : order.target;
-  else if (isSmokeOrder) target = order!.target;
-  else target = findEnemyCluster(state, team.side);
-  if (!target) return;
-
+  const aim = pickMortarAim(state, team, gunner, weapon, track);
+  if (!aim) return;
+  const target = aim.pos;
+  const isSmokeOrder = aim.kind === 'smoke';
   const distM = dist(gunner.pos, target) * TILE_M;
-  if (distM < (weapon.minRangeM ?? 0) || distM > weapon.rangeM) return;
-  if (!teamHasLOSTo(state, team.side, target)) return;
+
+  const { obs, spotter, mul, own } = mortarObservation(state, team, target);
+  const extraDelay = obs !== 'none' && spotter && !own
+    ? MORTAR_SPOTTER_DELAY_S[1] - (MORTAR_SPOTTER_DELAY_S[1] - MORTAR_SPOTTER_DELAY_S[0]) * clamp(spotter.experience / 100, 0, 1)
+    : 0;
+  const wait = fireMissionWait(state, team, gunner, { aim: target, targetTeamId: aim.trackedTeamId, extraFirstRoundDelayS: extraDelay });
+  if (wait > 0) { gunner.fireTimer = Math.min(wait, 0.5); return; }
+
+  const walkKey: object = team.crewWeapon?.mission ?? team;
+  let walk = tierWalk.get(walkKey);
+  if (!walk || walk.tier !== obs) { walk = { tier: obs, rounds: 0 }; tierWalk.set(walkKey, walk); }
+  const sigmaM = mortarDispersionM(distM, obs, walk.rounds, mul);
+  walk.rounds++;
+  onMissionRound(team, gunner);
 
   gunner.fireTimer = 1 / weapon.rate;
   gunner.ammo--;
@@ -855,11 +1050,13 @@ function stepMortarTeam(state: BattleState, rng: Rng, dt: number, team: Team, tr
   gunner.activity = 'firing';
   state.events.push({ kind: 'shot', pos: { ...gunner.pos }, weaponId: weapon.id, side: gunner.side });
 
-  const errM = 3 + distM / 100;
-  const errTiles = errM / TILE_M;
+  const errTiles = sigmaM / TILE_M;
   const impact = { x: target.x + rng.gauss() * errTiles, y: target.y + rng.gauss() * errTiles };
+  impact.x = clamp(impact.x, 0.01, state.map.width - 0.01);
+  impact.y = clamp(impact.y, 0.01, state.map.height - 0.01);
 
   if (isSmokeOrder) {
+    const order = team.order!;
     const rec = track.smokeRounds.get(team.id) ?? { count: 0, lastAt: -Infinity };
     state.tracers.push({ from: { ...gunner.pos }, to: impact, t: 0, hit: true, kind: 'mortar' });
     addSmoke(state.map, impact, 3, 1.0);
@@ -869,7 +1066,7 @@ function stepMortarTeam(state: BattleState, rng: Rng, dt: number, team: Team, tr
     rec.lastAt = state.time;
     track.smokeRounds.set(team.id, rec);
     if (rec.count >= 3) {
-      team.order = { type: 'defend', target: order!.target, issuedAt: state.time };
+      team.order = { type: 'defend', target: order.target, issuedAt: state.time };
     }
     return;
   }

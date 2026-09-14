@@ -17,7 +17,7 @@ interface ToggleRow {
 
 export class OptionsScreen implements Screen {
   private returnTo: Screen;
-  private panel: Rect = { x: 60, y: 110, w: 680, h: 300 };
+  private panel: Rect = { x: 60, y: 110, w: 680, h: 340 };
 
   private volMinusR: Rect;
   private volPlusR: Rect;
@@ -25,6 +25,7 @@ export class OptionsScreen implements Screen {
   private losR: Rect;
   private speedR: Rect;
   private visionR: Rect;
+  private depthR: Rect;
 
   private realismRows: ToggleRow[];
 
@@ -40,6 +41,7 @@ export class OptionsScreen implements Screen {
     this.losR = { x: p.x + 150, y: rowY(2), w: 100, h: 22 };
     this.speedR = { x: p.x + 150, y: rowY(3), w: 100, h: 22 };
     this.visionR = { x: p.x + 190, y: rowY(4), w: 100, h: 22 };
+    this.depthR = { x: p.x + 190, y: rowY(5), w: 100, h: 22 };
 
     const s = game.settings;
     const rowX = p.x + 590;
@@ -71,6 +73,8 @@ export class OptionsScreen implements Screen {
         s.losLines = !s.losLines;
       } else if (pointInRect(p, this.visionR)) {
         s.showUnitVision = !(s.showUnitVision ?? true);
+      } else if (pointInRect(p, this.depthR)) {
+        s.showDepthMap = !s.showDepthMap;
       } else if (pointInRect(p, this.speedR)) {
         const idx = SPEEDS.indexOf(s.speed);
         s.speed = SPEEDS[(idx + 1) % SPEEDS.length];
@@ -122,6 +126,9 @@ export class OptionsScreen implements Screen {
 
     label('SHOW UNIT VISION', p.x + 24, baseline(this.visionR));
     drawSmallMetalButton(ctx, this.visionR, (s.showUnitVision ?? true) ? 'ON' : 'OFF');
+
+    label('DEPTH MAP (TAB)', p.x + 24, baseline(this.depthR));
+    drawSmallMetalButton(ctx, this.depthR, s.showDepthMap ? 'ON' : 'OFF');
 
     drawShadowText(ctx, 'REALISM', p.x + 380, p.y + 28, 'bold 16px Arial, Helvetica, sans-serif', '#f0d840');
     for (const row of this.realismRows) {

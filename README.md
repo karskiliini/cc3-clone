@@ -22,7 +22,8 @@ order first (hotkey, order bar, or right-click menu), then click the target.
   Shift adds to the selection; Ctrl+A selects all; double-click a team box to centre on it.
 - Orders: press **Z** Move, **X** Move Fast, **C** Sneak, **V** Fire, **B** Smoke, **N** Defend,
   **M** Ambush (or click the order bar in the bottom strip, or right-click for the classic menu),
-  then click the target. Shift-click adds waypoints. Esc cancels.
+  then click the target. Shift-click adds waypoints (visited in click order before the final click). Esc cancels.
+  Order endpoints stay marked on the map; hover one to see its line to the team, click it to select that team.
 - Scroll: two-finger scroll / mouse wheel pans; pinch or Ctrl+wheel zooms around the pointer;
   middle-drag or Space+drag pans; screen edges and arrows/WASD scroll too.
 - Hold **Alt** while placing a Fire order: line of sight (bright green clear, dark green obscured, red blocked).
@@ -30,6 +31,11 @@ order first (hotkey, order bar, or right-click menu), then click the target.
   untouched where he would be spotted for sure, a dark-green tint where only obscured (concealment, distance,
   behind the soldiers' facing), darkened where out of range (300 m ring) or blocked. **L** toggles it
   (also Options → Show Unit Vision); **Shift+L** toggles unit labels.
+- **Tab** depth map: the battlefield's surface height as a relief map (blue-violet holes, grey ground,
+  yellow-orange hedges/fences/walls, red-to-white buildings, green hatch for tree crowns, contours every
+  0.5 m below ground and 2 m above). Craters, foxholes and trenches show as depressions; blasts breach walls,
+  flatten hedges and fences and bring buildings down, and the map follows. The vision overlay is hidden
+  while it is on. **.** / **,** select the next / previous team.
 - **F3** pause, **F5** team data, **F6** inset map, **F7** soldier monitor, **F8** options, **O** overview map,
   **Ctrl+K** toggle corpses, **+ / −** zoom, arrows or screen edge to scroll.
 - Bottom strip: Chat, Options, zoom, Map (inset on/off), Truce, Flee.

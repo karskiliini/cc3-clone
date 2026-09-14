@@ -15,6 +15,8 @@ const DEFAULT_SETTINGS: GameSettings = {
   speed: 1,
   // Selected units' vision overlay, toggled with 'L'.
   showUnitVision: true,
+  // Tab: depth/height map view over the battlefield.
+  showDepthMap: false,
 };
 
 function loadSettings(): GameSettings {

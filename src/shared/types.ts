@@ -119,6 +119,25 @@ export interface GameMap {
   craterMarks?: CraterMark[];
   /** tile indexes changed since last render bake (e.g. vehicle crushing terrain); renderer clears this */
   dirtyTiles?: number[];
+  /** surface height model (sim/heightField.ts), built at map load and updated by blasts/damage */
+  heightField?: HeightField;
+}
+
+/** Surface height in metres at HF_RES samples per tile edge (0.5 m), row-major over
+ * (width*res) x (height*res). `height` = base (terrain/structures) composed with `dig`
+ * (craters, foxholes, trenches); `canopy` is tree-crown height (0 = none), kept apart so a
+ * view can show the ground under woods. `version` increments on every change. */
+export interface HeightField {
+  res: number;
+  w: number;
+  h: number;
+  base: Float32Array;
+  dig: Float32Array;
+  height: Float32Array;
+  canopy: Float32Array;
+  version: number;
+  /** craterMarks already stamped into `dig` */
+  marksApplied: number;
 }
 
 /** A blast mark from one explosion: centre in tile coords, rim diameter in metres. */
@@ -318,7 +337,7 @@ export type TeamMoraleWord = 'Fanatic' | 'Confident' | 'Steady' | 'Shaken' | 'Br
 export type TeamStatusWord =
   | 'Idle' | 'Moving' | 'Moving Fast' | 'Sneaking' | 'Firing' | 'Defending'
   | 'Ambushing' | 'Pinned' | 'Cowering' | 'Panicked' | 'Routed' | 'Broken'
-  | 'Destroyed' | 'Surrendered' | 'Knocked Out' | 'Setting up';
+  | 'Destroyed' | 'Surrendered' | 'Knocked Out' | 'Setting up' | 'Aiming' | 'Loading';
 
 export interface TeamDef {
   id: string;                 // "ger_rifle_41"
@@ -381,6 +400,29 @@ export interface CrewWeaponState {
   abandonedAt: number;
   /** battle seconds the weapon was last set down (a move order issued before this does not pack it) */
   setAt: number;
+  /** fire-mission preparation (sim/crewWeapon.ts): laying on a new target, loading the next round,
+   * or ready to fire. Absent when the weapon has no current mission. (Named `firePhase` because
+   * `phase` is the set-up/packing state above.) */
+  firePhase?: FireMissionPhase;
+  /** the current fire mission, if any */
+  mission?: FireMission;
+}
+
+export type FireMissionPhase = 'aiming' | 'loading' | 'ready';
+
+export interface FireMission {
+  /** point the weapon was laid on (tile coords) */
+  layAim: Vec2;
+  /** attack-unit / engaged team being tracked, or null for a point */
+  targetTeamId: number | null;
+  /** seconds left in the aiming/loading phase */
+  timer: number;
+  /** rounds fired on this mission (mortar walk-in) */
+  rounds: number;
+  /** a round has been (or is being) loaded for this mission */
+  loaded: boolean;
+  /** battle seconds the mission was started */
+  startedAt: number;
 }
 
 // ------------------------------------------------------------------- battle
@@ -526,6 +568,8 @@ export interface GameSettings {
   speed: 1 | 2 | 4;
   /** Shade the map by what the selected units can see ('L' key / Options). Missing = on. */
   showUnitVision?: boolean;
+  /** Depth/height map view (Tab key / Options). Missing = off. */
+  showDepthMap?: boolean;
   // ---- "realism" toggles from the original's Options screen (cosmetic
   // no-ops for now; stored so the UI has somewhere to persist them) ----
   alwaysSeeEnemy?: boolean;

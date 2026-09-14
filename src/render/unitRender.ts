@@ -5,7 +5,7 @@
 import type {
   Camera, BattleState, Side, GameSettings, Soldier, Team, Facing8,
 } from '@/shared/types';
-import { VIEW_W, VIEW_H, ORDER_DOT_COLOR } from '@/shared/types';
+import { VIEW_W, VIEW_H } from '@/shared/types';
 import { facingAngle } from '@/shared/math';
 import { worldToScreen } from '@/engine/camera';
 import { PALETTE, SIDE_COLOR } from '@/render/palette';
@@ -13,7 +13,7 @@ import { getSoldierSprite, getVehicleSprite, getFlagSprite, unitSpriteScale } fr
 import { drawText, textWidth } from '@/render/pixelfont';
 import { VEHICLE_DEFS } from '@/data/units';
 import { teamBarColor } from '@/ui/hud/hudChrome';
-import { attackPhase } from '@/sim/orders';
+import { drawOrderMarkers } from '@/render/orderMarkers';
 import { getWeaponSprite } from '@/render/sprites';
 import { getCrewPoseSprite, type CrewPose } from '@/render/soldierArt';
 import { weaponMuzzleM, weaponTowLengthM } from '@/render/weaponArt';
@@ -471,112 +471,11 @@ function drawTeamLabels(ctx: CanvasRenderingContext2D, cam: Camera, state: Battl
   }
 }
 
-/** Order dot colour: Move blue, Move Fast purple, Sneak yellow, Smoke gray,
- * Fire red (direct, has a locked target team) or orange (suppression fire at
- * a bare point); Defend/Ambush use their arc colours (blue/green). */
-function orderColor(team: Team): string {
-  const order = team.order;
-  if (!order) return ORDER_DOT_COLOR.move;
-  if (order.type === 'fire' && order.targetTeamId == null) return '#e08a2c';
-  return ORDER_DOT_COLOR[order.type];
-}
-
-/** Attack-unit Fire order: a red line to the tracked target and a red dot that follows it every
- * frame (small red rings on the targeted enemy's spotted men/hull); while the target is lost the
- * dot is drawn hollow and dimmed at the last known position. */
-function drawAttackOrder(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, team: Team): void {
-  const order = team.order!;
-  const lost = attackPhase(state, order) !== 'tracking';
-  const color = ORDER_DOT_COLOR.fire;
-  const from = worldToScreen(cam, team.pos);
-  const to = worldToScreen(cam, order.target);
-  ctx.save();
-  ctx.globalAlpha = lost ? 0.55 : 1;
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1;
-  if (lost) ctx.setLineDash([3, 3]);
-  ctx.beginPath();
-  ctx.moveTo(from.x, from.y);
-  ctx.lineTo(to.x, to.y);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.beginPath();
-  ctx.arc(to.x, to.y, lost ? 3 : 2.5, 0, Math.PI * 2);
-  if (lost) ctx.stroke();
-  else { ctx.fillStyle = color; ctx.fill(); }
-  const target = order.targetTeamId != null ? state.teams.get(order.targetTeamId) : undefined;
-  if (target && !lost) {
-    ctx.globalAlpha = 0.8;
-    if (target.vehicleId != null) {
-      const v = state.vehicles.get(target.vehicleId);
-      if (v && state.spottedVehicles[team.side].has(v.id)) {
-        const p = worldToScreen(cam, v.pos);
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 12 * cam.zoom, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-    } else {
-      for (const id of target.soldierIds) {
-        const s = state.soldiers.get(id);
-        if (!s || s.health === 'dead' || s.health === 'incapacitated' || !state.spotted[team.side].has(id)) continue;
-        const p = worldToScreen(cam, s.pos);
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 5 * cam.zoom, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-    }
-  }
-  ctx.restore();
-}
-
-function drawOrderLine(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, team: Team): void {
-  const order = team.order;
-  if (!order) return;
-  if (order.type === 'fire' && order.targetTeamId != null) { drawAttackOrder(ctx, cam, state, team); return; }
-  const color = orderColor(team);
-  const from = worldToScreen(cam, team.pos);
-  if (order.type === 'defend' || order.type === 'ambush') {
-    const rad = facingAngle(team.facing) - Math.PI / 2;
-    const spread = Math.PI / 6; // 30deg either side = 60deg arc
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(from.x, from.y, 20 * cam.zoom, rad - spread, rad + spread);
-    ctx.stroke();
-    ctx.restore();
-    return;
-  }
-  // Thin line from the team to each waypoint (if any) and finally the
-  // target, with a small filled dot at each stop — matches the original's
-  // order-dot presentation rather than a dashed line with an end marker.
-  const points = [order.target, ...(order.waypoints ?? [])];
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1;
-  let prev = from;
-  for (const wp of points) {
-    const to = worldToScreen(cam, wp);
-    ctx.beginPath();
-    ctx.moveTo(prev.x, prev.y);
-    ctx.lineTo(to.x, to.y);
-    ctx.stroke();
-    prev = to;
-  }
-  for (const wp of points) {
-    const p = worldToScreen(cam, wp);
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
 export function drawUnits(
   ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState,
   playerSide: Side, selectedTeamIds: readonly number[], settings: GameSettings,
   showDead = true,
+  orderHover: { teamId: number } | null = null,
 ): void {
   ctx.save();
   ctx.beginPath();
@@ -592,10 +491,8 @@ export function drawUnits(
   drawFlags(ctx, cam, state);
   drawTeamLabels(ctx, cam, state, settings);
 
-  for (const id of selectedTeamIds) {
-    const team = state.teams.get(id);
-    if (team && team.side === playerSide) drawOrderLine(ctx, cam, state, team);
-  }
+  // order endpoints for every friendly team; lines for the selected / hovered ones (orderMarkers.ts)
+  drawOrderMarkers(ctx, cam, state, playerSide, selectedTeamIds, orderHover);
 
   ctx.restore();
 }

@@ -9,6 +9,7 @@ import { isPassable } from './path';
 import { hasLOS } from './los';
 import { VEHICLE_DEFS } from '@/data/units';
 import { WEAPONS } from '@/data/weapons';
+import { mortarBeliefAimFor } from './combat';
 
 export interface AIBattle {
   issueOrder(teamId: number, order: Order): void;
@@ -406,6 +407,7 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
         // HE at that range risks our own troops. Falls back to screening our own best VL if nothing
         // is contested (previous behaviour).
         const defended = findDefendedObjective(state, side, allVLsSorted);
+        let beliefAim: Vec2 | null = null;
         if (defended) {
           const distToDefended = nearestAttackerDistToPoint(attackerTeams, { x: defended.x, y: defended.y });
           if (distToDefended > 150) {
@@ -418,6 +420,9 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
           } else {
             tryIssueOrder(state, battle, track, team, { type: 'smoke', target: { x: defended.x, y: defended.y }, issuedAt: state.time });
           }
+        } else if ((beliefAim = mortarBeliefAimFor(state, team))) {
+          // indirect fire on what the crew / its leader believes is out there (suppression)
+          tryIssueOrder(state, battle, track, team, { type: 'fire', target: { x: beliefAim.x, y: beliefAim.y }, issuedAt: state.time });
         } else if (ownedVLs.length) {
           const contested = ownedVLs.reduce((best, vl) => (!best || vl.value > best.value ? vl : best));
           tryIssueOrder(state, battle, track, team, { type: 'smoke', target: { x: contested.x, y: contested.y }, issuedAt: state.time });

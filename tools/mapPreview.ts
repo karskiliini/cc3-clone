@@ -8,6 +8,8 @@ import { buildMap } from '@/sim/map';
 import { TerrainRenderer } from '@/render/terrainRender';
 import { createCamera, centerCamera, clampCamera } from '@/engine/camera';
 import { VIEW_W, VIEW_H } from '@/shared/types';
+import { DepthOverlay, rasterizeDepth } from '@/render/depthOverlay';
+import { getHeightField } from '@/sim/heightField';
 
 const THUMB_W = 480;
 const THUMB_H = 360;
@@ -25,6 +27,8 @@ const ZOOM_QS = qs.has('zoom') ? Number(qs.get('zoom')) : 1;
 const previewZoom = [0.5, 1, 2].includes(ZOOM_QS) ? ZOOM_QS : 1;
 // ?map=steppe_1943 renders only that map (faster art QA / headless capture).
 const mapFilter = qs.get('map');
+// ?depth=1 draws the Tab depth-map view over the 1:1 viewport and adds a whole-map depth thumbnail.
+const depthView = qs.get('depth') === '1';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -85,6 +89,32 @@ function renderMap(root: HTMLElement, mapId: string): void {
   // scrolling smooth); repeatedly redraw here so this static preview shows fully-baked,
   // full-detail chunks rather than the low-res scrolling fallback.
   for (let i = 0; i < 40; i++) renderer.draw(vctx, cam);
+  if (depthView) {
+    const overlay = new DepthOverlay();
+    const t0 = performance.now();
+    overlay.update(map, cam);
+    const ms = performance.now() - t0;
+    overlay.draw(vctx, cam);
+    overlay.drawLegend(vctx);
+    block.dataset.depthMs = ms.toFixed(1);
+
+    const field = getHeightField(map);
+    const img = rasterizeDepth(field, { x0: 0, y0: 0, cols: map.width, rows: map.height, ppt: 4 });
+    const full = el('canvas');
+    full.width = img.w; full.height = img.h;
+    full.getContext('2d')!.putImageData(new ImageData(img.data as Uint8ClampedArray<ArrayBuffer>, img.w, img.h), 0, 0);
+    const scaled = el('canvas');
+    scaled.width = THUMB_W; scaled.height = THUMB_H;
+    const sctx = scaled.getContext('2d')!;
+    sctx.imageSmoothingEnabled = true;
+    sctx.drawImage(full, 0, 0, THUMB_W, THUMB_H);
+    const depthWrap = el('div', 'thumb-wrap');
+    depthWrap.appendChild(scaled);
+    const cap = el('div', 'caption');
+    cap.textContent = `depth map (whole map) — viewport raster ${ms.toFixed(1)} ms`;
+    depthWrap.appendChild(cap);
+    row.appendChild(depthWrap);
+  }
   viewWrap.appendChild(viewCanvas);
   const viewCaption = el('div', 'caption');
   viewCaption.textContent = cxOverride !== null || cyOverride !== null

@@ -12,9 +12,9 @@
 //    weapon is not ready (moving, packing, setting up, or abandoned).
 // Deterministic: no rng, only battle time and soldier state.
 // ============================================================================
-import type { BattleState, CrewWeaponState, Soldier, Team, Vec2, WeaponClass, OrderType } from '@/shared/types';
+import type { BattleState, CrewWeaponState, FireMission, Soldier, Team, Vec2, WeaponClass, OrderType } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
-import { angleTo, clamp, dist, facingAngle, turnTowards } from '@/shared/math';
+import { angleTo, clamp, dist, facingAngle, turnTowards, wrapAngle } from '@/shared/math';
 import { WEAPONS } from '@/data/weapons';
 import { findPath } from './path';
 import { addMessage } from './messages';
@@ -264,6 +264,7 @@ function stepTeamWeapon(state: BattleState, team: Team, dt: number): void {
     cw = initCrewWeapon(state, team, gunner, cls);
   }
 
+  if (!isActive(gunner) || cw.abandoned || isFleeing(gunner)) clearMission(cw);
   if (!isActive(gunner)) {
     // gunner down: the weapon lies where it is until the next man takes it over
     if (!cw.abandoned) {
@@ -344,6 +345,7 @@ function stepTeamWeapon(state: BattleState, team: Team, dt: number): void {
       break;
     }
   }
+  stepMission(cw, gunner, cls, dt);
   gateFire(cw, gunner, dt);
 }
 
@@ -372,8 +374,153 @@ export function isHeldForPacking(state: BattleState, s: Soldier): boolean {
   return !isFleeing(s);
 }
 
-/** Team status override for the HUD ('Setting up' while the crew assembles the weapon). */
-export function crewWeaponStatus(team: Team): 'Setting up' | null {
+/** Team status override for the HUD ('Setting up' while the crew assembles the weapon, 'Aiming' /
+ * 'Loading' while it prepares a fire mission). */
+export function crewWeaponStatus(team: Team): 'Setting up' | 'Aiming' | 'Loading' | null {
   const cw = team.crewWeapon;
-  return cw && !cw.abandoned && cw.phase === 'settingUp' ? 'Setting up' : null;
+  if (!cw || cw.abandoned) return null;
+  if (cw.phase === 'settingUp') return 'Setting up';
+  if (cw.phase === 'ready' && cw.firePhase === 'aiming') return 'Aiming';
+  if (cw.phase === 'ready' && cw.firePhase === 'loading') return 'Loading';
+  return null;
+}
+
+// ------------------------------------------------------------------ fire missions
+// Every new fire mission of a crew-served weapon goes through lay (aim) -> load -> fire before the
+// first round; later rounds on the same target only need the load time (on top of the weapon's
+// normal rate of fire); a new aim point more than MISSION_NEW_AIM_M away starts a new lay; a
+// tracked team that moves more than MISSION_RELAY_M from the lay point costs a short re-lay.
+
+/** A new aim point further than this from the current lay point starts a new mission. */
+export const MISSION_NEW_AIM_M = 15;
+/** A tracked target that has moved further than this from the lay point needs a re-lay correction. */
+export const MISSION_RELAY_M = 10;
+/** Mortar lay time at zero / at maximum range (seconds, average crew). */
+export const MORTAR_LAY_S: [number, number] = [6, 10];
+/** AT gun traverse-and-lay: this much for no traverse, up to the max for a half-turn. */
+export const ATGUN_LAY_S: [number, number] = [1.5, 4];
+export const HMG_LAY_S = 2;
+/** Load time per round. HMGs are belt fed: no separate load phase. */
+export const LOAD_S: Record<CrewServedClass, number> = { mortar: 2, hmg: 0, atgun: 3.5 };
+/** Re-lay correction on a moving tracked target (seconds, average crew). */
+export const RELAY_S = 1.5;
+
+/** Crew-drill speed factor: green crews slower (x1.2), veterans faster (x0.8). */
+export function crewDrillFactor(experience: number): number {
+  return clamp(1.2 - experience / 250, 0.8, 1.2);
+}
+
+/** Lay (aim) time for a new mission. `distM` is the range to the aim point, `traverseRad` the angle
+ * the weapon must turn from its current facing. */
+export function layTimeS(weaponId: string, experience: number, distM: number, traverseRad: number): number {
+  const cls = crewServedClass(weaponId);
+  if (!cls) return 0;
+  const f = crewDrillFactor(experience);
+  if (cls === 'mortar') {
+    const range = WEAPONS[weaponId]?.rangeM ?? 1000;
+    return (MORTAR_LAY_S[0] + (MORTAR_LAY_S[1] - MORTAR_LAY_S[0]) * clamp(distM / range, 0, 1)) * f;
+  }
+  if (cls === 'atgun') {
+    return (ATGUN_LAY_S[0] + (ATGUN_LAY_S[1] - ATGUN_LAY_S[0]) * clamp(Math.abs(traverseRad) / Math.PI, 0, 1)) * f;
+  }
+  return HMG_LAY_S * f;
+}
+
+export function loadTimeS(weaponId: string, experience: number): number {
+  const cls = crewServedClass(weaponId);
+  return cls ? LOAD_S[cls] * crewDrillFactor(experience) : 0;
+}
+
+function clearMission(cw: CrewWeaponState): void {
+  cw.mission = undefined;
+  cw.firePhase = undefined;
+}
+
+/** Crews that are not in a state to work the gun abort the mission. */
+function canWorkGun(s: Soldier): boolean {
+  return !isFleeing(s) && s.activity !== 'cowering' && s.activity !== 'routed';
+}
+
+function stepMission(cw: CrewWeaponState, gunner: Soldier, cls: CrewServedClass, dt: number): void {
+  const m = cw.mission;
+  if (!m) return;
+  if (cw.phase !== 'ready' || cw.abandoned || !canWorkGun(gunner)) { clearMission(cw); return; }
+  if (cw.firePhase === 'ready') return;
+  m.timer -= dt;
+  if (m.timer > 0) return;
+  if (cw.firePhase === 'aiming') {
+    const load = LOAD_S[cls] * crewDrillFactor(gunner.experience);
+    if (load > 0 && !m.loaded) { cw.firePhase = 'loading'; m.loaded = true; m.timer += load; if (m.timer > 0) return; }
+  }
+  m.timer = 0;
+  cw.firePhase = 'ready';
+}
+
+export interface FireRequest {
+  /** where the round is going */
+  aim: Vec2;
+  /** team being engaged/tracked, or null for a point target */
+  targetTeamId: number | null;
+  /** extra seconds before the first round of a new mission (e.g. a spotter's correction by radio) */
+  extraFirstRoundDelayS?: number;
+}
+
+/** Called by combat when the gunner of a crew-served weapon wants to fire at `req.aim`. Starts a new
+ * mission (lay + load) or a re-lay correction as needed and returns the seconds still to wait, or 0
+ * when the round may be fired now. Soldiers who do not serve a crew weapon always get 0. */
+export function fireMissionWait(state: BattleState, team: Team | undefined, gunner: Soldier, req: FireRequest): number {
+  const cw = team?.crewWeapon;
+  if (!cw || cw.gunnerId !== gunner.id || gunner.weaponId !== cw.weaponId) return 0;
+  const cls = crewServedClass(cw.weaponId);
+  if (!cls) return 0;
+  if (cw.phase !== 'ready' || cw.abandoned || !canWorkGun(gunner)) { clearMission(cw); return 1; }
+  const m = cw.mission;
+  const movedM = m ? dist(m.layAim, req.aim) * TILE_M : Infinity;
+  const sameTrack = !!m && m.targetTeamId != null && m.targetTeamId === req.targetTeamId;
+  if (!m || (!sameTrack && movedM > MISSION_NEW_AIM_M)) {
+    const distM = dist(gunner.pos, req.aim) * TILE_M;
+    const traverse = wrapAngle(angleTo(cw.pos, req.aim) - cw.facing);
+    const lay = layTimeS(cw.weaponId, gunner.experience, distM, traverse) + (req.extraFirstRoundDelayS ?? 0);
+    const mission: FireMission = {
+      layAim: { x: req.aim.x, y: req.aim.y }, targetTeamId: req.targetTeamId, timer: lay, rounds: 0, loaded: false, startedAt: state.time,
+    };
+    cw.mission = mission;
+    cw.firePhase = 'aiming';
+    return missionRemaining(cw, cls, gunner);
+  }
+  if (sameTrack && movedM > MISSION_RELAY_M) {
+    // tracked target moved: small correction, keeps the mission (and its walk-in)
+    m.layAim = { x: req.aim.x, y: req.aim.y };
+    if (cw.firePhase === 'ready') {
+      cw.firePhase = 'aiming';
+      m.timer = RELAY_S * crewDrillFactor(gunner.experience);
+    } else {
+      m.timer += RELAY_S * crewDrillFactor(gunner.experience);
+    }
+  } else if (!sameTrack && req.targetTeamId !== m.targetTeamId) {
+    m.targetTeamId = req.targetTeamId; // a nearby target of another team: same lay, now tracking it
+  }
+  return cw.firePhase === 'ready' ? 0 : missionRemaining(cw, cls, gunner);
+}
+
+function missionRemaining(cw: CrewWeaponState, cls: CrewServedClass, gunner: Soldier): number {
+  const m = cw.mission!;
+  if (cw.firePhase === 'aiming' && !m.loaded) return m.timer + LOAD_S[cls] * crewDrillFactor(gunner.experience);
+  return Math.max(0, m.timer);
+}
+
+/** Called by combat after a crew-served weapon fired a round: counts it and starts loading the next. */
+export function onMissionRound(team: Team | undefined, gunner: Soldier): void {
+  const cw = team?.crewWeapon;
+  if (!cw || cw.gunnerId !== gunner.id || !cw.mission) return;
+  const cls = crewServedClass(cw.weaponId);
+  if (!cls) return;
+  cw.mission.rounds++;
+  const load = LOAD_S[cls] * crewDrillFactor(gunner.experience);
+  if (load > 0) { cw.firePhase = 'loading'; cw.mission.timer = load; } else cw.firePhase = 'ready';
+}
+
+/** Rounds already fired on the team's current mission (0 when none). */
+export function missionRounds(team: Team | undefined): number {
+  return team?.crewWeapon?.mission?.rounds ?? 0;
 }

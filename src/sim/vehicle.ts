@@ -11,6 +11,7 @@ import { isPassable } from './path';
 import { addStress, addOrMergeBelief } from './mind';
 import { expectedPenetrationChance } from './ballistics';
 import { addMessage } from './messages';
+import { crushTile } from './structures';
 
 const HEADING_ALIGN_RAD = 0.35;
 const BURN_TO_KO_S = 30;
@@ -418,10 +419,6 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
       v.pos = vadd(v.pos, vscale(dir, distTiles));
     }
 
-    if (props.crushable) {
-      setTile(map, tx, ty, 'open');
-      if (!map.dirtyTiles) map.dirtyTiles = [];
-      map.dirtyTiles.push(idx(map, tx, ty));
-    }
+    if (props.crushable) crushTile(map, tx, ty);
   }
 }

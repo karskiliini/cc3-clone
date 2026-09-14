@@ -81,6 +81,8 @@ interface BuildingBBox {
   minX: number; minY: number; maxX: number; maxY: number;
   kind: 'wood' | 'stone';
   id: number;
+  /** roof style class of the undamaged footprint (kept when blasts cave parts of the roof in) */
+  origBig?: boolean;
 }
 
 /** sin/cos of the field's row angle, precomputed once per field so rendering never redoes trig. */
@@ -1337,10 +1339,16 @@ interface Footprint {
  * genuinely enclosed hole — a courtyard, not a concave notch in the outline. */
 function analyzeFootprint(map: GameMap, bb: BuildingBBox): Footprint {
   const w = bb.maxX - bb.minX + 1, h = bb.maxY - bb.minY + 1;
+  // `occ` is the original footprint while classifying outside/courtyard; tiles whose roof has
+  // caved in (blast damage turned them to rubble/wall stubs) are dropped from it at the end, so the
+  // roof is clipped around them without mistaking them for a courtyard.
   const occ = new Array<boolean>(w * h);
+  const caved: number[] = [];
   for (let ty = 0; ty < h; ty++) {
     for (let tx = 0; tx < w; tx++) {
-      occ[ty * w + tx] = map.buildingId[idx(map, bb.minX + tx, bb.minY + ty)] === bb.id;
+      const ti = idx(map, bb.minX + tx, bb.minY + ty);
+      occ[ty * w + tx] = map.buildingId[ti] === bb.id;
+      if (occ[ty * w + tx] && !BUILDING_TERRAINS.has(map.tiles[ti])) caved.push(ty * w + tx);
     }
   }
   const outside = new Array<boolean>(w * h).fill(false);
@@ -1373,6 +1381,8 @@ function analyzeFootprint(map: GameMap, bb: BuildingBBox): Footprint {
   const hole = holeMaxX >= holeMinX
     ? { minX: bb.minX + holeMinX, minY: bb.minY + holeMinY, maxX: bb.minX + holeMaxX, maxY: bb.minY + holeMaxY }
     : null;
+  for (const k of caved) occ[k] = false;
+  if (caved.length) irregular = true;
   return { w, h, occ, hole, irregular };
 }
 
@@ -1517,8 +1527,9 @@ function buildingHeightPx(bb: BuildingBBox, big: boolean, seed: number): number 
  * path (nonzero fill) so overlapping sweeps never double the alpha, with a softer wider halo. */
 function paintBuildingShadow(ctx: CanvasRenderingContext2D, map: GameMap, bb: BuildingBBox, x0: number, y0: number, seed: number, season: Season): void {
   const fp = analyzeFootprint(map, bb);
+  if (!fp.occ.some(Boolean)) return; // ruined: no roof left to cast a shadow
   const wTiles = bb.maxX - bb.minX + 1, hTiles = bb.maxY - bb.minY + 1;
-  const big = fp.hole !== null || (wTiles > 12 && hTiles > 12);
+  const big = bb.origBig ?? (fp.hole !== null || (wTiles > 12 && hTiles > 12));
   const hgt = buildingHeightPx(bb, big, seed);
   const snowy = season === 'winter';
   const sweep = (dx: number, dy: number): Path2D => {
@@ -1552,7 +1563,8 @@ function paintRoof(ctx: CanvasRenderingContext2D, map: GameMap, bb: BuildingBBox
   const stone = bb.kind === 'stone';
   const snowy = season === 'winter';
   const fp = analyzeFootprint(map, bb);
-  const big = fp.hole !== null || (wTiles > 12 && hTiles > 12);
+  if (!fp.occ.some(Boolean)) return; // ruined: the roof is gone
+  const big = bb.origBig ?? (fp.hole !== null || (wTiles > 12 && hTiles > 12));
 
   // Eaves overhang: a tight dark band hugging the S and E eaves (the overhang's own shadow on the
   // wall top), on top of the long cast shadow painted by paintBuildingShadow beforehand.
@@ -2398,6 +2410,9 @@ export class TerrainRenderer {
    * per-tile band painter is skipped for these and a smooth stroked path is drawn instead. */
   private vectorLineTerrains = new Set<Terrain>();
   private winterTracks: WinterTrack[] | null = null;
+  /** terrain as built — lets the bake tell a flattened hedge/fence or breached wall (whose vector
+   * line must be cut there) from ground that was always open */
+  private origTiles: Terrain[];
 
   constructor(map: GameMap) {
     this.map = map;
@@ -2408,7 +2423,12 @@ export class TerrainRenderer {
     const angleRoll = hash2(0, 0, this.seed + 909);
     // 0 or 90 only — a 45 degree roll produced a diagonal chevron barcode at zoom 2.
     this.fieldBaseAngleDeg = angleRoll < 0.5 ? 0 : 90;
+    this.origTiles = map.tiles.slice();
     this.computeBuildingBBoxes();
+    for (const bb of this.buildingBBoxes.values()) {
+      const fp = analyzeFootprint(map, bb);
+      bb.origBig = fp.hole !== null || (bb.maxX - bb.minX + 1 > 12 && bb.maxY - bb.minY + 1 > 12);
+    }
     this.computeFields();
     this.groundUnder = this.computeGroundUnder();
     if (map.def.vectors) {
@@ -2901,11 +2921,22 @@ export class TerrainRenderer {
     // (hedge/fence/stonewall/trench) drawn once per chunk as a stroked path, replacing the
     // per-tile bands skipped above for terrains that have vector geometry on this map.
     if (map.def.vectors && this.vectorLineTerrains.size) {
+      // cut the stroked lines out of tiles whose hedge/fence/wall was flattened or breached
+      const broken = this.brokenLineTiles(x0, y0);
+      if (broken.length) {
+        const clip = new Path2D();
+        clip.rect(-2 * TILE_PX, -2 * TILE_PX, (CHUNK_TILES + 4) * TILE_PX, (CHUNK_TILES + 4) * TILE_PX);
+        for (const bi of broken) clip.rect((bi % map.width - x0) * TILE_PX, (((bi / map.width) | 0) - y0) * TILE_PX, TILE_PX, TILE_PX);
+        ctx.save();
+        ctx.clip(clip, 'evenodd');
+      }
       for (const v of map.def.vectors) {
         if (v.kind !== 'line') continue;
         paintLineVector(ctx, v, x0, y0, this.seed, season);
       }
+      if (broken.length) ctx.restore();
     }
+    this.paintStructureDamage(ctx, x0, y0, season);
 
     if (season === 'winter') {
       if (!this.winterTracks) this.winterTracks = computeWinterTracks(map, this.buildingBBoxes, this.seed);
@@ -2936,6 +2967,7 @@ export class TerrainRenderer {
         if (t === 'buildingWood' || t === 'buildingStone') paintEaveNotches(ctx, map, wx, wy, tx * TILE_PX, ty * TILE_PX);
       }
     }
+    this.paintCavedRoofEdges(ctx, x0, y0);
 
     // ------------------------------------------------------------ trees/bushes
     // Padded by 1 tile on every side (matching drawDecor's padding, and buildings' widened
@@ -2970,6 +3002,113 @@ export class TerrainRenderer {
       console.log(`[terrain] baked chunk (${cx},${cy}) @${zoom}x in ${dt.toFixed(1)}ms`);
     }
     return canvas;
+  }
+
+  /** Tile indexes (chunk + 1 tile border) that started as hedge/fence/stone wall and are no longer. */
+  private brokenLineTiles(x0: number, y0: number): number[] {
+    const map = this.map;
+    const out: number[] = [];
+    for (let wy = Math.max(0, y0 - 1); wy <= Math.min(map.height - 1, y0 + CHUNK_TILES); wy++) {
+      for (let wx = Math.max(0, x0 - 1); wx <= Math.min(map.width - 1, x0 + CHUNK_TILES); wx++) {
+        const i = wy * map.width + wx;
+        const o = this.origTiles[i];
+        if ((o === 'hedge' || o === 'fence' || o === 'stonewall') && map.tiles[i] !== o) out.push(i);
+      }
+    }
+    return out;
+  }
+
+  /** Battle damage on the ground layer: debris of flattened hedges/fences, and stubs of ruined
+   * buildings' walls (standing stone wall tiles inside a building footprint, which no vector
+   * line covers). Breached wall tiles are rubble and get the rubble debris pass already. */
+  private paintStructureDamage(ctx: CanvasRenderingContext2D, x0: number, y0: number, season: Season): void {
+    const map = this.map;
+    for (let ty = 0; ty < CHUNK_TILES; ty++) {
+      const wy = y0 + ty;
+      if (wy >= map.height) break;
+      for (let tx = 0; tx < CHUNK_TILES; tx++) {
+        const wx = x0 + tx;
+        if (wx >= map.width) break;
+        const i = wy * map.width + wx;
+        const o = this.origTiles[i], t = map.tiles[i];
+        const ox = tx * TILE_PX, oy = ty * TILE_PX;
+        if ((o === 'hedge' || o === 'fence') && t !== o) {
+          const n = o === 'hedge' ? 7 : 4;
+          for (let k = 0; k < n; k++) {
+            const px = ox + 2 + hash2(wx * 7 + k, wy, this.seed + 7101) * (TILE_PX - 4);
+            const py = oy + 2 + hash2(wx, wy * 7 + k, this.seed + 7102) * (TILE_PX - 4);
+            if (o === 'hedge') {
+              ctx.fillStyle = season === 'winter' ? 'rgba(70,56,40,0.85)' : k % 2 ? 'rgba(52,78,34,0.9)' : 'rgba(84,104,48,0.85)';
+              ctx.fillRect(Math.round(px), Math.round(py), 2 + (k % 2), 2);
+            } else {
+              ctx.save();
+              ctx.translate(px, py);
+              ctx.rotate(hash2(wx + k, wy + k, this.seed + 7103) * Math.PI);
+              ctx.fillStyle = '#5a4326';
+              ctx.fillRect(-3, -0.5, 6, 1.5);
+              ctx.restore();
+            }
+          }
+        } else if (t === 'stonewall' && map.buildingId[i] >= 0) {
+          // jagged broken wall stub with a shadow
+          ctx.fillStyle = 'rgba(16,16,8,0.35)';
+          ctx.fillRect(ox + 3, oy + 3, TILE_PX - 4, TILE_PX - 4);
+          ctx.fillStyle = '#8e8a82';
+          ctx.fillRect(ox + 2, oy + 2, TILE_PX - 5, TILE_PX - 5);
+          ctx.fillStyle = '#b4b0a6';
+          for (let k = 0; k < 4; k++) {
+            const bx = ox + 2 + Math.floor(hash2(wx + k, wy, this.seed + 7111) * (TILE_PX - 8));
+            const by = oy + 2 + Math.floor(hash2(wx, wy + k, this.seed + 7112) * (TILE_PX - 8));
+            ctx.fillRect(bx, by, 3, 2);
+          }
+          ctx.fillStyle = '#4e4a44';
+          ctx.fillRect(ox + 2, oy + TILE_PX - 5, TILE_PX - 5, 2);
+        }
+      }
+    }
+  }
+
+  /** Broken roof edge where part of a building's roof has caved in: charred dark rim along the
+   * still-roofed neighbours plus a few fallen beams across the hole. */
+  private paintCavedRoofEdges(ctx: CanvasRenderingContext2D, x0: number, y0: number): void {
+    const map = this.map;
+    for (let ty = 0; ty < CHUNK_TILES; ty++) {
+      const wy = y0 + ty;
+      if (wy >= map.height) break;
+      for (let tx = 0; tx < CHUNK_TILES; tx++) {
+        const wx = x0 + tx;
+        if (wx >= map.width) break;
+        const i = wy * map.width + wx;
+        const bid = map.buildingId[i];
+        if (bid < 0 || BUILDING_TERRAINS.has(map.tiles[i])) continue;
+        const ox = tx * TILE_PX, oy = ty * TILE_PX;
+        ctx.fillStyle = 'rgba(24,18,12,0.28)';
+        ctx.fillRect(ox, oy, TILE_PX, TILE_PX);
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = wx + dx, ny = wy + dy;
+          if (!inBounds(map, nx, ny)) continue;
+          const ni = ny * map.width + nx;
+          if (map.buildingId[ni] !== bid || !BUILDING_TERRAINS.has(map.tiles[ni])) continue;
+          // jagged charred rim on the roofed side
+          ctx.fillStyle = 'rgba(20,14,10,0.85)';
+          for (let k = 0; k < TILE_PX; k += 3) {
+            const d = 1 + Math.floor(hash2(wx * 3 + k, wy * 3 + dx + dy, this.seed + 7121) * 3);
+            if (dx === 1) ctx.fillRect(ox + TILE_PX - d, oy + k, d, 3);
+            else if (dx === -1) ctx.fillRect(ox, oy + k, d, 3);
+            else if (dy === 1) ctx.fillRect(ox + k, oy + TILE_PX - d, 3, d);
+            else ctx.fillRect(ox + k, oy, 3, d);
+          }
+        }
+        if (hash2(wx, wy, this.seed + 7131) < 0.45) {
+          ctx.save();
+          ctx.translate(ox + TILE_PX / 2, oy + TILE_PX / 2);
+          ctx.rotate(hash2(wx, wy, this.seed + 7132) * Math.PI);
+          ctx.fillStyle = '#2a1e14';
+          ctx.fillRect(-TILE_PX * 0.45, -1, TILE_PX * 0.9, 2);
+          ctx.restore();
+        }
+      }
+    }
   }
 
   private drawDecor(ctx: CanvasRenderingContext2D, x0: number, y0: number): void {
@@ -3168,7 +3307,28 @@ export class TerrainRenderer {
     const px = TILE_PX * cam.zoom;
 
     if (map.dirtyTiles && map.dirtyTiles.length) {
-      for (const ti of map.dirtyTiles) this.invalidateTile(ti % map.width, Math.floor(ti / map.width));
+      const buildings = new Set<number>();
+      for (const ti of map.dirtyTiles) {
+        this.invalidateTile(ti % map.width, Math.floor(ti / map.width));
+        // a building's roof/shadow spans several chunks: re-bake all of them, and its roof-off view
+        const bid = map.buildingId[ti];
+        if (bid >= 0) buildings.add(bid);
+        // a cut vector line changes its neighbours' tile too (line caps)
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = ti % map.width + dx, ny = Math.floor(ti / map.width) + dy;
+          if (inBounds(map, nx, ny)) this.invalidateTile(nx, ny);
+        }
+      }
+      for (const bid of buildings) {
+        const bb = this.buildingBBoxes.get(bid);
+        this.interiorCache.delete(bid);
+        if (!bb) continue;
+        for (let cy = Math.floor((bb.minY - 2) / CHUNK_TILES); cy <= Math.floor((bb.maxY + 2) / CHUNK_TILES); cy++) {
+          for (let cx = Math.floor((bb.minX - 2) / CHUNK_TILES); cx <= Math.floor((bb.maxX + 2) / CHUNK_TILES); cx++) {
+            this.invalidateTile(Math.max(0, cx * CHUNK_TILES), Math.max(0, cy * CHUNK_TILES));
+          }
+        }
+      }
       map.dirtyTiles.length = 0;
     }
 

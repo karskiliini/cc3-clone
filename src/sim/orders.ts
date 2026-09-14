@@ -79,7 +79,10 @@ function headingFor(state: BattleState, team: Team, order: Order): number {
   const known = orderHeading.get(order);
   if (known != null) return known;
   const leader = state.soldiers.get(team.leaderId);
-  const from = leader && leader.health !== 'dead' && leader.health !== 'incapacitated' ? leader.pos : team.pos;
+  const wps = order.waypoints;
+  // with waypoints, the formation (and a following Defend/Ambush) faces along the LAST leg
+  const from = wps && wps.length > 0 ? wps[wps.length - 1]
+    : leader && leader.health !== 'dead' && leader.health !== 'incapacitated' ? leader.pos : team.pos;
   const h = dist(from, order.target) > 0.5 ? angleTo(from, order.target) : formationBaseHeading(state.map, team.side);
   orderHeading.set(order, h);
   return h;
@@ -90,6 +93,86 @@ function headingFor(state: BattleState, team: Team, order: Order): number {
  * heading, so the rotation is by the difference. */
 export function orderSlotOffset(state: BattleState, team: Team, s: Soldier, order: Order): Vec2 {
   return rotateOffset(s.formationOffset, headingFor(state, team, order) - formationBaseHeading(state.map, team.side));
+}
+
+// ------------------------------------------------------------------ waypoints
+/** Move/MoveFast/Sneak: the points still to visit, in order — remaining waypoints, then the target. */
+export function orderRoutePoints(order: Order): Vec2[] {
+  return order.waypoints && order.waypoints.length > 0 ? [...order.waypoints, order.target] : [order.target];
+}
+
+/** Per-point heading (radians) of the leg each point of a routed path belongs to. */
+const pathLegHeadings = new WeakMap<Vec2[], number[]>();
+
+/** A* path from `from` through each of `points` in turn. An unreachable intermediate point is
+ * skipped (the route goes on to the next one). Records per-point leg headings for followers. */
+export function routeVia(state: BattleState, from: Vec2, points: readonly Vec2[], mover: 'infantry' | 'vehicle'): Vec2[] {
+  if (points.length === 1) {
+    const path = findPath(state.map, from, points[0], mover);
+    if (path.length > 0) pathLegHeadings.set(path, new Array(path.length).fill(dist(from, points[0]) > 1e-6 ? angleTo(from, points[0]) : 0));
+    return path;
+  }
+  let path: Vec2[] = [];
+  const headings: number[] = [];
+  let cur = from;
+  for (const p of points) {
+    const leg = findPath(state.map, cur, p, mover);
+    if (leg.length === 0) continue;
+    const h = dist(cur, p) > 1e-6 ? angleTo(cur, p) : (headings.length ? headings[headings.length - 1] : 0);
+    path = path.concat(leg);
+    for (let i = 0; i < leg.length; i++) headings.push(h);
+    cur = leg[leg.length - 1];
+  }
+  pathLegHeadings.set(path, headings);
+  return path;
+}
+
+/** Waypoint reached radius (tiles). */
+export const WAYPOINT_REACHED_TILES = 2;
+
+/** Per sim step: drop waypoints the team has reached (leader, or its vehicle, within
+ * WAYPOINT_REACHED_TILES), so `order.waypoints` always holds only the points still ahead. */
+export function stepOrderWaypoints(state: BattleState): void {
+  for (const team of state.teams.values()) {
+    const order = team.order;
+    const wps = order?.waypoints;
+    if (!order || !wps || wps.length === 0) continue;
+    if (order.type !== 'move' && order.type !== 'moveFast' && order.type !== 'sneak') continue;
+    let ref: Vec2 = team.pos;
+    let route: Vec2[] | null = null;
+    if (team.vehicleId != null) {
+      const v = state.vehicles.get(team.vehicleId);
+      if (v) { ref = v.pos; route = v.path; }
+    } else {
+      const leader = state.soldiers.get(team.leaderId);
+      if (leader && leader.health !== 'dead' && leader.health !== 'incapacitated') { ref = leader.pos; route = leader.path; }
+    }
+    while (wps.length > 0 && dist(ref, wps[0]) <= WAYPOINT_REACHED_TILES) wps.shift();
+    // a leg the path had to skip (unreachable waypoint): once the route no longer comes near it, drop it
+    if (wps.length > 0 && route && route.length > 0 && state.time - order.issuedAt > 1) {
+      const w = wps[0];
+      if (!route.some((p) => dist(p, w) <= WAYPOINT_REACHED_TILES + 1)) wps.shift();
+    }
+  }
+}
+
+/** Whether a team's order still has something to show: Fire/Smoke/Defend/Ambush while they stand;
+ * a move order while anyone of the team is still on the way (or yet to obey it). */
+export function isOrderActive(state: BattleState, team: Team): boolean {
+  const order = team.order;
+  if (!order || team.outOfAction) return false;
+  if (order.type !== 'move' && order.type !== 'moveFast' && order.type !== 'sneak') return true;
+  if (state.time - order.issuedAt < 0.5) return true;
+  if (team.vehicleId != null) {
+    const v = state.vehicles.get(team.vehicleId);
+    return !!v && v.path.length > 0;
+  }
+  for (const id of team.soldierIds) {
+    const s = state.soldiers.get(id);
+    if (!s || s.health === 'dead' || s.health === 'incapacitated') continue;
+    if (s.path.length > 0 || s.mind?.pendingOrderAt === order.issuedAt) return true;
+  }
+  return false;
 }
 
 const tileEq = (a: Vec2, b: Vec2) => Math.floor(a.x) === Math.floor(b.x) && Math.floor(a.y) === Math.floor(b.y);
@@ -139,7 +222,7 @@ function withArrivalHop(state: BattleState, from: Vec2, path: Vec2[], dest: Vec2
  * small per-soldier drift that wanders over the route (a damped random walk, tapering to zero over
  * the last waypoints) so the squad does not march in lockstep. One short A* to join it instead of
  * a full A* per soldier. Returns null when the shifted path is not usable. */
-function followerPathFromLeader(state: BattleState, s: Soldier, leaderPath: Vec2[], shift: Vec2, rng: Rng): Vec2[] | null {
+function followerPathFromLeader(state: BattleState, s: Soldier, leaderPath: Vec2[], shift: Vec2 | ((i: number) => Vec2), rng: Rng): Vec2[] | null {
   if (leaderPath.length === 0) return null;
   const map = state.map;
   const shifted: Vec2[] = [];
@@ -150,7 +233,7 @@ function followerPathFromLeader(state: BattleState, s: Soldier, leaderPath: Vec2
     dx = clamp(dx * 0.85 + rng.range(-0.45, 0.45), -DRIFT_MAX, DRIFT_MAX);
     dy = clamp(dy * 0.85 + rng.range(-0.45, 0.45), -DRIFT_MAX, DRIFT_MAX);
     const taper = Math.min(1, (n - 1 - i) / 4);
-    const base = vadd(w, shift);
+    const base = vadd(w, typeof shift === 'function' ? shift(i) : shift);
     let p = { x: base.x + dx * taper, y: base.y + dy * taper };
     if (!isPassable(map, Math.floor(p.x), Math.floor(p.y), 'infantry')) {
       dx = 0; dy = 0;
@@ -213,13 +296,20 @@ export function applyOrderToSoldier(state: BattleState, team: Team, s: Soldier, 
     const offset = orderSlotOffset(state, team, s, order);
     const dest = destinationFor(state, team, s, order, offset);
     let path: Vec2[] | null = null;
+    const wps = order.waypoints && order.waypoints.length > 0 ? order.waypoints : null;
     if (s.id === team.leaderId) {
-      path = leaderPath ?? findPath(state.map, s.pos, order.target, 'infantry');
+      path = leaderPath ?? routeVia(state, s.pos, orderRoutePoints(order), 'infantry');
     } else {
-      if (leaderPath) path = followerPathFromLeader(state, s, leaderPath, offset, rng) ?? followLeaderRoute(state, s, leaderPath, dest);
+      if (leaderPath) {
+        // formation offset turned to each leg's direction of travel (the last leg's = the slot's)
+        const legs = wps ? pathLegHeadings.get(leaderPath) : undefined;
+        const base = formationBaseHeading(state.map, team.side);
+        const shift = legs ? (i: number) => rotateOffset(s.formationOffset, (legs[i] ?? headingFor(state, team, order)) - base) : offset;
+        path = followerPathFromLeader(state, s, leaderPath, shift, rng) ?? followLeaderRoute(state, s, leaderPath, dest);
+      }
       if (!path) {
-        path = findPath(state.map, s.pos, dest, 'infantry');
-        if (path.length === 0) path = findPath(state.map, s.pos, order.target, 'infantry');
+        path = wps ? routeVia(state, s.pos, [...wps, dest], 'infantry') : findPath(state.map, s.pos, dest, 'infantry');
+        if (path.length === 0) path = routeVia(state, s.pos, orderRoutePoints(order), 'infantry');
       }
     }
     const hop = withArrivalHop(state, s.pos, path, dest);
@@ -294,6 +384,11 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
   // abandoned hull and its crew must not take a movement order in that window.
   const deadHull = isVehicleTeam ? state.vehicles.get(team.vehicleId!) : undefined;
   if (deadHull && (deadHull.state === 'knockedOut' || deadHull.state === 'burning' || deadHull.state === 'abandoned')) return;
+  // never share the waypoint list with the UI or other teams: it is consumed as they are reached
+  if (order.waypoints) {
+    if (order.type === 'move' || order.type === 'moveFast' || order.type === 'sneak') order.waypoints = order.waypoints.map((w) => ({ x: w.x, y: w.y }));
+    else delete order.waypoints;
+  }
   team.order = order;
   const type = effectiveType(team, order);
 
@@ -306,10 +401,10 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
 
   if (type === 'move' || type === 'moveFast' || type === 'sneak') {
     if (isVehicleTeam) {
-      if (vehicle) vehicle.path = findPath(state.map, vehicle.pos, order.target, 'vehicle');
+      if (vehicle) vehicle.path = routeVia(state, vehicle.pos, orderRoutePoints(order), 'vehicle');
     } else {
       const leader = state.soldiers.get(team.leaderId);
-      leaderPath = leader ? findPath(state.map, leader.pos, order.target, 'infantry') : [];
+      leaderPath = leader ? routeVia(state, leader.pos, orderRoutePoints(order), 'infantry') : [];
     }
   } else if (type === 'fire') {
     initAttackOrder(state, team, order);

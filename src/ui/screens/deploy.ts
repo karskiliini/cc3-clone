@@ -7,6 +7,9 @@ import { centerCamera, clampCamera, panCamera, screenToWorld, worldToScreen, zoo
 import { TerrainRenderer } from '@/render/terrainRender';
 import { drawUnits } from '@/render/unitRender';
 import { VisibilityOverlay } from '@/render/visibilityOverlay';
+import { DepthOverlay } from '@/render/depthOverlay';
+import { pickOrderMarker } from '@/render/orderMarkers';
+import { cycleTeamKey, handleDepthMapKey } from './viewKeys';
 import { hitRect } from '@/ui/hud/hudChrome';
 import { addMessage } from '@/sim/messages';
 import { TeamGrid } from '@/ui/hud/teamGrid';
@@ -37,6 +40,9 @@ export class DeployScreen implements Screen {
   private soldierMonitor = new SoldierMonitorPopup();
   private minimap = new Minimap();
   private visionOverlay = new VisibilityOverlay();
+  private depthOverlay = new DepthOverlay();
+  /** order endpoint marker under the pointer (hover shows its line, click selects its team) */
+  private hoveredOrderMarker: { teamId: number; kind: 'target' | 'waypoint'; index: number } | null = null;
   private selectedTeamId: number | null = null;
   private draggingTeamId: number | null = null;
   /** Left press on a friendly team that hasn't yet moved DRAG_THRESHOLD_PX — becomes a drag
@@ -107,11 +113,18 @@ export class DeployScreen implements Screen {
 
     // left mouse down on a friendly soldier/vehicle: select + start drag
     // (suppressed while Space+drag is panning the map)
+    this.hoveredOrderMarker = !this.overHud(input.mouse) && input.pointerInside
+      ? pickOrderMarker(state, cam, input.mouse, this.battle.playerSide())
+      : null;
     for (const c of input.clicks) {
       if (c.button !== 0 || this.overHud({ x: c.x, y: c.y }) || modernPanning) continue;
       const hitTeam = pickFriendlyTeamScreen(state, cam, { x: c.x, y: c.y }, this.battle.playerSide());
       this.draggingTeamId = null;
-      if (hitTeam) {
+      const marker = hitTeam ? null : pickOrderMarker(state, cam, { x: c.x, y: c.y }, this.battle.playerSide());
+      if (marker) {
+        this.selectedTeamId = marker.teamId;
+        this.pressTeamId = null;
+      } else if (hitTeam) {
         this.selectedTeamId = hitTeam.id;
         this.pressTeamId = hitTeam.id;
         this.pressStart = { x: c.x, y: c.y };
@@ -198,9 +211,20 @@ export class DeployScreen implements Screen {
       }
       game.saveSettings();
     }
-    if (game.settings.showUnitVision ?? true) {
+    // Tab: depth map view (hides the vision overlay while on). '.' / ',' cycle teams.
+    if (handleDepthMapKey(input.keysPressed, game.settings)) {
+      addMessage(state, `Depth map ${game.settings.showDepthMap ? 'on' : 'off'}`, 'info');
+    }
+    const cycled = cycleTeamKey(input.keysPressed, this.battle.selectableTeams(this.battle.playerSide()).map((t) => t.id), this.selectedTeamId);
+    if (cycled != null) this.selectedTeamId = cycled;
+    if (game.settings.showDepthMap) {
+      this.visionOverlay.reset();
+      this.depthOverlay.update(map, cam);
+    } else if (game.settings.showUnitVision ?? true) {
+      this.depthOverlay.reset();
       this.visionOverlay.update(state, cam, this.battle.playerSide(), this.selectedTeamId != null ? [this.selectedTeamId] : [], performance.now());
     } else {
+      this.depthOverlay.reset();
       this.visionOverlay.reset();
     }
   }
@@ -305,11 +329,13 @@ export class DeployScreen implements Screen {
     // Deployment shading (manual): own zone unshaded, enemy zone dark gray,
     // neutral ground light gray.
     this.drawDeploymentShading(ctx, cam);
-    if (game.settings.showUnitVision ?? true) {
+    if (game.settings.showDepthMap) {
+      this.depthOverlay.draw(ctx, cam);
+    } else if (game.settings.showUnitVision ?? true) {
       this.visionOverlay.draw(ctx, cam, state, this.selectedTeamId != null ? [this.selectedTeamId] : []);
     }
 
-    drawUnits(ctx, cam, state, this.battle.playerSide(), this.selectedTeamId != null ? [this.selectedTeamId] : [], game.settings);
+    drawUnits(ctx, cam, state, this.battle.playerSide(), this.selectedTeamId != null ? [this.selectedTeamId] : [], game.settings, true, this.hoveredOrderMarker);
 
     if (this.draggingTeamId != null) {
       this.drawDragGhost(ctx, cam, state, this.draggingTeamId);
@@ -318,6 +344,7 @@ export class DeployScreen implements Screen {
       const mouse = game.input.state.mouse;
       drawTextCentered(ctx, 'INVALID', mouse.x, mouse.y - 20, PALETTE.red, 'small');
     }
+    if (game.settings.showDepthMap) this.depthOverlay.drawLegend(ctx);
     ctx.restore();
 
     if (this.showMinimap) this.minimap.draw(ctx, this.terrain, state, cam, this.battle.playerSide());
@@ -334,6 +361,7 @@ export class DeployScreen implements Screen {
   cursor(): CursorKind {
     if (this.dragPan.active || this.modernPanDrag.active) return 'hand';
     if (this.draggingTeamId != null) return this.dragInvalid ? 'no' : 'move';
+    if (this.hoveredOrderMarker) return 'hand';
     return 'arrow';
   }
 }

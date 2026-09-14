@@ -7,6 +7,7 @@ import { TERRAIN_PROPS } from './terrain';
 import { findPath } from './path';
 import { isFirstFireFrozen } from './mind';
 import { stepCrewWeapons, isHeldForPacking } from './crewWeapon';
+import { stepOrderWaypoints } from './orders';
 
 const SPEEDS: Record<string, number> = {
   moving: 1.4,
@@ -25,6 +26,9 @@ export function stepMovement(state: BattleState, rng: Rng, dt: number): void {
   // Crew-served weapons: set-up/packing transitions and the fire gate (before anyone moves, so a
   // crew that has just been ordered off holds still while it packs).
   stepCrewWeapons(state, dt);
+  // Move orders with Shift-click waypoints: drop the ones the team has reached (paths were routed
+  // through every waypoint in turn by orders.ts, so this only keeps order.waypoints current).
+  stepOrderWaypoints(state);
   for (const s of state.soldiers.values()) {
     if (s.health === 'dead' || s.health === 'incapacitated') continue;
 

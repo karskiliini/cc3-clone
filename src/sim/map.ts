@@ -1,6 +1,7 @@
 import type { GameMap, MapDef, Terrain, Vec2, VictoryLocation } from '@/shared/types';
 import { otherSide } from '@/shared/types';
 import { TERRAIN_PROPS } from './terrain';
+import { buildHeightField } from './heightField';
 
 const BUILDING_TILES = new Set<Terrain>(['buildingWood', 'buildingStone', 'floor']);
 const WALL_TILES = new Set<Terrain>(['buildingWood', 'buildingStone']);
@@ -150,6 +151,7 @@ export function buildMap(def: MapDef): GameMap {
 
   floodFillBuildings(map);
   markWindows(map);
+  map.heightField = buildHeightField(map);
 
   return map;
 }

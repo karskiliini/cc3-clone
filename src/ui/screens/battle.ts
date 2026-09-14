@@ -10,6 +10,9 @@ import { TerrainRenderer } from '@/render/terrainRender';
 import { drawUnits } from '@/render/unitRender';
 import { drawEffects } from '@/render/effects';
 import { VisibilityOverlay } from '@/render/visibilityOverlay';
+import { DepthOverlay } from '@/render/depthOverlay';
+import { pickOrderMarker } from '@/render/orderMarkers';
+import { cycleTeamKey, handleDepthMapKey, offsetOrderPoints } from './viewKeys';
 import { hitRect } from '@/ui/hud/hudChrome';
 import { drawLOSLine } from '@/ui/losTool';
 import { TeamGrid } from '@/ui/hud/teamGrid';
@@ -85,6 +88,9 @@ export class BattleScreen implements Screen {
   private commandMenu = new CommandMenu();
   private orderBar = new OrderBar();
   private visionOverlay = new VisibilityOverlay();
+  private depthOverlay = new DepthOverlay();
+  /** order endpoint/waypoint marker under the pointer (hover shows its line, click selects) */
+  private hoveredOrderMarker: { teamId: number; kind: 'target' | 'waypoint'; index: number } | null = null;
   private selectedTeamId: number | null = null;
   private selectedTeamIds: number[] = [];
   private pendingOrder: OrderType | null = null;
@@ -170,21 +176,23 @@ export class BattleScreen implements Screen {
     const primary = state.teams.get(ids[0]);
     const isMoveType = MOVE_TYPES.includes(this.pendingOrder);
     const enemy = battle.teamAt(world, otherSide(battle.playerSide()));
-    const waypoints = this.pendingWaypoints.length > 0 ? [...this.pendingWaypoints] : undefined;
+    // Shift-click waypoints are intermediate points in click order, visited before `target`.
+    const chain = isMoveType ? this.pendingWaypoints : [];
     for (const id of ids) {
       const team = state.teams.get(id);
       if (!team) continue;
-      // Move-type group orders keep each team's relative offset from the
-      // primary team; Fire/Smoke centre every team on the same point.
-      const target = isMoveType && primary && ids.length > 1
-        ? { x: world.x + (team.pos.x - primary.pos.x), y: world.y + (team.pos.y - primary.pos.y) }
-        : world;
+      // Move-type group orders keep each team's relative offset from the primary team on every
+      // point of the chain; Fire/Smoke centre every team on the same point.
+      const offset = isMoveType && primary && ids.length > 1
+        ? { x: team.pos.x - primary.pos.x, y: team.pos.y - primary.pos.y }
+        : { x: 0, y: 0 };
+      const pts = offsetOrderPoints(world, chain, offset);
       battle.issueOrder(id, {
         type: this.pendingOrder,
-        target,
+        target: pts.target,
         targetTeamId: enemy ? enemy.id : undefined,
         issuedAt: state.time,
-        waypoints,
+        waypoints: pts.waypoints.length > 0 ? pts.waypoints : undefined,
       });
     }
     game.audio?.play('click');
@@ -299,8 +307,18 @@ export class BattleScreen implements Screen {
     // left mouse: press starts a potential drag (box-select), release decides
     // whether it was a simple click (select/issue order) or a drag (box-select).
     // Suppressed while Space/middle-drag panning is active.
+    // Order endpoint markers stay on the map; the one under the pointer shows its line.
+    this.hoveredOrderMarker = (!this.overHud(input.mouse) && !this.commandMenu.isOpen && input.pointerInside)
+      ? pickOrderMarker(state, cam, input.mouse, battle.playerSide())
+      : null;
     for (const c of input.clicks) {
       if (c.button === 0 && !this.overHud({ x: c.x, y: c.y }) && !this.commandMenu.isOpen && !menuWasOpen && !modernPanning) {
+        const marker = !this.pendingOrder ? pickOrderMarker(state, cam, { x: c.x, y: c.y }, battle.playerSide()) : null;
+        if (marker) {
+          // clicking a marker selects its team (Shift adds) — no deselect, no marquee
+          if (input.keysDown.has('shift')) this.addToSelection([marker.teamId]); else this.setSelection([marker.teamId]);
+          continue;
+        }
         this.leftDrag = { active: true, startX: c.x, startY: c.y, moved: 0 };
       }
     }
@@ -367,13 +385,12 @@ export class BattleScreen implements Screen {
       this.leftDrag.active = false;
     }
 
-    if (input.keysPressed.has('tab')) {
-      const teams = battle.selectableTeams(battle.playerSide());
-      if (teams.length > 0) {
-        const idx = teams.findIndex((t) => t.id === this.selectedTeamId);
-        this.setSelection([teams[(idx + 1) % teams.length].id]);
-      }
+    // Tab: depth map view. '.' / ',' cycle teams (Tab did this before the depth map).
+    if (handleDepthMapKey(input.keysPressed, game.settings)) {
+      addMessage(state, `Depth map ${game.settings.showDepthMap ? 'on' : 'off'}`, 'info');
     }
+    const cycled = cycleTeamKey(input.keysPressed, battle.selectableTeams(battle.playerSide()).map((t) => t.id), this.selectedTeamId);
+    if (cycled != null) this.setSelection([cycled]);
     if (input.keysDown.has('control') && input.keysPressed.has('a')) {
       this.setSelection(battle.selectableTeams(battle.playerSide()).map((t) => t.id));
     }
@@ -488,9 +505,16 @@ export class BattleScreen implements Screen {
       game.saveSettings();
     }
 
-    if (game.settings.showUnitVision ?? true) {
+    // The depth map and the vision overlay would fight for the same space: while the depth map is
+    // on the vision overlay is hidden; turning it off brings the vision overlay back.
+    if (game.settings.showDepthMap) {
+      this.visionOverlay.reset();
+      this.depthOverlay.update(state.map, cam);
+    } else if (game.settings.showUnitVision ?? true) {
+      this.depthOverlay.reset();
       this.visionOverlay.update(state, cam, battle.playerSide(), this.selectedTeamIds, performance.now());
     } else {
+      this.depthOverlay.reset();
       this.visionOverlay.reset();
     }
 
@@ -510,26 +534,29 @@ export class BattleScreen implements Screen {
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
     this.terrain.draw(ctx, cam);
     this.terrain.drawOverlays(ctx, cam, state);
-    if (game.settings.showUnitVision ?? true) this.visionOverlay.draw(ctx, cam, state, this.selectedTeamIds);
-    drawUnits(ctx, cam, state, battle.playerSide(), this.selectedTeamIds, game.settings, this.showDead);
+    if (game.settings.showDepthMap) this.depthOverlay.draw(ctx, cam);
+    else if (game.settings.showUnitVision ?? true) this.visionOverlay.draw(ctx, cam, state, this.selectedTeamIds);
+    drawUnits(ctx, cam, state, battle.playerSide(), this.selectedTeamIds, game.settings, this.showDead, this.hoveredOrderMarker);
     drawEffects(ctx, cam, state);
 
     const selTeam = this.selectedTeamId != null ? state.teams.get(this.selectedTeamId) ?? null : null;
     if (this.pendingOrder && selTeam) {
-      const from = { x: selTeam.pos.x, y: selTeam.pos.y };
-      const to = screenToWorld(cam, game.input.state.mouse);
-      const a = worldToScreen(cam, from);
-      const b = worldToScreen(cam, to);
-      // Use the order's own color from the very first aiming frame (before
-      // commit), matching the color the line will render once the order is
-      // actually issued — was hardcoded gold, which briefly looked wrong for
-      // every order type except Move.
+      // Rubber band: team -> Shift-click waypoints so far -> cursor. Use the order's own color from
+      // the very first aiming frame (before commit), matching the line once the order is issued.
+      const chain = [selTeam.pos, ...(MOVE_TYPES.includes(this.pendingOrder) ? this.pendingWaypoints : []), screenToWorld(cam, game.input.state.mouse)]
+        .map((p) => worldToScreen(cam, p));
       ctx.strokeStyle = ORDER_DOT_COLOR[this.pendingOrder];
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
+      ctx.moveTo(chain[0].x, chain[0].y);
+      for (let i = 1; i < chain.length; i++) ctx.lineTo(chain[i].x, chain[i].y);
       ctx.stroke();
+      ctx.fillStyle = ORDER_DOT_COLOR[this.pendingOrder];
+      for (let i = 1; i < chain.length - 1; i++) {
+        ctx.beginPath();
+        ctx.arc(chain[i].x, chain[i].y, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     if (this.pendingOrder === 'fire' && selTeam && game.input.state.keysDown.has('alt')) {
@@ -567,6 +594,8 @@ export class BattleScreen implements Screen {
       ctx.setLineDash([]);
     }
 
+    if (game.settings.showDepthMap) this.depthOverlay.drawLegend(ctx);
+
     ctx.restore();
 
     // Minimap and soldier monitor sit over the map viewport itself.
@@ -595,7 +624,7 @@ export class BattleScreen implements Screen {
     if (this.modernPanDrag.active) return 'hand';
     if (this.rightDrag.active && !this.rightDrag.menuOpenedOnPress && this.rightDrag.moved >= RIGHT_GESTURE_PX) return 'hand';
     if (this.hudHover) return 'hand';
-    if (this.hoverTeamId != null) return 'hand';
+    if (this.hoverTeamId != null || this.hoveredOrderMarker) return 'hand';
     return 'arrow';
   }
 }
