@@ -6,6 +6,9 @@ import { aiDeploy } from '@/sim/ai';
 import { centerCamera, clampCamera, panCamera, screenToWorld, worldToScreen, zoomIn, zoomOut } from '@/engine/camera';
 import { TerrainRenderer } from '@/render/terrainRender';
 import { drawUnits } from '@/render/unitRender';
+import { VisibilityOverlay } from '@/render/visibilityOverlay';
+import { hitRect } from '@/ui/hud/hudChrome';
+import { addMessage } from '@/sim/messages';
 import { TeamGrid } from '@/ui/hud/teamGrid';
 import { CombatMessages } from '@/ui/hud/combatMessages';
 import { BottomStrip } from '@/ui/hud/bottomStrip';
@@ -33,6 +36,7 @@ export class DeployScreen implements Screen {
   private bottomStrip = new BottomStrip('deploy');
   private soldierMonitor = new SoldierMonitorPopup();
   private minimap = new Minimap();
+  private visionOverlay = new VisibilityOverlay();
   private selectedTeamId: number | null = null;
   private draggingTeamId: number | null = null;
   /** Left press on a friendly team that hasn't yet moved DRAG_THRESHOLD_PX — becomes a drag
@@ -70,6 +74,17 @@ export class DeployScreen implements Screen {
     }
   }
 
+  /** Bottom panel, or the minimap / soldier monitor insets floating over the map viewport:
+   * presses and releases there never select, pick up or drop a team. */
+  private overHud(p: Vec2): boolean {
+    if (p.y >= VIEW_H) return true;
+    if (this.showMinimap && hitRect(p, this.minimap.rect)) return true;
+    const state = this.battle.state;
+    const selTeam = this.selectedTeamId != null ? state.teams.get(this.selectedTeamId) ?? null : null;
+    const r = this.soldierMonitor.bounds(state, selTeam);
+    return !!r && hitRect(p, r);
+  }
+
   update(dt: number, input: InputState): void {
     const cam = game.cam;
     const map = this.battle.state.map;
@@ -93,7 +108,7 @@ export class DeployScreen implements Screen {
     // left mouse down on a friendly soldier/vehicle: select + start drag
     // (suppressed while Space+drag is panning the map)
     for (const c of input.clicks) {
-      if (c.button !== 0 || c.y >= VIEW_H || modernPanning) continue;
+      if (c.button !== 0 || this.overHud({ x: c.x, y: c.y }) || modernPanning) continue;
       const hitTeam = pickFriendlyTeamScreen(state, cam, { x: c.x, y: c.y }, this.battle.playerSide());
       this.draggingTeamId = null;
       if (hitTeam) {
@@ -131,7 +146,11 @@ export class DeployScreen implements Screen {
     for (const r of input.releases) {
       if (r.button !== 0) continue;
       this.pressTeamId = null;
-      if (this.draggingTeamId != null) {
+      if (this.draggingTeamId != null && this.overHud({ x: r.x, y: r.y })) {
+        // Released over HUD: abandon the drag, the team stays where it was.
+        this.draggingTeamId = null;
+        this.dragInvalid = false;
+      } else if (this.draggingTeamId != null) {
         const dropWorld = this.snappedDropPoint(cam, { x: r.x, y: r.y });
         const ok = this.battle.deployTeam(this.draggingTeamId, dropWorld);
         if (!ok) this.invalidTimer = 1;
@@ -170,6 +189,20 @@ export class DeployScreen implements Screen {
       zoomOut(cam, map.width, map.height);
     }
     if (input.keysPressed.has('f6')) this.showMinimap = !this.showMinimap;
+    if (input.keysPressed.has('l')) {
+      if (input.keysDown.has('shift')) {
+        game.settings.unitLabels = !game.settings.unitLabels;
+      } else {
+        game.settings.showUnitVision = !(game.settings.showUnitVision ?? true);
+        addMessage(state, `View overlay ${game.settings.showUnitVision ? 'on' : 'off'}`, 'info');
+      }
+      game.saveSettings();
+    }
+    if (game.settings.showUnitVision ?? true) {
+      this.visionOverlay.update(state, cam, this.battle.playerSide(), this.selectedTeamId != null ? [this.selectedTeamId] : [], performance.now());
+    } else {
+      this.visionOverlay.reset();
+    }
   }
 
   /** World point under a screen point, snapped to the centre of its tile —
@@ -272,6 +305,9 @@ export class DeployScreen implements Screen {
     // Deployment shading (manual): own zone unshaded, enemy zone dark gray,
     // neutral ground light gray.
     this.drawDeploymentShading(ctx, cam);
+    if (game.settings.showUnitVision ?? true) {
+      this.visionOverlay.draw(ctx, cam, state, this.selectedTeamId != null ? [this.selectedTeamId] : []);
+    }
 
     drawUnits(ctx, cam, state, this.battle.playerSide(), this.selectedTeamId != null ? [this.selectedTeamId] : [], game.settings);
 

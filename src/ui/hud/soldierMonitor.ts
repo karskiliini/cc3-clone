@@ -205,6 +205,15 @@ export class SoldierMonitorPopup {
     return { x: RIGHT_X - WIDTH, y: PANEL_Y - h, w: WIDTH, h };
   }
 
+  /** Screen rect the popup occupies for `team` (null when it isn't drawn) — callers use it to keep
+   * clicks on the popup from reaching the map underneath. */
+  bounds(state: BattleState, team: Team | null): Rect | null {
+    if (!team) return null;
+    const count = team.soldierIds.filter((id) => state.soldiers.has(id)).length;
+    if (count === 0) return null;
+    return this.rect(Math.min(MAX_ROWS, count), team.vehicleId != null && state.vehicles.has(team.vehicleId));
+  }
+
   update(input: InputState, state: BattleState, team: Team | null): void {
     this.hoverUp = false;
     this.hoverDown = false;

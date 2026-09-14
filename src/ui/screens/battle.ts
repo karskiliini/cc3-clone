@@ -9,6 +9,8 @@ import { centerCamera, clampCamera, panCamera, screenToWorld, worldToScreen, zoo
 import { TerrainRenderer } from '@/render/terrainRender';
 import { drawUnits } from '@/render/unitRender';
 import { drawEffects } from '@/render/effects';
+import { VisibilityOverlay } from '@/render/visibilityOverlay';
+import { hitRect } from '@/ui/hud/hudChrome';
 import { drawLOSLine } from '@/ui/losTool';
 import { TeamGrid } from '@/ui/hud/teamGrid';
 import { CombatMessages } from '@/ui/hud/combatMessages';
@@ -82,6 +84,7 @@ export class BattleScreen implements Screen {
   private minimap = new Minimap();
   private commandMenu = new CommandMenu();
   private orderBar = new OrderBar();
+  private visionOverlay = new VisibilityOverlay();
   private selectedTeamId: number | null = null;
   private selectedTeamIds: number[] = [];
   private pendingOrder: OrderType | null = null;
@@ -138,6 +141,21 @@ export class BattleScreen implements Screen {
     const set = new Set(this.selectedTeamIds);
     if (set.has(id)) set.delete(id); else set.add(id);
     this.setSelection([...set]);
+  }
+
+  /** True when a screen point lies on HUD chrome rather than the open map: the bottom panel, or
+   * the minimap / soldier monitor insets that float over the map viewport. Presses and releases
+   * there must never select, deselect, box-select or issue orders. */
+  private overHud(p: Vec2): boolean {
+    if (p.y >= VIEW_H) return true;
+    if (this.showMinimap && hitRect(p, this.minimap.rect)) return true;
+    if (this.showSoldierMonitor) {
+      const state = this.battle.state;
+      const selTeam = this.selectedTeamId != null ? state.teams.get(this.selectedTeamId) ?? null : null;
+      const r = this.soldierMonitor.bounds(state, selTeam);
+      if (r && hitRect(p, r)) return true;
+    }
+    return false;
   }
 
   private addToSelection(ids: number[]): void {
@@ -220,6 +238,7 @@ export class BattleScreen implements Screen {
         this.commandMenu.close();
         continue;
       }
+      if (this.overHud({ x: c.x, y: c.y })) continue;
       const hitTeam = pickFriendlyTeamScreen(state, cam, { x: c.x, y: c.y }, battle.playerSide());
       this.rightDrag = { active: true, startX: c.x, startY: c.y, lastX: c.x, lastY: c.y, moved: 0, startTime: state.time, menuOpenedOnPress: false };
       if (hitTeam) {
@@ -246,6 +265,7 @@ export class BattleScreen implements Screen {
       if (r.button !== 2 || !this.rightDrag.active) continue;
       const heldMs = (state.time - this.rightDrag.startTime) * 1000;
       if (!this.rightDrag.menuOpenedOnPress && this.rightDrag.moved < RIGHT_GESTURE_PX && heldMs <= RIGHT_GESTURE_MS
+        && !this.overHud({ x: r.x, y: r.y })
         && this.selectedTeamId != null && !this.commandMenu.isOpen) {
         const team = state.teams.get(this.selectedTeamId);
         if (team) {
@@ -280,7 +300,7 @@ export class BattleScreen implements Screen {
     // whether it was a simple click (select/issue order) or a drag (box-select).
     // Suppressed while Space/middle-drag panning is active.
     for (const c of input.clicks) {
-      if (c.button === 0 && c.y < VIEW_H && !this.commandMenu.isOpen && !menuWasOpen && !modernPanning) {
+      if (c.button === 0 && !this.overHud({ x: c.x, y: c.y }) && !this.commandMenu.isOpen && !menuWasOpen && !modernPanning) {
         this.leftDrag = { active: true, startX: c.x, startY: c.y, moved: 0 };
       }
     }
@@ -289,7 +309,8 @@ export class BattleScreen implements Screen {
     }
     for (const r of input.releases) {
       if (r.button !== 0 || !this.leftDrag.active) continue;
-      if (r.y >= VIEW_H) {
+      // Ending on HUD (bottom panel, minimap, soldier monitor) abandons the gesture untouched.
+      if (this.overHud({ x: r.x, y: r.y })) {
         this.leftDrag.active = false;
         continue;
       }
@@ -388,7 +409,7 @@ export class BattleScreen implements Screen {
 
     // Hover feedback: which friendly team (if any) sits under the pointer
     // right now, for the subtle map-ring highlight + hand cursor.
-    this.hoverTeamId = (!this.pendingOrder && input.mouse.y < VIEW_H && !this.commandMenu.isOpen)
+    this.hoverTeamId = (!this.pendingOrder && !this.overHud(input.mouse) && !this.commandMenu.isOpen)
       ? (pickFriendlyTeamScreen(state, cam, input.mouse, battle.playerSide())?.id ?? null)
       : null;
 
@@ -457,7 +478,21 @@ export class BattleScreen implements Screen {
       const idx = SPEEDS.indexOf(game.settings.speed);
       game.settings.speed = SPEEDS[Math.max(0, idx - 1)];
     }
-    if (input.keysPressed.has('l')) game.settings.unitLabels = !game.settings.unitLabels;
+    if (input.keysPressed.has('l')) {
+      if (input.keysDown.has('shift')) {
+        game.settings.unitLabels = !game.settings.unitLabels;
+      } else {
+        game.settings.showUnitVision = !(game.settings.showUnitVision ?? true);
+        addMessage(state, `View overlay ${game.settings.showUnitVision ? 'on' : 'off'}`, 'info');
+      }
+      game.saveSettings();
+    }
+
+    if (game.settings.showUnitVision ?? true) {
+      this.visionOverlay.update(state, cam, battle.playerSide(), this.selectedTeamIds, performance.now());
+    } else {
+      this.visionOverlay.reset();
+    }
 
     game.audio?.handleEvents(battle.drainEvents(), cam);
   }
@@ -475,6 +510,7 @@ export class BattleScreen implements Screen {
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
     this.terrain.draw(ctx, cam);
     this.terrain.drawOverlays(ctx, cam, state);
+    if (game.settings.showUnitVision ?? true) this.visionOverlay.draw(ctx, cam, state, this.selectedTeamIds);
     drawUnits(ctx, cam, state, battle.playerSide(), this.selectedTeamIds, game.settings, this.showDead);
     drawEffects(ctx, cam, state);
 

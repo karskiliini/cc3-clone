@@ -17,13 +17,14 @@ interface ToggleRow {
 
 export class OptionsScreen implements Screen {
   private returnTo: Screen;
-  private panel: Rect = { x: 60, y: 110, w: 680, h: 250 };
+  private panel: Rect = { x: 60, y: 110, w: 680, h: 300 };
 
   private volMinusR: Rect;
   private volPlusR: Rect;
   private labelsR: Rect;
   private losR: Rect;
   private speedR: Rect;
+  private visionR: Rect;
 
   private realismRows: ToggleRow[];
 
@@ -38,6 +39,7 @@ export class OptionsScreen implements Screen {
     this.labelsR = { x: p.x + 150, y: rowY(1), w: 100, h: 22 };
     this.losR = { x: p.x + 150, y: rowY(2), w: 100, h: 22 };
     this.speedR = { x: p.x + 150, y: rowY(3), w: 100, h: 22 };
+    this.visionR = { x: p.x + 190, y: rowY(4), w: 100, h: 22 };
 
     const s = game.settings;
     const rowX = p.x + 590;
@@ -67,6 +69,8 @@ export class OptionsScreen implements Screen {
         s.unitLabels = !s.unitLabels;
       } else if (pointInRect(p, this.losR)) {
         s.losLines = !s.losLines;
+      } else if (pointInRect(p, this.visionR)) {
+        s.showUnitVision = !(s.showUnitVision ?? true);
       } else if (pointInRect(p, this.speedR)) {
         const idx = SPEEDS.indexOf(s.speed);
         s.speed = SPEEDS[(idx + 1) % SPEEDS.length];
@@ -115,6 +119,9 @@ export class OptionsScreen implements Screen {
 
     label('SPEED', p.x + 24, baseline(this.speedR));
     drawSmallMetalButton(ctx, this.speedR, `x${s.speed}`);
+
+    label('SHOW UNIT VISION', p.x + 24, baseline(this.visionR));
+    drawSmallMetalButton(ctx, this.visionR, (s.showUnitVision ?? true) ? 'ON' : 'OFF');
 
     drawShadowText(ctx, 'REALISM', p.x + 380, p.y + 28, 'bold 16px Arial, Helvetica, sans-serif', '#f0d840');
     for (const row of this.realismRows) {

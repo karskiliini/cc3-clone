@@ -288,7 +288,13 @@ export const AMBUSH_TRIGGER_M = 30;   // manual: ambush launches when enemy with
 export interface Order {
   type: OrderType;
   target: Vec2;               // destination, fire point, or facing point
-  targetTeamId?: number;      // for fire orders on a team
+  targetTeamId?: number;      // for fire orders on a team ("attack unit"; absent = area fire)
+  /** attack-unit orders on a vehicle team: the target hull */
+  targetVehicleId?: number;
+  /** attack-unit orders: battle time the target was last spotted by the ordering side */
+  lastSeenAt?: number;
+  /** attack-unit orders: target centre when it was last spotted (order.target follows it) */
+  lastKnownPos?: Vec2;
   issuedAt: number;           // battle seconds
   /** Move/MoveFast/Sneak only: additional waypoints after `target`, placed by
    * holding Shift while clicking (HUD-side chain; sim support may follow). */
@@ -480,6 +486,8 @@ export interface GameSettings {
   unitLabels: boolean;
   losLines: boolean;
   speed: 1 | 2 | 4;
+  /** Shade the map by what the selected units can see ('L' key / Options). Missing = on. */
+  showUnitVision?: boolean;
   // ---- "realism" toggles from the original's Options screen (cosmetic
   // no-ops for now; stored so the UI has somewhere to persist them) ----
   alwaysSeeEnemy?: boolean;

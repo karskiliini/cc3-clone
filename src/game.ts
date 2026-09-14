@@ -9,10 +9,12 @@ const SETTINGS_KEY = 'cc3.settings';
 const DEFAULT_SETTINGS: GameSettings = {
   volume: 0.7,
   // The original shows no floating team-name labels by default (they are an
-  // optional overlay); keep the 'L' hotkey / options toggle available.
+  // optional overlay); keep the Shift+L hotkey / options toggle available.
   unitLabels: false,
   losLines: true,
   speed: 1,
+  // Selected units' vision overlay, toggled with 'L'.
+  showUnitVision: true,
 };
 
 function loadSettings(): GameSettings {

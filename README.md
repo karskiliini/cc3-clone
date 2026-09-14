@@ -26,6 +26,10 @@ order first (hotkey, order bar, or right-click menu), then click the target.
 - Scroll: two-finger scroll / mouse wheel pans; pinch or Ctrl+wheel zooms around the pointer;
   middle-drag or Space+drag pans; screen edges and arrows/WASD scroll too.
 - Hold **Alt** while placing a Fire order: line of sight (bright green clear, dark green obscured, red blocked).
+- Unit vision: while teams are selected the map shows what they can see of an enemy standing in the open —
+  untouched where he would be spotted for sure, a dark-green tint where only obscured (concealment, distance,
+  behind the soldiers' facing), darkened where out of range (300 m ring) or blocked. **L** toggles it
+  (also Options → Show Unit Vision); **Shift+L** toggles unit labels.
 - **F3** pause, **F5** team data, **F6** inset map, **F7** soldier monitor, **F8** options, **O** overview map,
   **Ctrl+K** toggle corpses, **+ / −** zoom, arrows or screen edge to scroll.
 - Bottom strip: Chat, Options, zoom, Map (inset on/off), Truce, Flee.
