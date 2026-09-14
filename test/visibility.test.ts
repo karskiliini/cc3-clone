@@ -3,6 +3,7 @@ import type { BattleState, MapDef, Side, Soldier, Terrain, Vehicle, Facing8 } fr
 import { SIDES, TILE_M } from '@/shared/types';
 import { Rng } from '@/shared/rng';
 import { buildMap } from '@/sim/map';
+import { rasterizeScores, CERTAIN_SPOT_SCORE } from '@/render/visibilityOverlay';
 import { updateSpotting, observerVisibility, observerStandingSpotScore, collectSpotters, SOLDIER_SPOT_RANGE_M } from '@/sim/spotting';
 import { createMind } from '@/sim/mind';
 
@@ -189,18 +190,75 @@ describe.runIf(!!(globalThis as { process?: { env?: Record<string, string | unde
         const spotters = collectSpotters(battle.state, 'german', new Set(sel.map((t) => t.id)));
         const groups = ov.groupSpotters(spotters);
         const r = ov.overlayRegion(battle.state.map.width, battle.state.map.height, cam);
-        let best = Infinity;
+        let best = Infinity, rasterBest = Infinity;
         const counts = [0, 0, 0];
+        const scores = new Float32Array(r.cols * r.rows);
         for (let rep = 0; rep < 3; rep++) {
           const t0 = performance.now();
           counts.fill(0);
           for (let cy = 0; cy < r.rows; cy++) for (let cx = 0; cx < r.cols; cx++) {
-            counts[ov.classifyVisibility(battle.state, groups, r.x0 + cx * r.step + r.step / 2, r.y0 + cy * r.step + r.step / 2)]++;
+            const v = ov.visibilityScore(battle.state, groups, r.x0 + cx * r.step + r.step / 2, r.y0 + cy * r.step + r.step / 2);
+            scores[cy * r.cols + cx] = v;
+            counts[v >= ov.CERTAIN_SPOT_SCORE ? 0 : v > 0 ? 1 : 2]++;
           }
           best = Math.min(best, performance.now() - t0);
+          const t1 = performance.now();
+          ov.rasterizeScores(scores, r.cols, r.rows);
+          rasterBest = Math.min(rasterBest, performance.now() - t1);
         }
-        console.log(`${biggest.id} ${label} (${spotters.length} spotters, ${groups.length} tiles) zoom ${zoom}: ${r.cols}x${r.rows} cells, ${best.toFixed(1)} ms; clear/obscured/blocked ${counts.join('/')}`);
+        console.log(`${biggest.id} ${label} (${spotters.length} spotters, ${groups.length} tiles) zoom ${zoom}: ${r.cols}x${r.rows} cells, scores ${best.toFixed(1)} ms + raster ${rasterBest.toFixed(1)} ms; clear/obscured/blocked ${counts.join('/')}`);
       }
     }
+  });
+});
+
+describe('vision overlay rasteriser', () => {
+  const SUB = 4;
+  const alphaAt = (img: { data: Uint8ClampedArray; w: number }, cx: number, cy: number) =>
+    img.data[((cy * SUB + SUB / 2) * img.w + cx * SUB + SUB / 2) * 4 + 3] / 255;
+
+  it('keeps the shade of cells inside a region exact: clear stays clear, blocked stays ~42% dark', () => {
+    const cols = 12, rows = 12;
+    const scores = new Float32Array(cols * rows);
+    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) scores[y * cols + x] = x < 6 ? CERTAIN_SPOT_SCORE : 0;
+    const img = rasterizeScores(scores, cols, rows, SUB);
+    expect(alphaAt(img, 2, 5)).toBe(0);
+    expect(alphaAt(img, 4, 5)).toBe(0); // one cell from the edge: still untouched
+    expect(alphaAt(img, 9, 5)).toBeCloseTo(0.42, 2);
+    expect(alphaAt(img, 7, 5)).toBeCloseTo(0.42, 2);
+  });
+
+  it('turns a tile staircase into a diagonal edge (no axis-aligned steps)', () => {
+    const cols = 16, rows = 16;
+    const scores = new Float32Array(cols * rows);
+    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) scores[y * cols + x] = x <= y ? 0 : CERTAIN_SPOT_SCORE;
+    const img = rasterizeScores(scores, cols, rows, SUB);
+    // Where does the half-dark contour cross each raster row? For a staircase it would jump by a
+    // whole cell every SUB rows; for a diagonal it advances steadily ~1 px per row.
+    const crossings: number[] = [];
+    for (let py = 4 * SUB; py < 12 * SUB; py++) {
+      let cross = -1;
+      for (let px = 0; px < img.w - 1; px++) {
+        const a = img.data[(py * img.w + px) * 4 + 3], b = img.data[(py * img.w + px + 1) * 4 + 3];
+        if (a >= 54 && b < 54) { cross = px; break; }
+      }
+      crossings.push(cross);
+    }
+    for (let k = 1; k < crossings.length; k++) expect(Math.abs(crossings[k] - crossings[k - 1])).toBeLessThanOrEqual(2);
+  });
+
+  it('grades the partial band and leaves no green seam on a blocked/clear edge', () => {
+    const cols = 10, rows = 4;
+    const scores = new Float32Array(cols * rows);
+    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) scores[y * cols + x] = x < 5 ? 0 : CERTAIN_SPOT_SCORE;
+    const img = rasterizeScores(scores, cols, rows, SUB);
+    for (let px = 0; px < img.w; px++) {
+      const o = (2 * SUB * img.w + px) * 4;
+      expect(img.data[o + 1]).toBeLessThan(8); // no green channel anywhere along the row
+    }
+    const partial = new Float32Array(cols * rows);
+    for (let i = 0; i < partial.length; i++) partial[i] = (i % cols) < 5 ? 0.05 : 0.45;
+    const p = rasterizeScores(partial, cols, rows, SUB);
+    expect(alphaAt(p, 1, 1)).toBeGreaterThan(alphaAt(p, 8, 1) + 0.1);
   });
 });
