@@ -9,7 +9,7 @@ import { VIEW_W, VIEW_H, ORDER_DOT_COLOR } from '@/shared/types';
 import { facingAngle } from '@/shared/math';
 import { worldToScreen } from '@/engine/camera';
 import { PALETTE, SIDE_COLOR } from '@/render/palette';
-import { getSoldierSprite, getVehicleSprite, getFlagSprite } from '@/render/sprites';
+import { getSoldierSprite, getVehicleSprite, getFlagSprite, unitSpriteScale } from '@/render/sprites';
 import { drawText, textWidth } from '@/render/pixelfont';
 import { VEHICLE_DEFS } from '@/data/units';
 import { teamBarColor } from '@/ui/hud/hudChrome';
@@ -38,10 +38,12 @@ function drawTeamBars(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
  * shrink to an unreadable speck (sprites otherwise scale 1:1 with cam.zoom). */
 const MIN_SPRITE_PX = 6;
 
-/** `sprite.width/height * zoom`, clamped so the larger dimension never drops below
- * MIN_SPRITE_PX (uniformly, so the sprite doesn't distort). */
-function spriteDrawSize(sprite: HTMLCanvasElement, zoom: number): { dw: number; dh: number } {
-  let dw = sprite.width * zoom, dh = sprite.height * zoom;
+/** On-screen size of a unit sprite authored at `scale` sprite px per 1x px:
+ * `sprite.width/height * zoom / scale` (so a 2x sprite at zoom 2 blits 1:1,
+ * no nearest-neighbour upscaling), clamped so the larger dimension never
+ * drops below MIN_SPRITE_PX (uniformly, so the sprite doesn't distort). */
+function spriteDrawSize(sprite: HTMLCanvasElement, zoom: number, scale = 1): { dw: number; dh: number } {
+  let dw = (sprite.width * zoom) / scale, dh = (sprite.height * zoom) / scale;
   const largest = Math.max(dw, dh);
   if (largest > 0 && largest < MIN_SPRITE_PX) {
     const s = MIN_SPRITE_PX / largest;
@@ -50,12 +52,12 @@ function spriteDrawSize(sprite: HTMLCanvasElement, zoom: number): { dw: number; 
   return { dw, dh };
 }
 
-function rotateAndDraw(ctx: CanvasRenderingContext2D, sprite: HTMLCanvasElement, cx: number, cy: number, rad: number, zoom: number): void {
+function rotateAndDraw(ctx: CanvasRenderingContext2D, sprite: HTMLCanvasElement, cx: number, cy: number, rad: number, zoom: number, scale = 1): void {
   ctx.save();
   ctx.imageSmoothingEnabled = false;
   ctx.translate(cx, cy);
   ctx.rotate(rad);
-  const { dw, dh } = spriteDrawSize(sprite, zoom);
+  const { dw, dh } = spriteDrawSize(sprite, zoom, scale);
   ctx.drawImage(sprite, -dw / 2, -dh / 2, dw, dh);
   ctx.restore();
 }
@@ -93,30 +95,32 @@ function isEnemyVisible(state: BattleState, playerSide: Side, side: Side, id: nu
 function drawCorpses(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side, showDead: boolean): void {
   if (!showDead) return;
   const season = state.map.def.season;
+  const scale = unitSpriteScale(cam.zoom);
   for (const s of state.soldiers.values()) {
     if (s.health !== 'dead') continue;
     if (!isEnemyVisible(state, playerSide, s.side, s.id, false)) continue;
     const p = worldToScreen(cam, s.pos);
     if (!visible(s.pos, cam)) continue;
-    const sprite = getSoldierSprite(s.side, season, 'dead', s.facing, 0);
-    const { dw, dh } = spriteDrawSize(sprite, cam.zoom);
+    const sprite = getSoldierSprite(s.side, season, 'dead', s.facing, 0, 'enemy', scale);
+    const { dw, dh } = spriteDrawSize(sprite, cam.zoom, scale);
     ctx.drawImage(sprite, Math.round(p.x - dw / 2), Math.round(p.y - dh / 2), dw, dh);
   }
 }
 
 function drawVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side): void {
+  const scale = unitSpriteScale(cam.zoom);
   for (const veh of state.vehicles.values()) {
     if (!isEnemyVisible(state, playerSide, veh.side, veh.id, true)) continue;
     if (!visible(veh.pos, cam)) continue;
     const koLike = veh.state === 'knockedOut' || veh.state === 'burning' || veh.state === 'abandoned';
     const spriteState = koLike ? 'knockedOut' : 'ok';
     const p = worldToScreen(cam, veh.pos);
-    const hull = getVehicleSprite(veh.defId, 'hull', spriteState);
-    rotateAndDraw(ctx, hull, p.x, p.y, veh.hullFacing, cam.zoom);
+    const hull = getVehicleSprite(veh.defId, 'hull', spriteState, scale);
+    rotateAndDraw(ctx, hull, p.x, p.y, veh.hullFacing, cam.zoom, scale);
     const def = VEHICLE_DEFS[veh.defId];
     if (def && def.hasTurret) {
-      const turret = getVehicleSprite(veh.defId, 'turret', spriteState);
-      rotateAndDraw(ctx, turret, p.x, p.y, veh.turretFacing, cam.zoom);
+      const turret = getVehicleSprite(veh.defId, 'turret', spriteState, scale);
+      rotateAndDraw(ctx, turret, p.x, p.y, veh.turretFacing, cam.zoom, scale);
     }
   }
 }
@@ -182,6 +186,7 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
     return;
   }
   const season = state.map.def.season;
+  const scale = unitSpriteScale(cam.zoom);
   for (const s of state.soldiers.values()) {
     if (s.health === 'dead') continue;
     if (s.vehicleId != null) continue;
@@ -192,8 +197,8 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
     if (selected) drawSelectionRing(ctx, p);
     const stance = s.health === 'incapacitated' ? 'prone' : s.stance;
     const outline = s.side === playerSide ? 'friendly' : 'enemy';
-    const sprite = getSoldierSprite(s.side, season, stance, s.facing, frameOf(s), outline);
-    const { dw, dh } = spriteDrawSize(sprite, cam.zoom);
+    const sprite = getSoldierSprite(s.side, season, stance, s.facing, frameOf(s), outline, scale);
+    const { dw, dh } = spriteDrawSize(sprite, cam.zoom, scale);
     if (stance !== 'prone') drawSoldierShadow(ctx, p, dw, dh, cam.zoom);
     ctx.drawImage(sprite, Math.round(p.x - dw / 2), Math.round(p.y - dh / 2), dw, dh);
     // 2px facing tick in front of the soldier, only for the selected team.

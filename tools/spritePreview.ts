@@ -98,6 +98,73 @@ function cellPair1x4x(row: HTMLElement, label: string, src: HTMLCanvasElement): 
   row.appendChild(c);
 }
 
+// ------------------------------------------------------ wf5: zoom 2 (2x) --
+/** In-game zoom-2 comparison: the 1x sprite blown up 2x with nearest-
+ * neighbour (how zoom 2 used to look) beside the genuine 2x sprite drawn
+ * 1:1 (how it looks now), on a ground-tone backdrop, plus a 3x magnified
+ * copy of the 2x art for detail inspection. */
+function zoomCompareCell(row: HTMLElement, label: string, s1: HTMLCanvasElement, s2: HTMLCanvasElement, bg: string): void {
+  const c = document.createElement('div');
+  c.className = 'cell';
+  const mk = (src: HTMLCanvasElement, scale: number) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, src.width * scale);
+    canvas.height = Math.max(1, src.height * scale);
+    canvas.style.background = bg;
+    canvas.style.display = 'inline-block';
+    canvas.style.margin = '0 2px 2px';
+    canvas.style.verticalAlign = 'bottom';
+    const ctx = canvas.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
+    return canvas;
+  };
+  c.appendChild(mk(s1, 2));
+  c.appendChild(mk(s2, 1));
+  c.appendChild(mk(s2, 3));
+  const span = document.createElement('span');
+  span.textContent = `${label} (old 1x@2 | 2x | 2x@3)`;
+  c.appendChild(span);
+  row.appendChild(c);
+}
+
+const Z2_STANCES: (Stance | 'dead')[] = ['standing', 'crouching', 'prone', 'dead'];
+for (const season of ['summer', 'winter'] as Season[]) {
+  const bg = season === 'winter' ? '#d4d6d2' : '#6f7a45';
+  for (const side of SIDES) {
+    const row = section(`2x (zoom 2) soldiers — ${side} / ${season} — friendly (rim) then enemy`);
+    for (const outline of ['friendly', 'enemy'] as const) {
+      for (const stance of Z2_STANCES) {
+        if (stance === 'dead' && outline === 'friendly') continue;
+        for (const facing of [0, 1, 2] as Facing8[]) {
+          zoomCompareCell(row, `${outline[0]} ${stance} f${facing}`,
+            getSoldierSprite(side, season, stance, facing, 0, outline, 1),
+            getSoldierSprite(side, season, stance, facing, 0, outline, 2), bg);
+        }
+      }
+    }
+  }
+}
+
+/** Side-by-side readability line-up at true in-game zoom-2 size. */
+const lineupRow = section('2x line-up at true zoom-2 size: German friendly / German enemy / Soviet friendly / Soviet enemy');
+for (const season of ['summer', 'winter'] as Season[]) {
+  const bg = season === 'winter' ? '#d4d6d2' : '#6f7a45';
+  const c = document.createElement('canvas');
+  c.width = 4 * 8 * 30; c.height = 70;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, c.width, c.height);
+  let x = 0;
+  for (const [side, outline] of [['german', 'friendly'], ['german', 'enemy'], ['soviet', 'friendly'], ['soviet', 'enemy']] as [Side, 'friendly' | 'enemy'][]) {
+    for (let f = 0; f < 8; f++) {
+      const sp = getSoldierSprite(side, season, f % 3 === 2 ? 'crouching' : 'standing', f as Facing8, (f % 2) as 0 | 1, outline, 2);
+      ctx.drawImage(sp, x - sp.width / 2 + 15, 35 - sp.height / 2);
+      x += 30;
+    }
+  }
+  cell(lineupRow, season, c, 1);
+}
+
 for (const side of SIDES) {
   for (const season of SEASONS) {
     const row = section(`Soldiers — ${side} / ${season}`);
@@ -169,6 +236,15 @@ for (const id of VEHICLE_IDS) {
   const turret = getVehicleSprite(id, 'turret', 'knockedOut');
   cellPair(vehComposedKoRow, `${id} KO`, composeVehicle(hull, turret));
 }
+
+// ------------------------------------------------------ wf5: 2x vehicles --
+function composeVehicleAt(id: string, state: 'ok' | 'knockedOut', scale: number): HTMLCanvasElement {
+  return composeVehicle(getVehicleSprite(id, 'hull', state, scale), getVehicleSprite(id, 'turret', state, scale));
+}
+const veh2Row = section('2x (zoom 2) vehicles — composed hull+turret (old 1x@2 | 2x | 2x@3)');
+for (const id of VEHICLE_IDS) zoomCompareCell(veh2Row, id, composeVehicleAt(id, 'ok', 1), composeVehicleAt(id, 'ok', 2), '#6f7a45');
+const veh2KoRow = section('2x (zoom 2) vehicles — knocked out / burning');
+for (const id of VEHICLE_IDS) zoomCompareCell(veh2KoRow, `${id} KO`, composeVehicleAt(id, 'knockedOut', 1), composeVehicleAt(id, 'knockedOut', 2), '#6f7a45');
 
 // ------------------------------------------------------------------ flags --
 const flagRow = section('Flags');

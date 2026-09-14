@@ -28,7 +28,7 @@ import { hash2 } from '@/shared/rng';
 import { fbm, fbm64, fbm14, heightField, fbmClump, angleField } from '@/render/noise';
 import { idx, tileAt, inBounds } from '@/sim/map';
 import { TERRAIN_COLORS } from '@/render/palette';
-import { getTreeSprite, getSmokePuff } from '@/render/sprites';
+import { getTreeSprite, getTreeShadowSprite, getSmokePuff, TREE_SPRITE_WORLD_PX, TREE_VARIANTS, type TreeShape } from '@/render/sprites';
 import { drawDecorItem } from '@/render/decorSprites';
 import { worldToScreen, ZOOM_LEVELS } from '@/engine/camera';
 
@@ -548,6 +548,37 @@ const isWater = (t: Terrain) => t === 'water';
 const isRubble = (t: Terrain) => t === 'rubble';
 const isDirtySource = (t: Terrain) => t === 'pavedroad' || t === 'dirtroad' || t === 'rubble';
 const isWoody = (t: Terrain) => t === 'woods' || t === 'scatteredtrees';
+const isWoodsTile = (t: Terrain) => t === 'woods';
+const isLeeSource = (t: Terrain) => t === 'hedge' || t === 'stonewall' || t === 'fence' || t === 'buildingWood' || t === 'buildingStone';
+const isTrampleSource = (t: Terrain) => t === 'buildingWood' || t === 'buildingStone' || t === 'floor' || t === 'dirtroad' || t === 'pavedroad' || t === 'bridge';
+const EMPTY_GRID: Grid = { data: new Float32Array(1), size: 1, any: false };
+const FOREST_FLOOR_DARK: RGB = { r: 34, g: 36, b: 20 };
+const FOREST_FLOOR_MID: RGB = { r: 70, g: 62, b: 34 };
+const LITTER_BROWN: RGB = { r: 112, g: 82, b: 44 };
+const LITTER_OLIVE: RGB = { r: 88, g: 94, b: 44 };
+const SNOW_UNDER_TREES: RGB = { r: 176, g: 180, b: 186 };
+const SNOW_DRIFT_SHADOW: RGB = { r: 164, g: 178, b: 202 };
+const SNOW_CREST: RGB = { r: 250, g: 251, b: 250 };
+const SNOW_LEE_SHADOW: RGB = { r: 140, g: 156, b: 190 };
+const SNOW_TRAMPLED: RGB = { r: 186, g: 186, b: 184 };
+const SNOW_RUT: RGB = { r: 110, g: 94, b: 76 };
+const DEAD_GRASS: RGB = { r: 146, g: 122, b: 82 };
+const BARE_EARTH: RGB = { r: 84, g: 68, b: 52 };
+
+/** Bilinear sample of a coverage grid at fractional GRID coords (index g <-> tile x0-1+g
+ * centre), clamped to the grid — used for offset (lee-shadow) lookups. */
+function sampleGridF(grid: Grid, gx: number, gy: number): number {
+  if (!grid.any) return 0;
+  const { data, size } = grid;
+  const mx = size - 1.001;
+  gx = gx < 0 ? 0 : gx > mx ? mx : gx;
+  gy = gy < 0 ? 0 : gy > mx ? mx : gy;
+  const i0 = gx | 0, j0 = gy | 0, fx = gx - i0, fy = gy - j0;
+  const o = j0 * size + i0;
+  const a = data[o] + (data[o + 1] - data[o]) * fx;
+  const b = data[o + size] + (data[o + size + 1] - data[o + size]) * fx;
+  return a + (b - a) * fy;
+}
 
 // ---------------------------------------------------------------- base fill
 function paintGroundAndFeatures(
@@ -560,7 +591,38 @@ function paintGroundAndFeatures(
   pavedVec: VecAreaField | null, dirtVec: VecAreaField | null, waterVec: VecAreaField | null,
   tramRailY: number[],
   zoom: number, bpt: number,
+  woodsGrid: Grid, leeGrid: Grid, trampleGrid: Grid,
 ): void {
+  // ---- per-chunk low-frequency lattices (every LAT world px, bilinearly sampled per pixel):
+  // snow drift height + its NW-facing slope, and two ridge-noise fields whose |v-0.5| iso-bands
+  // become meandering trampled paths / paired vehicle ruts near buildings and roads.
+  const winterPass = season === 'winter';
+  const LAT = 4;
+  const latN = Math.ceil((tilesW * TILE_PX) / LAT) + 2;
+  const wx0px = x0 * TILE_PX, wy0px = y0 * TILE_PX;
+  let latDrift: Float32Array | null = null, latLit: Float32Array | null = null;
+  if (winterPass) {
+    latDrift = new Float32Array(latN * latN); latLit = new Float32Array(latN * latN);
+    const driftAt = (X: number, Y: number) => fbm((X * 0.8 + Y * 0.3) / 150, Y / 85, 2, seed + 7301);
+    for (let j = 0; j < latN; j++) {
+      for (let i = 0; i < latN; i++) {
+        const X = wx0px + i * LAT, Y = wy0px + j * LAT;
+        const d = driftAt(X, Y);
+        const o = j * latN + i;
+        latDrift[o] = d;
+        latLit[o] = d - driftAt(X - 6, Y - 6);
+      }
+    }
+  }
+  const latSample = (arr: Float32Array, wpx: number, wpy: number): number => {
+    const lx = (wpx - wx0px) / LAT, ly = (wpy - wy0px) / LAT;
+    const i0 = lx | 0, j0 = ly | 0;
+    const fx = lx - i0, fy = ly - j0;
+    const o = j0 * latN + i0;
+    const a = arr[o] + (arr[o + 1] - arr[o]) * fx;
+    const b = arr[o + latN] + (arr[o + latN + 1] - arr[o + latN]) * fx;
+    return a + (b - a) * fy;
+  };
   const groundAt = (tx: number, ty: number): Terrain => {
     const cx = tx < 0 ? 0 : tx >= mapW ? mapW - 1 : tx;
     const cy = ty < 0 ? 0 : ty >= mapH ? mapH - 1 : ty;
@@ -891,6 +953,73 @@ function paintGroundAndFeatures(
                 color = lerpRGB(color, warm, 0.45 + 0.35 * (hp / dens));
               } else if (hp < dens * 1.45) {
                 color = shade(color, -0.36 - 0.2 * hs); // dark 1px fleck
+              }
+            }
+          }
+
+          // ------------------------------------------------ forest floor under dense woods
+          // dark brown-green floor with leaf-litter speckle, so gaps between crowns read as
+          // shaded ground rather than open meadow.
+          if (plainGround && woodsGrid.any) {
+            const covWoods = sampleGrid(woodsGrid, tx, px, ty, py, wpx, wpy, seed + 3701, 0.05, bpt);
+            const fb = smooth01(covWoods, 0.3, 0.72);
+            if (fb > 0.003 && !winterPass) {
+              const mott = hash2(Math.floor(wpx / 3), Math.floor(wpy / 3), seed + 7402) * 0.55 + hash2(wpx, wpy, seed + 7403) * 0.45;
+              let fl = lerpRGB(FOREST_FLOOR_DARK, FOREST_FLOOR_MID, mott);
+              const lh = hash2(wpx, wpy, seed + 7401);
+              if (lh < 0.09) fl = lerpRGB(fl, LITTER_BROWN, 0.75);
+              else if (lh < 0.14) fl = lerpRGB(fl, LITTER_OLIVE, 0.7);
+              else if (lh < 0.22) fl = shade(fl, -0.35);
+              color = lerpRGB(color, fl, fb * 0.9);
+            } else if (fb > 0.003) {
+              // winter: thinner, greyer snow under the canopy with twig/leaf litter showing
+              color = lerpRGB(color, SNOW_UNDER_TREES, fb * 0.35);
+              const lh = hash2(wpx, wpy, seed + 7401);
+              if (lh < 0.03 * fb) color = lerpRGB(color, LITTER_BROWN, 0.5);
+            }
+          }
+
+          // ------------------------------------------------ snow depth (winter open snow)
+          if (winterPass && plainGround && groundT === 'snow' && latDrift && latLit) {
+            const dv = latSample(latDrift, wpx, wpy);
+            const dl = latSample(latLit, wpx, wpy);
+            // blue-grey drift hollows, bright sunlit crests, cooler lee slopes
+            const trough = 1 - smooth01(dv, 0.3, 0.62);
+            color = lerpRGB(color, SNOW_DRIFT_SHADOW, trough * 0.32);
+            const crest = clamp01(dl * 16);
+            const lee = clamp01(-dl * 16);
+            if (crest > 0) color = lerpRGB(color, SNOW_CREST, crest * 0.6);
+            if (lee > 0) color = lerpRGB(color, SNOW_DRIFT_SHADOW, lee * 0.3);
+
+            // soft blue shadow on the lee (SE) side of hedges/walls/fences/buildings
+            if (leeGrid.any) {
+              const gxl = tx + px / bpt + 0.5 - 0.45, gyl = ty + py / bpt + 0.5 - 0.45;
+              const leeS = smooth01(sampleGridF(leeGrid, gxl, gyl), 0.08, 0.42);
+              if (leeS > 0.003) color = lerpRGB(color, SNOW_LEE_SHADOW, leeS * 0.42);
+            }
+
+            // trampled ground around buildings and along roads
+            // (explicit track curves are stroked per building in paintWinterTracks; here trampled
+            // ground only greys the snow a little and lets earth show through more easily)
+            let tramp = 0;
+            if (trampleGrid.any) {
+              tramp = smooth01(sampleGrid(trampleGrid, tx, px, ty, py, wpx, wpy, seed + 3801, 0.02, bpt), 0.1, 0.4);
+              if (tramp > 0.003) color = lerpRGB(color, SNOW_TRAMPLED, tramp * 0.18);
+            }
+
+            // exposed dark earth / dead-grass streaks where snow lies thin: road shoulders, under
+            // trees, along hedges and walls, trampled ground and wind-scoured crests
+            const covDirtyT = dirtyGrid.any ? sampleGrid(dirtyGrid, tx, px, ty, py, wpx, wpy, seed + 3602, 0.03, bpt) : 0;
+            const covLeeHere = leeGrid.any ? sampleGrid(leeGrid, tx, px, ty, py, wpx, wpy, seed + 3702, 0.03, bpt) : 0;
+            const covW = woodsGrid.any ? sampleGrid(woodsGrid, tx, px, ty, py, wpx, wpy, seed + 3703, 0.03, bpt) : 0;
+            const thin = Math.max(clamp01(covDirtyT) * 0.7, covW * 0.3, covLeeHere * 1.3, tramp * 0.4, crest * 0.15);
+            if (thin > 0.04) {
+              const en = fbm(wpx / 11, wpy / 5, 1, seed + 7351) * 0.8 + hash2(wpx, wpy, seed + 7352) * 0.2;
+              const thr = 1 - thin * 0.42;
+              if (en > thr) {
+                const amt = clamp01((en - thr) * 9);
+                const ec = lerpRGB(BARE_EARTH, DEAD_GRASS, smooth01(fbm(wpx / 2.5, wpy / 7, 1, seed + 7353), 0.42, 0.58));
+                color = lerpRGB(color, ec, amt * 0.68);
               }
             }
           }
@@ -1396,7 +1525,108 @@ function occupancyClipPath(fp: Footprint, bb: BuildingBBox, x0: number, y0: numb
   return path;
 }
 
-function paintRoof(ctx: CanvasRenderingContext2D, map: GameMap, bb: BuildingBBox, x0: number, y0: number, seed: number, season: Season): void {
+type RoofTex = 'shingle' | 'plank' | 'tile';
+/** Pattern period in world px — must divide CHUNK_PX so the texture lines up across chunk seams. */
+const ROOF_TEX_PERIOD = 20;
+const roofPatternCanvas = new Map<string, HTMLCanvasElement>();
+
+/** A tileable overlay (alpha light/dark only, so it works on any roof colour) generated per pixel
+ * at the OUTPUT resolution for the given zoom: shingle courses with staggered joints, planks, or
+ * clay/stone tile courses. Courses run parallel to the ridge. */
+function roofPatternSource(kind: RoofTex, ridgeHoriz: boolean, zoom: number): HTMLCanvasElement {
+  const key = `${kind}|${ridgeHoriz ? 'h' : 'v'}|${zoom}`;
+  let c = roofPatternCanvas.get(key);
+  if (c) return c;
+  const P = Math.max(2, Math.round(ROOF_TEX_PERIOD * zoom));
+  c = document.createElement('canvas');
+  c.width = P; c.height = P;
+  const ctx = c.getContext('2d')!;
+  const img = ctx.createImageData(P, P);
+  const d = img.data;
+  const course = kind === 'plank' ? 5 : 4;
+  const joint = kind === 'plank' ? 20 : kind === 'tile' ? 4 : 5;
+  for (let j = 0; j < P; j++) {
+    for (let i = 0; i < P; i++) {
+      // (a = across-ridge coord, b = along-ridge coord) in world px
+      const wxp = (i + 0.5) / zoom, wyp = (j + 0.5) / zoom;
+      const a = ridgeHoriz ? wyp : wxp, b = ridgeHoriz ? wxp : wyp;
+      let lum = 0; // -1..1
+      if (kind === 'plank') {
+        // planks run ACROSS courses (perpendicular to ridge) — swap roles
+        const pa = b, pb = a;
+        const pi = Math.floor(pa / course);
+        const fa = pa / course - pi;
+        lum = (hash2(pi, 0, 7711) - 0.5) * 0.5;
+        if (fa < 0.12 * (zoom >= 2 ? 1 : 1.6)) lum -= 0.7;
+        else if (fa < 0.3) lum += 0.12;
+        lum += (hash2(pi, Math.floor(pb / 2), 7712) - 0.5) * 0.18;
+      } else {
+        const ci = Math.floor(a / course);
+        const fa = a / course - ci;
+        const stagger = ci % 2 ? joint / 2 : 0;
+        const si = Math.floor((b + stagger) / joint);
+        const fb = (b + stagger) / joint - si;
+        lum = (hash2(ci, si, kind === 'tile' ? 7721 : 7731) - 0.5) * 0.55;
+        if (kind === 'tile') lum += Math.sin(fb * Math.PI) * 0.3 - 0.15; // rounded pantile
+        else lum += (fa - 0.5) * 0.35; // each shingle lighter at its lower, exposed butt edge
+        const edgeW = 0.9 / (course * zoom);
+        if (fa > 1 - edgeW * 1.2) lum -= 0.85; // course shadow line
+        if (fb < 0.9 / (joint * zoom)) lum -= 0.5; // joint
+      }
+      const o = (j * P + i) * 4;
+      if (lum >= 0) { d[o] = 255; d[o + 1] = 236; d[o + 2] = 200; d[o + 3] = Math.min(255, lum * 90); }
+      else { d[o] = 16; d[o + 1] = 10; d[o + 2] = 4; d[o + 3] = Math.min(255, -lum * 125); }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  roofPatternCanvas.set(key, c);
+  return c;
+}
+
+function getRoofPattern(ctx: CanvasRenderingContext2D, kind: RoofTex, ridgeHoriz: boolean, zoom: number): CanvasPattern | null {
+  const pat = ctx.createPattern(roofPatternSource(kind, ridgeHoriz, zoom), 'repeat');
+  if (!pat) return null;
+  // the bake context is scaled by `zoom`: map one pattern pixel to one output pixel
+  if (typeof DOMMatrix !== 'undefined') pat.setTransform(new DOMMatrix([1 / zoom, 0, 0, 1 / zoom, 0, 0]));
+  return pat;
+}
+
+/** Building height in world px (drives cast-shadow length). */
+function buildingHeightPx(bb: BuildingBBox, big: boolean, seed: number): number {
+  const base = big ? 10 : bb.kind === 'stone' ? 8.5 : 7;
+  return base + (hash2(bb.id, 29, seed + 731) - 0.5) * 2;
+}
+
+/** SE cast shadow for one building: every occupied tile swept by the sun offset, unioned into one
+ * path (nonzero fill) so overlapping sweeps never double the alpha, with a softer wider halo. */
+function paintBuildingShadow(ctx: CanvasRenderingContext2D, map: GameMap, bb: BuildingBBox, x0: number, y0: number, seed: number, season: Season): void {
+  const fp = analyzeFootprint(map, bb);
+  const wTiles = bb.maxX - bb.minX + 1, hTiles = bb.maxY - bb.minY + 1;
+  const big = fp.hole !== null || (wTiles > 12 && hTiles > 12);
+  const hgt = buildingHeightPx(bb, big, seed);
+  const snowy = season === 'winter';
+  const sweep = (dx: number, dy: number): Path2D => {
+    const p = new Path2D();
+    for (let ty = 0; ty < fp.h; ty++) {
+      for (let tx = 0; tx < fp.w; tx++) {
+        if (!fp.occ[ty * fp.w + tx]) continue;
+        const l = (bb.minX + tx - x0) * TILE_PX, t = (bb.minY + ty - y0) * TILE_PX;
+        const r = l + TILE_PX, b = t + TILE_PX;
+        p.moveTo(l, t); p.lineTo(r, t); p.lineTo(r + dx, t + dy); p.lineTo(r + dx, b + dy); p.lineTo(l + dx, b + dy); p.lineTo(l, b); p.closePath();
+      }
+    }
+    return p;
+  };
+  const dx = hgt * 0.95, dy = hgt * 0.8;
+  ctx.fillStyle = snowy ? 'rgba(52,66,104,0.2)' : 'rgba(8,8,4,0.16)';
+  ctx.fill(sweep(dx + 3, dy + 3), 'nonzero');
+  ctx.fillStyle = snowy ? 'rgba(48,62,100,0.46)' : 'rgba(8,8,4,0.36)';
+  ctx.fill(sweep(dx, dy), 'nonzero');
+  ctx.fillStyle = snowy ? 'rgba(40,50,84,0.2)' : 'rgba(6,6,2,0.2)';
+  ctx.fill(sweep(dx * 0.45, dy * 0.45), 'nonzero');
+}
+
+function paintRoof(ctx: CanvasRenderingContext2D, map: GameMap, bb: BuildingBBox, x0: number, y0: number, seed: number, season: Season, zoom = 1): void {
   const left = (bb.minX - x0) * TILE_PX;
   const top = (bb.minY - y0) * TILE_PX;
   const wTiles = bb.maxX - bb.minX + 1;
@@ -1408,53 +1638,11 @@ function paintRoof(ctx: CanvasRenderingContext2D, map: GameMap, bb: BuildingBBox
   const fp = analyzeFootprint(map, bb);
   const big = fp.hole !== null || (wTiles > 12 && hTiles > 12);
 
-  // Wall/base course, just outside the roof footprint on the S and E sides, so the roof reads
-  // as sitting on a structure rather than floating directly on the ground texture: a lit top
-  // edge, a material-appropriate mid tone, a dark base line, and a handful of window marks with
-  // sills. Ground-shadow band cast beyond the wall, in two alpha steps.
-  const WALL_PX = 4;
-  const wallMid = stone ? '#8d8a80' : (hash2(bb.id, 7, seed + 711) < 0.5 ? '#c8bfa8' : '#6b4a2e');
-  ctx.fillStyle = wallMid;
-  ctx.fillRect(left + w, top, WALL_PX, h + WALL_PX);
-  ctx.fillRect(left, top + h, w + WALL_PX, WALL_PX);
-  ctx.fillStyle = shadeHex(wallMid, 0.32);
-  ctx.fillRect(left + w, top, 1, h + WALL_PX);
-  ctx.fillRect(left, top + h, w + WALL_PX, 1);
-  ctx.fillStyle = shadeHex(wallMid, -0.38);
-  ctx.fillRect(left + w + WALL_PX - 1, top, 1, h + WALL_PX);
-  ctx.fillRect(left, top + h + WALL_PX - 1, w + WALL_PX, 1);
-
-  // window marks with a light sill: denser rhythm (every ~4px) for tenement facades, a handful
-  // (2-3) for ordinary houses.
-  const drawWinV = (wx: number, wy: number) => {
-    ctx.fillStyle = 'rgba(20,18,16,0.8)';
-    ctx.fillRect(wx, wy, 2, 3);
-    ctx.fillStyle = snowy ? 'rgba(210,214,220,0.85)' : 'rgba(230,224,200,0.85)';
-    ctx.fillRect(wx, wy + 3, 2, 1);
-  };
-  const drawWinH = (wx: number, wy: number) => {
-    ctx.fillStyle = 'rgba(20,18,16,0.8)';
-    ctx.fillRect(wx, wy, 3, 2);
-    ctx.fillStyle = snowy ? 'rgba(210,214,220,0.85)' : 'rgba(230,224,200,0.85)';
-    ctx.fillRect(wx + 3, wy, 1, 2);
-  };
-  if (big) {
-    for (let d = 5; d < h - 1; d += 4) drawWinV(left + w + 1, top + d);
-    for (let d = 5; d < w - 1; d += 4) drawWinH(left + d, top + h + 1);
-  } else {
-    const winN = 2 + Math.floor(hash2(bb.id, 91, seed + 712) * 2);
-    for (let i = 0; i < winN; i++) { const t = (i + 1) / (winN + 1); drawWinV(left + w + 1, top + Math.round(t * h)); }
-    for (let i = 0; i < winN; i++) { const t = (i + 1) / (winN + 1); drawWinH(left + Math.round(t * w), top + h + 1); }
-  }
-
-  // soft shadow cast onto the ground beyond the wall, ~6px wide, in two alpha steps.
-  // (winter: a stronger bluish shadow on the snow, ref_cc3_1484)
-  ctx.fillStyle = snowy ? 'rgba(24,32,52,0.45)' : 'rgba(8,8,6,0.35)';
-  ctx.fillRect(left + w + WALL_PX, top, 2, h + WALL_PX);
-  ctx.fillRect(left, top + h + WALL_PX, w + WALL_PX, 2);
-  ctx.fillStyle = snowy ? 'rgba(24,32,52,0.22)' : 'rgba(8,8,6,0.18)';
-  ctx.fillRect(left + w + WALL_PX + 2, top, 4, h + WALL_PX);
-  ctx.fillRect(left, top + h + WALL_PX + 2, w + WALL_PX, 4);
+  // Eaves overhang: a tight dark band hugging the S and E eaves (the overhang's own shadow on the
+  // wall top), on top of the long cast shadow painted by paintBuildingShadow beforehand.
+  ctx.fillStyle = snowy ? 'rgba(30,38,60,0.5)' : 'rgba(8,8,4,0.45)';
+  ctx.fillRect(left + w, top + 1, 2, h + 1);
+  ctx.fillRect(left + 1, top + h, w + 1, 2);
 
   // If the footprint isn't a plain rectangle (a notch, like a narrower tower merged into a
   // nave, or a real interior hole/courtyard), clip the roof fills to the occupied tiles only so
@@ -1470,7 +1658,7 @@ function paintRoof(ctx: CanvasRenderingContext2D, map: GameMap, bb: BuildingBBox
     // In winter this must read as a snow-covered roof (pale, off-white), not merely a brighter
     // version of the same olive/brown material colour — a hue-preserving brighten here is what
     // produced the flat olive-green rectangle the critique flagged.
-    const flat = snowy ? mixHex(flatBase, SNOW_LIT, 0.72) : flatBase;
+    const flat = snowy ? mixHex(flatBase, SNOW_LIT, 0.62) : flatBase;
     ctx.fillStyle = flat;
     ctx.fillRect(left, top, w, h);
     if (snowy) {
@@ -1488,10 +1676,20 @@ function paintRoof(ctx: CanvasRenderingContext2D, map: GameMap, bb: BuildingBBox
     ctx.strokeStyle = shadeHex(flat, 0.22);
     ctx.lineWidth = 2;
     ctx.strokeRect(left + 2, top + 2, Math.max(0, w - 4), Math.max(0, h - 4));
-    // 2px parapet at the outer edge
-    ctx.fillStyle = shadeHex(flat, -0.35);
+    // roofing-felt seams at output resolution
+    {
+      const pat = getRoofPattern(ctx, 'plank', w >= h, zoom);
+      if (pat) { ctx.fillStyle = pat; ctx.globalAlpha = 0.35; ctx.fillRect(left, top, w, h); ctx.globalAlpha = 1; }
+    }
+    // 2px parapet at the outer edge (lit on N/W, dark on S/E) casting a shadow onto the roof
+    // just inside its N and W runs
+    ctx.fillStyle = snowy ? 'rgba(40,52,84,0.28)' : 'rgba(0,0,0,0.28)';
+    ctx.fillRect(left + 2, top + 2, w - 4, 3);
+    ctx.fillRect(left + 2, top + 5, 3, h - 7);
+    ctx.fillStyle = shadeHex(flat, 0.25);
     ctx.fillRect(left, top, w, 2);
     ctx.fillRect(left, top, 2, h);
+    ctx.fillStyle = shadeHex(flat, -0.4);
     ctx.fillRect(left, top + h - 2, w, 2);
     ctx.fillRect(left + w - 2, top, 2, h);
     // row of chimneys along the long axis
@@ -1530,71 +1728,107 @@ function paintRoof(ctx: CanvasRenderingContext2D, map: GameMap, bb: BuildingBBox
     const litFill = snowy ? mixHex(v.light, SNOW_LIT, 0.55) : v.light;
     const shadeFill = snowy ? mixHex(v.dark, SNOW_SHADE, 0.25) : v.dark;
 
-    // shaded (unlit) slope first, full footprint
-    ctx.fillStyle = shadeFill;
-    ctx.fillRect(left, top, w, h);
-    // lit slope, brighter than the shaded slope
-    ctx.fillStyle = litFill;
-    if (ridgeHoriz) ctx.fillRect(left, top, w, Math.ceil(h / 2));
-    else ctx.fillRect(left, top, Math.ceil(w / 2), h);
+    const along = ridgeHoriz ? w : h; // ridge length
+    const across = ridgeHoriz ? h : w;
+    const ridgeAt = Math.floor(across / 2);
+    // two slopes: NW-facing slope (N half for an E-W ridge, W half for N-S) catches the sun
+    const litRect = ridgeHoriz ? [left, top, w, ridgeAt] : [left, top, ridgeAt, h];
+    const shadeRect = ridgeHoriz ? [left, top + ridgeAt, w, h - ridgeAt] : [left + ridgeAt, top, w - ridgeAt, h];
+    ctx.fillStyle = shadeHex(v.light, 0.1);
+    ctx.fillRect(litRect[0], litRect[1], litRect[2], litRect[3]);
+    ctx.fillStyle = shadeHex(v.base, -0.2);
+    ctx.fillRect(shadeRect[0], shadeRect[1], shadeRect[2], shadeRect[3]);
+    void along;
 
-    // gable-end hint: a darker triangle on the shaded slope at each end of the ridge, where it
-    // meets the short walls. In winter this must stay a darker SNOW tone (a faint blue-grey),
-    // not the bare roof material's dark colour — using v.dark unconditionally painted a solid
-    // brown/stone wedge over the snow-covered shaded slope.
-    ctx.fillStyle = snowy ? shadeHex(shadeFill, -0.2) : shadeHex(v.dark, -0.18);
-    if (ridgeHoriz) {
-      const g = Math.min(h * 0.4, w * 0.25);
-      ctx.beginPath(); ctx.moveTo(left, top + h / 2); ctx.lineTo(left + g, top + h); ctx.lineTo(left, top + h); ctx.closePath(); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(left + w, top + h / 2); ctx.lineTo(left + w - g, top + h); ctx.lineTo(left + w, top + h); ctx.closePath(); ctx.fill();
-    } else {
-      const g = Math.min(w * 0.4, h * 0.25);
-      ctx.beginPath(); ctx.moveTo(left + w / 2, top); ctx.lineTo(left + w, top + g); ctx.lineTo(left + w, top); ctx.closePath(); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(left + w / 2, top + h); ctx.lineTo(left + w, top + h - g); ctx.lineTo(left + w, top + h); ctx.closePath(); ctx.fill();
+    // shingle / plank / tile courses at OUTPUT resolution (pattern generated per zoom)
+    const texKind: RoofTex = stone ? 'tile' : hash2(bb.id, 17, seed + 721) < 0.62 ? 'shingle' : 'plank';
+    const pat = getRoofPattern(ctx, texKind, ridgeHoriz, zoom);
+    if (pat) {
+      ctx.fillStyle = pat;
+      ctx.globalAlpha = snowy ? 0.5 : 0.9;
+      ctx.fillRect(left, top, w, h);
+      ctx.globalAlpha = 1;
+    }
+    // slope shading: lit slope brightest just below the ridge, shaded slope darkens toward eave
+    {
+      const [lx, ly, lw, lh] = litRect;
+      const g1 = ridgeHoriz ? ctx.createLinearGradient(0, ly + lh, 0, ly) : ctx.createLinearGradient(lx + lw, 0, lx, 0);
+      g1.addColorStop(0, 'rgba(255,248,230,0.16)');
+      g1.addColorStop(1, 'rgba(255,248,230,0)');
+      ctx.fillStyle = g1;
+      ctx.fillRect(lx, ly, lw, lh);
+      const [sx, sy, sw, sh] = shadeRect;
+      const g2 = ridgeHoriz ? ctx.createLinearGradient(0, sy, 0, sy + sh) : ctx.createLinearGradient(sx, 0, sx + sw, 0);
+      g2.addColorStop(0, 'rgba(0,0,0,0.03)');
+      g2.addColorStop(1, 'rgba(0,0,0,0.14)');
+      ctx.fillStyle = g2;
+      ctx.fillRect(sx, sy, sw, sh);
     }
 
-    // plank/tile lines perpendicular to the ridge, -8% brightness
-    ctx.fillStyle = snowy ? 'rgba(0,0,0,0.28)' : 'rgba(0,0,0,0.18)';
-    if (ridgeHoriz) { for (let x = 2; x < w; x += 3) ctx.fillRect(left + x, top, 1, h); }
-    else { for (let y = 2; y < h; y += 3) ctx.fillRect(left, top + y, w, 1); }
+    // hipped-end hint: darker triangles at each end of the ridge on the shaded slope
+    ctx.fillStyle = 'rgba(0,0,0,0.14)';
+    if (ridgeHoriz) {
+      const g = Math.min(h * 0.45, w * 0.25);
+      ctx.beginPath(); ctx.moveTo(left, top + ridgeAt); ctx.lineTo(left + g, top + h); ctx.lineTo(left, top + h); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(left + w, top + ridgeAt); ctx.lineTo(left + w - g, top + h); ctx.lineTo(left + w, top + h); ctx.closePath(); ctx.fill();
+    } else {
+      const g = Math.min(w * 0.45, h * 0.25);
+      ctx.beginPath(); ctx.moveTo(left + ridgeAt, top); ctx.lineTo(left + w, top + g); ctx.lineTo(left + w, top); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(left + ridgeAt, top + h); ctx.lineTo(left + w, top + h - g); ctx.lineTo(left + w, top + h); ctx.closePath(); ctx.fill();
+    }
 
     if (snowy) {
-      // snow lying in patches on the lit slope, plus a strip along the lit side of the ridge
-      const litX = left, litY = top;
-      const litW = ridgeHoriz ? w : Math.ceil(w / 2), litH = ridgeHoriz ? Math.ceil(h / 2) : h;
+      // snow cover: bright on the sunlit slope, cold blue-grey on the shaded slope, thinning to
+      // bare material along the eaves and in wind-scoured patches, so ridge and eaves still read.
+      const [lx, ly, lw, lh] = litRect;
+      const [sx, sy, sw, sh] = shadeRect;
+      ctx.fillStyle = 'rgba(238,242,246,0.64)';
+      ctx.fillRect(lx, ly, lw, lh);
+      ctx.fillStyle = 'rgba(176,190,212,0.46)';
+      ctx.fillRect(sx, sy, sw, sh);
+      // roof courses still faintly show through the snow
+      if (pat) { ctx.fillStyle = pat; ctx.globalAlpha = 0.3; ctx.fillRect(left, top, w, h); ctx.globalAlpha = 1; }
+      // wind-scoured streaks along the courses where the roof material shows through
       ctx.save();
-      ctx.beginPath(); ctx.rect(litX, litY, litW, litH); ctx.clip();
-      ctx.fillStyle = SNOW_LIT;
-      const patchN = Math.max(3, Math.floor((w * h) / 160));
-      for (let i = 0; i < patchN; i++) {
-        const sx = litX + hash2(bb.id * 61 + i, i, 830) * litW;
-        const sy = litY + hash2(bb.id * 61 + i, i, 831) * litH;
-        const sz = 3 + Math.floor(hash2(bb.id * 67 + i, i, 832) * 3);
-        ctx.fillRect(Math.round(sx - sz / 2), Math.round(sy - sz / 2), sz, Math.max(2, sz - 1));
+      ctx.beginPath(); ctx.rect(left, top, w, h); ctx.clip();
+      const bareN = Math.max(2, Math.floor((w * h) / 380));
+      ctx.fillStyle = shadeHex(v.base, -0.05);
+      for (let i = 0; i < bareN; i++) {
+        const px_ = left + 2 + hash2(bb.id * 71 + i, i, 840) * (w - 4);
+        const py_ = top + 2 + hash2(bb.id * 73 + i, i, 841) * (h - 4);
+        const len = 4 + hash2(bb.id, i, 842) * 10;
+        ctx.globalAlpha = 0.25 + hash2(bb.id, i, 843) * 0.3;
+        if (ridgeHoriz) ctx.fillRect(px_ - len / 2, py_, len, 1 + Math.round(hash2(bb.id, i, 844)));
+        else ctx.fillRect(px_, py_ - len / 2, 1 + Math.round(hash2(bb.id, i, 844)), len);
       }
-      if (ridgeHoriz) ctx.fillRect(left, top + Math.floor(h / 2) - 2, w, 2);
-      else ctx.fillRect(left + Math.ceil(w / 2) - 2, top, 2, h);
+      ctx.globalAlpha = 1;
       ctx.restore();
+      // bare material along the eaves (snow slides off the edge)
+      ctx.fillStyle = shadeHex(v.base, -0.15);
+      ctx.globalAlpha = 0.7;
+      if (ridgeHoriz) { ctx.fillRect(left, top, w, 1.5); ctx.fillRect(left, top + h - 1.5, w, 1.5); }
+      else { ctx.fillRect(left, top, 1.5, h); ctx.fillRect(left + w - 1.5, top, 1.5, h); }
+      ctx.globalAlpha = 1;
     }
 
-    // ridge line: always the roof material's own dark tone, so it (and the eave outline below)
-    // stay visible against a snow-covered roof rather than disappearing into it.
-    ctx.fillStyle = snowy ? v.dark : shadeHex(v.light, 0.2);
-    if (ridgeHoriz) ctx.fillRect(left, top + Math.floor(h / 2), w, 1);
-    else ctx.fillRect(left + Math.floor(w / 2), top, 1, h);
+    // ridge: a 2px cap — lit highlight on the sun side, dark line on the shaded side
+    ctx.fillStyle = snowy ? shadeHex(v.dark, -0.1) : shadeHex(v.dark, -0.3);
+    if (ridgeHoriz) ctx.fillRect(left, top + ridgeAt, w, 1);
+    else ctx.fillRect(left + ridgeAt, top, 1, h);
+    ctx.fillStyle = snowy ? '#f6f8fa' : shadeHex(v.light, 0.35);
+    if (ridgeHoriz) ctx.fillRect(left, top + ridgeAt - 1, w, 1);
+    else ctx.fillRect(left + ridgeAt - 1, top, 1, h);
 
-    // eave outline: 1px dark
-    ctx.strokeStyle = v.dark;
+    // eaves: dark outline all round, a lit fascia on the N and W edges
+    ctx.strokeStyle = shadeHex(v.dark, -0.35);
     ctx.lineWidth = 1;
     ctx.strokeRect(left + 0.5, top + 0.5, Math.max(0, w - 1), Math.max(0, h - 1));
-
-    // faint stone-coursing mortar lines
-    if (stone && !snowy) {
-      ctx.strokeStyle = 'rgba(0,0,0,0.15)';
-      ctx.lineWidth = 1;
-      for (let gx = 4; gx < w; gx += 5) { ctx.beginPath(); ctx.moveTo(left + gx + 0.5, top); ctx.lineTo(left + gx + 0.5, top + h); ctx.stroke(); }
-      for (let gy = 4; gy < h; gy += 5) { ctx.beginPath(); ctx.moveTo(left, top + gy + 0.5); ctx.lineTo(left + w, top + gy + 0.5); ctx.stroke(); }
-    }
+    ctx.fillStyle = snowy ? 'rgba(255,255,255,0.35)' : 'rgba(255,240,210,0.22)';
+    ctx.fillRect(left + 1, top + 1, w - 2, 1);
+    ctx.fillRect(left + 1, top + 1, 1, h - 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    ctx.fillRect(left + 1, top + h - 2, w - 2, 1);
+    ctx.fillRect(left + w - 2, top + 1, 1, h - 2);
 
     // chimney on buildings >= 5x5 tiles, with a highlight and its own tiny cast shadow; in
     // winter, a few bare patches of the roof's own colour show through the snow near it.
@@ -1787,31 +2021,44 @@ function paintEaveNotches(ctx: CanvasRenderingContext2D, map: GameMap, wx: numbe
 }
 
 // --------------------------------------------------------------------- trees
-function paintTreeShadow(ctx: CanvasRenderingContext2D, cx: number, cy: number, rx: number, ry: number, season: Season = 'autumn'): void {
-  ctx.save();
-  // summer: a stronger, longer SE shadow so trees stand off the darker olive ground
-  const summer = season === 'summer';
-  ctx.translate(cx + (summer ? 6 : 4), cy + (summer ? 8 : 6));
-  for (let i = 0; i < 3; i++) {
-    ctx.globalAlpha = summer ? 0.2 : 0.12;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, rx * (1 - i * 0.15), ry * (1 - i * 0.15), 0, 0, Math.PI * 2);
-    ctx.fillStyle = '#000000';
-    ctx.fill();
-  }
-  ctx.restore();
+/** Size buckets (x zoom) that crown sprites are generated at; a crown of size s is drawn from
+ * the smallest bucket >= s, so it is only ever downscaled by <=~25% (with smoothing), never
+ * nearest-neighbour upscaled. */
+const CROWN_SIZE_BUCKETS = [0.7, 0.95, 1.2, 1.45, 1.7];
+/** Visual crown radius in world px at size 1 (sprite footprint is 28px). */
+const CROWN_R = 11.5;
+/** Canopy alpha: a touch translucent so the canopy mass never reads as a solid carpet. */
+const CANOPY_ALPHA = 0.88;
+
+function drawCrown(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number, shape: TreeShape, variant: number, season: Season, zoom: number, alpha = CANOPY_ALPHA): void {
+  let b = CROWN_SIZE_BUCKETS[CROWN_SIZE_BUCKETS.length - 1];
+  for (const s of CROWN_SIZE_BUCKETS) if (s >= size - 1e-6) { b = s; break; }
+  const spr = getTreeSprite(variant, season, b * zoom, shape);
+  const dw = TREE_SPRITE_WORLD_PX * size;
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(spr, Math.round((cx - dw / 2) * zoom) / zoom, Math.round((cy - dw / 2) * zoom) / zoom, dw, dw);
   ctx.globalAlpha = 1;
 }
 
-/** A soft lightening on the NW third of the canopy so individual trees pop against the ground
- * ramp instead of reading as a flat dark disc (round-2 critique: trees don't read as trees). */
-function paintCanopyHighlight(ctx: CanvasRenderingContext2D, cx: number, cy: number, dw: number, dh: number, season: Season): void {
-  ctx.globalAlpha = season === 'winter' ? 0.22 : 0.45;
-  ctx.fillStyle = season === 'winter' ? '#eef2f6' : '#b8d060';
-  ctx.beginPath();
-  ctx.ellipse(cx - dw * 0.16, cy - dh * 0.18, dw * 0.28, dh * 0.22, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.globalAlpha = 1;
+/** Soft cast shadow for one crown: summer/autumn a SE-offset soft oval; winter a long cold
+ * blue-grey streak running down-left across the snow (ref_cc3_1482). */
+function drawCrownShadow(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number, season: Season, zoom: number): void {
+  const R = CROWN_R * size;
+  if (season === 'winter') {
+    const spr = getTreeShadowSprite(zoom, 'blue');
+    const s = TREE_SPRITE_WORLD_PX * size * 0.75;
+    ctx.save();
+    ctx.translate(cx - s * 0.55, cy + s * 0.35);
+    ctx.rotate(-0.6);
+    ctx.globalAlpha = 0.5;
+    ctx.drawImage(spr, -s * 1.05, -s * 0.24, s * 2.1, s * 0.48);
+    ctx.restore();
+  } else {
+    const spr = getTreeShadowSprite(zoom, 'dark');
+    ctx.globalAlpha = season === 'summer' ? 0.72 : 0.6;
+    ctx.drawImage(spr, cx + R * 0.45 - R * 1.2, cy + R * 0.6 - R * 1.0, R * 2.4, R * 2.0);
+    ctx.globalAlpha = 1;
+  }
 }
 
 /** Winter leafless scrub tree: a spiky brown starburst with a small dark centre. */
@@ -1839,97 +2086,251 @@ function paintScrubTree(ctx: CanvasRenderingContext2D, cx: number, cy: number, s
   ctx.beginPath(); ctx.arc(cx, cy, 1.5, 0, Math.PI * 2); ctx.fill();
 }
 
-function paintTrees(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number, season: Season, seed: number): void {
-  const t = tileAt(map, wx, wy);
-  if (t === 'woods' && season === 'winter') {
-    // Winter wood = INDIVIDUAL trees with snow showing between them (ref_cc3_1482): 1-2 per
-    // tile, mostly brown leafless crowns mixed with a few snow-crusted conifer canopies, each
-    // with a long soft blue-grey shadow streak running down-left.
-    // ~0.5 trees/tile (1-2 on half the tiles): at a full 1-2 on every tile the trees merged into
-    // a continuous thicket with no snow between them (checked against ref_cc3_1482 spacing).
-    const hc = hash2(wx, wy, seed + 101);
-    const count = hc < 0.38 ? 1 : hc < 0.5 ? 2 : 0;
-    for (let i = 0; i < count; i++) {
-      const jxT = (hash2(wx * 13 + i, wy * 13 + i, seed + 103) - 0.5) * 1.4;
-      const jyT = (hash2(wx * 13 + i + 5, wy * 13 + i + 5, seed + 107) - 0.5) * 1.4;
-      if (coverageAt(map, isWoody, wx + 0.5 + jxT, wy + 0.5 + jyT, seed + 8801) < 0.5) continue;
-      const cx = ox + (0.5 + jxT) * TILE_PX, cy = oy + (0.5 + jyT) * TILE_PX;
-      const kindH = hash2(wx * 17 + i, wy * 17 + i, seed + 109);
-      const leafless = kindH < 0.6;
-      let s: number;
-      let sprite: HTMLCanvasElement | null = null;
-      if (leafless) {
-        s = 18 + hash2(wx * 23 + i, wy * 23 + i, seed + 121) * 10;
-      } else {
-        sprite = getTreeSprite(Math.floor(kindH * 5) % 3, season);
-        s = sprite.width * (0.6 + hash2(wx * 23 + i, wy * 23 + i, seed + 121) * 0.2);
-      }
-      ctx.save();
-      ctx.translate(cx - s * 0.55, cy + s * 0.35);
-      ctx.rotate(-0.6);
-      ctx.fillStyle = 'rgba(70,80,100,0.30)';
-      ctx.beginPath();
-      ctx.ellipse(0, 0, s * 0.9, s * 0.18, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-      if (leafless) {
-        // a soft brown twig-mass under the branches so the crown reads as a fuzzy ball, not sticks
-        ctx.fillStyle = 'rgba(74,54,38,0.4)';
-        ctx.beginPath(); ctx.ellipse(cx, cy - s * 0.08, s * 0.34, s * 0.3, 0, 0, Math.PI * 2); ctx.fill();
-        paintScrubTree(ctx, cx, cy, seed + 131 + i, s, '#4a3626', 1.5, false);
-      } else if (sprite) {
-        ctx.drawImage(sprite, Math.round(cx - s / 2), Math.round(cy - s / 2), s, s);
-        paintCanopyHighlight(ctx, cx, cy, s, s, season);
+// ------------------------------------------------------------ winter tracks (trampled paths +
+// vehicle ruts converging on buildings from roads and neighbouring houses, ref_cc3_1484)
+interface WinterTrack { a: Vec2; c: Vec2; b: Vec2; ruts: boolean; minX: number; minY: number; maxX: number; maxY: number }
+
+function computeWinterTracks(map: GameMap, bboxes: Map<number, BuildingBBox>, seed: number): WinterTrack[] {
+  const tracks: WinterTrack[] = [];
+  const isRoadT = (t: Terrain) => t === 'dirtroad' || t === 'pavedroad' || t === 'bridge';
+  const edgePoint = (bb: BuildingBBox, tx: number, ty: number): Vec2 => {
+    // point on the bbox boundary (world px) nearest the target (world px)
+    const l = bb.minX * TILE_PX, r = (bb.maxX + 1) * TILE_PX, t = bb.minY * TILE_PX, btm = (bb.maxY + 1) * TILE_PX;
+    const x = Math.min(r, Math.max(l, tx)), y = Math.min(btm, Math.max(t, ty));
+    const dl = x - l, dr = r - x, dt = y - t, db = btm - y;
+    const m = Math.min(dl, dr, dt, db);
+    if (tx >= l && tx <= r && ty >= t && ty <= btm) return { x, y };
+    if (m === dl && tx < l) return { x: l, y };
+    if (m === dr && tx > r) return { x: r, y };
+    if (m === dt && ty < t) return { x, y: t };
+    return { x, y: ty < t ? t : ty > btm ? btm : y };
+  };
+  const push = (a: Vec2, b: Vec2, ruts: boolean, h: number) => {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 12) return;
+    const off = (h - 0.5) * len * 0.5;
+    const c = { x: (a.x + b.x) / 2 - (dy / len) * off, y: (a.y + b.y) / 2 + (dx / len) * off };
+    const pad = 10;
+    tracks.push({
+      a, b, c, ruts,
+      minX: Math.min(a.x, b.x, c.x) - pad, minY: Math.min(a.y, b.y, c.y) - pad,
+      maxX: Math.max(a.x, b.x, c.x) + pad, maxY: Math.max(a.y, b.y, c.y) + pad,
+    });
+  };
+  const list = [...bboxes.values()];
+  for (const bb of list) {
+    const bcx = ((bb.minX + bb.maxX + 1) / 2) * TILE_PX, bcy = ((bb.minY + bb.maxY + 1) / 2) * TILE_PX;
+    // nearest road tile within 12 tiles of the footprint
+    let best: Vec2 | null = null, bestD = Infinity;
+    const R = 12;
+    for (let ty = bb.minY - R; ty <= bb.maxY + R; ty++) {
+      for (let tx = bb.minX - R; tx <= bb.maxX + R; tx++) {
+        if (!inBounds(map, tx, ty) || !isRoadT(map.tiles[idx(map, tx, ty)])) continue;
+        const ex = tx < bb.minX ? bb.minX - tx : tx > bb.maxX ? tx - bb.maxX : 0;
+        const ey = ty < bb.minY ? bb.minY - ty : ty > bb.maxY ? ty - bb.maxY : 0;
+        const d = ex * ex + ey * ey + hash2(tx, ty, seed + 7501) * 0.5;
+        if (d < bestD) { bestD = d; best = { x: (tx + 0.5) * TILE_PX, y: (ty + 0.5) * TILE_PX }; }
       }
     }
-  } else if (t === 'woods') {
-    const count = hash2(wx, wy, seed + 101) < 0.4 ? 3 : 5;
-    for (let i = 0; i < count; i++) {
-      const jxT = (hash2(wx * 13 + i, wy * 13 + i, seed + 103) - 0.5) * 1.4;
-      const jyT = (hash2(wx * 13 + i + 5, wy * 13 + i + 5, seed + 107) - 0.5) * 1.4;
-      // ragged canopy edge: reject candidates that fall outside the smoothed woody field
-      if (coverageAt(map, isWoody, wx + 0.5 + jxT, wy + 0.5 + jyT, seed + 8801) < 0.5) continue;
-      const cx = ox + (0.5 + jxT) * TILE_PX, cy = oy + (0.5 + jyT) * TILE_PX;
-      // 'woods' (dense tree mass) always uses the round canopy sprite — including the
-      // snow-crusted winter variant already built in sprites.ts — so it reads as a mass of
-      // trees; only the sparser 'scatteredtrees' fringe uses the leafless scrub look.
-      const variant = Math.floor(hash2(wx * 17 + i, wy * 17 + i, seed + 109) * 3);
-      const hScale = hash2(wx * 23 + i, wy * 23 + i, seed + 121);
-      const scale = season === 'summer' ? 1.15 + 0.5 * hScale : 0.8 + hScale * 0.5;
-      const sprite = getTreeSprite(variant, season);
-      const dw = sprite.width * scale, dh = sprite.height * scale;
-      paintTreeShadow(ctx, cx, cy, dw * 0.45, dh * 0.25, season);
-      ctx.drawImage(sprite, Math.round(cx - dw / 2), Math.round(cy - dh / 2), dw, dh);
-      paintCanopyHighlight(ctx, cx, cy, dw, dh, season);
+    if (best && bestD > 1) {
+      // two approaches from the road, slightly apart, converging on the house
+      const a = edgePoint(bb, best.x, best.y);
+      push(a, best, true, hash2(bb.id, 1, seed + 7502));
+      const b2 = { x: best.x + (hash2(bb.id, 2, seed + 7503) - 0.5) * 90, y: best.y + (hash2(bb.id, 3, seed + 7503) - 0.5) * 90 };
+      if (inBounds(map, Math.floor(b2.x / TILE_PX), Math.floor(b2.y / TILE_PX))) push(edgePoint(bb, b2.x, b2.y), b2, hash2(bb.id, 4, seed + 7504) < 0.5, hash2(bb.id, 5, seed + 7502));
     }
-  } else if (t === 'scatteredtrees') {
-    // round-3 fix #3: summer scatteredtrees canopy density was noticeably sparser than the
-    // reference's field-edge tree lines (0.55 chance per tile) — raised to 0.72.
-    if (hash2(wx, wy, seed + 111) < 0.72) {
-      const jxT = (hash2(wx * 19, wy * 19, seed + 113) - 0.5) * 0.4;
-      const jyT = (hash2(wx * 23, wy * 23, seed + 117) - 0.5) * 0.4;
-      if (coverageAt(map, isWoody, wx + 0.5 + jxT, wy + 0.5 + jyT, seed + 8802) >= 0.5) {
-        const cx = ox + (0.5 + jxT) * TILE_PX, cy = oy + (0.5 + jyT) * TILE_PX;
-        if (season === 'winter') {
-          const size = 12 + hash2(wx * 31, wy * 31, seed + 123) * 10;
-          paintScrubTree(ctx, cx, cy, seed + 123, size);
-        } else {
-          const variant = Math.floor(hash2(wx * 29, wy * 29, seed + 119) * 3);
-          const hScale = hash2(wx * 31, wy * 31, seed + 123);
-          const scale = season === 'summer' ? 1.15 + 0.5 * hScale : 0.85 + hScale * 0.4;
-          const sprite = getTreeSprite(variant, season);
-          const dw = sprite.width * scale, dh = sprite.height * scale;
-          paintTreeShadow(ctx, cx, cy, dw * 0.45, dh * 0.25, season);
-          ctx.drawImage(sprite, Math.round(cx - dw / 2), Math.round(cy - dh / 2), dw, dh);
-          paintCanopyHighlight(ctx, cx, cy, dw, dh, season);
-        }
-      }
+    // a footpath to the nearest neighbouring building (each pair once)
+    let nb: BuildingBBox | null = null, nd = Infinity;
+    for (const o of list) {
+      if (o.id === bb.id) continue;
+      const ocx = ((o.minX + o.maxX + 1) / 2) * TILE_PX, ocy = ((o.minY + o.maxY + 1) / 2) * TILE_PX;
+      const d = Math.hypot(ocx - bcx, ocy - bcy);
+      if (d < nd) { nd = d; nb = o; }
+    }
+    if (nb && nb.id > bb.id && nd < 18 * TILE_PX) {
+      const ocx = ((nb.minX + nb.maxX + 1) / 2) * TILE_PX, ocy = ((nb.minY + nb.maxY + 1) / 2) * TILE_PX;
+      push(edgePoint(bb, ocx, ocy), edgePoint(nb, bcx, bcy), false, hash2(bb.id, nb.id, seed + 7505));
     }
   }
-  // (no per-tile bush roll on plain grass/hedge tiles — bushes come only from each map's
-  // explicit scatterDecor('bush', …) placements, matching the original's sparse, deliberate
-  // look instead of a uniform per-tile scatter.)
+  return tracks;
 }
+
+function paintWinterTracks(ctx: CanvasRenderingContext2D, tracks: WinterTrack[], x0: number, y0: number, seed: number): void {
+  const wx0 = x0 * TILE_PX, wy0 = y0 * TILE_PX;
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (let i = 0; i < tracks.length; i++) {
+    const tr = tracks[i];
+    if (tr.maxX < wx0 || tr.minX > wx0 + CHUNK_PX || tr.maxY < wy0 || tr.minY > wy0 + CHUNK_PX) continue;
+    const ax = tr.a.x - wx0, ay = tr.a.y - wy0, cx = tr.c.x - wx0, cy = tr.c.y - wy0, bx = tr.b.x - wx0, by = tr.b.y - wy0;
+    const curve = (o: number) => {
+      const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len * o, ny = dx / len * o;
+      ctx.beginPath();
+      ctx.moveTo(ax + nx, ay + ny);
+      ctx.quadraticCurveTo(cx + nx, cy + ny, bx + nx, by + ny);
+      ctx.stroke();
+    };
+    // trampled, greyer band of broken snow
+    ctx.setLineDash([]);
+    ctx.strokeStyle = 'rgba(120,126,138,0.14)';
+    ctx.lineWidth = tr.ruts ? 9 : 5;
+    curve(0);
+    ctx.strokeStyle = 'rgba(150,156,168,0.12)';
+    ctx.lineWidth = tr.ruts ? 5 : 3;
+    curve(0);
+    // paired ruts (vehicles/sleds) or a single broken foot track, dark earth showing through
+    const h = hash2(i, 7, seed + 7510);
+    ctx.setLineDash([7 + h * 6, 2 + h * 2, 4, 1.5]);
+    ctx.strokeStyle = 'rgba(92,72,52,0.78)';
+    ctx.lineWidth = 1.25;
+    if (tr.ruts) { curve(-2.2); curve(2.2); } else { ctx.strokeStyle = 'rgba(104,90,74,0.45)'; curve(0); }
+  }
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+// ------------------------------------------------------------ dense woods (blue-noise crowns)
+interface WoodCand { x: number; y: number; size: number; shape: TreeShape; variant: number; pri: number; scrub: boolean }
+
+/** Candidate cell size (world px) and minimum-spacing factor (x sum of crown radii). Winter
+ * woods are individual trees with snow between them, summer woods a closed but irregular canopy
+ * with floor gaps. */
+function woodsParams(season: Season): { cell: number; k: number } {
+  return season === 'winter' ? { cell: 16, k: 0.8 } : { cell: 10, k: 0.52 };
+}
+
+/** One jittered crown candidate per world cell — a pure function of (cell, seed), so every chunk
+ * that sees a cell derives the identical tree (seam-free across chunk bakes). */
+function woodsCandidate(map: GameMap, ci: number, cj: number, cell: number, seed: number, season: Season): WoodCand | null {
+  if (ci < 0 || cj < 0) return null;
+  const x = (ci + 0.1 + 0.8 * hash2(ci, cj, seed + 1201)) * cell;
+  const y = (cj + 0.1 + 0.8 * hash2(ci, cj, seed + 1202)) * cell;
+  const tx = Math.floor(x / TILE_PX), ty = Math.floor(y / TILE_PX);
+  if (!inBounds(map, tx, ty) || map.tiles[idx(map, tx, ty)] !== 'woods') return null;
+  // ragged canopy edge against the smoothed woody field
+  if (coverageAt(map, isWoody, x / TILE_PX - 0.5, y / TILE_PX - 0.5, seed + 8801) < 0.5) return null;
+  const winter = season === 'winter';
+  // low-frequency clearings so the forest floor shows through in irregular glades
+  const clr = fbm(x / 72, y / 72, 2, seed + 1207);
+  if (clr < (winter ? 0.3 : 0.27)) return null;
+  if (hash2(ci, cj, seed + 1204) < (winter ? 0.06 : 0.03)) return null;
+  let size = (winter ? 0.95 : 0.7) + (winter ? 0.55 : 0.8) * hash2(ci, cj, seed + 1205);
+  const hs = hash2(ci, cj, seed + 1206);
+  let shape: TreeShape;
+  let scrub = false;
+  if (winter) {
+    if (hs < 0.76) shape = 'bare';
+    else if (hs < 0.92) { shape = 'conifer'; size *= 0.8; }
+    else { shape = 'bare'; scrub = true; }
+  } else {
+    shape = hs < 0.36 ? 'round' : hs < 0.68 ? 'lobed' : hs < 0.86 ? 'elongated' : 'conifer';
+    if (shape === 'conifer') size = Math.max(0.6, size * 0.78);
+  }
+  return {
+    x, y, size, shape, scrub,
+    variant: Math.floor(hash2(ci, cj, seed + 1208) * TREE_VARIANTS),
+    pri: hash2(ci, cj, seed + 1209),
+  };
+}
+
+/** Dense-woods crowns for one chunk (plus padding so crowns/shadows straddling the edge are drawn
+ * identically on both sides). Poisson-disc style thinning: a candidate is dropped if any
+ * higher-priority candidate within k*(Ri+Rj) exists, giving irregular overlap and floor gaps
+ * instead of a regular carpet. All shadows go down before any crown. */
+function paintWoodsChunk(ctx: CanvasRenderingContext2D, map: GameMap, x0: number, y0: number, season: Season, seed: number, zoom: number): void {
+  const { cell, k } = woodsParams(season);
+  const PAD = 48;
+  const reach = Math.ceil((k * 2 * CROWN_R * 1.5) / cell);
+  const wx0 = x0 * TILE_PX, wy0 = y0 * TILE_PX;
+  const ci0 = Math.floor((wx0 - PAD) / cell) - reach, cj0 = Math.floor((wy0 - PAD) / cell) - reach;
+  const ci1 = Math.floor((wx0 + CHUNK_PX + PAD) / cell) + reach, cj1 = Math.floor((wy0 + CHUNK_PX + PAD) / cell) + reach;
+  // quick reject: no woods tile anywhere in the padded window
+  let anyWoods = false;
+  const tx0 = Math.max(0, Math.floor((wx0 - PAD) / TILE_PX) - 1), tx1 = Math.min(map.width - 1, Math.floor((wx0 + CHUNK_PX + PAD) / TILE_PX) + 1);
+  const ty0 = Math.max(0, Math.floor((wy0 - PAD) / TILE_PX) - 1), ty1 = Math.min(map.height - 1, Math.floor((wy0 + CHUNK_PX + PAD) / TILE_PX) + 1);
+  for (let ty = ty0; ty <= ty1 && !anyWoods; ty++) for (let tx = tx0; tx <= tx1; tx++) if (map.tiles[idx(map, tx, ty)] === 'woods') { anyWoods = true; break; }
+  if (!anyWoods) return;
+
+  const gw = ci1 - ci0 + 1, gh = cj1 - cj0 + 1;
+  const cands: (WoodCand | null)[] = new Array(gw * gh);
+  for (let gj = 0; gj < gh; gj++) for (let gi = 0; gi < gw; gi++) cands[gj * gw + gi] = woodsCandidate(map, ci0 + gi, cj0 + gj, cell, seed, season);
+
+  const accepted: WoodCand[] = [];
+  for (let gj = reach; gj < gh - reach; gj++) {
+    for (let gi = reach; gi < gw - reach; gi++) {
+      const c = cands[gj * gw + gi];
+      if (!c) continue;
+      if (c.x < wx0 - PAD || c.x > wx0 + CHUNK_PX + PAD || c.y < wy0 - PAD || c.y > wy0 + CHUNK_PX + PAD) continue;
+      const ri = CROWN_R * c.size;
+      let ok = true;
+      for (let dj = -reach; dj <= reach && ok; dj++) {
+        for (let di = -reach; di <= reach; di++) {
+          if (!di && !dj) continue;
+          const o = cands[(gj + dj) * gw + gi + di];
+          if (!o || o.pri <= c.pri) continue;
+          const md = k * (ri + CROWN_R * o.size);
+          const dx = o.x - c.x, dy = o.y - c.y;
+          if (dx * dx + dy * dy < md * md) { ok = false; break; }
+        }
+      }
+      if (ok) accepted.push(c);
+    }
+  }
+  if (!accepted.length) return;
+  // small trees underneath, big ones on top; ties by position (deterministic across chunks)
+  accepted.sort((a, b) => a.size - b.size || a.y - b.y || a.x - b.x);
+  const lx = (c: WoodCand) => c.x - wx0, ly = (c: WoodCand) => c.y - wy0;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  for (const c of accepted) drawCrownShadow(ctx, lx(c), ly(c), c.size, season, zoom);
+  for (const c of accepted) {
+    if (c.scrub) {
+      ctx.imageSmoothingEnabled = false;
+      paintScrubTree(ctx, lx(c), ly(c), seed + 131, 16 + c.size * 8, '#4a3626', 1.3, false);
+      ctx.imageSmoothingEnabled = true;
+    } else {
+      drawCrown(ctx, lx(c), ly(c), c.size, c.shape, c.variant, season, zoom, c.shape === 'bare' ? 1 : CANOPY_ALPHA);
+    }
+  }
+  ctx.imageSmoothingEnabled = false;
+}
+
+/** Per-tile trees outside dense woods ('scatteredtrees' fringes, tree lines, orchards). Dense
+ * 'woods' tiles are handled chunk-wide by paintWoodsChunk. */
+function paintTrees(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number, season: Season, seed: number, zoom: number): void {
+  const t = tileAt(map, wx, wy);
+  if (t !== 'scatteredtrees') return;
+  // round-3 fix #3: summer scatteredtrees canopy density raised to 0.72 per tile.
+  if (hash2(wx, wy, seed + 111) >= 0.72) return;
+  const jxT = (hash2(wx * 19, wy * 19, seed + 113) - 0.5) * 0.4;
+  const jyT = (hash2(wx * 23, wy * 23, seed + 117) - 0.5) * 0.4;
+  if (coverageAt(map, isWoody, wx + 0.5 + jxT, wy + 0.5 + jyT, seed + 8802) < 0.5) return;
+  const cx = ox + (0.5 + jxT) * TILE_PX, cy = oy + (0.5 + jyT) * TILE_PX;
+  const hScale = hash2(wx * 31, wy * 31, seed + 123);
+  const variant = Math.floor(hash2(wx * 29, wy * 29, seed + 119) * TREE_VARIANTS);
+  const shapeRoll = hash2(wx * 37, wy * 37, seed + 127);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  if (season === 'winter') {
+    if (shapeRoll < 0.45) {
+      ctx.imageSmoothingEnabled = false;
+      paintScrubTree(ctx, cx, cy, seed + 123, 12 + hScale * 10);
+    } else {
+      const size = 0.65 + hScale * 0.45;
+      drawCrownShadow(ctx, cx, cy, size, season, zoom);
+      drawCrown(ctx, cx, cy, size, shapeRoll < 0.85 ? 'bare' : 'conifer', variant, season, zoom, 1);
+    }
+  } else {
+    const size = season === 'summer' ? 1.0 + 0.6 * hScale : 0.85 + hScale * 0.45;
+    const shape: TreeShape = shapeRoll < 0.5 ? 'round' : shapeRoll < 0.85 ? 'lobed' : 'elongated';
+    drawCrownShadow(ctx, cx, cy, size, season, zoom);
+    drawCrown(ctx, cx, cy, size, shape, variant, season, zoom, 0.94);
+  }
+  ctx.imageSmoothingEnabled = false;
+}
+
 
 /** Tiles whose terrain is in `vectorLineTerrains` are rendered by `paintLineVector` as one
  * smooth stroked path per chunk instead — skip the blocky per-tile band for those here. */
@@ -2076,6 +2477,7 @@ export class TerrainRenderer {
   /** Terrains (hedge/fence/stonewall/trench) fully covered by a 'line' vector on this map — the
    * per-tile band painter is skipped for these and a smooth stroked path is drawn instead. */
   private vectorLineTerrains = new Set<Terrain>();
+  private winterTracks: WinterTrack[] | null = null;
 
   constructor(map: GameMap) {
     this.map = map;
@@ -2325,8 +2727,8 @@ export class TerrainRenderer {
    * feathered edges, ruts and rows are computed fresh at that resolution instead of being
    * baked once at zoom 1 and blockily upscaled. The remaining canvas-op passes (walls, roofs,
    * trees, decor) are unchanged code, just run under a ctx.scale(zoom,zoom) so line widths and
-   * drawImage calls scale automatically (smoothing stays off, so sprites scale with nearest-
-   * neighbour as intended). */
+   * drawImage calls scale automatically. Tree crowns are the exception: they are generated at
+   * zoom x size-bucket resolution (getTreeSprite scale) and drawn with smoothing on. */
   private bakeChunk(cx: number, cy: number, zoom: number): HTMLCanvasElement {
     const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
     const bpt = Math.round(TILE_PX * zoom);
@@ -2359,6 +2761,9 @@ export class TerrainRenderer {
     // blurred so the dirty-snow shoulder doesn't show tile stair-steps along road edges
     const dirtyGrid = season === 'winter' ? buildGrid(map, x0, y0, CHUNK_TILES, isDirtySource, 1) : cropsGrid;
     const gu = this.groundUnder, mw = map.width, mh = map.height;
+    const woodsGrid = buildGrid(map, x0, y0, CHUNK_TILES, isWoodsTile, 1);
+    const leeGrid = season === 'winter' ? buildGrid(map, x0, y0, CHUNK_TILES, isLeeSource, 1) : EMPTY_GRID;
+    const trampleGrid = season === 'winter' ? buildGrid(map, x0, y0, CHUNK_TILES, isTrampleSource, 3) : EMPTY_GRID;
     const openGrid = buildGrid(map, x0, y0, CHUNK_TILES, isOpenGround, 1, (tx, ty) => {
       const cx2 = tx < 0 ? 0 : tx >= mw ? mw - 1 : tx;
       const cy2 = ty < 0 ? 0 : ty >= mh ? mh - 1 : ty;
@@ -2392,6 +2797,7 @@ export class TerrainRenderer {
       this.groundUnder, map.width, map.height, this.fieldId, this.fieldAxis,
       cropsGrid, mudGrid, tallgrassGrid, pavedGrid, dirtGrid, waterGrid, rubbleGrid, dirtyGrid, openGrid,
       pavedVec, dirtVec, waterVec, tramRailY, zoom, bpt,
+      woodsGrid, leeGrid, trampleGrid,
     );
     reliefCache = null;
     ctx.putImageData(img, 0, 0);
@@ -2440,14 +2846,24 @@ export class TerrainRenderer {
       }
     }
 
+    if (season === 'winter') {
+      if (!this.winterTracks) this.winterTracks = computeWinterTracks(map, this.buildingBBoxes, this.seed);
+      paintWinterTracks(ctx, this.winterTracks, x0, y0, this.seed);
+    }
+
     // ------------------------------------------------------------ buildings
+    // all cast shadows first so a neighbour's shadow never lands on top of a roof
+    for (const bb of this.buildingBBoxes.values()) {
+      if (bb.maxX < x0 - 1 || bb.minX >= x0 + CHUNK_TILES || bb.maxY < y0 - 1 || bb.minY >= y0 + CHUNK_TILES) continue;
+      paintBuildingShadow(ctx, map, bb, x0, y0, this.seed, season);
+    }
     for (const bb of this.buildingBBoxes.values()) {
       // The wall band + cast shadow drawn on the S/E sides protrude up to ~1 tile past the
       // building's own footprint, so a chunk immediately past that edge still needs a (clipped)
       // draw call to pick up that protruding sliver — widen the overlap test by 1 tile on the
       // max side accordingly.
       if (bb.maxX < x0 - 1 || bb.minX >= x0 + CHUNK_TILES || bb.maxY < y0 - 1 || bb.minY >= y0 + CHUNK_TILES) continue;
-      paintRoof(ctx, map, bb, x0, y0, this.seed, season);
+      paintRoof(ctx, map, bb, x0, y0, this.seed, season, zoom);
     }
     for (let ty = 0; ty < CHUNK_TILES; ty++) {
       const wy = y0 + ty;
@@ -2475,9 +2891,12 @@ export class TerrainRenderer {
       for (let tx = -1; tx <= CHUNK_TILES; tx++) {
         const wx = x0 + tx;
         if (wx < 0 || wx >= map.width) continue;
-        paintTrees(ctx, map, wx, wy, tx * TILE_PX, ty * TILE_PX, season, this.seed);
+        paintTrees(ctx, map, wx, wy, tx * TILE_PX, ty * TILE_PX, season, this.seed, zoom);
       }
     }
+
+    paintWoodsChunk(ctx, map, x0, y0, season, this.seed, zoom);
+
 
     // ------------------------------------------------------------ decor
     this.drawDecor(ctx, x0, y0);

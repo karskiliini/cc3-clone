@@ -8,7 +8,7 @@ import { TILE_PX, TILE_M } from '@/shared/types';
 import { hash2 } from '@/shared/rng';
 import { createCanvas, ctx2d } from '@/render/pixelUtil';
 import { buildVehicleHull, buildVehicleTurret } from '@/render/vehicleArt';
-import { buildSoldierArt, orientSoldierArt, type SoldierOutline } from '@/render/soldierArt';
+import { buildSoldierSprite, type SoldierOutline } from '@/render/soldierArt';
 import { buildTeamIcon } from '@/render/teamIconArt';
 
 const PX_PER_M = TILE_PX / TILE_M; // 5 px/m
@@ -29,6 +29,46 @@ function cached(key: string, build: () => HTMLCanvasElement): HTMLCanvasElement 
 // ============================================================================
 const OUTLINE = '#1a1a14';
 
+/** Sprite resolutions the unit builders author: 1x for zoom <= 1, 2x
+ * (genuinely re-rasterised with extra detail, not doubled pixels) for zoom 2. */
+export const UNIT_SPRITE_SCALES = [1, 2] as const;
+export type UnitSpriteScale = (typeof UNIT_SPRITE_SCALES)[number];
+export function unitSpriteScale(zoom: number): UnitSpriteScale {
+  return zoom >= 2 ? 2 : 1;
+}
+
+/** Bounded LRU caches for unit sprites, one per scale, so a long session that
+ * visits every facing/stance/season at both zooms can't grow without limit
+ * and evicting 2x sprites never throws away the hot 1x set (or vice versa). */
+class LruCache {
+  private map = new Map<string, HTMLCanvasElement>();
+  constructor(private readonly cap: number) {}
+  get(key: string, build: () => HTMLCanvasElement): HTMLCanvasElement {
+    const hit = this.map.get(key);
+    if (hit) {
+      this.map.delete(key);
+      this.map.set(key, hit);
+      return hit;
+    }
+    const c = build();
+    this.map.set(key, c);
+    if (this.map.size > this.cap) this.map.delete(this.map.keys().next().value as string);
+    return c;
+  }
+  get size(): number { return this.map.size; }
+}
+const SOLDIER_CACHE_CAP = 900;
+const VEHICLE_CACHE_CAP = 160;
+const soldierCaches: Record<UnitSpriteScale, LruCache> = { 1: new LruCache(SOLDIER_CACHE_CAP), 2: new LruCache(SOLDIER_CACHE_CAP) };
+const vehicleCaches: Record<UnitSpriteScale, LruCache> = { 1: new LruCache(VEHICLE_CACHE_CAP), 2: new LruCache(VEHICLE_CACHE_CAP) };
+
+/** Current unit-sprite cache sizes (for the preview page / perf checks). */
+export function unitSpriteCacheStats(): Record<string, number> {
+  return { soldier1: soldierCaches[1].size, soldier2: soldierCaches[2].size, vehicle1: vehicleCaches[1].size, vehicle2: vehicleCaches[2].size };
+}
+
+/** Oriented soldier sprite, square, centred on the soldier. Authored at
+ * `scale` px per 1x px: draw at `width * zoom / scale`. */
 export function getSoldierSprite(
   side: Side,
   season: Season,
@@ -36,9 +76,13 @@ export function getSoldierSprite(
   facing: Facing8,
   frame: 0 | 1,
   outline: SoldierOutline = 'enemy',
+  scale: number = 1,
 ): HTMLCanvasElement {
-  const key = `soldier|${side}|${season}|${stance}|${facing}|${frame}|${outline}`;
-  return cached(key, () => orientSoldierArt(buildSoldierArt(side, season, stance, frame, outline), facing));
+  const sc = unitSpriteScale(scale);
+  const fr = stance === 'dead' || stance === 'prone' ? 0 : frame;
+  const ol = stance === 'dead' ? 'enemy' : outline;
+  const key = `${side}|${season === 'winter' ? 'winter' : 'summer'}|${stance}|${facing}|${fr}|${ol}`;
+  return soldierCaches[sc].get(key, () => buildSoldierSprite(side, season, stance, facing, fr, ol, sc));
 }
 
 // ============================================================================
@@ -77,13 +121,17 @@ function getDims(defId: string): { lengthM: number; widthM: number } {
 }
 
 
-export function getVehicleSprite(defId: string, part: 'hull' | 'turret', state: 'ok' | 'knockedOut'): HTMLCanvasElement {
-  const key = `vehicle|${defId}|${part}|${state}`;
-  return cached(key, () => {
+/** Hull/turret sprite centred on the vehicle pivot, authored at `scale` px
+ * per 1x px (draw at `width * zoom / scale`). Knocked-out/burning variants
+ * share the 'knockedOut' art at every scale. */
+export function getVehicleSprite(defId: string, part: 'hull' | 'turret', state: 'ok' | 'knockedOut', scale: number = 1): HTMLCanvasElement {
+  const sc = unitSpriteScale(scale);
+  const key = `${defId}|${part}|${state}`;
+  return vehicleCaches[sc].get(key, () => {
     const { lengthM, widthM } = getDims(defId);
     return part === 'hull'
-      ? buildVehicleHull(defId, lengthM, widthM, state)
-      : buildVehicleTurret(defId, lengthM, widthM, state);
+      ? buildVehicleHull(defId, lengthM, widthM, state, sc)
+      : buildVehicleTurret(defId, lengthM, widthM, state, sc);
   });
 }
 
@@ -253,85 +301,263 @@ export function getSmokePuff(size: number): HTMLCanvasElement {
 }
 
 // ============================================================================
-// TREES — 28x28 canopy with shadow (summer/autumn), 18-26px bare "starburst"
-// scrub (winter), 4 variants x season, matching the doubled map scale.
+// TREES — crowns seen from above, generated PER PIXEL at the requested output
+// scale (zoom x size bucket) so a zoom-2 bake gets real leaf-clump detail
+// instead of a nearest-neighbour upscale of a 28px sprite, and zoom 0.5 draws a
+// genuinely small sprite. Sprite footprint is always TREE_SPRITE_WORLD_PX world
+// pixels square; the canvas is ceil(28*scale) px. Shapes: round, lobed,
+// elongated (broadleaf clump crowns built from lit sphere "blobs"), conifer
+// (star-shaped cone with branch spokes, snow-dusted in winter) and bare (winter
+// leafless crown: brown twig stipple ball with radiating branches).
 // ============================================================================
-const TREE_COLORS: Record<Season, { canopy: string[]; hi: string; branch: string }> = {
-  summer: { canopy: ['#2f4a26', '#355230', '#2a4020'], hi: '#5a7a48', branch: '#4a3a24' },
-  autumn: { canopy: ['#8a5a26', '#a06e2a', '#c08a2c'], hi: '#d8a840', branch: '#5a3f20' },
-  // Dense mottled brown/tan scrub clump (not skeletal branch-lines) so
-  // winter trees stay solidly visible against snow terrain.
-  winter: { canopy: ['#8a7a5c', '#6b5f45', '#7c6e51'], hi: '#a89878', branch: '#5c5248' },
+export type TreeShape = 'round' | 'lobed' | 'elongated' | 'conifer' | 'bare';
+export const TREE_SPRITE_WORLD_PX = 28;
+/** Number of distinct layouts per shape (each with its own light/highlight jitter). */
+export const TREE_VARIANTS = 8;
+
+type Rgb3 = [number, number, number];
+const CROWN_RAMPS: Record<Season, Rgb3[]> = {
+  summer: [[20, 30, 14], [34, 52, 22], [54, 78, 32], [92, 116, 46], [150, 168, 78]],
+  autumn: [[48, 30, 14], [88, 54, 22], [136, 88, 32], [180, 126, 46], [220, 174, 82]],
+  // winter broadleaf (rare — winter woods are mostly bare/conifer): dull olive-brown
+  winter: [[40, 36, 26], [60, 54, 38], [84, 76, 54], [112, 102, 76], [146, 136, 108]],
 };
+const CONIFER_RAMP: Rgb3[] = [[12, 24, 16], [22, 40, 24], [36, 58, 32], [58, 82, 44], [96, 120, 66]];
+const BARE_RAMP: Rgb3[] = [[40, 28, 20], [64, 46, 32], [92, 68, 46], [126, 98, 68], [164, 134, 98]];
+const SNOW_LIT_RGB: Rgb3 = [236, 240, 244];
+const SNOW_SHADE_RGB: Rgb3 = [168, 180, 198];
 
-/** Irregular lobed canopy: several overlapping circles seeded per-variant,
- * unified with a base fill and a per-lobe wobble outline. Shared by
- * summer/autumn foliage and the winter mottled-scrub clump. */
-function drawClumpCanopy(ctx: CanvasRenderingContext2D, cx: number, cy: number, variant: number, colors: { canopy: string[]; hi: string }, baseR: number): void {
-  const lobes: { x: number; y: number; rad: number }[] = [];
-  for (let i = 0; i < 7; i++) {
-    const ang = (i / 7) * Math.PI * 2 + hash2(variant, i, 1) * 0.6;
-    const dist = 3 + hash2(variant, i, 2) * 4;
-    const rad = 5 + hash2(variant, i, 3) * 3.2;
-    lobes.push({ x: cx + Math.cos(ang) * dist, y: cy + Math.sin(ang) * dist * 0.8, rad });
-  }
-  for (let i = 0; i < lobes.length; i++) {
-    ctx.fillStyle = colors.canopy[i % colors.canopy.length];
-    ctx.beginPath();
-    ctx.arc(lobes[i].x, lobes[i].y, lobes[i].rad, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.fillStyle = colors.canopy[0];
-  ctx.beginPath();
-  ctx.arc(cx, cy, baseR, 0, Math.PI * 2);
-  ctx.fill();
-
-  // NW highlight fleck (light 3rd tone) — small, not a big overpowering blob.
-  ctx.fillStyle = colors.hi;
-  ctx.beginPath();
-  ctx.arc(cx - 3.5, cy - 4.5, 1.6, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillRect(cx - 4, cy - 7, 1, 1);
-  ctx.fillRect(cx - 1, cy - 8, 1, 1);
-
-  // Per-lobe dark edge — a light overall wobble outline instead of one
-  // perfect circle, so the canopy silhouette reads as clumpy, not geometric.
-  ctx.strokeStyle = 'rgba(20,20,16,0.35)';
-  ctx.lineWidth = 1;
-  for (const lobe of lobes) {
-    ctx.beginPath();
-    ctx.arc(lobe.x, lobe.y, lobe.rad, 0, Math.PI * 2);
-    ctx.stroke();
-  }
+function rampAt3(r: Rgb3[], t: number): Rgb3 {
+  const n = r.length - 1;
+  const tt = (t < 0 ? 0 : t > 1 ? 1 : t) * n;
+  let i = Math.floor(tt);
+  if (i >= n) i = n - 1;
+  const f = tt - i, a = r[i], b = r[i + 1];
+  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
 }
 
-function buildTree(variant: number, season: Season): HTMLCanvasElement {
-  const c = createCanvas(28, 28);
-  const ctx = ctx2d(c);
-  const colors = TREE_COLORS[season];
-  const cx = 14, cy = 13;
+/** Smooth value noise, 0..1 (bilinear over hash2 lattice). */
+function vnoise(x: number, y: number, seed: number): number {
+  const x0 = Math.floor(x), y0 = Math.floor(y);
+  let fx = x - x0, fy = y - y0;
+  fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
+  const a = hash2(x0, y0, seed), b = hash2(x0 + 1, y0, seed);
+  const c = hash2(x0, y0 + 1, seed), d = hash2(x0 + 1, y0 + 1, seed);
+  return a + (b - a) * fx + (c + (d - c) * fx - a - (b - a) * fx) * fy;
+}
 
-  // Shadow, offset below-right.
-  ctx.fillStyle = 'rgba(20,20,16,0.25)';
-  ctx.beginPath();
-  ctx.ellipse(cx + 3, cy + 6, 9, 5, 0, 0, Math.PI * 2);
-  ctx.fill();
+interface CrownBlob { x: number; y: number; r: number; z: number }
+const SHAPE_IDX: Record<TreeShape, number> = { round: 0, lobed: 1, elongated: 2, conifer: 3, bare: 4 };
 
-  drawClumpCanopy(ctx, cx, cy, variant, colors, 6.5);
-
-  if (season === 'winter') {
-    // A dusting of snow flecks on top of the mottled canopy so it still
-    // reads as "winter" without collapsing back into thin skeletal lines.
-    ctx.fillStyle = '#eef0ef';
-    for (let i = 0; i < 6; i++) {
-      const ang = (i / 6) * Math.PI * 2 + hash2(variant, i, 21) * 0.8;
-      const dist = 2 + hash2(variant, i, 22) * 6;
-      ctx.fillRect(cx + Math.cos(ang) * dist, cy + Math.sin(ang) * dist * 0.8 - 2, 1, 1);
+function crownBlobs(shape: TreeShape, variant: number): CrownBlob[] {
+  const s = 9000 + SHAPE_IDX[shape] * 101;
+  const H = (i: number, k: number) => hash2(variant * 31 + i, k, s);
+  const blobs: CrownBlob[] = [];
+  if (shape === 'round') {
+    const R = 9.8 + H(0, 9) * 1.4;
+    blobs.push({ x: 0, y: 0, r: R, z: 0 });
+    const n = 6 + Math.floor(H(0, 8) * 3);
+    for (let i = 0; i < n; i++) {
+      const ang = (i / n) * Math.PI * 2 + H(i, 1) * 0.8;
+      const dist = 3.5 + H(i, 2) * 3.8;
+      const r = 3.2 + H(i, 3) * 1.8;
+      const surf = Math.sqrt(Math.max(0, R * R - dist * dist));
+      blobs.push({ x: Math.cos(ang) * dist, y: Math.sin(ang) * dist, r, z: surf - r * 0.55 });
+    }
+  } else if (shape === 'lobed') {
+    const n = 4 + Math.floor(H(0, 4) * 3);
+    blobs.push({ x: 0, y: 0, r: 6.5, z: 1.5 });
+    for (let i = 0; i < n; i++) {
+      const ang = (i / n) * Math.PI * 2 + H(i, 1) * 0.9;
+      const dist = 3.8 + H(i, 2) * 2.3;
+      blobs.push({ x: Math.cos(ang) * dist, y: Math.sin(ang) * dist, r: 5.4 + H(i, 3) * 2.2, z: H(i, 5) * 2 });
+    }
+  } else if (shape === 'elongated') {
+    const a = H(0, 5) * Math.PI;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    for (let i = 0; i < 3; i++) {
+      const t = (i - 1) * 5.2 + (H(i, 6) - 0.5) * 1.2;
+      const p = (H(i, 7) - 0.5) * 2.4;
+      const r = (i === 1 ? 7.0 : 5.8) + H(i, 3) * 1.1;
+      blobs.push({ x: ca * t - sa * p, y: sa * t + ca * p, r, z: H(i, 4) * 1.5 });
+    }
+    for (let i = 0; i < 3; i++) {
+      const t = (H(i, 11) - 0.5) * 10, p = (H(i, 12) - 0.5) * 5;
+      blobs.push({ x: ca * t - sa * p, y: sa * t + ca * p, r: 3 + H(i, 13) * 1.5, z: 3 });
     }
   }
+  return blobs;
+}
+
+function buildCrown(variant: number, season: Season, scale: number, shape: TreeShape): HTMLCanvasElement {
+  const S = Math.max(4, Math.ceil(TREE_SPRITE_WORLD_PX * scale));
+  const c = createCanvas(S, S);
+  const ctx = ctx2d(c);
+  const img = ctx.createImageData(S, S);
+  const data = img.data;
+  const half = TREE_SPRITE_WORLD_PX / 2;
+  const hs = 9000 + SHAPE_IDX[shape] * 101 + variant * 7;
+  // per-variant light direction jitter around NW and highlight strength
+  const la = -2.36 + (hash2(variant, 1, hs) - 0.5) * 0.9;
+  let Lx = Math.cos(la) * 0.72, Ly = Math.sin(la) * 0.72, Lz = 0.7;
+  const ln = Math.hypot(Lx, Ly, Lz); Lx /= ln; Ly /= ln; Lz /= ln;
+  const hiStr = 0.7 + hash2(variant, 2, hs) * 0.55;
+  const winter = season === 'winter';
+
+  if (shape === 'conifer') {
+    const nb = 9 + Math.floor(hash2(variant, 3, hs) * 5);
+    const rot = hash2(variant, 4, hs) * Math.PI * 2;
+    const R = 11.5 + hash2(variant, 5, hs) * 1.5;
+    for (let j = 0; j < S; j++) {
+      const v = (j + 0.5) / scale - half;
+      for (let i = 0; i < S; i++) {
+        const u = (i + 0.5) / scale - half;
+        const d = Math.hypot(u, v);
+        if (d > R) continue;
+        const th = Math.atan2(v, u);
+        const ph = (th - rot) * nb / 2;
+        const spoke = Math.abs(Math.cos(ph));
+        const rTh = R * (0.76 + 0.24 * Math.sqrt(spoke)) * (0.9 + 0.2 * vnoise(th * 3 + 10, variant, hs));
+        if (d >= rTh) continue;
+        const q = d / rTh;
+        const tang = Math.sin(ph * 2) * 0.55;
+        let nx = Math.cos(th) * 0.75 - Math.sin(th) * tang, ny = Math.sin(th) * 0.75 + Math.cos(th) * tang;
+        const nz = 0.62;
+        const nl = Math.hypot(nx, ny, nz); nx /= nl; ny /= nl;
+        let lam = (nx * Lx + ny * Ly + (nz / nl) * Lz);
+        lam = lam < 0 ? 0 : lam > 1 ? 1 : lam;
+        const needles = vnoise(d * 1.4, th * nb * 2.2, hs + 31);
+        let t = 0.05 + 0.62 * lam * hiStr + 0.18 * (1 - q) + 0.3 * (needles - 0.5) - 0.2 * q * q * q;
+        if (hash2(i, j, hs + Math.round(scale * 100)) < 0.08) t -= 0.18;
+        let col = rampAt3(CONIFER_RAMP, t);
+        if (winter) {
+          const sn = vnoise(u * 0.9 + 50, v * 0.9, hs + 41);
+          const snowAmt = (sn - 0.52) * 3.2 + (lam - 0.45) * 1.1 + (1 - q) * 0.25;
+          if (snowAmt > 0.25) {
+            const k = Math.min(1, (snowAmt - 0.25) * 2.5) * 0.92;
+            const sc = lam > 0.55 ? SNOW_LIT_RGB : SNOW_SHADE_RGB;
+            col = [col[0] + (sc[0] - col[0]) * k, col[1] + (sc[1] - col[1]) * k, col[2] + (sc[2] - col[2]) * k];
+          }
+        }
+        const o = (j * S + i) * 4;
+        const aa = Math.min(1, (rTh - d) * scale * 0.9);
+        data[o] = col[0]; data[o + 1] = col[1]; data[o + 2] = col[2]; data[o + 3] = 255 * aa;
+      }
+    }
+  } else if (shape === 'bare') {
+    const R = 10.5 + hash2(variant, 5, hs) * 1.8;
+    const nsp = 6 + Math.floor(hash2(variant, 6, hs) * 5);
+    const spokes: number[] = [];
+    for (let k = 0; k < nsp; k++) spokes.push((k / nsp) * Math.PI * 2 + hash2(variant, 20 + k, hs) * 0.7);
+    const pxSeed = hs + Math.round(scale * 100) * 13;
+    for (let j = 0; j < S; j++) {
+      const v = (j + 0.5) / scale - half;
+      for (let i = 0; i < S; i++) {
+        const u = (i + 0.5) / scale - half;
+        const d = Math.hypot(u, v);
+        if (d > R * 1.1) continue;
+        const th = Math.atan2(v, u);
+        const q = d / (R * (0.88 + 0.22 * vnoise(th * 2.5 + 7, variant, hs + 3)));
+        if (q >= 1) continue;
+        let branch = false;
+        if (q < 0.92) {
+          for (let k = 0; k < nsp; k++) {
+            const da = th - spokes[k];
+            const cs = Math.cos(da);
+            if (cs <= 0) continue;
+            const wob = (vnoise(d * 0.5, k * 5, hs + 9) - 0.5) * 1.6;
+            if (Math.abs(d * Math.sin(da) + wob * (d / R)) < 0.18 + 0.3 * (1 - q)) { branch = true; break; }
+          }
+        }
+        const clump = vnoise(u * 0.45 + 30, v * 0.45, hs + 5);
+        const dens = Math.pow(1 - q, 0.4) * (0.5 + 0.5 * clump);
+        const hp = hash2(i, j, pxSeed);
+        const filled = hp < dens * 0.95;
+        const o = (j * S + i) * 4;
+        const nxs = u / R, nys = v / R;
+        const lam = 0.5 - 0.65 * (nxs * Lx + nys * Ly) / 0.72;
+        if (branch) {
+          const col = rampAt3(BARE_RAMP, 0.08 + 0.25 * lam);
+          data[o] = col[0]; data[o + 1] = col[1]; data[o + 2] = col[2]; data[o + 3] = 255;
+        } else if (filled) {
+          let t = 0.12 + 0.62 * lam * hiStr + (hash2(i, j, pxSeed + 1) - 0.5) * 0.45 - 0.2 * q;
+          if (hp < dens * 0.25) t -= 0.2;
+          const col = rampAt3(BARE_RAMP, t);
+          data[o] = col[0]; data[o + 1] = col[1]; data[o + 2] = col[2]; data[o + 3] = 255 * (q > 0.75 ? 0.75 : 1);
+        } else if (q < 0.7) {
+          // faint twig haze so the crown core reads as a mass, not a sieve
+          const col = BARE_RAMP[1];
+          data[o] = col[0]; data[o + 1] = col[1]; data[o + 2] = col[2]; data[o + 3] = 255 * 0.45 * (1 - q / 0.7);
+        }
+      }
+    }
+  } else {
+    const blobs = crownBlobs(shape, variant);
+    let maxH = 1;
+    for (const b of blobs) maxH = Math.max(maxH, b.z + b.r);
+    const ramp = CROWN_RAMPS[season];
+    const pxSeed = hs + Math.round(scale * 100) * 13;
+    for (let j = 0; j < S; j++) {
+      const v = (j + 0.5) / scale - half;
+      for (let i = 0; i < S; i++) {
+        const u = (i + 0.5) / scale - half;
+        // leafy ragged silhouette: coherent ~1.5 world-px noise on the blob distance
+        const leaf = vnoise(u * 0.75 + variant * 3.1, v * 0.75, hs + 11);
+        const wob = (leaf - 0.5) * 0.42 + (hash2(i, j, pxSeed + 2) - 0.5) * 0.1;
+        let best = -1e9, nx = 0, ny = 0, nz = 1, edge = 1, er = 1;
+        for (let k = 0; k < blobs.length; k++) {
+          const b = blobs[k];
+          const du = u - b.x, dv = v - b.y;
+          const dd = (du * du + dv * dv) / (b.r * b.r) + wob;
+          if (dd >= 1) continue;
+          const sq = Math.sqrt(1 - dd);
+          const h = b.z + b.r * sq;
+          if (h > best) { best = h; nx = du / b.r; ny = dv / b.r; nz = sq; edge = dd; er = b.r; }
+        }
+        if (best < -1e8) continue;
+        let lam = nx * Lx + ny * Ly + nz * Lz;
+        lam = lam < 0 ? 0 : lam > 1 ? 1 : lam;
+        const ao = best / maxH;
+        const clump = vnoise(u * 0.55 + 20, v * 0.55, hs + 17);
+        const fine = vnoise(u * 1.3, v * 1.3 + 40, hs + 23);
+        let t = 0.02 + 0.62 * lam * lam * hiStr + 0.22 * ao + 0.3 * (clump - 0.5) + 0.22 * (fine - 0.5) - 0.22 * edge * edge * edge;
+        if (fine < 0.2 && clump < 0.5) t -= 0.2; // dark gaps between leaf clusters
+        if (hash2(i, j, pxSeed) < 0.05) t += lam > 0.5 ? 0.18 : -0.15; // sparkle / pinholes
+        const col = rampAt3(ramp, t);
+        const o = (j * S + i) * 4;
+        const aa = Math.min(1, (1 - edge) * er * scale * 0.5 + 0.15);
+        data[o] = col[0]; data[o + 1] = col[1]; data[o + 2] = col[2]; data[o + 3] = 255 * aa;
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
   return c;
 }
 
-export function getTreeSprite(variant: number, season: Season): HTMLCanvasElement {
-  return cached(`tree|${variant}|${season}`, () => buildTree(variant, season));
+/** Cached tree crown sprite. `scale` is output pixels per world pixel (bake zoom x size bucket);
+ * the canvas is ceil(28*scale) square and represents a 28x28 world-pixel footprint. The legacy
+ * 2-arg call (`getTreeSprite(v, season)`) returns a round crown at 1x. */
+export function getTreeSprite(variant: number, season: Season, scale = 1, shape: TreeShape = 'round'): HTMLCanvasElement {
+  const v = ((variant % TREE_VARIANTS) + TREE_VARIANTS) % TREE_VARIANTS;
+  return cached(`tree|${shape}|${v}|${season}|${Math.round(scale * 1000)}`, () => buildCrown(v, season, scale, shape));
+}
+
+/** Soft radial cast-shadow blob for trees (32 world px square at `scale`), black or cold
+ * blue-grey for snow. Drawn stretched/rotated with smoothing on. */
+export function getTreeShadowSprite(scale: number, tint: 'dark' | 'blue'): HTMLCanvasElement {
+  return cached(`treeShadow|${tint}|${Math.round(scale * 1000)}`, () => {
+    const S = Math.max(4, Math.ceil(32 * scale));
+    const c = createCanvas(S, S);
+    const ctx = c.getContext('2d')!;
+    const r = S / 2;
+    const g = ctx.createRadialGradient(r, r, 0, r, r, r);
+    const rgb = tint === 'blue' ? '52,66,98' : '10,12,6';
+    g.addColorStop(0, `rgba(${rgb},1)`);
+    g.addColorStop(0.5, `rgba(${rgb},0.85)`);
+    g.addColorStop(0.8, `rgba(${rgb},0.35)`);
+    g.addColorStop(1, `rgba(${rgb},0)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, S, S);
+    return c;
+  });
 }

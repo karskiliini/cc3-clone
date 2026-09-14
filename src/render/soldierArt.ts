@@ -1,430 +1,515 @@
 // ============================================================================
-// soldierArt.ts — hand-authored pixel-art grids for infantry, at 10 px/metre
-// (TILE_PX/TILE_M), mirroring the vehicleArt.ts method: each stance is built
-// as a 2D grid of characters (a Grid) by dedicated builder code — every
-// character placed is a deliberate pixel (helmet dome, shoulders, weapon,
-// boots) — then painted onto a small canvas with a baked drop shadow. This
-// replaces the old 12px-grid-scaled-2x soldiers, which read as chunky pawns,
-// with small, crisp, top-down figures matching the original's scale.
+// soldierArt.ts — procedural top-down infantry sprites, at 10 px/metre
+// (TILE_PX/TILE_M) per sprite scale unit.
 //
-// The north-facing (facing 0, "up") pose is the only one hand-authored per
-// stance/frame. Cardinal facings (E/S/W) are exact 90 degree rotations.
-// Diagonal facings use a nearest-neighbour 45 degree rotation of the whole
-// sprite, then the helmet disc is re-stamped at the rotated centre (rotation
-// of a tiny circle degrades into a blocky blob otherwise) so it stays round.
+// wf5: soldiers are no longer hand-placed character grids that get scaled
+// with nearest-neighbour. Each stance is a small list of vector-ish shape
+// primitives (rects, capsules, a shaded helmet dome, a torso trapezoid)
+// authored in "grid units" (1 unit = 1 px at 1x, i.e. 0.1 m). A sprite is
+// produced by rasterising that list directly at the requested scale and
+// facing: every output pixel centre is inverse-rotated into the north-facing
+// pose and the topmost primitive covering it decides its colour.
+//
+//  - 1x keeps the small, bold silhouette the game has always used.
+//  - 2x samples the same shapes at twice the density, and primitives flagged
+//    `min: 2` add genuine extra detail that has no room at 1x: 4-5 tone
+//    helmet shading, a slim rifle with a lit barrel, wooden fore-stock and
+//    butt, bolt handle and sling, laced boots, belt, Y-straps / bedroll,
+//    bread bag, hands and forearms.
+//  - Diagonal facings are sampled analytically, so the helmet stays round and
+//    edges stay clean without the old post-rotation helmet re-stamp.
+//  - Lighting (helmet highlight, uniform lit/shadow edges, winter smock SE
+//    shade) is evaluated in screen space, so the sun stays NW whatever the
+//    soldier's facing.
+//  - The dark outline ring, and the halo (enemies) or faint team-colour rim
+//    (the player's own soldiers) outside it, are grown on the rasterised grid
+//    in output pixels, one ring per scale step, so their on-screen weight is
+//    the same at zoom 1 and zoom 2.
 // ============================================================================
 import type { Side, Season, Stance, Facing8 } from '@/shared/types';
-import { createCanvas, ctx2d, rotate90, rotateSprite } from '@/render/pixelUtil';
-
-// --------------------------------------------------------------- grid -----
-type Grid = string[][];
-
-function blank(w: number, h: number, fill = '.'): Grid {
-  return Array.from({ length: h }, () => Array<string>(w).fill(fill));
-}
-function put(g: Grid, x: number, y: number, ch: string): void {
-  if (y >= 0 && y < g.length && x >= 0 && x < g[0].length) g[y][x] = ch;
-}
-function fillRect(g: Grid, x0: number, y0: number, x1: number, y1: number, ch: string): void {
-  const h = g.length, w = g[0].length;
-  for (let y = Math.max(0, y0); y <= Math.min(h - 1, y1); y++) {
-    for (let x = Math.max(0, x0); x <= Math.min(w - 1, x1); x++) g[y][x] = ch;
-  }
-}
-
-/** Iterate every pixel within radius `r` of (cx,cy), used both to author the
- * helmet disc into a character grid and to re-stamp it onto a rotated
- * canvas — one shared shape definition for both code paths. */
-function forEachDiscPixel(cx: number, cy: number, r: number, cb: (x: number, y: number) => void): void {
-  const ri = Math.ceil(r);
-  for (let y = -ri; y <= ri; y++) {
-    for (let x = -ri; x <= ri; x++) {
-      if (Math.sqrt(x * x + y * y) <= r) cb(cx + x, cy + y);
-    }
-  }
-}
-
-/** 4-tone helmet dome: dark rim, mid fill, a lighter NW blob, and a single
- * brightest specular pixel at the NW-most rim pixel. */
-function paintHelmet(g: Grid, cx: number, cy: number, r: number): void {
-  forEachDiscPixel(cx, cy, r, (x, y) => put(g, x, y, 'O'));
-  forEachDiscPixel(cx, cy, Math.max(1, r - 1), (x, y) => put(g, x, y, 'H'));
-  forEachDiscPixel(cx - 1, cy - 1, Math.max(1, r - 2.2), (x, y) => put(g, x, y, 'h'));
-  put(g, cx - Math.round(r * 0.75), cy - Math.round(r * 0.75), 'P');
-}
-
-// -------------------------------------------------------------- palette ---
-// Boots and weapon are near-black — the original's small figures still read
-// their gear as the darkest thing on the sprite even against dark terrain.
-const BOOT = '#171510';
-const WEAPON = '#121210';
-const STOCK = '#6b4a2e';
-const SKIN = '#c9a37c';
-const BLOOD = '#5a1a12';
-// Round-2 critique: soldiers were too low-contrast against grass/snow. A
-// baked 1px silhouette outline plus a mid-grey SE shading tone (winter only,
-// so white smocks don't vanish against snow) fixes that without changing the
-// authored shapes above.
-const OUTLINE_COLOR = 'rgba(30,31,24,0.85)'; // '#1e1f18' @ 85%
-// Round-3 contrast pass: a second, softer ring one pixel further out than the
-// baked outline above — a dark 40%-alpha halo so the figure separates from
-// noisy grass/snow texture even where the terrain happens to be dark too
-// (the drop shadow, drawn separately by unitRender.ts under each figure,
-// handles the "sits on the ground" cue; this halo handles raw silhouette
-// contrast against any background tone).
-const HALO_COLOR = 'rgba(8,8,6,0.4)';
-const WINTER_SE_SHADE = '#a9aba4';
-// wf4: the manual's bright yellow "soldier outline" that friendly winter
-// figures carry in ref_cc3_1482 — replaces the dark ring + halo for them.
-const FRIENDLY_WINTER_OUTLINE = 'rgba(216,200,96,0.9)';
-const FRIENDLY_WINTER_HALO = 'rgba(8,8,6,0.2)';
+import { createCanvas, ctx2d } from '@/render/pixelUtil';
 
 /** Whose soldier this sprite is, relative to the viewing player. */
 export type SoldierOutline = 'friendly' | 'enemy';
 
-interface UniformPalette { u: string; s: string; helmetMid: string; helmetLight: string }
-// Round-3: shift German feldgrau slightly bluer and Soviet khaki slightly
-// warmer (relative to round 2's tones) so the two sides are distinguishable
-// by hue at a glance, not just by value, matching the reference's clearly
-// two-toned opposing uniforms.
-const GERMAN_SUMMER: UniformPalette = { u: '#626f5e', s: '#485144', helmetMid: '#5a6052', helmetLight: '#737a6c' };
-const SOVIET_SUMMER: UniformPalette = { u: '#8f7f44', s: '#695b2e', helmetMid: '#71663a', helmetLight: '#897e4c' };
-// wf4: smock lowered below the snow ramp's brightest tones so the figure is
-// not a pure-white blob; WINTER_SE_SHADE stays darker than it.
-const WINTER_SMOCK = { u: '#c9cac2', s: '#a9aaa2' };
-const SOVIET_WINTER_HELMET_MID = '#d0d0c8';
+// ------------------------------------------------------------ primitives ---
+interface OpBase {
+  ch: string;
+  /** Only rasterised at scale >= min (detail that has no room at 1x). */
+  min?: number;
+  /** Only rasterised at scale <= max (the chunky 1x stand-in for a detail). */
+  max?: number;
+}
+/** Axis-aligned rect [x0,x1) x [y0,y1). `edge` recolours the 1-output-pixel
+ * border facing away from the light; `lit` (2x+) the border facing it.
+ * `edgeY` also shades the north/south borders (x borders always shade).
+ * `round` trims the corners with a quarter-circle of that radius (2x+). */
+interface RectOp extends OpBase { k: 'rect'; x0: number; y0: number; x1: number; y1: number; edge?: string; lit?: string; edgeY?: boolean; round?: number }
+/** Capsule (thick line with round caps) of width `w`. */
+interface SegOp extends OpBase { k: 'seg'; x0: number; y0: number; x1: number; y1: number; w: number }
+/** Ellipse centred at (cx,cy). */
+interface EllOp extends OpBase { k: 'ell'; cx: number; cy: number; rx: number; ry: number; edge?: string }
+/** Shaded steel helmet dome. */
+interface HelmetOp extends OpBase { k: 'helmet'; cx: number; cy: number; r: number; flare: boolean }
+/** Torso trapezoid for prone/dead figures: y in [y0,y1), half width
+ * interpolated from hw0 at y0 to hw1 at y1 around cx. */
+interface TrapOp extends OpBase { k: 'trap'; cx: number; y0: number; y1: number; hw0: number; hw1: number; edge?: string; lit?: string }
+type Op = RectOp | SegOp | EllOp | HelmetOp | TrapOp;
 
-function darkenHex(hex: string, factor: number): string {
-  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
-  const f = (v: number) => Math.round(v * factor).toString(16).padStart(2, '0');
+interface Figure {
+  ops: Op[];
+  /** North-pose pivot (sprite centre) in grid units. */
+  px: number; py: number;
+  /** Max distance of any painted unit from the pivot. */
+  extent: number;
+}
+
+interface Sampler {
+  s: number;
+  pix: number; // one output pixel in units
+  cos: number; sin: number;
+}
+
+const SQRT1_2 = Math.SQRT1_2;
+
+/** How much a unit-space surface normal faces the NW light, once rotated
+ * into screen space (-1 = faces away, 1 = faces the light). */
+function lightOf(sm: Sampler, nx: number, ny: number): number {
+  const sx = nx * sm.cos - ny * sm.sin;
+  const sy = nx * sm.sin + ny * sm.cos;
+  return -(sx + sy) * SQRT1_2;
+}
+
+function sampleOp(op: Op, gx: number, gy: number, sm: Sampler): string | null {
+  switch (op.k) {
+    case 'rect': {
+      if (gx < op.x0 || gx >= op.x1 || gy < op.y0 || gy >= op.y1) return null;
+      const dl = gx - op.x0, dr = op.x1 - gx, dt = gy - op.y0, db = op.y1 - gy;
+      if (op.round && sm.s >= 2) {
+        const r = op.round;
+        const cx = dl < r ? op.x0 + r : dr < r ? op.x1 - r : NaN;
+        const cy = dt < r ? op.y0 + r : db < r ? op.y1 - r : NaN;
+        if (!Number.isNaN(cx) && !Number.isNaN(cy) && Math.hypot(gx - cx, gy - cy) > r) return null;
+      }
+      if (!op.edge) return op.ch;
+      const shadeY = op.edgeY || sm.s >= 2;
+      let best = Math.min(dl, dr);
+      let nx = dl < dr ? -1 : 1, ny = 0;
+      if (shadeY && Math.min(dt, db) < best) { best = Math.min(dt, db); nx = 0; ny = dt < db ? -1 : 1; }
+      if (best >= sm.pix) return op.ch;
+      const l = lightOf(sm, nx, ny);
+      if (l > 0.3) return op.lit && sm.s >= 2 ? op.lit : op.ch;
+      return op.edge;
+    }
+    case 'seg': {
+      const vx = op.x1 - op.x0, vy = op.y1 - op.y0;
+      const len2 = vx * vx + vy * vy;
+      let t = len2 > 0 ? ((gx - op.x0) * vx + (gy - op.y0) * vy) / len2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      const dx = gx - (op.x0 + vx * t), dy = gy - (op.y0 + vy * t);
+      return dx * dx + dy * dy <= (op.w * 0.5) * (op.w * 0.5) ? op.ch : null;
+    }
+    case 'ell': {
+      const nx = (gx - op.cx) / op.rx, ny = (gy - op.cy) / op.ry;
+      const d = nx * nx + ny * ny;
+      if (d > 1) return null;
+      if (op.edge && sm.s >= 2 && d > 0.55 && lightOf(sm, nx, ny) < 0) return op.edge;
+      return op.ch;
+    }
+    case 'trap': {
+      if (gy < op.y0 || gy >= op.y1) return null;
+      const t = (gy - op.y0) / (op.y1 - op.y0);
+      const hw = op.hw0 + (op.hw1 - op.hw0) * t;
+      const dx = gx - op.cx;
+      if (Math.abs(dx) > hw) return null;
+      if (!op.edge) return op.ch;
+      const side = hw - Math.abs(dx);
+      const endD = Math.min(gy - op.y0, op.y1 - gy);
+      let nx = dx < 0 ? -1 : 1, ny = 0, best = side;
+      if (sm.s >= 2 && endD < best) { best = endD; nx = 0; ny = gy - op.y0 < op.y1 - gy ? -1 : 1; }
+      if (best >= sm.pix) return op.ch;
+      if (lightOf(sm, nx, ny) > 0.3) return op.lit && sm.s >= 2 ? op.lit : op.ch;
+      return op.edge;
+    }
+    case 'helmet': {
+      const dx = gx - op.cx, dy = gy - op.cy;
+      const d = Math.hypot(dx, dy);
+      if (d > op.r) return null;
+      // Rim: 1 unit at 1x; at 2x a finer 1-1.5 px rim (wider for the flared
+      // German Stahlhelm skirt than the smooth Soviet SSh-40 dome).
+      const rimW = sm.s >= 2 ? (op.flare ? 0.8 : 0.55) : 1;
+      if (d > op.r - rimW) return 'O';
+      const inner = op.r - rimW;
+      const nd = d / inner;
+      const z = Math.sqrt(Math.max(0, 1 - nd * nd));
+      // Screen-space offset for world-fixed NW light.
+      const sx = dx * sm.cos - dy * sm.sin, sy = dx * sm.sin + dy * sm.cos;
+      const lit = (-(sx + sy) * SQRT1_2) / inner;
+      const v = 0.6 * lit + 0.4 * z;
+      if (sm.s >= 2) {
+        if (v > 0.66) return 'P';
+        if (v > 0.38) return 'h';
+        if (v > 0.02) return 'H';
+        return 'D';
+      }
+      if (v > 0.72) return 'P';
+      if (v > 0.34) return 'h';
+      return 'H';
+    }
+  }
+}
+
+// ------------------------------------------------------------- figures ----
+const rect = (x0: number, y0: number, x1: number, y1: number, ch: string, extra: Partial<RectOp> = {}): RectOp =>
+  ({ k: 'rect', x0, y0, x1, y1, ch, ...extra });
+const seg = (x0: number, y0: number, x1: number, y1: number, w: number, ch: string, extra: Partial<SegOp> = {}): SegOp =>
+  ({ k: 'seg', x0, y0, x1, y1, w, ch, ...extra });
+const ell = (cx: number, cy: number, rx: number, ry: number, ch: string, extra: Partial<EllOp> = {}): EllOp =>
+  ({ k: 'ell', cx, cy, rx, ry, ch, ...extra });
+
+/** A rifle carried pointing north with its muzzle at (x, yTop): chunky
+ * 2-unit bar + stock at 1x; at 2x a slim lit barrel, wooden fore-stock,
+ * receiver with bolt handle, shaped butt and a webbing sling. */
+function rifleOps(x: number, yTop: number, len: number, hand: boolean): Op[] {
+  const stockY = yTop + len;
+  const ops: Op[] = [
+    // 1x: 2-wide barrel + 2-unit wood stock + grip pixel.
+    rect(x, yTop, x + 2, stockY, 'W', { max: 1 }),
+    rect(x, stockY, x + 2, stockY + 2, 'K', { max: 1 }),
+  ];
+  if (hand) ops.push(rect(x, stockY + 2, x + 1, stockY + 3, 'G', { max: 1 }));
+  const cx = x + 1;
+  const foreY0 = yTop + len * 0.42;
+  const recvY = yTop + len * 0.78;
+  ops.push(
+    // Sling: webbing strap along the outer (east) side, slack in the middle.
+    seg(cx + 0.9, yTop + len * 0.2, cx + 1.25, yTop + len * 0.6, 0.5, 'Q', { min: 2 }),
+    seg(cx + 1.25, yTop + len * 0.6, cx + 0.8, stockY + 1.5, 0.5, 'Q', { min: 2 }),
+    // Wooden fore-stock and hand guard (wider than the barrel).
+    rect(cx - 0.75, foreY0, cx + 0.75, recvY, 'K', { edge: 'J', lit: 'K', min: 2 }),
+    // Barrel: lit west half, dark east half; muzzle / front sight.
+    rect(cx - 0.5, yTop, cx, foreY0, 'w', { min: 2 }),
+    rect(cx, yTop, cx + 0.5, foreY0, 'W', { min: 2 }),
+    rect(cx - 0.5, yTop, cx + 0.5, yTop + 0.5, 'W', { min: 2 }),
+    // Receiver + bolt handle.
+    rect(cx - 0.5, recvY, cx + 0.5, stockY, 'W', { min: 2 }),
+    rect(cx + 0.5, recvY + 0.5, cx + 1.25, recvY + 1, 'w', { min: 2 }),
+    // Butt: narrow wrist widening to the butt plate.
+    rect(cx - 0.5, stockY, cx + 0.5, stockY + 1, 'K', { min: 2 }),
+    rect(cx - 0.75, stockY + 1, cx + 0.75, stockY + 2.5, 'K', { edge: 'J', lit: 'K', min: 2 }),
+    rect(cx - 0.75, stockY + 2.5, cx + 0.75, stockY + 3, 'J', { min: 2 }),
+  );
+  return ops;
+}
+
+/** Belt kit seen from above on a torso spanning x0..x1 whose waist is at
+ * waistY. German: Y-straps + bread bag + entrenching tool; Soviet: rolled
+ * greatcoat (skatka) slung across the body + a canvas bag. 2x only. */
+function beltKitOps(side: Side, x0: number, x1: number, shoulderY: number, waistY: number): Op[] {
+  const mid = (x0 + x1) / 2;
+  const ops: Op[] = [rect(x0, waistY - 0.5, x1, waistY, 'E', { min: 2 }), rect(mid - 0.25, waistY - 0.5, mid + 0.25, waistY, 'Z', { min: 2 })];
+  if (side === 'german') {
+    ops.push(
+      seg(x0 + 1.25, shoulderY + 0.25, mid - 0.5, waistY - 0.5, 0.5, 'E', { min: 2 }),
+      seg(x1 - 1.25, shoulderY + 0.25, mid + 0.5, waistY - 0.5, 0.5, 'E', { min: 2 }),
+      rect(x1 - 1.75, waistY - 0.25, x1 - 0.25, waistY + 1.25, 'e', { edge: 'E', min: 2 }),
+      rect(x0 + 0.25, waistY - 0.25, x0 + 1.25, waistY + 1.5, 'E', { min: 2 }),
+    );
+  } else {
+    ops.push(
+      seg(x0 + 0.5, shoulderY + 0.5, x1 - 0.75, waistY - 0.75, 1.2, 'e', { min: 2 }),
+      seg(x0 + 0.5, shoulderY + 0.5, x1 - 0.75, waistY - 0.75, 0.4, 'E', { min: 2 }),
+      rect(x0 + 0.25, waistY - 0.25, x0 + 2, waistY + 1.25, 'e', { edge: 'E', min: 2 }),
+    );
+  }
+  return ops;
+}
+
+/** A leg trailing behind the body: trouser + boot at 2x, a solid dark boot
+ * bar at 1x. */
+function legOps(x: number, y0: number, len: number): Op[] {
+  const y1 = y0 + len;
+  return [
+    rect(x, y0, x + 2, y1 - 1, 'b', { max: 1 }),
+    rect(x, y1 - 1, x + 2, y1, 'k', { max: 1 }),
+    rect(x, y0, x + 2, y1 - 3.5, 'T', { edge: 'S', min: 2, round: 0.5 }),
+    rect(x, y1 - 3.5, x + 2, y1, 'b', { edge: 'k', lit: 'B', min: 2, round: 0.75 }),
+    rect(x + 0.5, y1 - 0.5, x + 1.5, y1, 'k', { min: 2 }),
+  ];
+}
+
+function helmetOf(cx: number, cy: number, r: number, side: Side): HelmetOp {
+  return { k: 'helmet', cx, cy, r, flare: side === 'german', ch: 'H' };
+}
+
+function standingFigure(side: Side, frame: 0 | 1): Figure {
+  const ops: Op[] = [];
+  ops.push(...legOps(6, 12.5, frame === 0 ? 7 : 6), ...legOps(10, 12.5, frame === 0 ? 6 : 7));
+  // Torso mass under the helmet: shoulders wider than the hips.
+  ops.push(rect(5.5, 8.5, 12.5, 13.5, 'U', { edge: 'S', lit: 'L', round: 1.5 }));
+  ops.push(...beltKitOps(side, 5.5, 12.5, 9, 13.5));
+  // Right forearm to the grip, left arm reaching across to the fore-stock.
+  ops.push(seg(11.5, 11, 13, 11.5, 1.4, 'U', { min: 2 }), rect(12.75, 10.75, 13.75, 11.75, 'G', { min: 2 }));
+  ops.push(seg(6.5, 10, 12.25, 5.5, 1.3, 'S', { min: 2 }), rect(12.75, 4.75, 13.75, 5.75, 'G', { min: 2 }));
+  ops.push(...rifleOps(12.25, 0.5, 8.5, true));
+  ops.push(helmetOf(9, 7.5, 3.5, side));
+  return { ops, px: 9.5, py: 10.5, extent: 11.5 };
+}
+
+function crouchingFigure(side: Side, frame: 0 | 1): Figure {
+  const ops: Op[] = [];
+  const wob = frame === 1 ? 1 : 0;
+  // Tucked boot, nudged sideways for the settle-into-cover cycle.
+  ops.push(rect(7 + wob, 12, 9 + wob, 14, 'b', { max: 1 }), rect(7 + wob, 14, 9 + wob, 15, 'k', { max: 1 }));
+  ops.push(rect(7 + wob, 12, 9 + wob, 15, 'b', { edge: 'k', lit: 'B', min: 2, round: 0.75 }));
+  // Kneeling leg bent diagonally back.
+  ops.push(seg(10.3, 12, 13.3, 14.8, 1.9, 'b', { max: 1 }), rect(13.5, 14.5, 14.5, 15.5, 'k', { max: 1 }));
+  ops.push(seg(10.3, 11.8, 12.3, 13.8, 2, 'T', { min: 2 }), seg(12.1, 13.6, 13.7, 15.1, 1.9, 'b', { min: 2 }), seg(13.4, 14.9, 13.9, 15.4, 1, 'k', { min: 2 }));
+  ops.push(rect(5, 8, 12.5, 12.5, 'U', { edge: 'S', lit: 'L', round: 1.5 }));
+  ops.push(...beltKitOps(side, 5, 12.5, 8.5, 12.5));
+  ops.push(seg(11, 10.5, 12.75, 9.5, 1.4, 'U', { min: 2 }), rect(12.75, 9, 13.75, 10, 'G', { min: 2 }));
+  ops.push(seg(6.5, 9, 12.25, 4.5, 1.3, 'S', { min: 2 }), rect(12.75, 3.5, 13.75, 4.5, 'G', { min: 2 }));
+  ops.push(...rifleOps(12.25, 2, 5, true));
+  ops.push(helmetOf(9, 7, 4, side));
+  return { ops, px: 9, py: 9, extent: 9.5 };
+}
+
+/** Shared prone/dead body: helmet at the north end, torso tapering from the
+ * shoulders to the hips, two boots splayed at the south end. */
+function proneBody(side: Side): Op[] {
+  const ops: Op[] = [];
+  ops.push(rect(3, 21, 5, 22, 'b', { max: 1 }), rect(3, 22, 5, 23, 'k', { max: 1 }));
+  ops.push(rect(7, 21, 9, 22, 'b', { max: 1 }), rect(7, 22, 9, 23, 'k', { max: 1 }));
+  ops.push(rect(2.75, 20, 5, 23, 'b', { edge: 'k', lit: 'B', min: 2, round: 0.75 }));
+  ops.push(rect(7, 20, 9.25, 23, 'b', { edge: 'k', lit: 'B', min: 2, round: 0.75 }));
+  ops.push({ k: 'trap', cx: 6.5, y0: 13, y1: 21, hw0: 4.5, hw1: 3, ch: 'U', edge: 'S', lit: 'L' });
+  ops.push(rect(3.5, 18.5, 9.5, 21, 'T', { min: 2 }), rect(6.25, 19, 6.75, 21, 'S', { min: 2 }));
+  ops.push(...beltKitOps(side, 3.5, 9.5, 13, 18.5));
+  return ops;
+}
+
+function proneFigure(side: Side): Figure {
+  const ops = proneBody(side);
+  // 1x: arm bumps beside the helmet, rifle 6 units beyond it.
+  ops.push(rect(3, 10, 5, 12, 'U', { max: 1 }), rect(8, 10, 10, 12, 'U', { max: 1 }));
+  ops.push(rect(5, 0, 7, 6, 'W', { max: 1 }));
+  // 2x: both arms reaching forward to the rifle, hands on stock and grip.
+  ops.push(seg(3.5, 13, 4.5, 7.5, 1.6, 'U', { min: 2 }), seg(9.5, 13, 7.5, 9, 1.6, 'U', { min: 2 }));
+  ops.push(rect(4.5, 6.5, 5.5, 7.5, 'G', { min: 2 }), rect(6.75, 8.5, 7.75, 9.5, 'G', { min: 2 }));
+  ops.push(...rifleOps(5.5, 0, 6, false).filter((o) => o.min === 2).map((o) => ({ ...o })));
+  ops.push(helmetOf(6.5, 9.5, 3.5, side));
+  return { ops, px: 6, py: 12, extent: 12.2 };
+}
+
+function deadFigure(side: Side): Figure {
+  const ops: Op[] = [];
+  // Irregular blood pool under the torso.
+  ops.push(rect(5, 15, 7, 16, 'R', { max: 1 }), rect(6, 16, 8, 17, 'R', { max: 1 }));
+  ops.push(ell(6.5, 16, 2.3, 1.4, 'R', { min: 2 }), ell(8, 17.5, 1.3, 1, 'R', { min: 2 }), ell(4.8, 14.8, 0.9, 0.7, 'R', { min: 2 }));
+  ops.push(...proneBody(side));
+  // One arm tucked, the other flung out wide.
+  ops.push(rect(3, 10, 5, 12, 'U', { max: 1 }), rect(9, 9, 12, 11, 'U', { max: 1 }));
+  ops.push(seg(3.5, 13, 3.2, 10, 1.6, 'U', { min: 2 }), seg(9.5, 13, 11.8, 9.5, 1.6, 'U', { min: 2 }), rect(11.5, 8.5, 12.5, 9.5, 'G', { min: 2 }));
+  // Weapon dropped beside the body.
+  ops.push(rect(8, 0, 10, 6, 'W', { max: 1 }));
+  ops.push(...rifleOps(8.5, -1, 5, false).filter((o) => o.min === 2));
+  ops.push(helmetOf(6.5, 9.5, 3.5, side));
+  return { ops, px: 6, py: 12, extent: 12.2 };
+}
+
+// ------------------------------------------------------------- palette ----
+const BOOT = '#1a1712';
+const WEAPON = '#141412';
+const WEAPON_HI = '#4c4c48';
+const STOCK = '#6e4a2a';
+const SKIN = '#c9a37c';
+const LEATHER = '#241c14';
+const BUCKLE = '#8a8a7c';
+const OUTLINE_COLOR = 'rgba(26,27,22,0.88)';
+const HALO_COLOR = 'rgba(8,8,6,0.4)';
+/** wf5: the player's own soldiers get a faint pale-gold rim outside the dark
+ * outline (period-feel "your men" cue, not an RTS selection glow). Slightly
+ * deeper and stronger on snow, where pale gold alone would vanish. */
+const FRIENDLY_RIM: Record<'summer' | 'winter', string> = {
+  summer: 'rgba(236,212,122,0.35)',
+  winter: 'rgba(200,160,40,0.5)',
+};
+
+interface UniformPalette { u: string; s: string; helmetMid: string; helmetLight: string; kit: string; sling: string }
+// wf5 side readability: German field grey with a cool blue-grey cast and a
+// darker helmet; Soviet warm khaki / olive-brown with a lighter, more olive
+// helmet. The two now differ in hue (blue-grey vs brown) AND helmet value.
+const GERMAN_SUMMER: UniformPalette = { u: '#5d686c', s: '#465055', helmetMid: '#454b4e', helmetLight: '#5c6366', kit: '#7a7458', sling: '#3a3a2e' };
+const SOVIET_SUMMER: UniformPalette = { u: '#8f7a4b', s: '#6c5734', helmetMid: '#7b7e48', helmetLight: '#969a5e', kit: '#8c8458', sling: '#5a4a2a' };
+const WINTER_SMOCK = { u: '#cacbc4', s: '#a8aaa2' };
+const WINTER_SE_SHADE = '#aeb0aa';
+
+function parseHex(hex: string): [number, number, number] {
+  return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+}
+function toHex(r: number, g: number, b: number): string {
+  const f = (v: number) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
   return '#' + f(r) + f(g) + f(b);
+}
+function darkenHex(hex: string, factor: number): string {
+  const [r, g, b] = parseHex(hex);
+  return toHex(r * factor, g * factor, b * factor);
 }
 function lightenHex(hex: string, factor: number): string {
-  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
-  const f = (v: number) => Math.round(v + (255 - v) * factor).toString(16).padStart(2, '0');
-  return '#' + f(r) + f(g) + f(b);
+  const [r, g, b] = parseHex(hex);
+  return toHex(r + (255 - r) * factor, g + (255 - g) * factor, b + (255 - b) * factor);
 }
-/** Mix each channel 'amount' of the way toward flat grey — used for the
- * dead-soldier desaturation pass before darkening. */
 function desaturateHex(hex: string, amount: number): string {
-  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  const [r, g, b] = parseHex(hex);
   const gray = (r + g + b) / 3;
-  const f = (v: number) => Math.round(v + (gray - v) * amount).toString(16).padStart(2, '0');
-  return '#' + f(r) + f(g) + f(b);
+  return toHex(r + (gray - r) * amount, g + (gray - g) * amount, b + (gray - b) * amount);
+}
+
+/** Uniform colours per side/season (exported for tests / the preview). */
+export function uniformColors(side: Side, season: Season): { uniform: string; helmet: string } {
+  const pal = paletteFor(side, season);
+  return { uniform: pal.u, helmet: pal.helmetMid };
 }
 
 function paletteFor(side: Side, season: Season): UniformPalette {
-  if (season === 'winter') {
-    if (side === 'german') return { u: WINTER_SMOCK.u, s: WINTER_SMOCK.s, helmetMid: GERMAN_SUMMER.helmetMid, helmetLight: GERMAN_SUMMER.helmetLight };
-    return { u: WINTER_SMOCK.u, s: WINTER_SMOCK.s, helmetMid: SOVIET_WINTER_HELMET_MID, helmetLight: lightenHex(SOVIET_WINTER_HELMET_MID, 0.35) };
-  }
-  return side === 'german' ? GERMAN_SUMMER : SOVIET_SUMMER;
+  const base = side === 'german' ? GERMAN_SUMMER : SOVIET_SUMMER;
+  if (season === 'winter') return { ...base, u: WINTER_SMOCK.u, s: WINTER_SMOCK.s };
+  return base;
 }
 
-/** Resolve the character->colour map for one soldier variant. Dead soldiers
- * get every colour desaturated 40% toward grey then darkened 30%.
- *
- * Round-2 contrast pass: the shoulder/torso dark edge ('S') is darkened
- * further than the palette's own dark tone, and the helmet's light tone
- * ('h', and therefore its derived specular) is brightened, so the head reads
- * as a distinct disc and the body silhouette reads as a distinct shape at
- * battle zoom instead of blending into the ground ramp. */
-function colorsFor(side: Side, season: Season, dead: boolean, outline: SoldierOutline = 'enemy'): Record<string, string> {
+function colorsFor(side: Side, season: Season, dead: boolean, outline: SoldierOutline): Record<string, string> {
   const pal = paletteFor(side, season);
-  let u = pal.u;
-  // Round-3 contrast pass: push the shoulder/torso dark edge and the helmet
-  // specular ~15% further apart than the round-2 values (0.72 -> 0.61 darken
-  // factor on the shoulder edge; 0.22 -> 0.25 and 0.55 -> 0.63 lighten
-  // factors on the helmet light tone and its specular pixel) so the head and
-  // silhouette edge read as more distinctly lit/shadowed at battle zoom.
-  let s = darkenHex(pal.s, 0.61);
-  let helmetMid = pal.helmetMid;
-  let helmetLight = lightenHex(pal.helmetLight, 0.25);
-  let weapon = WEAPON, stock = STOCK, skin = SKIN, boot = BOOT;
-  let winterShade = WINTER_SE_SHADE;
-  if (dead) {
-    // Dead soldiers read clearly darker than the living: heavier desaturate
-    // + darken than round 2 (0.4/0.7 -> 0.45/0.55).
-    const fix = (hex: string) => darkenHex(desaturateHex(hex, 0.45), 0.55);
-    u = fix(u); s = fix(s); helmetMid = fix(helmetMid); helmetLight = fix(helmetLight);
-    weapon = fix(weapon); stock = fix(stock); skin = fix(skin); boot = fix(boot);
-    winterShade = fix(winterShade);
-  }
-  const rim = darkenHex(helmetMid, 0.62);
-  const specular = lightenHex(helmetLight, 0.63);
-  const yellowRing = season === 'winter' && outline === 'friendly' && !dead;
-  return {
-    O: rim, H: helmetMid, h: helmetLight, P: specular,
-    U: u, S: s, V: winterShade,
-    W: weapon, K: stock, G: skin,
-    b: boot, k: darkenHex(boot, 0.55),
-    R: 'rgba(90,26,18,0.7)',
-    X: yellowRing ? FRIENDLY_WINTER_OUTLINE : OUTLINE_COLOR,
-    Y: yellowRing ? FRIENDLY_WINTER_HALO : HALO_COLOR,
+  const winter = season === 'winter';
+  const base: Record<string, string> = {
+    U: pal.u,
+    L: lightenHex(pal.u, 0.18),
+    S: darkenHex(pal.s, 0.72),
+    V: WINTER_SE_SHADE,
+    T: winter ? darkenHex(WINTER_SMOCK.s, 0.92) : darkenHex(pal.s, 0.85),
+    H: pal.helmetMid,
+    h: lightenHex(pal.helmetLight, 0.22),
+    D: darkenHex(pal.helmetMid, 0.78),
+    W: WEAPON, w: WEAPON_HI, K: STOCK, J: darkenHex(STOCK, 0.62), Q: winter ? '#6e6a5c' : pal.sling,
+    G: SKIN,
+    b: BOOT, B: '#3a342a', k: darkenHex(BOOT, 0.55),
+    E: winter ? '#6a665a' : LEATHER, e: winter ? '#b8b6a8' : pal.kit, Z: BUCKLE,
+    R: 'rgba(96,24,16,0.72)',
   };
-}
-
-// ---------------------------------------------------------- stance grids --
-interface Built { grid: Grid; helmet: { cx: number; cy: number; r: number } }
-
-/** Standing / walking, north-facing: 6px helmet, 6-wide shoulders, a rifle
- * held forward (north) from the right shoulder with a wood stock and a skin
- * pixel at the grip, and two long alternating legs trailing behind so the
- * figure reads as an elongated striding silhouette along its facing. */
-function buildStandingGrid(frame: 0 | 1): Built {
-  const W = 20, H = 22;
-  const g = blank(W, H);
-  const helmet = { cx: 9, cy: 6, r: 3 };
-  paintHelmet(g, helmet.cx, helmet.cy, helmet.r);
-
-  // Shoulders: 6px wide x 3 rows, darker edge columns.
-  const shY0 = 10, shY1 = 12, shX0 = 6, shX1 = 11;
-  fillRect(g, shX0, shY0, shX1, shY1, 'U');
-  for (let y = shY0; y <= shY1; y++) { put(g, shX0, y, 'S'); put(g, shX1, y, 'S'); }
-
-  // Weapon: 2px-wide, 9px barrel extending north from the right shoulder,
-  // a 2px wood stock at the grip end, and a skin pixel at the hand.
-  const wx0 = 12, wx1 = 13;
-  fillRect(g, wx0, 0, wx1, 8, 'W');
-  fillRect(g, wx0, 9, wx1, 10, 'K');
-  put(g, wx0, 11, 'G');
-
-  // Legs: two 2px boots trailing the shoulders, alternating stride per frame.
-  const bootY0 = 13;
-  const leftLen = frame === 0 ? 8 : 7;
-  const rightLen = frame === 0 ? 7 : 8;
-  fillRect(g, 6, bootY0, 7, bootY0 + leftLen - 1, 'b');
-  fillRect(g, 6, bootY0 + leftLen - 1, 7, bootY0 + leftLen - 1, 'k');
-  fillRect(g, 10, bootY0, 11, bootY0 + rightLen - 1, 'b');
-  fillRect(g, 10, bootY0 + rightLen - 1, 11, bootY0 + rightLen - 1, 'k');
-
-  return { grid: g, helmet };
-}
-
-/** Crouching, north-facing: larger 7px helmet, hunched 7-wide shoulders, a
- * shorter weapon, a short tucked boot and a second bent leg trailing
- * diagonally behind (the kneeling leg), so it reads differently from the
- * straight two-legged standing figure at 1x. */
-function buildCrouchingGrid(frame: 0 | 1): Built {
-  const W = 18, H = 18;
-  const g = blank(W, H);
-  const helmet = { cx: 9, cy: 6, r: 3.5 };
-  paintHelmet(g, helmet.cx, helmet.cy, helmet.r);
-
-  const shY0 = 9, shY1 = 11, shX0 = 5, shX1 = 11;
-  fillRect(g, shX0, shY0, shX1, shY1, 'U');
-  for (let y = shY0; y <= shY1; y++) { put(g, shX0, y, 'S'); put(g, shX1, y, 'S'); }
-
-  // Shorter weapon: 5px barrel + 2px stock + grip pixel.
-  const wx0 = 12, wx1 = 13;
-  fillRect(g, wx0, 2, wx1, 6, 'W');
-  fillRect(g, wx0, 7, wx1, 8, 'K');
-  put(g, wx0, 9, 'G');
-
-  // One tucked boot, nudged sideways for the settle-into-cover cycle.
-  const wob = frame === 1 ? 1 : 0;
-  fillRect(g, 8 + wob, 12, 9 + wob, 14, 'b');
-  fillRect(g, 8 + wob, 14, 9 + wob, 14, 'k');
-  // Kneeling leg: ~4px bent diagonally back and outward from the hip.
-  for (let i = 0; i < 4; i++) {
-    put(g, 10 + i, 12 + i, 'b');
-    put(g, 11 + i, 12 + i, i === 3 ? 'k' : 'b');
+  base.O = darkenHex(base.H, 0.6);
+  base.P = lightenHex(base.h, 0.55);
+  if (dead) {
+    const fix = (c: string) => (c.startsWith('#') ? darkenHex(desaturateHex(c, 0.45), 0.58) : c);
+    for (const k of Object.keys(base)) base[k] = fix(base[k]);
   }
-
-  return { grid: g, helmet };
+  const friendly = outline === 'friendly' && !dead;
+  base.X = OUTLINE_COLOR;
+  base.Y = friendly ? FRIENDLY_RIM[winter ? 'winter' : 'summer'] : HALO_COLOR;
+  base.y = friendly ? FRIENDLY_RIM[winter ? 'winter' : 'summer'].replace(/[\d.]+\)$/, (m) => `${(parseFloat(m) * 0.55).toFixed(2)})`) : 'rgba(8,8,6,0.16)';
+  return base;
 }
 
-/** Shared prone/dead skeleton: helmet at the north end, 2px arm bumps beside
- * it, a torso tapering from 8-wide shoulders to 5-wide hips, and two boots
- * slightly splayed at the south (rear) end. Weapon and arm placement differ
- * between the live prone pose and the dead pose, so those are added by the
- * two callers below. */
-function buildProneSkeleton(): Built {
-  const W = 12, H = 24;
-  const g = blank(W, H);
-  const cx = 6;
-  const helmet = { cx, cy: 9, r: 3 };
-  paintHelmet(g, helmet.cx, helmet.cy, helmet.r);
-
-  // Torso/back tapering from 8-wide (shoulders) to 5-wide (hips).
-  for (let y = 13; y <= 20; y++) {
-    const t = (y - 13) / 7;
-    const hw = 4 - t * 1.5;
-    const x0 = Math.round(cx - hw), x1 = Math.round(cx + hw);
-    fillRect(g, x0, y, x1, y, 'U');
-    put(g, x0, y, 'S');
-    put(g, x1, y, 'S');
-  }
-
-  // Boots: two 2px dark blocks, splayed slightly wider than the hip taper.
-  fillRect(g, 3, 21, 4, 22, 'b');
-  fillRect(g, 3, 22, 4, 22, 'k');
-  fillRect(g, 7, 21, 8, 22, 'b');
-  fillRect(g, 7, 22, 8, 22, 'k');
-
-  return { grid: g, helmet };
+// ---------------------------------------------------------- rasterise -----
+function parseColor(c: string): [number, number, number, number] {
+  if (c.startsWith('#')) { const [r, g, b] = parseHex(c); return [r, g, b, 255]; }
+  const m = c.match(/rgba?\(([^)]+)\)/);
+  if (!m) return [255, 0, 255, 255];
+  const p = m[1].split(',').map((v) => parseFloat(v));
+  return [p[0], p[1], p[2], Math.round((p[3] ?? 1) * 255)];
 }
 
-/** Prone (live): weapon extends 6px beyond the helmet along the facing
- * (north), and both arm bumps sit symmetrically beside the helmet. */
-function buildProneGrid(): Built {
-  const built = buildProneSkeleton();
-  const g = built.grid;
-  const cx = built.helmet.cx;
-  fillRect(g, cx - 1, 0, cx, 5, 'W');
-  fillRect(g, cx - 3, 10, cx - 2, 11, 'U');
-  fillRect(g, cx + 2, 10, cx + 3, 11, 'U');
-  return built;
+function figureFor(side: Side, stance: Stance | 'dead', frame: 0 | 1): Figure {
+  if (stance === 'dead') return deadFigure(side);
+  if (stance === 'prone') return proneFigure(side);
+  if (stance === 'crouching') return crouchingFigure(side, frame);
+  return standingFigure(side, frame);
 }
 
-/** Dead: one arm flung out sideways (asymmetric), the weapon dropped 3px to
- * the side rather than held centred, and a 4px irregular blood splat under
- * the torso. */
-function buildDeadGrid(): Built {
-  const built = buildProneSkeleton();
-  const g = built.grid;
-  const cx = built.helmet.cx;
-  // Weapon dropped, offset 3px to the side of where it would be held.
-  fillRect(g, cx + 2, 0, cx + 3, 5, 'W');
-  // One arm tucked normally, the other flung out wide to the side.
-  fillRect(g, cx - 3, 10, cx - 2, 11, 'U');
-  fillRect(g, cx + 3, 9, cx + 5, 10, 'U');
-  // Irregular blood splat under the torso.
-  put(g, cx - 1, 15, 'R');
-  put(g, cx, 15, 'R');
-  put(g, cx, 16, 'R');
-  put(g, cx + 1, 16, 'R');
-  return built;
-}
-
-/** Mid-grey SE shading for winter smocks: half of each uniform ('U') cell,
- * split along the sprite's own NW/SE diagonal, is recoloured to a distinct
- * shade tone so a white-clad figure keeps volume/contrast against snow
- * instead of dissolving into a flat white blob (compare ref_cc3_1482.png,
- * where the white-clad figures still read clearly against snow). */
-function applyWinterShading(grid: Grid): void {
-  const h = grid.length, w = grid[0].length;
-  const refX = w / 2, refY = h / 2;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (grid[y][x] !== 'U') continue;
-      if (x - refX + (y - refY) >= 0) grid[y][x] = 'V';
+/** Rasterise a figure at `scale` and `facing` into an N x N character grid
+ * (row-major, '' = empty) with the pivot exactly at the canvas centre. */
+function rasterise(fig: Figure, facing: Facing8, scale: number, winter: boolean): { n: number; cells: string[] } {
+  const rings = 2;
+  const half = Math.ceil(fig.extent + 1) * scale + rings * scale;
+  const n = half * 2;
+  const ang = (facing * Math.PI) / 4;
+  let cos = Math.cos(ang), sin = Math.sin(ang);
+  if (facing % 2 === 0) { cos = Math.round(cos); sin = Math.round(sin); }
+  const sm: Sampler = { s: scale, pix: 1 / scale, cos, sin };
+  const ops = fig.ops.filter((o) => (o.min == null || scale >= o.min) && (o.max == null || scale <= o.max));
+  const cells = new Array<string>(n * n).fill('');
+  for (let py = 0; py < n; py++) {
+    const sy = (py + 0.5 - half) / scale;
+    for (let px = 0; px < n; px++) {
+      const sx = (px + 0.5 - half) / scale;
+      // Inverse-rotate the screen offset into the north-facing pose.
+      const ux = sx * cos + sy * sin;
+      const uy = -sx * sin + sy * cos;
+      if (ux * ux + uy * uy > (fig.extent + 1) * (fig.extent + 1)) continue;
+      const gx = ux + fig.px, gy = uy + fig.py;
+      let ch = '';
+      for (let i = ops.length - 1; i >= 0; i--) {
+        const hit = sampleOp(ops[i], gx, gy, sm);
+        if (hit) { ch = hit; break; }
+      }
+      // Winter smock: the SE half (in screen space) takes the shade tone so
+      // a white figure keeps its volume against snow.
+      if (winter && ch === 'U' && sx + sy >= 0) ch = 'V';
+      cells[py * n + px] = ch;
     }
   }
+  return { n, cells };
 }
 
-/** Expand a grid by two empty rings on every side: mark every background
- * cell touching a filled cell as the baked 1px silhouette outline ('X'),
- * then mark every remaining background cell touching *that* ring (or the
- * figure) as a second, softer 1px halo ('Y') one pixel further out. Together
- * these separate the figure from noisy ground/snow texture at battle zoom —
- * the halo is a round-3 addition on top of round 2's single outline ring, so
- * the silhouette still reads even where the ground happens to be as dark as
- * the outline itself. */
-function addOutline(grid: Grid): Grid {
-  const h = grid.length, w = grid[0].length;
-  const off = 2;
-  const nw = w + off * 2, nh = h + off * 2;
-  const out = blank(nw, nh);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) out[y + off][x + off] = grid[y][x];
-  const filled = (x: number, y: number) => x >= 0 && y >= 0 && x < nw && y < nh && out[y][x] !== '.';
-  const withOutline = out.map((row) => row.slice());
-  for (let y = 0; y < nh; y++) {
-    for (let x = 0; x < nw; x++) {
-      if (out[y][x] !== '.') continue;
-      if (filled(x - 1, y) || filled(x + 1, y) || filled(x, y - 1) || filled(x, y + 1)) withOutline[y][x] = 'X';
+/** Grow the dark outline ring and the halo/rim rings on the raster, in
+ * output pixels: 1x = outline + 1 halo ring; 2x = outline + 2 halo rings
+ * (the outer one softer), so the rings carry the same screen weight. */
+function growRings(n: number, cells: string[], scale: number): void {
+  const grow = (from: (c: string) => boolean, ch: string, diag: boolean) => {
+    const add: number[] = [];
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const i = y * n + x;
+        if (cells[i] !== '') continue;
+        const at = (xx: number, yy: number) => xx >= 0 && yy >= 0 && xx < n && yy < n && from(cells[yy * n + xx]);
+        if (at(x - 1, y) || at(x + 1, y) || at(x, y - 1) || at(x, y + 1)
+          || (diag && (at(x - 1, y - 1) || at(x + 1, y - 1) || at(x - 1, y + 1) || at(x + 1, y + 1)))) add.push(i);
+      }
     }
-  }
-  const filledOrOutline = (x: number, y: number) => x >= 0 && y >= 0 && x < nw && y < nh && withOutline[y][x] !== '.';
-  const withHalo = withOutline.map((row) => row.slice());
-  for (let y = 0; y < nh; y++) {
-    for (let x = 0; x < nw; x++) {
-      if (withOutline[y][x] !== '.') continue;
-      if (filledOrOutline(x - 1, y) || filledOrOutline(x + 1, y) || filledOrOutline(x, y - 1) || filledOrOutline(x, y + 1)) withHalo[y][x] = 'Y';
-    }
-  }
-  return withHalo;
+    for (const i of add) cells[i] = ch;
+  };
+  const any = (c: string) => c !== '';
+  grow(any, 'X', false);
+  grow(any, 'Y', scale >= 2);
+  if (scale >= 2) grow(any, 'y', false);
 }
 
-// --------------------------------------------------------- canvas compose -
-// Room for the baked outline ring + halo ring (2px) without clipping. The
-// drop shadow is no longer baked into this canvas — it's drawn separately by
-// unitRender.ts, under each figure, so it can be positioned/composited in
-// screen space independent of the sprite's own rotation.
-const PAD = 3;
-
-function gridToCanvas(grid: Grid, colors: Record<string, string>): HTMLCanvasElement {
-  const w = grid[0].length, h = grid.length;
-  const expanded = addOutline(grid);
-  const ew = expanded[0].length, eh = expanded.length;
-  const c = createCanvas(w + PAD * 2, h + PAD * 2);
+function paint(n: number, cells: string[], colors: Record<string, string>): HTMLCanvasElement {
+  const c = createCanvas(n, n);
   const ctx = ctx2d(c);
-  // The expanded grid's (0,0) is the original grid's (-2,-2) (outline ring +
-  // halo ring), so it lands at canvas (PAD-2, PAD-2) to keep the original
-  // grid's (0,0) at (PAD, PAD) — the convention `buildSoldierArt`'s
-  // helmet-offset math below relies on.
-  const base = PAD - 2;
-  for (let y = 0; y < eh; y++) {
-    for (let x = 0; x < ew; x++) {
-      const ch = expanded[y][x];
-      if (ch === '.') continue;
-      ctx.fillStyle = colors[ch] ?? '#ff00ff';
-      ctx.fillRect(base + x, base + y, 1, 1);
-    }
+  const img = ctx.createImageData(n, n);
+  const rgba = new Map<string, [number, number, number, number]>();
+  for (let i = 0; i < cells.length; i++) {
+    const ch = cells[i];
+    if (!ch) continue;
+    let col = rgba.get(ch);
+    if (!col) { col = parseColor(colors[ch] ?? '#ff00ff'); rgba.set(ch, col); }
+    const o = i * 4;
+    img.data[o] = col[0]; img.data[o + 1] = col[1]; img.data[o + 2] = col[2]; img.data[o + 3] = col[3];
   }
+  ctx.putImageData(img, 0, 0);
   return c;
 }
 
-export interface SoldierArt {
-  canvas: HTMLCanvasElement;
-  helmet: { cx: number; cy: number; r: number };
-  helmetColors: { rim: string; mid: string; light: string; specular: string };
-}
-
-/** Build the north-facing (facing 0, "up") pixel art for one soldier
- * variant. Cached by the caller (sprites.ts) keyed on the same arguments. */
-export function buildSoldierArt(side: Side, season: Season, stance: Stance | 'dead', frame: 0 | 1, outline: SoldierOutline = 'enemy'): SoldierArt {
-  const dead = stance === 'dead';
-  const colors = colorsFor(side, season, dead, outline);
-  const built = dead ? buildDeadGrid()
-    : stance === 'prone' ? buildProneGrid()
-    : stance === 'crouching' ? buildCrouchingGrid(frame)
-    : buildStandingGrid(frame);
-  if (season === 'winter') applyWinterShading(built.grid);
-  const canvas = gridToCanvas(built.grid, colors);
-  return {
-    canvas,
-    helmet: { cx: built.helmet.cx + PAD, cy: built.helmet.cy + PAD, r: built.helmet.r },
-    helmetColors: { rim: colors.O, mid: colors.H, light: colors.h, specular: colors.P },
-  };
-}
-
-/** Re-stamp the helmet disc at its rotated position, in the same layered
- * rim/mid/light/specular tones as paintHelmet, so a 45 degree nearest-
- * neighbour rotation doesn't leave the head looking like a jagged blob. */
-function restampHelmet(canvas: HTMLCanvasElement, art: SoldierArt, facing: Facing8): void {
-  const w = canvas.width, h = canvas.height;
-  const centre = { x: w / 2 - 0.5, y: h / 2 - 0.5 };
-  const dx = art.helmet.cx - centre.x, dy = art.helmet.cy - centre.y;
-  const rad = (facing * Math.PI) / 4;
-  const cos = Math.cos(rad), sin = Math.sin(rad);
-  const cx = Math.round(centre.x + dx * cos - dy * sin);
-  const cy = Math.round(centre.y + dx * sin + dy * cos);
-  const ctx = ctx2d(canvas);
-  const r = art.helmet.r;
-  forEachDiscPixel(cx, cy, r, (x, y) => { ctx.fillStyle = art.helmetColors.rim; ctx.fillRect(x, y, 1, 1); });
-  forEachDiscPixel(cx, cy, Math.max(1, r - 1), (x, y) => { ctx.fillStyle = art.helmetColors.mid; ctx.fillRect(x, y, 1, 1); });
-  forEachDiscPixel(cx - 1, cy - 1, Math.max(1, r - 2.2), (x, y) => { ctx.fillStyle = art.helmetColors.light; ctx.fillRect(x, y, 1, 1); });
-  ctx.fillStyle = art.helmetColors.specular;
-  ctx.fillRect(cx - Math.round(r * 0.75), cy - Math.round(r * 0.75), 1, 1);
-}
-
-/** Orient the north-facing art to the given facing: exact 90 degree
- * rotations for the cardinals, a 45 degree nearest-neighbour rotation plus
- * a helmet re-stamp for the diagonals. */
-export function orientSoldierArt(art: SoldierArt, facing: Facing8): HTMLCanvasElement {
-  if (facing % 2 === 0) return rotate90(art.canvas, facing / 2);
-  const rotated = rotateSprite(art.canvas, (facing * Math.PI) / 4);
-  restampHelmet(rotated, art, facing);
-  return rotated;
+/** Build one oriented soldier sprite. The canvas is square, the soldier's
+ * position is its exact centre, and it is authored for `scale` sprite pixels
+ * per 1x pixel — draw it at `canvas.width * zoom / scale`. Cached by the
+ * caller (sprites.ts). */
+export function buildSoldierSprite(
+  side: Side, season: Season, stance: Stance | 'dead', facing: Facing8, frame: 0 | 1,
+  outline: SoldierOutline = 'enemy', scale = 1,
+): HTMLCanvasElement {
+  const s = scale >= 2 ? 2 : 1;
+  const fig = figureFor(side, stance, stance === 'dead' || stance === 'prone' ? 0 : frame);
+  const { n, cells } = rasterise(fig, facing, s, season === 'winter');
+  growRings(n, cells, s);
+  return paint(n, cells, colorsFor(side, season, stance === 'dead', stance === 'dead' ? 'enemy' : outline));
 }
