@@ -26,6 +26,8 @@ type RGB = readonly [number, number, number];
 interface EarthPalette {
   soil: RGB; soilLight: RGB; pitDeep: RGB; scorch: RGB; snow: RGB; snowShade: RGB;
   sandbag: RGB; log: RGB; board: RGB; grass: RGB; water: RGB; shadow: RGB; clodLight: RGB;
+  /** thin trodden-earth fringe colour where loose soil feathers out into the ground */
+  halo?: RGB;
 }
 
 const PALETTES: Record<Season, EarthPalette> = {
@@ -103,6 +105,10 @@ interface ShadeOpts {
   old: boolean;
   seed: number;
   puddles: boolean;
+  /** per-feature palette overrides (e.g. foxhole spoil is damper/darker than blast ejecta) */
+  palette?: Partial<EarthPalette>;
+  /** f.aux holds a 0..1 mix from the soil colour toward `palette.halo` (winter foxhole rim fade) */
+  warm?: boolean;
 }
 
 // light from the NW, ~40 degrees above the horizon
@@ -111,7 +117,9 @@ const TAN_ELEV = 0.62;
 
 /** Shades a filled field into RGBA (non-premultiplied, straight alpha). */
 export function shadeField(f: EarthField, season: Season, o: ShadeOpts, out: Uint8ClampedArray): void {
-  const pal = PALETTES[season];
+  const pal = o.palette ? { ...PALETTES[season], ...o.palette } : PALETTES[season];
+  const warmA = o.warm && pal.halo ? f.aux : null;
+  const halo = pal.halo ?? pal.soilLight;
   const { w, h, zoom } = f;
   const n = w * h;
   const mpp = 1 / (PX_PER_M * zoom);
@@ -180,6 +188,10 @@ export function shadeField(f: EarthField, season: Season, o: ShadeOpts, out: Uin
         let r = pal.soil[0] + (pal.soilLight[0] - pal.soil[0]) * t;
         let g = pal.soil[1] + (pal.soilLight[1] - pal.soil[1]) * t;
         let b = pal.soil[2] + (pal.soilLight[2] - pal.soil[2]) * t;
+        if (warmA && warmA[i] > 0) {
+          const wm = warmA[i];
+          r += (halo[0] - r) * wm; g += (halo[1] - g) * wm; b += (halo[2] - b) * wm;
+        }
         if (hi < 0) {
           const dt = Math.pow(clamp01(-hi / o.depthRef), 0.75);
           r += (pal.pitDeep[0] - r) * dt; g += (pal.pitDeep[1] - g) * dt; b += (pal.pitDeep[2] - b) * dt;
@@ -402,17 +414,34 @@ export interface FoxholeDraw {
 
 export function foxholeExtentPx(): number { return 3.3 * PX_PER_M; }
 
+/** Foxhole spoil is freshly dug, damp subsoil: darker and browner than sun-dried blast ejecta
+ * (which reads as sand if reused). Winter adds an orange-brown trodden fringe fading into snow. */
+const FOXHOLE_PALETTES: Record<Season, Partial<EarthPalette>> = {
+  summer: { soil: [72, 52, 30], soilLight: [110, 82, 50], clodLight: [126, 96, 60], pitDeep: [30, 18, 6] },
+  autumn: { soil: [68, 50, 32], soilLight: [104, 80, 54], clodLight: [118, 92, 64], pitDeep: [28, 18, 8] },
+  winter: {
+    soil: [52, 33, 20], soilLight: [80, 52, 30], clodLight: [96, 64, 38], pitDeep: [44, 30, 20],
+    halo: [150, 92, 46], sandbag: [118, 108, 92], snow: [176, 178, 186], snowShade: [104, 108, 122],
+  },
+};
+
 export function fillFoxhole(f: EarthField, fx: FoxholeDraw, season: Season): ShadeOpts {
   const { w, h, zoom } = f;
   const seed = fx.seed | 0;
   const winter = season === 'winter';
+  // the long axis (`s`) runs across the front, i.e. along the dug-in line; `fy` points at the enemy
   const fwdX = Math.cos(fx.angle), fwdY = Math.sin(fx.angle);
   const sideX = -fwdY, sideY = fwdX;
-  const A = (fx.men === 2 ? 1.08 : 0.72) * (0.9 + hash2(1, 0, seed + 501) * 0.2); // half length along the front
-  const B = (fx.men === 2 ? 0.52 : 0.5) * (0.9 + hash2(2, 0, seed + 502) * 0.2);  // half width
-  const rr = Math.min(A, B) * (fx.men === 2 ? 0.7 : 0.9);
-  const H = f.H, soil = f.soil, snow = f.snow, mat = f.mat;
-  const depth = 1.3;
+  const jA = 0.9 + hash2(1, 0, seed + 501) * 0.2, jB = 0.9 + hash2(2, 0, seed + 502) * 0.2;
+  // winter: a narrow slot ~0.5 m wide, 1.7-2.0 m long, so pit + rim band is ~1 x 2.2-2.5 m
+  const A = winter ? (fx.men === 2 ? 1.1 : 0.96) * jA : (fx.men === 2 ? 1.08 : 0.72) * jA; // half length along the front
+  const B = winter ? 0.36 * jB : (fx.men === 2 ? 0.52 : 0.5) * jB;                         // half width
+  const rr = Math.min(A, B) * (winter ? 0.95 : fx.men === 2 ? 0.7 : 0.9);
+  const H = f.H, soil = f.soil, snow = f.snow, mat = f.mat, warm = f.aux;
+  if (winter) warm.fill(0, 0, w * h);
+  const depth = winter ? 1.2 : 1.3;
+  const wallRamp = winter ? 0.1 : 0.22;
+  const wobble = winter ? 0.07 : 0.2;
   for (let y = 0; y < h; y++) {
     const Y = f.oy + (y + 0.5) / zoom;
     const dym = (Y - fx.y) / PX_PER_M;
@@ -423,17 +452,59 @@ export function fillFoxhole(f: EarthField, fx: FoxholeDraw, season: Season): Sha
       const fy = dxm * fwdX + dym * fwdY;
       const qx = Math.abs(s) - (A - rr), qy = Math.abs(fy) - (B - rr);
       const nf = noise2(X / 3.2, Y / 3.2, seed + 503);
-      let sd = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - rr;
-      sd += nf * 0.2;
+      // winter: halfway between an ellipse and a capsule (an oval slot, neither pointy nor boxy)
+      let sd: number;
+      if (winter) {
+        const er = Math.sqrt((s / A) * (s / A) + (fy / B) * (fy / B));
+        const gl = Math.hypot(s / (A * A), fy / (B * B)) / Math.max(er, 1e-3);
+        const box = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - rr;
+        sd = 0.5 * box + 0.5 * (er - 1) / Math.max(gl, 1 / A);
+      } else sd = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - rr;
+      sd += nf * wobble;
       if (sd > 1.9) continue;
       const i = y * w + x;
       if (sd < 0) {
-        H[i] = -depth * smooth(0, 0.22, -sd);
+        H[i] = -depth * smooth(0, wallRamp, -sd);
         soil[i] = 1;
-        if (winter) snow[i] = 0.75;
+        // winter: snow blown into the pit settles on its floor
+        if (winter) snow[i] = 0.42 + 0.3 * smooth(0.05, 0.16, -sd);
         continue;
       }
       const frontW = smooth(-B * 0.9, B * 1.1, fy);
+      if (winter) {
+        // dark spoil band hugging the slot (slightly heavier on the enemy side), feathering through
+        // orange-brown trodden earth into the snow
+        const band = 0.24 + 0.1 * frontW + nf * 0.1;
+        const lump = 0.8 + 0.4 * vnoise(s * 2.6 + 9, fy * 2.6 + 9, seed + 505);
+        const t = (sd - band * 0.45) / (band * 0.75);
+        let hh = (0.05 + 0.1 * frontW) * lump * Math.exp(-t * t);
+        let sa = smooth(band + 0.22, band - 0.1, sd);
+        const haloA = Math.exp(-Math.max(0, sd - band) / 0.4) * 0.72 * clamp01(0.8 + nf * 1.8);
+        if (haloA > sa) sa = haloA;
+        if (sd < band + 0.2) {
+          const cell = hash2(Math.floor(X * zoom), Math.floor(Y * zoom), seed + 504);
+          if (cell > 0.9 + sd * 0.2) { sa = Math.max(sa, 0.8); mat[i] = MAT_CLOD; }
+        }
+        const taper = smooth(1.4, 0.8, sd);
+        sa *= taper; hh *= taper;
+        if (fx.variant === 1 && frontW > 0.45 && sd > 0.02 && sd < 0.3 && Math.abs(s) < A + 0.15) {
+          const along = (s + 10) / 0.4;
+          const bag = Math.sqrt(Math.max(0, Math.sin(Math.PI * (along - Math.floor(along))))) * Math.sqrt(Math.max(0, Math.sin(Math.PI * (sd - 0.02) / 0.28)));
+          hh = Math.max(hh, 0.1 + 0.16 * bag);
+          mat[i] = bag > 0.32 ? MAT_SANDBAG : MAT_SEAM;
+          sa = 1;
+        } else if (fx.variant === 2 && frontW > 0.5 && sd > 0.02 && sd < 0.24 && Math.abs(s) < A + 0.25) {
+          const cross = (sd - 0.13) / 0.11;
+          hh = Math.max(hh, 0.08 + 0.18 * Math.sqrt(Math.max(0, 1 - cross * cross)));
+          mat[i] = Math.abs(cross) > 0.86 ? MAT_SEAM : MAT_LOG;
+          sa = 1;
+        }
+        H[i] = hh;
+        soil[i] = sa;
+        warm[i] = mat[i] === MAT_NONE ? smooth(band * 0.2, band + 0.35, sd) * 0.95 : 0;
+        snow[i] = mat[i] === MAT_SANDBAG || mat[i] === MAT_LOG ? 0.55 : 0.12;
+        continue;
+      }
       const crest = 0.2 + 0.4 * frontW;
       const width = 0.26 + 0.24 * frontW;
       const t = (sd - crest) / (sd > crest ? width * 1.25 : width);
@@ -448,7 +519,7 @@ export function fillFoxhole(f: EarthField, fx: FoxholeDraw, season: Season): Sha
         if (cell > 0.8 + sd * 0.25) { sa = Math.max(sa, 0.7); mat[i] = MAT_CLOD; }
       }
       // earth trodden and thrown over the surrounding ground: a soft brown fade outward
-      const halo = Math.exp(-Math.max(0, sd - crest) / (winter ? 0.4 : 0.28)) * (winter ? 0.42 : 0.25) * clamp01(0.7 + nf * 1.6);
+      const halo = Math.exp(-Math.max(0, sd - crest) / 0.28) * 0.25 * clamp01(0.7 + nf * 1.6);
       if (halo > sa) sa = halo;
       const taper = smooth(1.85, 1.2, sd);
       sa *= taper; hh *= taper;
@@ -471,10 +542,9 @@ export function fillFoxhole(f: EarthField, fx: FoxholeDraw, season: Season): Sha
       }
       H[i] = hh;
       soil[i] = sa;
-      if (winter) snow[i] = 0.36;
     }
   }
-  return { depthRef: depth * 0.75, old: false, seed, puddles: false };
+  return { depthRef: depth * 0.75, old: false, seed, puddles: false, palette: FOXHOLE_PALETTES[season], warm: winter };
 }
 
 export function paintFoxhole(ctx: CanvasRenderingContext2D, fx: FoxholeDraw, season: Season, originX: number, originY: number, zoom: number): void {

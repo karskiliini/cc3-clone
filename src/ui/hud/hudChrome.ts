@@ -65,6 +65,36 @@ export function clipTextToWidth(ctx: CanvasRenderingContext2D, text: string, max
   return s;
 }
 
+/** Picks the largest font / fullest wording that fits `maxW` without cutting a word: each
+ * candidate text (full word first, then abbreviations) is tried at the base size and up to
+ * `maxShrink` px smaller. Falls back to the last candidate trimmed back to a whole word. The
+ * returned `font` is the ctx.font string to draw with; ctx.font is left as it was on entry. */
+export function fitHudText(
+  ctx: CanvasRenderingContext2D, candidates: readonly string[], maxW: number, maxShrink = 2,
+): { text: string; font: string } {
+  const base = ctx.font;
+  const m = /(\d+(?:\.\d+)?)px/.exec(base);
+  const px = m ? parseFloat(m[1]) : 11;
+  const fontAt = (size: number) => (m ? base.replace(m[0], `${size}px`) : base);
+  try {
+    for (const text of candidates) {
+      for (let d = 0; d <= maxShrink; d++) {
+        const font = fontAt(px - d);
+        ctx.font = font;
+        if (ctx.measureText(text).width <= maxW) return { text, font };
+      }
+    }
+    const font = fontAt(px - maxShrink);
+    ctx.font = font;
+    const last = candidates[candidates.length - 1] ?? '';
+    const words = last.split(' ');
+    while (words.length > 1 && ctx.measureText(words.join(' ')).width > maxW) words.pop();
+    return { text: words.join(' '), font };
+  } finally {
+    ctx.font = base;
+  }
+}
+
 /** Team name-bar colour: driven by team state first (dead/broken -> dark
  * red, suppressed/panicking -> yellow), falling back to a role colour for
  * teams that are otherwise fine — command teams read cyan/teal in the

@@ -9,7 +9,8 @@ import { PANEL_Y } from '@/shared/types';
 import { clamp } from '@/shared/math';
 import { HUD } from '@/render/palette';
 import { WEAPONS } from '@/data/weapons';
-import { drawHudBevel, hitRect, setHudFont, clipTextToWidth } from './hudChrome';
+import { VEHICLE_DEFS } from '@/data/units';
+import { drawHudBevel, hitRect, setHudFont, fitHudText } from './hudChrome';
 
 const GLYPH_SIZE = 8;
 
@@ -71,12 +72,28 @@ const MAX_ROWS = 4;
 const CELL_H = 15;
 const HEADER_H = 14;
 const ARROW_W = 12;
+const NAME_W = 70;
+const ROLE_W = 66;
+const RDS_CELL_W = 28;
+
+/** Inner text widths (cell width minus the 3 px padding each side) of the monitor's columns in
+ * the narrowest layout (with the scroll arrow), plus their fonts — used by tests to prove no
+ * role/status/activity word overflows. */
+export const MONITOR_TEXT_CELLS = {
+  role: { maxW: ROLE_W - 6, font: 'map' as const },
+  activity: { maxW: NAME_W - 6, font: 'small' as const },
+  status: { maxW: WIDTH - 2 - (ARROW_W + NAME_W + 1 + ROLE_W + 1) - 6, font: 'small' as const },
+};
+/** Every word the role and status/activity columns can show. */
+export const MONITOR_ROLE_WORDS = ['Leader', 'Gunner', 'Assist', 'Assist. Ldr.', 'Loader', 'Driver', 'Commander', 'Soldat', 'Radioman', 'Crew'];
+export const MONITOR_STATUS_WORDS = ['Healthy', 'Slightly injured', 'Incap.', 'Dead', 'Pinned', 'Cowering', 'Panicked', 'Broken', 'Berserk'];
+export const MONITOR_ACTIVITY_WORDS = ['Dead', 'Unconscious', 'Wary', 'Shaken', 'Driving', 'Moving', 'Running', 'Crawling', 'Firing', 'Reloading', 'Loading', 'Assisting', 'Defending', 'Ambushing', 'Hiding', 'Fleeing', 'Charging', 'Surrendered', 'Waiting'];
 
 const GUNNER_WEAPON_CLASSES = new Set<WeaponClass>(['lmg', 'hmg', 'mortar', 'atgun', 'atrocket']);
 
 function role(vehicle: Vehicle | undefined, soldiers: Soldier[], index: number, s: Soldier): string {
   if (vehicle) {
-    const roles = ['Commander', 'Gunner', 'Loader', 'Driver'];
+    const roles = ['Commander', 'Gunner', 'Loader', 'Driver', 'Radioman'];
     return roles[index] ?? 'Crew';
   }
   if (index === 0) return 'Leader';
@@ -175,13 +192,89 @@ function statusCell(s: Soldier): { word: string; color: string } {
   }
 }
 
-const HE_CLASSES = new Set<WeaponClass>(['mortar', 'atgun', 'tankgun']);
+/** Original-style abbreviations tried (after shrinking the font) when a word still overflows. */
+export const MONITOR_ABBREV: Record<string, string[]> = {
+  Commander: ['Cmdr.'],
+  'Assist. Ldr.': ['Asst. Ldr.', 'A. Ldr.'],
+  Radioman: ['Radio'],
+  'Slightly injured': ['Injured'],
+  Unconscious: ['Uncons.'],
+  Surrendered: ['Surr.'],
+};
 
-/** Text in a bevelled cell; `align` centre is used for the raised role cell. */
+/** Short weapon names for the line-2 label (the original prints the bare model, no mount/scope). */
+const SHORT_WEAPON_NAME: Record<string, string> = {
+  mosin: 'Mosin', mosin_scoped: 'Mosin', kar98k_scoped: 'Kar98k', ppsh41: 'PPSh', svt40: 'SVT-40',
+  pistol_p38: 'P38', pistol_tt: 'TT-33', mg34_hmg: 'MG34', mg42_hmg: 'MG42', maxim: 'Maxim',
+  coax_mg34: 'MG34', coax_dt: 'DT', panzerschreck: 'Pz.schreck', satchel: 'Satchel',
+};
+export function shortWeaponName(weaponId: string): string {
+  const w = WEAPONS[weaponId];
+  if (!w) return '';
+  return SHORT_WEAPON_NAME[weaponId] ?? w.name.replace(/\s*\(.*\)\s*$/, '');
+}
+
+/** What line 2 shows to the right of the activity cell for one soldier. */
+export interface WeaponReadout {
+  /** pictogram class, or null for no glyph */
+  glyph: WeaponClass | null;
+  /** ammo type ("AP"/"HE"/"Smk"), short weapon name, or '' */
+  label: string;
+  /** rounds figure for the rds. cell, or null to leave the cell empty */
+  rounds: number | null;
+}
+
+/** Round a gun currently has loaded: AP when laid on (or waiting for) armour, HE against men/points. */
+function gunRound(targetVehicleId: number | null, targetSoldierId: number | null, targetPoint: unknown): 'AP' | 'HE' {
+  if (targetVehicleId != null) return 'AP';
+  if (targetSoldierId != null || targetPoint != null) return 'HE';
+  return 'AP';
+}
+
+/** Per-soldier weapon/ammo readout, following the original monitor: gun and mortar crews show the
+ * round type of *their own* weapon, vehicle gunners the main gun's round, loaders just the rounds,
+ * drivers/commanders nothing; everyone else the short name of the weapon he carries. */
+export function weaponReadout(s: Soldier, team: Team | null, vehicle: Vehicle | undefined, roleName: string): WeaponReadout {
+  if (vehicle) {
+    const def = VEHICLE_DEFS[vehicle.defId];
+    const mainId = def?.mainWeaponId ?? null;
+    if (roleName === 'Gunner') {
+      if (mainId) {
+        return { glyph: 'tankgun', label: gunRound(vehicle.targetVehicleId, vehicle.targetSoldierId, vehicle.targetPoint), rounds: vehicle.mainAmmo };
+      }
+      const coax = def?.coaxWeaponId ?? null;
+      return coax
+        ? { glyph: 'coaxmg', label: shortWeaponName(coax), rounds: vehicle.coaxAmmo }
+        : { glyph: null, label: '', rounds: null };
+    }
+    if (roleName === 'Loader') return { glyph: null, label: '', rounds: mainId ? vehicle.mainAmmo : null };
+    if (roleName === 'Radioman' && def?.coaxWeaponId) {
+      return { glyph: 'coaxmg', label: shortWeaponName(def.coaxWeaponId), rounds: vehicle.coaxAmmo };
+    }
+    return { glyph: null, label: '', rounds: null };
+  }
+  const w = WEAPONS[s.weaponId];
+  if (!w) return { glyph: null, label: '', rounds: s.ammo };
+  switch (w.cls) {
+    case 'mortar':
+      return { glyph: w.cls, label: team?.order?.type === 'smoke' && w.smoke ? 'Smk' : 'HE', rounds: s.ammo };
+    case 'atgun':
+    case 'tankgun':
+      return { glyph: w.cls, label: gunRound(s.targetVehicleId, s.targetSoldierId, s.targetPoint), rounds: s.ammo };
+    default:
+      return { glyph: w.cls, label: shortWeaponName(s.weaponId), rounds: s.ammo };
+  }
+}
+
+/** Text in a bevelled cell; `align` centre is used for the raised role cell. The text is fitted
+ * (font shrunk up to 2 px, then an abbreviation) rather than cut mid-word. */
 function cellText(ctx: CanvasRenderingContext2D, r: Rect, text: string, color: string, align: 'left' | 'center' | 'right' = 'left'): void {
   ctx.fillStyle = color;
   const maxW = r.w - 6;
-  const t = clipTextToWidth(ctx, text, maxW);
+  const base = ctx.font;
+  const fit = fitHudText(ctx, [text, ...(MONITOR_ABBREV[text] ?? [])], maxW);
+  ctx.font = fit.font;
+  const t = fit.text;
   const ty = Math.round(r.y + (r.h - 12) / 2) + 1;
   if (align === 'center') {
     ctx.textAlign = 'center';
@@ -193,6 +286,7 @@ function cellText(ctx: CanvasRenderingContext2D, r: Rect, text: string, color: s
     ctx.fillText(t, Math.round(r.x + 3), ty);
   }
   ctx.textAlign = 'left';
+  ctx.font = base;
 }
 
 export class SoldierMonitorPopup {
@@ -265,9 +359,6 @@ export class SoldierMonitorPopup {
     const hasScroll = soldiers.length > MAX_ROWS;
     const contentX = r.x + (hasScroll ? ARROW_W : 2);
     const rightX = r.x + r.w - 2;
-    const NAME_W = 70;
-    const ROLE_W = 66;
-    const RDS_CELL_W = 28;
 
     for (let i = 0; i < rows; i++) {
       const s = soldiers[this.scroll + i];
@@ -295,21 +386,29 @@ export class SoldierMonitorPopup {
       drawHudBevel(ctx, actR, true, HUD.black);
       setHudFont(ctx, 'small');
       cellText(ctx, actR, activityWord(s, team, vehicle, roleName), activityColor(s));
-      const w = WEAPONS[s.weaponId];
+      const ro = weaponReadout(s, team, vehicle, roleName);
       const glyphX = roleR.x + 6;
-      if (w) drawWeaponGlyph(ctx, glyphX, y2 + 3, w.cls);
-      setHudFont(ctx, 'label');
-      ctx.fillStyle = HUD.text;
-      ctx.fillText(w && HE_CLASSES.has(w.cls) ? 'HE' : 'AP', glyphX + GLYPH_SIZE + 5, y2 + 2);
+      if (ro.glyph) drawWeaponGlyph(ctx, glyphX, y2 + 3, ro.glyph);
       setHudFont(ctx, 'small');
-      ctx.fillStyle = HUD.text;
-      ctx.textAlign = 'right';
-      ctx.fillText('rds.', rightX - 2, y2 + 2);
-      ctx.textAlign = 'left';
       const rdsLabelW = ctx.measureText(' rds.').width;
       const nR: Rect = { x: Math.round(rightX - 2 - rdsLabelW - RDS_CELL_W), y: y2, w: RDS_CELL_W, h: CELL_H };
+      if (ro.label) {
+        setHudFont(ctx, 'label');
+        ctx.fillStyle = HUD.text;
+        const labelX = glyphX + GLYPH_SIZE + 5;
+        const fit = fitHudText(ctx, [ro.label], nR.x - 3 - labelX);
+        ctx.font = fit.font;
+        ctx.fillText(fit.text, labelX, y2 + 2);
+        setHudFont(ctx, 'small');
+      }
       drawHudBevel(ctx, nR, true, HUD.black);
-      cellText(ctx, nR, String(s.ammo), HUD.text, 'right');
+      if (ro.rounds != null) {
+        ctx.fillStyle = HUD.text;
+        ctx.textAlign = 'right';
+        ctx.fillText('rds.', rightX - 2, y2 + 2);
+        ctx.textAlign = 'left';
+        cellText(ctx, nR, String(ro.rounds), HUD.text, 'right');
+      }
     }
 
     if (hasScroll) {

@@ -96,6 +96,42 @@ const FRESH: CraterMark[] = [
   { x: 47, y: 18.9, sizeM: 3.8, kind: 'shell' },
 ];
 
+/** Foxhole row: a slanted dug-in line (foxholeLine, so each hole's angle comes from the line) plus
+ * a few loose holes, sized so zoom 1 shows the whole row and zoom 2 the first half. */
+const FW = 26, FH = 9;
+function foxholeDef(season: Season): MapDef {
+  const paint = (p: MapPainter) => {
+    p.fill(season === 'winter' ? 'snow' : 'grass');
+    p.foxholeLine([{ x: 1, y: 2 }, { x: 13, y: 6.5 }, { x: 25, y: 3 }], { x: 13, y: 40 }, { spacing: 3, stagger: 0.4, gapProb: 0 });
+  };
+  const tiles: Terrain[] = new Array(FW * FH).fill('open');
+  const p = new MapPainter(tiles, FW, FH, 777);
+  paint(p);
+  return {
+    id: `foxhole_preview_${season}`, name: `Foxholes ${season}`, description: '', width: FW, height: FH, season,
+    paint(t, w, h) { paint(new MapPainter(t, w, h, 777)); },
+    victoryLocations: [],
+    deployZones: { german: { x: 0, y: FH - 1, w: FW, h: 1 }, soviet: { x: 0, y: 0, w: FW, h: 1 } },
+    attacker: 'german', decor: p.decor, vectors: p.vectors,
+  };
+}
+
+function foxholeRows(root: HTMLElement): void {
+  root.appendChild(el('h2', 'foxhole lines (summer / autumn / winter) — zoom 1 and zoom 2'));
+  for (const season of ['summer', 'autumn', 'winter'] as Season[]) {
+    const r = new TerrainRenderer(buildMap(foxholeDef(season)));
+    const row = el('div', undefined, 'row');
+    const c1 = view(r, 1, 0, 0, FW * TILE_PX, FH * TILE_PX);
+    c1.dataset.label = `${season}_fox_z1`;
+    const w1 = el('div'); w1.appendChild(c1); w1.appendChild(el('div', `${season} foxholes zoom 1`, 'cap'));
+    const c2 = view(r, 2, 0, 0, FW * TILE_PX, FH * TILE_PX * 2);
+    c2.dataset.label = `${season}_fox_z2`;
+    const w2 = el('div'); w2.appendChild(c2); w2.appendChild(el('div', `${season} foxholes zoom 2`, 'cap'));
+    row.appendChild(w1); row.appendChild(w2);
+    root.appendChild(row);
+  }
+}
+
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, cls?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
   if (text) e.textContent = text;
@@ -123,6 +159,7 @@ function gallery(): void {
     'Right: crenellated trench (top), foxholes variants 0-5 (1/2-man x spoil/sandbag/log), foxholes by trees; road with fresh marks.', 'cap');
   legend.style.margin = '0 16px';
   root.appendChild(legend);
+  foxholeRows(root);
   for (const season of ['summer', 'autumn', 'winter'] as Season[]) {
     const map = buildMap(sampleDef(season));
     map.craterMarks = FRESH.map((m) => ({ ...m }));
