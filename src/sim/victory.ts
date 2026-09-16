@@ -52,24 +52,40 @@ export function sideScore(state: BattleState, side: Side): number {
   return vlPoints + ss.kills * KILL_POINTS + prisoners * KILL_POINTS * PRISONER_VALUE_MULTIPLIER - ss.losses * 1;
 }
 
-/** Result from the player's perspective: ratio of (score+20) between the two sides. */
+/** Result from the player's perspective: ratio of (score+20) between the two sides, graded into
+ * the manual's nine symmetric levels (round5 critique #10: a 40-losses-to-13, 0-of-8-VL rout used
+ * to grade as "Minor Defeat" because the old scale only had four bins — decisive/victory/draw/
+ * defeat — with a decisive cutoff at ratio>=3; a truly one-sided battle can land at ratio<<0.1 and
+ * needs its own bottom rung, not the same "defeat" bucket as a narrow loss). Thresholds are
+ * reciprocal around 1 (a totalVictory ratio is the exact inverse of a totalDefeat ratio) so the
+ * scale reads the same from either side. */
 export function computeResult(state: BattleState): BattleResult {
   const player = state.config.playerSide;
   const enemy = otherSide(player);
   const ps = state.sides[player].score;
   const es = state.sides[enemy].score;
   const ratio = (ps + 20) / (es + 20);
-  if (ratio >= 3) return 'decisive';
-  if (ratio >= 1.5) return 'victory';
-  if (ratio < 0.67) return 'defeat';
-  return 'draw';
+  if (ratio >= 8) return 'totalVictory';
+  if (ratio >= 4) return 'decisiveVictory';
+  if (ratio >= 2) return 'majorVictory';
+  if (ratio >= 1.25) return 'minorVictory';
+  if (ratio > 0.8) return 'draw';
+  if (ratio > 0.5) return 'minorDefeat';
+  if (ratio > 0.25) return 'majorDefeat';
+  if (ratio > 0.125) return 'decisiveDefeat';
+  return 'totalDefeat';
 }
 
 function resultMessage(result: BattleResult): string {
   switch (result) {
-    case 'decisive': return 'A decisive victory!';
-    case 'victory': return 'Victory.';
-    case 'defeat': return 'Defeat.';
+    case 'totalVictory': return 'A total victory!';
+    case 'decisiveVictory': return 'A decisive victory!';
+    case 'majorVictory': return 'A major victory.';
+    case 'minorVictory': return 'A minor victory.';
+    case 'minorDefeat': return 'A minor defeat.';
+    case 'majorDefeat': return 'A major defeat.';
+    case 'decisiveDefeat': return 'A decisive defeat.';
+    case 'totalDefeat': return 'A total defeat.';
     default: return 'A draw.';
   }
 }
@@ -87,7 +103,10 @@ export function flee(state: BattleState, side: Side): void {
   }
   for (const s of SIDES) state.sides[s].score = sideScore(state, s);
   state.phase = 'ended';
-  state.result = side === state.config.playerSide ? 'defeat' : 'decisive';
+  state.fledSide = side;
+  // A flee cedes every VL outright, so grade it at the top of the scale regardless of the score
+  // ratio at the moment of fleeing — fleeing the field is itself the most one-sided outcome.
+  state.result = side === state.config.playerSide ? 'totalDefeat' : 'totalVictory';
   state.events.push({ kind: 'ended' });
   addMessage(state, `${sideName(side)} forces have fled the field — the enemy takes the ground.`, 'warn');
 }

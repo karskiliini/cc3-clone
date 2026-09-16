@@ -387,9 +387,16 @@ export interface Order {
 
 export type TeamMoraleWord = 'Fanatic' | 'Confident' | 'Steady' | 'Shaken' | 'Broken';
 export type TeamStatusWord =
+  // 'Idle' is only ever the one-frame spawn-time default (sim/spawn.ts) before the first
+  // computeTeamStatus (sim/morale.ts) runs; that function itself never emits it — see 'Waiting'.
   | 'Idle' | 'Moving' | 'Moving Fast' | 'Sneaking' | 'Firing' | 'Defending'
   | 'Ambushing' | 'Pinned' | 'Cowering' | 'Panicked' | 'Routed' | 'Broken'
-  | 'Destroyed' | 'Surrendered' | 'Knocked Out' | 'Setting up' | 'Aiming' | 'Loading';
+  | 'Destroyed' | 'Surrendered' | 'Knocked Out' | 'Setting up' | 'Aiming' | 'Loading'
+  // Manual vocabulary this HUD was missing (round5 critique #9): a team with no active order or
+  // that has finished one (arrived, nothing left to do) waits for orders; a team whose obedience
+  // roll failed (sim/orders.ts canObey) is visibly hesitating rather than looking merely idle; a
+  // team with a Fire order but no line of sight to its target can't see it.
+  | 'Waiting' | 'Hesitating' | "Can't See";
 
 export interface TeamDef {
   id: string;                 // "ger_rifle_41"
@@ -479,7 +486,11 @@ export interface FireMission {
 
 // ------------------------------------------------------------------- battle
 export type BattlePhase = 'deploy' | 'running' | 'paused' | 'ended';
-export type BattleResult = 'decisive' | 'victory' | 'draw' | 'defeat';
+// Manual (docs/reference/cc3-manual-notes.md §"Scoring and Victory Determination"): "Total,
+// decisive, major, minor victory; or equivalent defeat" — nine symmetric grades around a draw.
+export type BattleResult =
+  | 'totalVictory' | 'decisiveVictory' | 'majorVictory' | 'minorVictory' | 'draw'
+  | 'minorDefeat' | 'majorDefeat' | 'decisiveDefeat' | 'totalDefeat';
 
 export interface BattleMessage {
   time: number;               // battle seconds elapsed
@@ -556,6 +567,9 @@ export interface BattleState {
   result: BattleResult | null;
   events: BattleEvent[];      // drained by renderer/audio each frame
   nextId: number;
+  /** Side that ended the battle by fleeing (sim/victory.ts flee()), if any — lets the debrief show
+   * a surviving team as "Withdrawn" rather than "Intact" when its own side quit the field. */
+  fledSide?: Side | null;
 }
 
 // --------------------------------------------------------------- UI shared

@@ -286,11 +286,15 @@ function printReport(reports: RunReport[]): void {
   }
   // True attacker-win-rate, from the ATTACKER's perspective (not just playerSide='german'): result
   // is always computed from german's perspective (computeResult in victory.ts), so when the
-  // attacker is soviet, a german 'defeat' is an attacker win and a german 'decisive'/'victory' is
-  // an attacker loss. Draws are excluded from the win-rate denominator (neither side "won").
+  // attacker is soviet, a german defeat-grade result is an attacker win and a german victory-grade
+  // result is an attacker loss. Draws are excluded from the win-rate denominator (neither side
+  // "won"). BattleResult has nine graded levels (round5 critique #10:
+  // totalVictory/decisiveVictory/majorVictory/minorVictory/draw/minorDefeat/majorDefeat/
+  // decisiveDefeat/totalDefeat) rather than the old four, so "germanWon" is any victory grade.
+  const GERMAN_WIN_RESULTS = new Set(['totalVictory', 'decisiveVictory', 'majorVictory', 'minorVictory']);
   const decided = reports.filter((r) => r.result !== 'draw');
   const attackerWins = decided.filter((r) => {
-    const germanWon = r.result === 'decisive' || r.result === 'victory';
+    const germanWon = GERMAN_WIN_RESULTS.has(r.result);
     return r.attacker === 'german' ? germanWon : !germanWon;
   }).length;
   lines.push('');

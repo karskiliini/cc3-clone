@@ -56,13 +56,28 @@ export function drawHudBase(ctx: CanvasRenderingContext2D): void {
   ctx.strokeRect(0.5, PANEL_Y + 0.5, SCREEN_W - 1, PANEL_H - 1);
 }
 
-/** Clips text to `maxW` px by trimming characters (adds no ellipsis — the
- * HUD's boxes are small enough that a hard trim reads fine). */
+/** Clips text to `maxW` px, breaking only on a word boundary and marking the cut with an
+ * ellipsis (round5 critique #6/#10: the old char-by-char trim cut mid-word — "has been wounde",
+ * "has been destroye" — with no ellipsis, so a clipped line looked identical to a complete one).
+ * Falls back to a char-trim only for a single word that alone still overflows `maxW`. */
 export function clipTextToWidth(ctx: CanvasRenderingContext2D, text: string, maxW: number): string {
   if (ctx.measureText(text).width <= maxW) return text;
-  let s = text;
-  while (s.length > 1 && ctx.measureText(s).width > maxW) s = s.slice(0, -1);
-  return s;
+  const ellipsis = '…';
+  const budget = maxW - ctx.measureText(ellipsis).width;
+  if (budget <= 0) return ellipsis;
+  const words = text.split(' ');
+  let out = '';
+  for (const w of words) {
+    const candidate = out ? `${out} ${w}` : w;
+    if (ctx.measureText(candidate).width > budget) break;
+    out = candidate;
+  }
+  if (!out) {
+    let s = text;
+    while (s.length > 1 && ctx.measureText(s + ellipsis).width > maxW) s = s.slice(0, -1);
+    return s + ellipsis;
+  }
+  return out + ellipsis;
 }
 
 /** Picks the largest font / fullest wording that fits `maxW` without cutting a word: each
@@ -110,6 +125,7 @@ export function teamBarColor(team: Team): string {
       return HUD.red;
     case 'Pinned':
     case 'Cowering':
+    case 'Hesitating':
       return HUD.yellow;
     default:
       break;
@@ -125,6 +141,7 @@ export function teamStatusTextColor(word: TeamStatusWord): string {
     case 'Cowering': // shown as 'Seeking Cover'
       return HUD.statusGreen;
     case 'Pinned':
+    case 'Hesitating':
       return HUD.yellow;
     case 'Broken':
     case 'Panicked':
@@ -133,18 +150,20 @@ export function teamStatusTextColor(word: TeamStatusWord): string {
     case 'Destroyed':
     case 'Knocked Out':
       return HUD.dim;
-    default: // Idle/Ambushing/Defending/Moving/Moving Fast/Sneaking/Surrendered
+    default: // Waiting/Ambushing/Defending/Moving/Moving Fast/Sneaking/Surrendered/Can't See
       return HUD.text;
   }
 }
 
-/** Team-status word -> the original-game display word (a few of ours don't
- * match the original's vocabulary 1:1). */
+/** Team-status word -> the original-game display word (a few of ours don't match the original's
+ * vocabulary 1:1). Round5 critique #8/#9: this used to also remap 'Destroyed' -> 'KIA' and
+ * 'Knocked Out' -> 'Destroyed', which meant the SAME underlying "this vehicle is gone" event
+ * displayed as two different words depending on whether the hull or the crew died first — the
+ * exact "KIA vs Destroyed used interchangeably" defect. Show both words as-is now; morale.ts's
+ * computeTeamStatus is responsible for always picking the same one of the two for a given cause. */
 const STATUS_DISPLAY: Partial<Record<TeamStatusWord, string>> = {
   Cowering: 'Seeking Cover',
   Routed: 'Fled',
-  Destroyed: 'KIA',
-  'Knocked Out': 'Destroyed',
 };
 export function teamStatusLabel(word: TeamStatusWord): string {
   return STATUS_DISPLAY[word] ?? word;

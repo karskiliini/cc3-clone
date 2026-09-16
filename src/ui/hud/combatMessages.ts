@@ -1,7 +1,9 @@
 // ============================================================================
 // combatMessages.ts — the "Combat Messages" column (x 620..800, y 632..768):
-// last 4 messages, each in its own sunken box (team name + coloured body line)
-// with a running number, up/down arrow buttons, and the red title under it.
+// last 4 messages, each in its own sunken box (team name + coloured body line,
+// no index numbers — ref_cc3_1479 has none), up/down arrow buttons, and the
+// red title under it. Consecutive identical lines collapse into one row with
+// a "(×N)" repeat count instead of posting as separate rows.
 // ============================================================================
 import type { Rect, InputState, BattleState, BattleMessage, Team } from '@/shared/types';
 import { HUD } from '@/render/palette';
@@ -42,9 +44,17 @@ function msgColor(kind: BattleMessage['kind']): string {
  * sim/morale, sim/combat); split on that newline. Older/unstructured
  * messages fall back to matching a known team's name as a prefix, or
  * "Report" when no team is identifiable. */
-function splitMessage(text: string, teams: Team[]): { who: string; body: string } {
+export function splitMessage(text: string, teams: Team[]): { who: string; body: string } {
   const nl = text.indexOf('\n');
-  if (nl >= 0) return { who: text.slice(0, nl), body: text.slice(nl + 1) };
+  if (nl >= 0) {
+    const who = text.slice(0, nl);
+    let body = text.slice(nl + 1);
+    // Defensive (round5 critique #6): a producer that (accidentally) repeats the team name at the
+    // start of the body — the name is already drawn as its own line above this one — gets it
+    // stripped here so a duplicate is never shown, regardless of which sim module wrote it.
+    if (who && (body === who || body.startsWith(`${who} `))) body = body.slice(who.length).trimStart();
+    return { who, body };
+  }
   let best: Team | null = null;
   for (const t of teams) {
     if (!t.name) continue;
@@ -56,6 +66,32 @@ function splitMessage(text: string, teams: Team[]): { who: string; body: string 
   let body = text.slice(best.name.length);
   if (body.startsWith(':')) body = body.slice(1);
   return { who: best.name, body: body.trim() || text };
+}
+
+export interface CollapsedMessage {
+  who: string;
+  body: string;
+  kind: BattleMessage['kind'];
+  /** how many consecutive raw messages this row collapsed (round5 critique #6: the exact same
+   * line — e.g. a knocked-out report — could post twice in a row with nothing to tell them apart
+   * but two identical rows). 1 = not repeated. */
+  count: number;
+}
+
+/** Splits every raw message and merges consecutive duplicates (same who+body+kind) into one row
+ * with a repeat count, so the log never shows the same line twice in a row. */
+export function collapseMessages(messages: readonly BattleMessage[], teams: Team[]): CollapsedMessage[] {
+  const out: CollapsedMessage[] = [];
+  for (const m of messages) {
+    const { who, body } = splitMessage(m.text, teams);
+    const last = out[out.length - 1];
+    if (last && last.who === who && last.body === body && last.kind === m.kind) {
+      last.count++;
+    } else {
+      out.push({ who, body, kind: m.kind, count: 1 });
+    }
+  }
+  return out;
 }
 
 function drawArrowButton(ctx: CanvasRenderingContext2D, r: Rect, dir: 'up' | 'down', hot: boolean, enabled: boolean): void {
@@ -81,7 +117,8 @@ export class CombatMessages {
   }
 
   update(input: InputState, state: BattleState): void {
-    const total = state.messages.length;
+    const teams = Array.from(state.teams.values());
+    const total = collapseMessages(state.messages, teams).length;
     const maxScroll = this.maxScroll(total);
     this.hoverUp = hitRect(input.mouse, UP_RECT);
     this.hoverDown = hitRect(input.mouse, DOWN_RECT);
@@ -99,33 +136,30 @@ export class CombatMessages {
   }
 
   draw(ctx: CanvasRenderingContext2D, state: BattleState): void {
-    const total = state.messages.length;
+    const teams = Array.from(state.teams.values());
+    const collapsed = collapseMessages(state.messages, teams);
+    const total = collapsed.length;
     const maxScroll = this.maxScroll(total);
     const endIdx = total - this.scroll; // exclusive
     const startIdx = Math.max(0, endIdx - VISIBLE_ROWS);
-    const teams = Array.from(state.teams.values());
 
     for (let row = 0; row < VISIBLE_ROWS; row++) {
       const box: Rect = { x: BOX_X, y: ROW_YS[row], w: BOX_W, h: BOX_H };
       drawHudBevel(ctx, box, true, HUD.black);
       const idx = startIdx + row;
       if (idx >= endIdx) continue;
-      const m = state.messages[idx];
-      const { who, body } = splitMessage(m.text, teams);
+      const m = collapsed[idx];
+      // The original (ref_cc3_1479) has no running index numbers in this panel — round5 critique
+      // #6/#10 flagged our "(35)(36)(37)" as debug-looking output, so this row is just who + body.
+      const body = m.count > 1 ? `${m.body} (×${m.count})` : m.body;
 
       ctx.save();
       ctx.beginPath();
       ctx.rect(box.x + 1, box.y + 1, box.w - 2, box.h - 2);
       ctx.clip();
       setHudFont(ctx, 'small');
-      const numLabel = `(${idx + 1})`;
-      const numW = ctx.measureText(numLabel).width;
       ctx.fillStyle = HUD.text;
-      ctx.fillText(clipTextToWidth(ctx, who, box.w - numW - 10), box.x + 3, box.y + 1);
-      ctx.fillStyle = HUD.dim;
-      ctx.textAlign = 'right';
-      ctx.fillText(numLabel, box.x + box.w - 3, box.y + 1);
-      ctx.textAlign = 'left';
+      ctx.fillText(clipTextToWidth(ctx, m.who, box.w - 6), box.x + 3, box.y + 1);
       ctx.fillStyle = msgColor(m.kind);
       ctx.fillText(clipTextToWidth(ctx, body.replace(/\s+/g, ' '), box.w - 6), box.x + 3, box.y + 12);
       ctx.restore();

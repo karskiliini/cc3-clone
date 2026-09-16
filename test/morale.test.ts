@@ -213,8 +213,9 @@ describe('knocked-out vehicle team messages (round-4 HUD finding 2)', () => {
     state.vehicles.get(42)!.state = 'burning';
     stepMorale(state, rng, 0.1);
     expect(state.teams.get(1)!.status).toBe('Knocked Out');
-    const m = state.messages.find((x) => x.text.includes('knocked out'));
-    expect(m?.text).toBe('PzKw IV G\nPzKw IV G has been knocked out.');
+    const m = state.messages.find((x) => x.text.includes('Knocked out'));
+    // Body must not repeat the team name (round5 critique #6): the name is already the first line.
+    expect(m?.text).toBe('PzKw IV G\nKnocked out.');
     expect(m?.kind).toBe('bad');
   });
 
@@ -227,5 +228,91 @@ describe('knocked-out vehicle team messages (round-4 HUD finding 2)', () => {
     const m = state.messages.find((x) => x.text.includes('knocked out'));
     expect(m?.text).toBe('Enemy\nEnemy vehicle knocked out.');
     expect(m?.kind).toBe('good');
+  });
+
+  it('a vehicle whose crew is wiped but whose hull was never marked knockedOut/burning/abandoned still reads "Knocked Out", not "Destroyed" (round5 critique #8: KIA vs Destroyed used inconsistently for the same vehicle class)', () => {
+    const state = withVehicle('german');
+    for (const s of state.soldiers.values()) s.health = 'dead';
+    const rng = new Rng(1);
+    stepMorale(state, rng, 0.1);
+    expect(state.vehicles.get(42)!.state).toBe('ok'); // hull itself was never touched
+    expect(state.teams.get(1)!.status).toBe('Knocked Out');
+  });
+});
+
+describe('status vocabulary (round5 critique #9)', () => {
+  it('a team with no order and nobody doing anything reads "Waiting", not "Idle"', () => {
+    const state = makeState();
+    const rng = new Rng(1);
+    for (const s of state.soldiers.values()) s.activity = 'idle';
+    state.teams.get(1)!.order = null;
+    stepMorale(state, rng, 0.1);
+    expect(state.teams.get(1)!.status).toBe('Waiting');
+  });
+
+  it('a team whose obedience roll failed reads "Hesitating" and posts a rate-limited flavour message', () => {
+    const state = makeState();
+    const rng = new Rng(1);
+    const team = state.teams.get(1)!;
+    team.order = { type: 'move', target: { x: 9, y: 9 }, issuedAt: 0 };
+    for (const s of state.soldiers.values()) {
+      s.activity = 'idle';
+      s.mind.pendingOrderAt = 0; // canObey (sim/orders.ts) rolled a refusal and parked the order
+    }
+    stepMorale(state, rng, 0.1);
+    expect(team.status).toBe('Hesitating');
+    const hesitationMsgs = state.messages.filter((m) => m.text.includes('is hesitating'));
+    expect(hesitationMsgs.length).toBe(1);
+    // Rate-limited: stepping again immediately must not post a second one.
+    stepMorale(state, rng, 0.1);
+    expect(state.messages.filter((m) => m.text.includes('is hesitating')).length).toBe(1);
+  });
+
+  it('a Fire order with nobody actually firing reads "Can\'t See"', () => {
+    const state = makeState();
+    const rng = new Rng(1);
+    const team = state.teams.get(1)!;
+    team.order = { type: 'fire', target: { x: 9, y: 9 }, issuedAt: 0 };
+    for (const s of state.soldiers.values()) s.activity = 'idle';
+    stepMorale(state, rng, 0.1);
+    expect(team.status).toBe("Can't See");
+  });
+
+  it('a vehicle team that has arrived rests instead of showing "Moving" forever (round5 critique #7)', () => {
+    // sim/movement.ts skips vehicle-crew soldiers entirely (their position and arrival are driven
+    // by sim/vehicle.ts), so soldier.activity is set once to 'moving' at order-issue time and never
+    // reset — team status must trust the vehicle's own path/speed instead.
+    const state = makeState();
+    const rng = new Rng(1);
+    const team = state.teams.get(1)!;
+    team.vehicleId = 42;
+    team.order = { type: 'move', target: { x: 9, y: 9 }, issuedAt: 0 };
+    state.vehicles.set(42, {
+      id: 42, teamId: 1, side: 'german', defId: 'pz4gh', pos: { x: 9, y: 9 }, hullFacing: 0, turretFacing: 0,
+      state: 'ok', mainAmmo: 50, coaxAmmo: 200, path: [], speed: 0,
+      targetVehicleId: null, targetSoldierId: null, targetPoint: null,
+      mainFireTimer: 0, coaxFireTimer: 0, burnTimer: 0, hits: 0,
+    });
+    for (const s of state.soldiers.values()) { s.vehicleId = 42; s.activity = 'moving'; }
+    stepMorale(state, rng, 0.1);
+    expect(team.status).not.toBe('Moving');
+    expect(team.status).toBe('Waiting');
+  });
+
+  it('a vehicle team still under way keeps showing "Moving"', () => {
+    const state = makeState();
+    const rng = new Rng(1);
+    const team = state.teams.get(1)!;
+    team.vehicleId = 42;
+    team.order = { type: 'move', target: { x: 9, y: 9 }, issuedAt: 0 };
+    state.vehicles.set(42, {
+      id: 42, teamId: 1, side: 'german', defId: 'pz4gh', pos: { x: 5, y: 5 }, hullFacing: 0, turretFacing: 0,
+      state: 'ok', mainAmmo: 50, coaxAmmo: 200, path: [{ x: 9, y: 9 }], speed: 2,
+      targetVehicleId: null, targetSoldierId: null, targetPoint: null,
+      mainFireTimer: 0, coaxFireTimer: 0, burnTimer: 0, hits: 0,
+    });
+    for (const s of state.soldiers.values()) { s.vehicleId = 42; s.activity = 'moving'; }
+    stepMorale(state, rng, 0.1);
+    expect(team.status).toBe('Moving');
   });
 });

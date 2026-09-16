@@ -16,10 +16,15 @@ const OPERATION_KEY = 'cc3.operation';
 /** Short result word for the briefing header's "past results" line — the manual specifies
  * results carry forward from battle to battle, so the player should be able to see them. */
 const RESULT_SHORT: Record<BattleResult, string> = {
-  decisive: 'Decisive',
-  victory: 'Victory',
+  totalVictory: 'Total Vict.',
+  decisiveVictory: 'Decisive Vict.',
+  majorVictory: 'Major Vict.',
+  minorVictory: 'Minor Vict.',
   draw: 'Draw',
-  defeat: 'Defeat',
+  minorDefeat: 'Minor Def.',
+  majorDefeat: 'Major Def.',
+  decisiveDefeat: 'Decisive Def.',
+  totalDefeat: 'Total Def.',
 };
 
 function saveOperation(op: OperationState): void {

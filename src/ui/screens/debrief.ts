@@ -1,4 +1,4 @@
-import type { BattleResult, CursorKind, InputState, Screen, Side } from '@/shared/types';
+import type { BattleResult, CursorKind, InputState, Screen, Side, Team } from '@/shared/types';
 import { SIDES } from '@/shared/types';
 import { game } from '@/game';
 import type { Battle } from '@/sim/battle';
@@ -7,12 +7,32 @@ import { beginMenuFrame, toMenuInput, BottomStrip } from './common';
 import { MainMenuScreen } from './mainMenu';
 import { OperationScreen, advanceOperation } from './operation';
 
-const RESULT_WORDS: Record<BattleResult, string> = {
-  decisive: 'Decisive Victory',
-  victory: 'Minor Victory',
+export const RESULT_WORDS: Record<BattleResult, string> = {
+  totalVictory: 'Total Victory',
+  decisiveVictory: 'Decisive Victory',
+  majorVictory: 'Major Victory',
+  minorVictory: 'Minor Victory',
   draw: 'Draw',
-  defeat: 'Minor Defeat',
+  minorDefeat: 'Minor Defeat',
+  majorDefeat: 'Major Defeat',
+  decisiveDefeat: 'Decisive Defeat',
+  totalDefeat: 'Total Defeat',
 };
+
+/** End-of-battle state for the "YOUR TEAMS" table (round5 critique #10): the live HUD's status
+ * word is an in-battle activity ("Loading", "Firing", "Moving Fast") that means nothing once the
+ * battle is over, so the debrief needs its own small vocabulary of final outcomes. */
+export function finalStateLabel(team: Team, fled: boolean): string {
+  switch (team.status) {
+    case 'Destroyed':
+    case 'Knocked Out':
+    case 'Routed':
+    case 'Surrendered':
+      return team.status;
+    default:
+      return fled ? 'Withdrawn' : 'Intact';
+  }
+}
 
 export class DebriefScreen implements Screen {
   private battle: Battle;
@@ -114,23 +134,33 @@ export class DebriefScreen implements Screen {
     const teamsRect = { x: 40, y: 384, w: 720, h: 160 };
     drawDarkPanel(ctx, teamsRect);
     drawShadowText(ctx, 'YOUR TEAMS', teamsRect.x + 12, teamsRect.y + 20, 'bold 13px Arial, Helvetica, sans-serif', '#f0d840');
-    let ty = teamsRect.y + 40;
     ctx.font = '11px Arial, Helvetica, sans-serif';
     ctx.textAlign = 'left';
-    for (const team of state.teams.values()) {
-      if (team.side !== playerSide) continue;
+    // Two columns so every team fits, vehicle teams included (round5 critique #10: a single
+    // one-team-per-row column ran out of vertical room after ~8 rows and silently dropped the
+    // four vehicle teams — their kills never made it into the headline-vs-per-team-sum check).
+    const rowH = 15;
+    const startY = teamsRect.y + 40;
+    const maxRows = Math.max(1, Math.floor((teamsRect.y + teamsRect.h - 8 - startY) / rowH));
+    const teamColW = (teamsRect.w - 32) / 2;
+    const fled = state.fledSide === playerSide;
+    const teamsList = [...state.teams.values()].filter((t) => t.side === playerSide);
+    for (let i = 0; i < teamsList.length && i < maxRows * 2; i++) {
+      const team = teamsList[i];
+      const col = Math.floor(i / maxRows);
+      const row = i % maxRows;
+      const x = teamsRect.x + 16 + col * (teamColW + 16);
+      const y = startY + row * rowH;
       const alive = team.soldierIds.filter((id) => {
         const soldier = state.soldiers.get(id);
         return soldier && soldier.health !== 'dead';
       }).length;
       ctx.fillStyle = '#f0d840';
-      ctx.fillText(team.name, teamsRect.x + 16, ty);
+      ctx.fillText(team.name, x, y);
       ctx.fillStyle = '#e8e8e0';
-      ctx.fillText(`${alive}/${team.soldierIds.length}`, teamsRect.x + 220, ty);
-      ctx.fillText(`Kills: ${team.kills}`, teamsRect.x + 300, ty);
-      ctx.fillText(team.status, teamsRect.x + 420, ty);
-      ty += 15;
-      if (ty > teamsRect.y + teamsRect.h - 8) break;
+      ctx.fillText(`${alive}/${team.soldierIds.length}`, x + 140, y);
+      ctx.fillText(`Kills: ${team.kills}`, x + 190, y);
+      ctx.fillText(finalStateLabel(team, fled), x + 260, y);
     }
 
     this.strip.draw(ctx);

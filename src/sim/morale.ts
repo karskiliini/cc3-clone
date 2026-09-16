@@ -21,6 +21,9 @@ interface MoraleTrack {
   lastHealth: Map<number, Health>;
   tankScareAt: Map<number, number>;
   teamLastStatus: Map<number, TeamStatusWord>;
+  /** last time (battle seconds) a "is hesitating" flavour message was posted for a team, so it
+   * doesn't spam every step while an order stays refused (round5 critique #9). */
+  hesitationMsgAt: Map<number, number>;
 }
 
 const tracks = new WeakMap<BattleState, MoraleTrack>();
@@ -28,7 +31,7 @@ const tracks = new WeakMap<BattleState, MoraleTrack>();
 function getTrack(state: BattleState): MoraleTrack {
   let t = tracks.get(state);
   if (!t) {
-    t = { lastHealth: new Map(), tankScareAt: new Map(), teamLastStatus: new Map() };
+    t = { lastHealth: new Map(), tankScareAt: new Map(), teamLastStatus: new Map(), hesitationMsgAt: new Map() };
     tracks.set(state, t);
   }
   return t;
@@ -160,7 +163,10 @@ function detectCasualtiesAndApply(state: BattleState, track: MoraleTrack): void 
 }
 
 const ACTIVITY_TO_STATUS: Partial<Record<Activity, TeamStatusWord>> = {
-  idle: 'Idle',
+  // A team that has arrived/has nothing left to do is "Waiting" for its next order, not "Idle" —
+  // the manual's vocabulary has no "Idle" (round5 critique #9); see computeTeamStatus for how this
+  // is further split into Hesitating / Can't See / a vehicle's resting order-stance.
+  idle: 'Waiting',
   moving: 'Moving',
   movingFast: 'Moving Fast',
   sneaking: 'Sneaking',
@@ -168,7 +174,7 @@ const ACTIVITY_TO_STATUS: Partial<Record<Activity, TeamStatusWord>> = {
   reloading: 'Firing',
   defending: 'Defending',
   ambushing: 'Ambushing',
-  hiding: 'Idle',
+  hiding: 'Waiting',
   cowering: 'Cowering',
   pinned: 'Pinned',
   panicked: 'Panicked',
@@ -177,14 +183,38 @@ const ACTIVITY_TO_STATUS: Partial<Record<Activity, TeamStatusWord>> = {
   surrendered: 'Surrendered',
 };
 
-function computeTeamStatus(state: BattleState, team: Team): { status: TeamStatusWord; outOfAction: boolean; morale: number } {
+/** True once a strict majority of `alive` still hasn't obeyed the team's *current* order because
+ * their individual obedience roll failed (sim/orders.ts canObey sets mind.pendingOrderAt on any
+ * refusal, then retries after mind.hesitation runs out) — i.e. they are refusing/slow to respond,
+ * not merely incapacitated by a severe mental state (that path is caught earlier by the
+ * pinned/cowering/panicked/routed activity mirror, so this only fires for otherwise-idle men). */
+function majorityHesitating(alive: Soldier[], team: Team): boolean {
+  if (!team.order) return false;
+  const n = alive.filter((s) => s.mind.pendingOrderAt !== undefined && (s.activity === 'idle' || s.activity === 'defending')).length;
+  return n * 2 > alive.length;
+}
+
+function maybeAnnounceHesitating(state: BattleState, team: Team, track: MoraleTrack): void {
+  if (team.side !== state.config.playerSide) return;
+  const last = track.hesitationMsgAt.get(team.id) ?? -Infinity;
+  if (state.time - last < 60) return;
+  track.hesitationMsgAt.set(team.id, state.time);
+  addMessage(state, `${team.name}\nis hesitating.`, 'warn');
+}
+
+function computeTeamStatus(state: BattleState, team: Team, track: MoraleTrack): { status: TeamStatusWord; outOfAction: boolean; morale: number } {
   const soldiers = team.soldierIds.map((id) => state.soldiers.get(id)).filter((s): s is Soldier => !!s);
   const vehicle = team.vehicleId != null ? state.vehicles.get(team.vehicleId) : undefined;
   if (vehicle && (vehicle.state === 'knockedOut' || vehicle.state === 'burning' || vehicle.state === 'abandoned')) {
     return { status: 'Knocked Out', outOfAction: true, morale: 0 };
   }
   const alive = soldiers.filter((s) => s.health !== 'dead' && s.health !== 'incapacitated');
-  if (alive.length === 0) return { status: 'Destroyed', outOfAction: true, morale: 0 };
+  // Round5 critique #8: a vehicle whose crew is wiped out but whose hull was never actually
+  // marked knockedOut/burning/abandoned used to fall through to the generic "Destroyed" branch
+  // below, so the SAME class of vehicle showed "Destroyed" or "Knocked Out" depending only on
+  // which happened first (crew death vs. hull state) — the "KIA vs Destroyed used
+  // interchangeably" defect. Route every non-functional vehicle through one status.
+  if (alive.length === 0) return { status: vehicle ? 'Knocked Out' : 'Destroyed', outOfAction: true, morale: 0 };
 
   const morale = alive.reduce((sum, s) => sum + s.morale, 0) / alive.length;
   const actingAlive = alive.filter((s) => s.activity !== 'routed' && s.activity !== 'surrendered');
@@ -198,6 +228,13 @@ function computeTeamStatus(state: BattleState, team: Team): { status: TeamStatus
   if (majority((s) => s.activity === 'routed')) return { status: 'Routed', outOfAction, morale };
   if (morale < 25) return { status: 'Broken', outOfAction, morale };
 
+  // Round5 critique #9: "Idle" used to cover arrived / order-refused / no-order alike, and the
+  // player was never told an obedience roll had failed. Surface that mechanic explicitly.
+  if (majorityHesitating(alive, team)) {
+    maybeAnnounceHesitating(state, team, track);
+    return { status: 'Hesitating', outOfAction, morale };
+  }
+
   const counts = new Map<Activity, number>();
   for (const s of alive) counts.set(s.activity, (counts.get(s.activity) ?? 0) + 1);
   let best: Activity = 'idle';
@@ -205,13 +242,32 @@ function computeTeamStatus(state: BattleState, team: Team): { status: TeamStatus
   for (const [a, n] of counts) {
     if (n > bestN) { best = a; bestN = n; }
   }
-  const word = ACTIVITY_TO_STATUS[best] ?? 'Idle';
+  let word = ACTIVITY_TO_STATUS[best] ?? 'Waiting';
+
+  // Round5 critique #7: vehicle crew soldiers are positioned by sim/vehicle.ts, not
+  // sim/movement.ts (which is what resets infantry `activity` back to 'idle' on arrival) — a
+  // vehicle team's soldier.activity is set to 'moving'/'movingFast' once at order-issue time and
+  // then never updated again, so it read "Moving" forever even a minute after the vehicle itself
+  // stopped. Trust the vehicle's own path/speed instead of the stale soldier activity.
+  if (vehicle && (word === 'Moving' || word === 'Moving Fast' || word === 'Sneaking')) {
+    const stillMoving = vehicle.path.length > 0 || Math.abs(vehicle.speed) > 0.05;
+    if (!stillMoving) {
+      const orderType = team.order?.type;
+      word = orderType === 'defend' ? 'Defending' : orderType === 'ambush' ? 'Ambushing' : 'Waiting';
+    }
+  }
+
   // crew-served weapon being assembled (sim/crewWeapon.ts) reads 'Setting up' unless the crew is
   // doing something more urgent than waiting on it
-  if (word === 'Idle' || word === 'Defending' || word === 'Ambushing' || word === 'Firing') {
+  if (word === 'Waiting' || word === 'Defending' || word === 'Ambushing' || word === 'Firing') {
     const crew = crewWeaponStatus(team);
     if (crew) return { status: crew, outOfAction, morale };
   }
+
+  // A Fire order with nobody actually firing means no one can see the target (round5 critique #9
+  // asked for the manual's "Can't See" word rather than a bare "Idle"/"Waiting").
+  if (word === 'Waiting' && team.order?.type === 'fire') return { status: "Can't See", outOfAction, morale };
+
   return { status: word, outOfAction, morale };
 }
 
@@ -233,8 +289,11 @@ function messageForTransition(side: Side, playerSide: Side, teamName: string, st
     if (status === 'Pinned') return `${teamName}\nWe're pinned down.`;
     if (status === 'Broken') return `${teamName}\nWe're breaking!`;
     if (status === 'Routed') return `${teamName}\nWe're running!`;
-    if (status === 'Destroyed') return `${teamName}\n${teamName} has been destroyed.`;
-    if (status === 'Knocked Out') return `${teamName}\n${teamName} has been knocked out.`;
+    // Body omits the team name (round5 critique #6): the name is already the message's first
+    // line (combatMessages.ts splits on '\n' and draws it as its own row), so repeating it in the
+    // body read as "PzKw IV F1 / PzKw IV F1 has been knocked out."
+    if (status === 'Destroyed') return `${teamName}\nDestroyed.`;
+    if (status === 'Knocked Out') return `${teamName}\nKnocked out.`;
     return null;
   }
   if (status === 'Knocked Out') return 'Enemy\nEnemy vehicle knocked out.';
@@ -244,7 +303,7 @@ function messageForTransition(side: Side, playerSide: Side, teamName: string, st
 
 function updateTeamCaches(state: BattleState, track: MoraleTrack): void {
   for (const team of state.teams.values()) {
-    const { status, outOfAction, morale } = computeTeamStatus(state, team);
+    const { status, outOfAction, morale } = computeTeamStatus(state, team, track);
     team.morale = morale;
     team.status = status;
     team.outOfAction = outOfAction;

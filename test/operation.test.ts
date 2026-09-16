@@ -52,9 +52,9 @@ describe('advanceOperation', () => {
     game.operation = op;
     game.battle = battle;
 
-    advanceOperation('victory');
+    advanceOperation('minorVictory');
 
-    expect(op.results).toEqual(['victory']);
+    expect(op.results).toEqual(['minorVictory']);
     expect(op.index).toBe(1);
     expect(op.requisition).toBe(OPERATION[1].requisition.german);
 
@@ -77,9 +77,9 @@ describe('advanceOperation', () => {
     game.operation = op;
     game.battle = null;
 
-    advanceOperation('defeat');
+    advanceOperation('minorDefeat');
 
-    expect(op.results).toEqual(['defeat']);
+    expect(op.results).toEqual(['minorDefeat']);
     expect(op.forcePool).toEqual([{ defId: 'ger_rifle_41', experience: 45, alive: 4 }]);
   });
 });

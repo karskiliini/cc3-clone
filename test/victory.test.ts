@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { computeResult, prisonerCount, sideScore, stepVictory } from '@/sim/victory';
-import { VL_CAPTURE_SECONDS } from '@/shared/types';
+import { SIDES, VL_CAPTURE_SECONDS } from '@/shared/types';
 import type { BattleState, Side, Soldier, Vec2 } from '@/shared/types';
 import { createMind } from '@/sim/mind';
 
@@ -116,17 +116,47 @@ describe('victory', () => {
   it('computes result thresholds from the player perspective', () => {
     const state = makeState();
 
-    state.sides.german.score = 100; state.sides.soviet.score = 0; // (120)/(20) = 6
-    expect(computeResult(state)).toBe('decisive');
+    state.sides.german.score = 140; state.sides.soviet.score = 0; // (160)/(20) = 8
+    expect(computeResult(state)).toBe('totalVictory');
 
-    state.sides.german.score = 10; state.sides.soviet.score = 0; // (30)/(20) = 1.5
-    expect(computeResult(state)).toBe('victory');
+    state.sides.german.score = 60; state.sides.soviet.score = 0; // (80)/(20) = 4
+    expect(computeResult(state)).toBe('decisiveVictory');
+
+    state.sides.german.score = 20; state.sides.soviet.score = 0; // (40)/(20) = 2
+    expect(computeResult(state)).toBe('majorVictory');
+
+    state.sides.german.score = 5; state.sides.soviet.score = 0; // (25)/(20) = 1.25
+    expect(computeResult(state)).toBe('minorVictory');
 
     state.sides.german.score = 0; state.sides.soviet.score = 0; // (20)/(20) = 1
     expect(computeResult(state)).toBe('draw');
 
-    state.sides.german.score = 0; state.sides.soviet.score = 100; // (20)/(120) ~= 0.167
-    expect(computeResult(state)).toBe('defeat');
+    state.sides.german.score = 0; state.sides.soviet.score = 5; // (20)/(25) = 0.8
+    expect(computeResult(state)).toBe('minorDefeat');
+
+    state.sides.german.score = 0; state.sides.soviet.score = 20; // (20)/(40) = 0.5
+    expect(computeResult(state)).toBe('majorDefeat');
+
+    state.sides.german.score = 0; state.sides.soviet.score = 60; // (20)/(80) = 0.25
+    expect(computeResult(state)).toBe('decisiveDefeat');
+
+    state.sides.german.score = 0; state.sides.soviet.score = 140; // (20)/(160) = 0.125
+    expect(computeResult(state)).toBe('totalDefeat');
+  });
+
+  it('grades a lopsided rout (round5 critique #10: 40 losses to 13, 0/8 VLs) as a decisive-or-worse defeat, not "Minor Defeat"', () => {
+    const state = makeState();
+    // German (player) got wiped out and held none of the 8 victory locations the enemy holds.
+    state.sides.german.kills = 12;
+    state.sides.german.losses = 40;
+    state.sides.soviet.kills = 40;
+    state.sides.soviet.losses = 12;
+    for (let i = 0; i < 8; i++) {
+      state.map.victoryLocations.push({ id: 10 + i, name: `VL${i}`, x: 0, y: 0, value: 1, owner: 'soviet', captureTimer: 0, capturingSide: null });
+    }
+    for (const s of SIDES) state.sides[s].score = sideScore(state, s);
+    const result = computeResult(state);
+    expect(['majorDefeat', 'decisiveDefeat', 'totalDefeat']).toContain(result);
   });
 
   it('counts surrendered enemy soldiers as prisoners worth 3x a kill in score (balance round 3)', () => {
