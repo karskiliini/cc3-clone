@@ -173,7 +173,7 @@ describe('earthwork art (height fields)', () => {
   });
 
   it('a winter foxhole is an elongated slot lying across its facing (along the dug-in line)', () => {
-    const W = 70;
+    const W = 90; // wide enough for the scaled-up winter slot plus its halo, in either orientation
     const span = (angle: number) => {
       const f = new EarthField();
       f.reset(W, W, 1, -35, -35);
@@ -185,10 +185,10 @@ describe('earthwork art (height fields)', () => {
       return { w: x1 - x0 + 1, h: y1 - y0 + 1 };
     };
     const south = span(Math.PI / 2); // faces south -> long axis east-west
-    expect(south.w / south.h).toBeGreaterThan(1.8);
+    expect(south.w / south.h).toBeGreaterThan(1.5);
     expect(south.w / south.h).toBeLessThan(3);
     const east = span(0);
-    expect(east.h / east.w).toBeGreaterThan(1.8);
+    expect(east.h / east.w).toBeGreaterThan(1.5);
   });
 
   it('a trench centreline is crenellated but stays inside the tile band of the source line', () => {

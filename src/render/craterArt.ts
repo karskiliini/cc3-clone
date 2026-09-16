@@ -412,7 +412,11 @@ export interface FoxholeDraw {
   seed: number;
 }
 
-export function foxholeExtentPx(): number { return 3.3 * PX_PER_M; }
+export function foxholeExtentPx(): number { return 4.4 * PX_PER_M; }
+
+/** Winter foxholes are drawn ~30% larger (world-space) than the other seasons' slot shape:
+ * the original's dug-in line reads noticeably longer than ours at the same zoom. */
+const WINTER_FOXHOLE_SCALE = 1.3;
 
 /** Foxhole spoil is freshly dug, damp subsoil: darker and browner than sun-dried blast ejecta
  * (which reads as sand if reused). Winter adds an orange-brown trodden fringe fading into snow. */
@@ -433,10 +437,12 @@ export function fillFoxhole(f: EarthField, fx: FoxholeDraw, season: Season): Sha
   const fwdX = Math.cos(fx.angle), fwdY = Math.sin(fx.angle);
   const sideX = -fwdY, sideY = fwdX;
   const jA = 0.9 + hash2(1, 0, seed + 501) * 0.2, jB = 0.9 + hash2(2, 0, seed + 502) * 0.2;
-  // winter: a narrow slot ~0.5 m wide, 1.7-2.0 m long, so pit + rim band is ~1 x 2.2-2.5 m
-  const A = winter ? (fx.men === 2 ? 1.1 : 0.96) * jA : (fx.men === 2 ? 1.08 : 0.72) * jA; // half length along the front
-  const B = winter ? 0.36 * jB : (fx.men === 2 ? 0.52 : 0.5) * jB;                         // half width
-  const rr = Math.min(A, B) * (winter ? 0.95 : fx.men === 2 ? 0.7 : 0.9);
+  // winter: a narrow slot ~0.5 m wide, 1.7-2.0 m long, so pit + rim band is ~1 x 2.2-2.5 m (scaled
+  // up WINTER_FOXHOLE_SCALE below, world-space, to match the original's size).
+  // summer/autumn: an elongated dug pit, length/width ~2.2-2.4, roughly 2.2 x 1 m for a 1-man hole.
+  const A = winter ? (fx.men === 2 ? 1.1 : 0.96) * jA : (fx.men === 2 ? 1.3 : 1.05) * jA; // half length along the front
+  const B = winter ? 0.36 * jB : (fx.men === 2 ? 0.56 : 0.46) * jB;                       // half width
+  const rr = Math.min(A, B) * (winter ? 0.95 : fx.men === 2 ? 0.78 : 0.85);
   const H = f.H, soil = f.soil, snow = f.snow, mat = f.mat, warm = f.aux;
   if (winter) warm.fill(0, 0, w * h);
   const depth = winter ? 1.2 : 1.3;
@@ -448,8 +454,11 @@ export function fillFoxhole(f: EarthField, fx: FoxholeDraw, season: Season): Sha
     for (let x = 0; x < w; x++) {
       const X = f.ox + (x + 0.5) / zoom;
       const dxm = (X - fx.x) / PX_PER_M;
-      const s = dxm * sideX + dym * sideY;
-      const fy = dxm * fwdX + dym * fwdY;
+      let s = dxm * sideX + dym * sideY;
+      let fy = dxm * fwdX + dym * fwdY;
+      // winter: work in a coordinate frame shrunk by WINTER_FOXHOLE_SCALE so the whole slot —
+      // pit, wallRamp, spoil band and halo reach alike — comes out that much bigger in world space.
+      if (winter) { s /= WINTER_FOXHOLE_SCALE; fy /= WINTER_FOXHOLE_SCALE; }
       const qx = Math.abs(s) - (A - rr), qy = Math.abs(fy) - (B - rr);
       const nf = noise2(X / 3.2, Y / 3.2, seed + 503);
       // winter: halfway between an ellipse and a capsule (an oval slot, neither pointy nor boxy)
@@ -505,27 +514,29 @@ export function fillFoxhole(f: EarthField, fx: FoxholeDraw, season: Season): Sha
         snow[i] = mat[i] === MAT_SANDBAG || mat[i] === MAT_LOG ? 0.55 : 0.12;
         continue;
       }
-      const crest = 0.2 + 0.4 * frontW;
-      const width = 0.26 + 0.24 * frontW;
+      // a modest low bank hugging the pit, heaviest on the enemy side, plus a thin scatter beyond —
+      // the pit itself (sd < 0, above) must stay the dominant dark shape, not this rim.
+      const crest = 0.12 + 0.2 * frontW;
+      const width = 0.15 + 0.13 * frontW;
       const t = (sd - crest) / (sd > crest ? width * 1.25 : width);
       const lump = 0.82 + 0.36 * vnoise(s * 2.2 + 9, fy * 2.2 + 9, seed + 505);
-      let mound = (0.08 + 0.42 * frontW) * lump * Math.exp(-t * t);
-      mound += nf * 0.06 * frontW;
+      let mound = (0.045 + 0.18 * frontW) * lump * Math.exp(-t * t);
+      mound += nf * 0.05 * frontW;
       let hh = mound;
-      let sa = clamp01(mound / 0.07);
+      let sa = clamp01(mound / 0.06);
       // thrown-out spoil specks a little beyond the bank
-      if (sd < 0.9) {
+      if (sd < 0.6) {
         const cell = hash2(Math.floor(X * zoom), Math.floor(Y * zoom), seed + 504);
-        if (cell > 0.8 + sd * 0.25) { sa = Math.max(sa, 0.7); mat[i] = MAT_CLOD; }
+        if (cell > 0.84 + sd * 0.25) { sa = Math.max(sa, 0.65); mat[i] = MAT_CLOD; }
       }
       // earth trodden and thrown over the surrounding ground: a soft brown fade outward
-      const halo = Math.exp(-Math.max(0, sd - crest) / 0.28) * 0.25 * clamp01(0.7 + nf * 1.6);
+      const halo = Math.exp(-Math.max(0, sd - crest) / 0.2) * 0.16 * clamp01(0.7 + nf * 1.6);
       if (halo > sa) sa = halo;
-      const taper = smooth(1.85, 1.2, sd);
+      const taper = smooth(1.15, 0.75, sd);
       sa *= taper; hh *= taper;
-      if (fx.variant === 1 && frontW > 0.45 && sd > 0.03 && sd < 0.64 && Math.abs(s) < A + 0.3) {
+      if (fx.variant === 1 && frontW > 0.45 && sd > 0.03 && sd < 0.4 && Math.abs(s) < A + 0.3) {
         // two staggered rows of sandbags on the parapet
-        const rowF = (sd - 0.03) / 0.305;
+        const rowF = (sd - 0.03) / 0.185;
         const row = Math.floor(rowF);
         const along = (s + row * 0.2 + 10) / 0.4;
         const bx = Math.sin(Math.PI * (along - Math.floor(along)));
@@ -534,8 +545,8 @@ export function fillFoxhole(f: EarthField, fx: FoxholeDraw, season: Season): Sha
         hh = Math.max(hh, 0.16 + 0.22 * bag - row * 0.06);
         mat[i] = bag > 0.32 ? MAT_SANDBAG : MAT_SEAM;
         sa = 1;
-      } else if (fx.variant === 2 && frontW > 0.5 && sd > 0.02 && sd < 0.42 && Math.abs(s) < A + 0.45) {
-        const cross = (sd - 0.22) / 0.2;
+      } else if (fx.variant === 2 && frontW > 0.5 && sd > 0.02 && sd < 0.26 && Math.abs(s) < A + 0.45) {
+        const cross = (sd - 0.13) / 0.12;
         hh = Math.max(hh, 0.1 + 0.26 * Math.sqrt(Math.max(0, 1 - cross * cross)));
         mat[i] = Math.abs(cross) > 0.86 ? MAT_SEAM : MAT_LOG;
         sa = 1;
