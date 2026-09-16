@@ -29,25 +29,34 @@ const KOLKHOZ_SPUR = [{ x: 62, y: 93 }, { x: 62, y: 102 }];
  * reason the dug-in rifle pits on its southern lip matter. Relief ~15 m, swells 2-5%,
  * gully sides ~20%. */
 function paintElevationFor(e: ElevationApi): void {
-  e.base(12);
-  e.rolling(2.4, 74, 4);
-  // long low swells: one carrying the German trench belt, one through the middle
-  e.ridge([{ x: -20, y: 30 }, { x: 120, y: 26 }, { x: 260, y: 34 }], 52, 2.2);
-  e.ridge([{ x: -20, y: 68 }, { x: 70, y: 74 }, { x: 150, y: 62 }, { x: 260, y: 70 }], 66, 3.0);
+  e.base(5);
+  e.rolling(3.2, 132, 4);
+  e.rolling(0.9, 30, 24);
+  // two long east-west swells: one carrying the German trench belt, one the Soviet jump-off
+  e.ridge([{ x: -20, y: 34 }, { x: 120, y: 28 }, { x: 260, y: 38 }], 80, 7.0);
+  e.ridge([{ x: -20, y: 112 }, { x: 70, y: 118 }, { x: 150, y: 106 }, { x: 260, y: 114 }], 80, 6.0);
   // the commanding rise the kolkhoz stands on — it looks down the whole southern approach
-  e.hill(62, 82, 42, 5.0);
-  // the ground sags toward the southern (Soviet) edge
-  e.slope({ x: 0, y: 130, w: 240, h: 40 }, 0, -2.4, Math.PI / 2);
+  e.hill(62, 82, 60, 11, 'smooth');
+  // the plain sags away toward the southern (Soviet) edge
+  e.slope({ x: 0, y: 122, w: 240, h: 48 }, 0, -4.5, Math.PI / 2);
   e.smoothElevation(2);
-  // the balka: 3.5 m deep, ~26 tiles (52 m) across including its sloping sides
-  e.valley(BALKA, 26, 3.5);
-  e.gradeRoad(MAIN_TRACK, 3, 6);
-  e.gradeRoad(NS_TRACK, 3, 7);
-  e.gradeRoad(KOLKHOZ_SPUR, 3, 8);
-  e.smoothElevation(1);
-  // no cliffs: relax anything the composed features made steeper than 30%% (river banks and the
-  // balka lip do sit near that cap — those are the deliberate "steep bank" cases)
-  e.limitGrade(30);
+  // the balka: a real gully 4.5 m below the plain, ~26 tiles (52 m) across including its sides
+  e.valley(BALKA, 26, 4.5);
+  // Road grading caps are a CEILING, not a target (main roads ~11%, minor tracks 20%): the
+  // corridor follows the natural ground where that is already walkable and only cuts where it is
+  // not. Forcing a track flatter than the hillside it crosses digs a cutting whose near-vertical
+  // shoulders limitGrade then eats back into the road itself.
+  e.gradeRoad(MAIN_TRACK, 3, 11);
+  e.gradeRoad(NS_TRACK, 3, 11);
+  e.gradeRoad(KOLKHOZ_SPUR, 3, 20);
+  e.smoothElevation(2);
+  // re-assert the road grades: the smoothing pass above blends the graded corridor back into
+  // the (much steeper) ground beside it, which is what let a "graded" road reach 22%
+  e.gradeRoad(MAIN_TRACK, 3, 11);
+  e.gradeRoad(NS_TRACK, 3, 11);
+  e.gradeRoad(KOLKHOZ_SPUR, 3, 20);
+  // no cliffs, and nothing above VEHICLE_MAX_GRADE (0.25)
+  e.limitGrade(24);
   e.clampRange(0, 25);
 }
 
@@ -203,14 +212,13 @@ export const steppe_1943: MapDef = {
     { id: 3, name: 'Track Junction', x: 178, y: 102, value: 1 },
     { id: 4, name: 'Balka', x: 115, y: 118, value: 2 },
   ],
+  // round-5 fix #8: the two 240-tile-wide edge strips were 145 tiles (290 m) apart with each
+  // force spread across the whole map width. Both are now one screen across and 83 tiles (166 m)
+  // apart — the Germans still deploy on their trench-line swell, the Soviets on theirs above the
+  // balka, with the kolkhoz rise on the contested western flank between them.
   deployZones: {
-    german: { x: 0, y: 0, w: 240, h: 25 },
-    // balance note: an earlier pass tried enlarging/moving this zone north to shorten the
-    // soviet attacker's march, but harness testing showed it made the map MORE lopsided (units
-    // engaged the trench line's defenders earlier and less organized, with worse casualties on
-    // every seed) - reverted to the original strip; the force-mix and VL-value changes below
-    // carry this map's fix instead.
-    soviet: { x: 0, y: 145, w: 240, h: 25 },
+    german: { x: 100, y: 16, w: 28, h: 28 },
+    soviet: { x: 100, y: 100, w: 28, h: 26 },
   },
   decor,
   vectors,

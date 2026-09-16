@@ -122,10 +122,13 @@ describe('foxholes (map DSL)', () => {
         total++;
         expect(map.tiles[Math.floor(d.y) * map.width + Math.floor(d.x)]).toBe('trench');
         for (const vl of def.victoryLocations) expect(Math.hypot(vl.x - d.x, vl.y - d.y)).toBeGreaterThan(2.5);
-        for (const z of Object.values(def.deployZones)) {
-          const inside = d.x >= z.x && d.x < z.x + z.w && d.y >= z.y && d.y < z.y + z.h;
-          expect(inside).toBe(false);
-        }
+        // A foxhole may lie inside the DEFENDER's own deploy zone — those are his prepared
+        // positions, and round 5 tightened the zones onto the ground each side actually holds.
+        // It must never lie inside the ATTACKER's jump-off area.
+        const attackerZone = def.deployZones[def.attacker];
+        const inAttackerZone = d.x >= attackerZone.x && d.x < attackerZone.x + attackerZone.w
+          && d.y >= attackerZone.y && d.y < attackerZone.y + attackerZone.h;
+        expect(inAttackerZone, `${def.id} foxhole at ${d.x},${d.y} is in the attacker's deploy zone`).toBe(false);
       }
     }
     expect(total).toBeGreaterThan(15);

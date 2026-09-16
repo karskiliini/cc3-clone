@@ -23,22 +23,35 @@ const FORD_ROAD = [{ x: 60, y: 128 }, { x: 74, y: 122 }, { x: 87, y: 118 }, { x:
  * swallow a man at 100 m — with the river lying in a wide, shallow flood plain. Relief ~9 m,
  * slopes mostly 2-6%. */
 function paintElevationFor(e: ElevationApi): void {
-  e.base(7);
-  e.rolling(2.4, 44, 5);
-  e.rolling(1.1, 19, 6); // finer folds, the scale a section disappears into
-  // the flood plain: wide and very shallow, so both banks read as flat river meadow
-  e.valley(RIVER, 74, 3.0);
-  // slightly higher forest shoulders east and west of the plain
-  e.hill(40, 50, 40, 2.0);
-  e.hill(158, 108, 38, 2.2);
+  e.base(3);
+  e.rolling(3.2, 124, 5);
+  e.rolling(1.0, 26, 25);
+  // the river runs in the bottom of a real valley: the forest floor falls ~14 m over the 200 m
+  // from either map edge down to the water, so the two sides genuinely look across at each other
+  e.slope({ x: 0, y: 0, w: 100, h: 160 }, 14, 0, 0);
+  e.slope({ x: 100, y: 0, w: 100, h: 160 }, 0, 15, 0);
+  // the flood plain: a flat shelf either side of the channel inside that fall
+  e.valley(RIVER, 64, 2.6);
+  // wooded shoulders east and west, with the lodge standing on the western one
+  e.hill(43, 43, 44, 3.5, 'smooth');
+  e.hill(158, 108, 44, 3.2, 'smooth');
+  // dead ground on the approach to the ford
+  e.hill(72, 122, 34, -2.2, 'smooth');
   e.smoothElevation(2);
-  e.cutRiver(RIVER, 4, 1.0);
-  e.gradeRoad(MAIN_ROAD, 3, 7);
-  e.gradeRoad(FORD_ROAD, 3, 8);
-  e.smoothElevation(1);
-  // no cliffs: relax anything the composed features made steeper than 30%% (river banks and the
-  // balka lip do sit near that cap — those are the deliberate "steep bank" cases)
-  e.limitGrade(30);
+  e.cutRiver(RIVER, 4, 0.6);
+  // Road grading caps are a CEILING, not a target (main roads ~11%, minor tracks 20%): the
+  // corridor follows the natural ground where that is already walkable and only cuts where it is
+  // not. Forcing a track flatter than the hillside it crosses digs a cutting whose near-vertical
+  // shoulders limitGrade then eats back into the road itself.
+  e.gradeRoad(MAIN_ROAD, 3, 11);
+  e.gradeRoad(FORD_ROAD, 3, 20);
+  e.smoothElevation(2);
+  // re-assert the road grades: the smoothing pass above blends the graded corridor back into
+  // the (much steeper) ground beside it, which is what let a "graded" road reach 22%
+  e.gradeRoad(MAIN_ROAD, 3, 11);
+  e.gradeRoad(FORD_ROAD, 3, 20);
+  // no cliffs, and nothing above VEHICLE_MAX_GRADE (0.25)
+  e.limitGrade(24);
   e.clampRange(0, 25);
 }
 
@@ -158,9 +171,12 @@ export const forest_1944: MapDef = {
     { id: 3, name: 'Ford', x: 95, y: 117, value: 2 },
     { id: 4, name: 'Logging Camp', x: 161, y: 97, value: 1 },
   ],
+  // round-5 fix #8: the deploy zones used to sit on opposite map edges, 130-190 tiles apart,
+  // with each force smeared across the map's full width — minutes of walking before contact.
+  // They are now one screen across and 82 tiles (164 m) apart, straddling the contested ground.
   deployZones: {
-    german: { x: 0, y: 0, w: 25, h: 160 },
-    soviet: { x: 175, y: 0, w: 25, h: 160 },
+    german: { x: 50, y: 58, w: 28, h: 28 },
+    soviet: { x: 132, y: 58, w: 28, h: 28 },
   },
   decor,
   vectors,

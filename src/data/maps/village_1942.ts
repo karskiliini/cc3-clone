@@ -22,23 +22,34 @@ const TRACK_SE = [{ x: 160, y: 80 }, { x: 165, y: 118 }];
  * carries the school to the east; the fields fall away north and south. Relief ~13 m,
  * hill slopes 6-9%. */
 function paintElevationFor(e: ElevationApi): void {
-  e.base(5);
-  e.rolling(1.6, 58, 3);
-  // the hill: wide and rounded, crown just north of the main street where the church stands
-  e.hill(105, 66, 56, 7.5, 'smooth');
+  e.base(3);
+  e.rolling(2.8, 122, 3);
+  e.rolling(0.8, 28, 23);
+  // the hill the village stands on is the map: 15 m of command over the low ground on both
+  // flanks, ~150 tiles (300 m) across, with the church on its crown. Both deploy zones are on the
+  // low ground and have to climb to reach it — the manual's "harder to assault from below" case.
+  e.hill(105, 68, 78, 15, 'smooth');
   // a lower shoulder running east to the school, so the street is a saddle rather than a ledge
-  e.ridge([{ x: 105, y: 72 }, { x: 140, y: 82 }, { x: 158, y: 94 }], 46, 2.6);
+  e.ridge([{ x: 105, y: 74 }, { x: 140, y: 84 }, { x: 160, y: 96 }], 76, 4.5);
   // low ground both sides: the northern crop parcels and the southern meadows
-  e.valley([{ x: 0, y: 16 }, { x: 110, y: 10 }, { x: 220, y: 18 }], 46, 2.2);
-  e.valley([{ x: 0, y: 148 }, { x: 110, y: 154 }, { x: 220, y: 146 }], 46, 2.4);
+  e.valley([{ x: 0, y: 14 }, { x: 110, y: 8 }, { x: 220, y: 16 }], 64, 3.0);
+  e.valley([{ x: 0, y: 150 }, { x: 110, y: 156 }, { x: 220, y: 148 }], 64, 3.2);
   e.smoothElevation(2);
-  e.gradeRoad(MAIN_STREET, 5, 6);
-  e.gradeRoad(TRACK_NW, 3, 8);
-  e.gradeRoad(TRACK_SE, 3, 8);
-  e.smoothElevation(1);
-  // no cliffs: relax anything the composed features made steeper than 30%% (river banks and the
-  // balka lip do sit near that cap — those are the deliberate "steep bank" cases)
-  e.limitGrade(30);
+  // Road grading caps are a CEILING, not a target (main roads ~11%, minor tracks 20%): the
+  // corridor follows the natural ground where that is already walkable and only cuts where it is
+  // not. Forcing a track flatter than the hillside it crosses digs a cutting whose near-vertical
+  // shoulders limitGrade then eats back into the road itself.
+  e.gradeRoad(MAIN_STREET, 5, 11);
+  e.gradeRoad(TRACK_NW, 3, 20);
+  e.gradeRoad(TRACK_SE, 3, 20);
+  e.smoothElevation(2);
+  // re-assert the road grades: the smoothing pass above blends the graded corridor back into
+  // the (much steeper) ground beside it, which is what let a "graded" road reach 22%
+  e.gradeRoad(MAIN_STREET, 5, 11);
+  e.gradeRoad(TRACK_NW, 3, 20);
+  e.gradeRoad(TRACK_SE, 3, 20);
+  // no cliffs, and nothing above VEHICLE_MAX_GRADE (0.25)
+  e.limitGrade(24);
   e.clampRange(0, 25);
 }
 
@@ -162,15 +173,20 @@ export const village_1942: MapDef = {
   elevation: paintElevationFor,
   victoryLocations: [
     { id: 0, name: 'Church', x: 105, y: 62, value: 3 },
-    { id: 1, name: 'School', x: 154, y: 95, value: 2 },
+    // balance (round 5): the School sits behind the German line and North Farm on the Soviet
+    // side of the hill, so their values are swapped — the prize stays the hill itself.
+    { id: 1, name: 'School', x: 154, y: 95, value: 1 },
     { id: 2, name: 'Main Street', x: 110, y: 80, value: 2 },
     { id: 3, name: 'Mill', x: 58, y: 77, value: 1 },
-    { id: 4, name: 'North Farm', x: 180, y: 55, value: 1 },
+    { id: 4, name: 'North Farm', x: 180, y: 55, value: 2 },
     { id: 5, name: 'South Farm', x: 35, y: 130, value: 1 },
   ],
+  // round-5 fix #8: the deploy zones used to sit on opposite map edges, 130-190 tiles apart,
+  // with each force smeared across the map's full width — minutes of walking before contact.
+  // They are now one screen across and 90 tiles (180 m) apart, straddling the contested ground.
   deployZones: {
-    soviet: { x: 0, y: 0, w: 220, h: 30 },
-    german: { x: 0, y: 130, w: 220, h: 30 },
+    soviet: { x: 91, y: 12, w: 28, h: 28 },
+    german: { x: 91, y: 102, w: 28, h: 28 },
   },
   decor,
   vectors,

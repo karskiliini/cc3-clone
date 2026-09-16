@@ -104,7 +104,14 @@ const WATER_RAMP = ['#3c5566', '#4a6578', '#5a7688', '#6a8698'];
 const ICE_RAMP = ['#6e8290', '#7d919e', '#8fa2ae', '#a6b6c0'];
 // Summer road/crops: warm saturated ochre/gold sampled against ref_cc3_1479 (dirt road ~(131,102,35),
 // wheat ~(162,125,31)). Separate from ROAD_RAMP/CROPS_RAMP, which autumn still uses.
-const SUMMER_ROAD_RAMP = ['#7a5c1e', '#8f6e26', '#a07a2c', '#b08a36'];
+// Round-5 fix #7: the four-stop ramp swung 6 levels per pixel-pair against the reference's 16-17.
+// A wet-rut dark at the bottom and a dry gravel highlight at the top widen the swing to the
+// reference's, and the per-pixel gravel/rut work in the dirtroad branch of paintGroundAndFeatures
+// spends that range at the 2-5 px scale the eye reads as "gravel track".
+const SUMMER_ROAD_RAMP = ['#78591c', '#8d6a24', '#a27c2e', '#b48c3c', '#c49d50', '#d2ac74'];
+/** stamped gravel highlight / wet rut, sampled from ref_cc3_1479's dirt road */
+const ROAD_GRAVEL: RGB = { r: 205, g: 165, b: 108 };
+const ROAD_WET_RUT: RGB = { r: 106, g: 78, b: 36 };
 const SUMMER_CROPS_RAMP = ['#6e5210', '#8a6a16', '#a27e1e', '#b89226', '#c8a230'];
 // grey-brown debris, not the pinkish-brown palette.ts default (that read as a paint spatter,
 // especially over snow) — used for all seasons since rubble is rubble regardless.
@@ -123,7 +130,11 @@ const LOCAL_RAMPS: Partial<Record<Season, Partial<Record<Terrain, string[]>>>> =
     // CC3 olive green, ramp hue ~66deg / sat ~0.66: the per-pixel warm dirt speckle in
     // paintGroundAndFeatures pulls the rendered mean to ~60deg like ref_cc3_1479; large ochre/
     // brown blotches come from the low-frequency patch layer in groundColorFbm.
-    grass: ['#424617', '#53591e', '#646a25', '#737a2c', '#858d38'],
+    // Round-5 fix #7/#15: round 4's "pull it back to green" overshot — ref_cc3_1479's open grass
+    // is a dry BROWN-OLIVE (R above G), ours had become a yellow-green (R below G). Every stop
+    // gains red and loses a little green, which lands the rendered mean back on the reference's
+    // hue while the olive base and the speckle layers below are untouched.
+    grass: ['#4a4419', '#5b5420', '#706128', '#7f6c2e', '#918039'],
     tallgrass: ['#62652a', '#767834', '#8a893e', '#9a984a'],
     crops: SUMMER_CROPS_RAMP,
     mud: MUD_RAMP,
@@ -144,12 +155,18 @@ const LOCAL_RAMPS: Partial<Record<Season, Partial<Record<Terrain, string[]>>>> =
     rubble: RUBBLE_RAMP,
   },
   winter: {
-    snow: ['#c4c9d1', '#d6dae0', '#e6e9ee', '#f2f4f7'],
+    // Round-5 fix #7: ours measured 28 levels brighter and distinctly cooler than ref_cc3_1482's
+    // trodden winter ground (#b2aaa5). Every stop drops ~20-22 levels and warms so red sits above
+    // blue — snow that has been walked, drifted and dirtied, not blank paper.
+    snow: ['#a7a6a5', '#b9b7b3', '#cac7c1', '#d6d2cb'],
     // snow-covered tracks: close to snow colour (ref_cc3_1484 main track ~(225,225,227)); the
     // road is defined by its wheel ruts, not by a dark fill. Paved top stays ~10+ below snow so
     // Berlin streets still read as streets.
-    dirtroad: ['#b9b0a3', '#c6bdb0', '#cfc7bb', '#d6cfc4'],
-    pavedroad: ['#b4b8bd', '#c4c8cd', '#d0d4d8', '#dadde1'],
+    // round-5 fix #7: with the snow ramp dropped ~20 levels, the old track ramp sat BRIGHTER than
+    // the ground it crosses. A used track in ref_cc3_1484 is dirtier than the field either side.
+    dirtroad: ['#8f8578', '#9d9384', '#a89d8d', '#b0a595'],
+    // darkened with the snow ramp (round-5 fix #7): a swept street still reads as street
+    pavedroad: ['#7e7a72', '#8b867c', '#969086', '#a09a8e'],
     mud: ['#3a352e', '#4a4238', '#585044', '#635a4c'],
     water: ICE_RAMP,
     rubble: RUBBLE_RAMP,
@@ -299,8 +316,11 @@ function groundColorFbm(t: Terrain, season: Season, X: number, Y: number, seed: 
  * bake cost is unchanged apart from two Float32Array bilinear reads per block instead of two
  * fbm evaluations (strictly cheaper). */
 const RELIEF_AMP = 0.18;
-/** metres of rise per metre of run that saturates the shading (a ~35% slope is fully lit/shaded) */
-const RELIEF_FULL_GRADE = 0.35;
+/** Metres of rise per metre of run that saturates the shading. Round-5 fix #2: 0.35 meant the
+ * ordinary 6-10% working slopes of rolling farmland landed at 1 +- 0.05 — under the ground's own
+ * dither amplitude, so the hillshading was invisible in the normal view. At 0.18 a 10% slope
+ * shades at ~55% of full amplitude and the landforms read. */
+const RELIEF_FULL_GRADE = 0.18;
 let reliefCache: Map<number, number> | null = null;
 let reliefGround: Float32Array | null = null;
 let reliefW = 0, reliefH = 0;
@@ -607,9 +627,11 @@ const FOREST_FLOOR_MID: RGB = { r: 70, g: 62, b: 34 };
 const LITTER_BROWN: RGB = { r: 112, g: 82, b: 44 };
 const LITTER_OLIVE: RGB = { r: 88, g: 94, b: 44 };
 const SNOW_UNDER_TREES: RGB = { r: 176, g: 180, b: 186 };
-const SNOW_DRIFT_SHADOW: RGB = { r: 164, g: 178, b: 202 };
-const SNOW_CREST: RGB = { r: 250, g: 251, b: 250 };
-const SNOW_LEE_SHADOW: RGB = { r: 140, g: 156, b: 190 };
+// round-5 fix #7: the drift/lee shadows were a strong cornflower blue that pulled the whole
+// snowfield's mean cooler than the reference's; warmed so red sits close to blue.
+const SNOW_DRIFT_SHADOW: RGB = { r: 172, g: 176, b: 190 };
+const SNOW_CREST: RGB = { r: 232, g: 230, b: 226 };
+const SNOW_LEE_SHADOW: RGB = { r: 152, g: 154, b: 172 };
 const SNOW_TRAMPLED: RGB = { r: 186, g: 186, b: 184 };
 const SNOW_RUT: RGB = { r: 110, g: 94, b: 76 };
 const DEAD_GRASS: RGB = { r: 146, g: 122, b: 82 };
@@ -893,22 +915,56 @@ function paintGroundAndFeatures(
             const rutWob = (fbm(wpx / 30, wpy / 30, 2, seed + 4620) - 0.5) * 2;
             const rutOk = !dirtRes || (dirtRes.endDist >= dirtRes.halfW && !dirtRes.junction);
             const inRutBand = rutOk && (dirtRes
-              ? Math.abs(dirtRes.dist + rutWob - 0.35 * dirtRes.halfW) < 1.6
-              : covDirt >= 0.6 && covDirt <= 0.72);
+              ? (Math.abs(dirtRes.dist + rutWob - 0.34 * dirtRes.halfW) < 1.9
+                || Math.abs(dirtRes.dist + rutWob - 0.68 * dirtRes.halfW) < 1.4)
+              : covDirt >= 0.58 && covDirt <= 0.74);
             const rutHit = inRutBand && hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4602) > 0.2;
             if (season === 'winter') {
               // snow-covered track: pale snow with thin dark-brown ruts, no puddles
-              if (rutHit) rc = lerpRGB(rc, { r: 112, g: 84, b: 56 }, 0.7);
-              else rc = lerpRGB(rc, groundColorFbm('snow', season, wpx, wpy, seed), 0.6);
+              // round-5 fix #7: wider, dirtier ruts (SNOW_RUT at ~3x the old coverage) — a snow
+              // track in ref_cc3_1484 is two broad churned brown bands, not a hairline.
+              if (rutHit) rc = lerpRGB(rc, SNOW_RUT, 0.8);
+              else {
+                rc = lerpRGB(rc, groundColorFbm('snow', season, wpx, wpy, seed), 0.55);
+                const dh = hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4611);
+                if (dh < 0.22) rc = lerpRGB(rc, SNOW_RUT, 0.2 + 0.5 * (dh / 0.22));
+                else if (dh < 0.34) rc = lerpRGB(rc, DEAD_GRASS, 0.3);
+              }
             } else if (rutHit) {
               const puddleBucketX = Math.floor(wpx / 45), puddleBucketY = Math.floor(wpy / 45);
               if (hash2(puddleBucketX, puddleBucketY, seed + 4603) < 0.15) {
-                rc = lerpRGB(rc, { r: 92, g: 72, b: 40 }, 0.35); // darker damp earth in the rut
+                rc = lerpRGB(rc, ROAD_WET_RUT, 0.55); // wet, churned earth in the rut
               } else {
-                rc = shade(rc, -0.10);
+                rc = lerpRGB(rc, ROAD_WET_RUT, 0.3);
               }
             }
-            if (season !== 'winter' && hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4610) < 0.02) rc = shade(rc, -0.2); // sparse stones (buried under snow in winter)
+            // ---- summer road surface: gravel. Round-5 fix #7 measured our dirt road at a local
+            // contrast of 6 against the reference's 16-17 — a flat ochre slab with two rut lines.
+            // The reference road is a *graded gravel* surface: a bright dry crown, dark damp ruts,
+            // and loose stones catching the light. Three cheap layers reproduce that, all at the
+            // 2-5 px scale the eye reads as grain (the ramp's own fbm bands only vary over 14-64 px):
+            if (season !== 'winter') {
+              // (1) a fine, road-following wash: a 3 px fbm band plus a per-pixel stipple
+              const fineR = fbm(wpx / 3.5, wpy / 3.5, 1, seed + 4640);
+              const grainR = hash2(wpx, wpy, seed + 4641);
+              rc = shade(rc, (fineR - 0.5) * 0.30 + (grainR - 0.5) * 0.34);
+              // (2) the crown: a graded track is domed, so the middle is dry and pale and the
+              // verges are damp and dark. From vector geometry this is a real distance ratio.
+              const ratioR = dirtRes ? Math.min(1, dirtRes.dist / Math.max(1, dirtRes.halfW)) : 1 - covDirt;
+              rc = shade(rc, 0.14 - 0.34 * ratioR * ratioR);
+              // (3) stamped gravel: ~8% of 2-3 px cells are loose stones (bright, with a dark
+              // side away from the light), another ~6% are pressed-in dark grit.
+              const gcx = Math.floor(wpx / 1.8), gcy = Math.floor(wpy / 1.8);
+              const gh = hash2(gcx, gcy, seed + 4642);
+              if (gh < 0.085) {
+                const lit = hash2(gcx + (wpx > gcx * 2.5 + 1 ? 1 : 0), gcy, seed + 4643);
+                rc = lerpRGB(rc, ROAD_GRAVEL, 0.35 + 0.45 * lit);
+              } else if (gh < 0.145) {
+                rc = shade(rc, -0.28 - 0.22 * hash2(gcx, gcy, seed + 4644));
+              }
+            } else if (hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 4610) < 0.02) {
+              rc = shade(rc, -0.2); // sparse stones (mostly buried under snow in winter)
+            }
             color = rc;
           }
 
@@ -981,11 +1037,13 @@ function paintGroundAndFeatures(
             const posterized = Math.round(clump * 3) / 3;
             const soft = lerp(clump, posterized, 0.6);
             const isSnowGround = groundT === 'snow';
-            color = shade(color, (soft - 0.5) * (isSnowGround ? 0.24 : 0.40));
+            color = shade(color, (soft - 0.5) * (isSnowGround ? 0.36 : 0.40));
             // (c) sparse directional strokes 3-7px long ("grass tufts"), following a slowly
             // varying angle field. Grass/open get denser, stronger tufts plus sparse dark-brown
             // earth flecks (ref grass stipple); snow keeps the subtler original values.
-            const tuft = isSnowGround ? tuftShade(wpx, wpy, seed) : tuftShade(wpx, wpy, seed, 0.4, 0.16);
+            // Round-5 fix #7/#15: tuft density and amplitude raised (0.40/0.16 -> 0.48/0.24) so the
+            // 5-15 px scale the eye actually reads as "grass" carries real contrast.
+            const tuft = isSnowGround ? tuftShade(wpx, wpy, seed, 0.3, 0.13) : tuftShade(wpx, wpy, seed, 0.48, 0.24);
             if (tuft !== 0) color = shade(color, tuft);
             if (season !== 'summer' && !isSnowGround && hash2(wpx, wpy, seed + 9100) < 0.06) color = lerpRGB(color, { r: 92, g: 70, b: 38 }, 0.35);
             if (season === 'summer' && !isSnowGround) {
@@ -994,15 +1052,15 @@ function paintGroundAndFeatures(
               // plus ~8-12% of pixels pushed to warm brown or dry ochre and darker 1px flecks, with
               // density clumped by the mid-frequency `clump` field (dirt showing through grass).
               const hs = hash2(wpx, wpy, seed + 9111);
-              color = shade(color, (hs - 0.5) * 0.48);
+              color = shade(color, (hs - 0.5) * 0.60);
               const dirt = fbm(wpx / 12, wpy / 12, 1, seed + 9130) * 0.65 + clump * 0.35;
               const dens = 0.02 + 0.26 * smooth01(dirt, 0.42, 0.74);
               const hp = hash2(wpx, wpy, seed + 9120);
               if (hp < dens) {
                 const warm = hash2(wpx, wpy, seed + 9121) < 0.55 ? SPECKLE_BROWN : SPECKLE_OCHRE;
                 color = lerpRGB(color, warm, 0.45 + 0.35 * (hp / dens));
-              } else if (hp < dens * 1.45) {
-                color = shade(color, -0.36 - 0.2 * hs); // dark 1px fleck
+              } else if (hp < dens * 1.5) {
+                color = shade(color, -0.44 - 0.24 * hs); // dark 1px fleck
               }
             }
           }
@@ -1062,15 +1120,38 @@ function paintGroundAndFeatures(
             const covDirtyT = dirtyGrid.any ? sampleGrid(dirtyGrid, tx, px, ty, py, wpx, wpy, seed + 3602, 0.03, bpt) : 0;
             const covLeeHere = leeGrid.any ? sampleGrid(leeGrid, tx, px, ty, py, wpx, wpy, seed + 3702, 0.03, bpt) : 0;
             const covW = woodsGrid.any ? sampleGrid(woodsGrid, tx, px, ty, py, wpx, wpy, seed + 3703, 0.03, bpt) : 0;
-            const thin = Math.max(clamp01(covDirtyT) * 0.7, covW * 0.3, covLeeHere * 1.3, tramp * 0.4, crest * 0.15);
-            if (thin > 0.04) {
-              const en = fbm(wpx / 11, wpy / 5, 1, seed + 7351) * 0.8 + hash2(wpx, wpy, seed + 7352) * 0.2;
-              const thr = 1 - thin * 0.42;
+            // Round-5 fix #7: ref_cc3_1482 sells snow with DIRT — exposed earth along every track
+            // and bank, brown dead grass poking through everywhere, not only beside a hedge. The
+            // `thin` field is roughly tripled (a real floor over open snow, and every source
+            // weighted up), and the threshold now spends the whole field instead of 42% of it.
+            const thin = Math.max(
+              0.40,                                  // open snowfield: never bare paper
+              clamp01(covDirtyT) * 0.85,
+              covW * 0.6, covLeeHere * 1.2, tramp * 0.7, crest * 0.2,
+            );
+            {
+              // Three scales, weighted toward the isotropic CLUMP octave: the reference's dead
+              // vegetation sits in round tussocks a few pixels across scattered evenly over the
+              // field, not in the wind-combed horizontal bands a single anisotropic fbm gives.
+              const clumpS = clamp01(fbmClump(wpx, wpy, seed + 7360));
+              const en = clumpS * 0.50
+                + fbm(wpx / 13, wpy / 13, 1, seed + 7351) * 0.28
+                + hash2(wpx, wpy, seed + 7352) * 0.22;
+              const thr = 1 - thin * 0.92;
               if (en > thr) {
-                const amt = clamp01((en - thr) * 9);
+                const amt = clamp01((en - thr) * 5.5);
                 const ec = lerpRGB(BARE_EARTH, DEAD_GRASS, smooth01(fbm(wpx / 2.5, wpy / 7, 1, seed + 7353), 0.42, 0.58));
-                color = lerpRGB(color, ec, amt * 0.68);
+                color = lerpRGB(color, ec, amt * 0.92);
+                // twigs: the darkest pixels inside a tussock, which is where most of the
+                // reference's per-pixel contrast actually lives
+                if (amt > 0.45 && hash2(wpx, wpy, seed + 7356) < 0.3) color = shade(color, -0.4);
               }
+              // scattered grit, hard little drift shadows and wind-polished highlights, so open
+              // snow still has grain where no stubble showed through
+              const gh = hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 7355);
+              if (gh < 0.06) color = lerpRGB(color, SNOW_RUT, 0.25 + 4 * gh);
+              else if (gh < 0.17) color = lerpRGB(color, SNOW_DRIFT_SHADOW, 0.3);
+              else if (gh > 0.9) color = lerpRGB(color, SNOW_CREST, 0.36);
             }
           }
 
@@ -1582,13 +1663,16 @@ function paintBuildingShadow(ctx: CanvasRenderingContext2D, map: GameMap, bb: Bu
     }
     return p;
   };
-  const dx = hgt * 0.95, dy = hgt * 0.8;
-  ctx.fillStyle = snowy ? 'rgba(52,66,104,0.2)' : 'rgba(8,8,4,0.16)';
-  ctx.fill(sweep(dx + 3, dy + 3), 'nonzero');
-  ctx.fillStyle = snowy ? 'rgba(48,62,100,0.46)' : 'rgba(8,8,4,0.36)';
-  ctx.fill(sweep(dx, dy), 'nonzero');
-  ctx.fillStyle = snowy ? 'rgba(40,50,84,0.2)' : 'rgba(6,6,2,0.2)';
-  ctx.fill(sweep(dx * 0.45, dy * 0.45), 'nonzero');
+  // Round-5 fix #5: this is now unconditional and deliberately heavy enough to read at zoom 1 on
+  // summer grass as well as on snow — in ref_cc3_1484 the cast shadow is the single strongest cue
+  // that a building has height. Length scales with the building's own height (buildingHeightPx).
+  const dx = hgt * 1.25, dy = hgt * 1.05;
+  ctx.fillStyle = snowy ? 'rgba(52,66,104,0.24)' : 'rgba(10,10,6,0.2)';
+  ctx.fill(sweep(dx + 4, dy + 4), 'nonzero');   // penumbra
+  ctx.fillStyle = snowy ? 'rgba(46,60,98,0.56)' : 'rgba(8,8,4,0.5)';
+  ctx.fill(sweep(dx, dy), 'nonzero');           // the shadow proper
+  ctx.fillStyle = snowy ? 'rgba(38,48,82,0.34)' : 'rgba(6,6,2,0.34)';
+  ctx.fill(sweep(dx * 0.5, dy * 0.5), 'nonzero'); // darker close to the wall
 }
 
 function paintRoof(ctx: CanvasRenderingContext2D, map: GameMap, bb: BuildingBBox, x0: number, y0: number, seed: number, season: Season, zoom = 1): void {
@@ -1604,11 +1688,22 @@ function paintRoof(ctx: CanvasRenderingContext2D, map: GameMap, bb: BuildingBBox
   if (!fp.occ.some(Boolean)) return; // ruined: the roof is gone
   const big = bb.origBig ?? (fp.hole !== null || (wTiles > 12 && hTiles > 12));
 
-  // Eaves overhang: a tight dark band hugging the S and E eaves (the overhang's own shadow on the
-  // wall top), on top of the long cast shadow painted by paintBuildingShadow beforehand.
-  ctx.fillStyle = snowy ? 'rgba(30,38,60,0.5)' : 'rgba(8,8,4,0.45)';
-  ctx.fillRect(left + w, top + 1, 2, h + 1);
-  ctx.fillRect(left + 1, top + h, w + 1, 2);
+  // Eaves overhang: the roof oversails its wall, so a graded band of its own shadow falls on the
+  // ground/wall-top just outside the S and E eaves, deepest right under the edge and fading over
+  // the overhang's depth (round-5 fix #5: this used to be a flat 2 px slab).
+  {
+    const over = 3 + (big ? 2 : 0);
+    const gE = ctx.createLinearGradient(left + w, 0, left + w + over, 0);
+    gE.addColorStop(0, snowy ? 'rgba(28,36,58,0.62)' : 'rgba(8,8,4,0.58)');
+    gE.addColorStop(1, snowy ? 'rgba(28,36,58,0)' : 'rgba(8,8,4,0)');
+    ctx.fillStyle = gE;
+    ctx.fillRect(left + w, top + 1, over, h + over);
+    const gS = ctx.createLinearGradient(0, top + h, 0, top + h + over);
+    gS.addColorStop(0, snowy ? 'rgba(28,36,58,0.62)' : 'rgba(8,8,4,0.58)');
+    gS.addColorStop(1, snowy ? 'rgba(28,36,58,0)' : 'rgba(8,8,4,0)');
+    ctx.fillStyle = gS;
+    ctx.fillRect(left + 1, top + h, w + over, over);
+  }
 
   // If the footprint isn't a plain rectangle (a notch, like a narrower tower merged into a
   // nave, or a real interior hole/courtyard), clip the roof fills to the occupied tiles only so
@@ -1700,10 +1795,28 @@ function paintRoof(ctx: CanvasRenderingContext2D, map: GameMap, bb: BuildingBBox
     // two slopes: NW-facing slope (N half for an E-W ridge, W half for N-S) catches the sun
     const litRect = ridgeHoriz ? [left, top, w, ridgeAt] : [left, top, ridgeAt, h];
     const shadeRect = ridgeHoriz ? [left, top + ridgeAt, w, h - ridgeAt] : [left + ridgeAt, top, w - ridgeAt, h];
-    ctx.fillStyle = shadeHex(v.light, 0.1);
-    ctx.fillRect(litRect[0], litRect[1], litRect[2], litRect[3]);
-    ctx.fillStyle = shadeHex(v.base, -0.2);
-    ctx.fillRect(shadeRect[0], shadeRect[1], shadeRect[2], shadeRect[3]);
+    // Round-5 fix #5: the roof used to be two flat fills butted together at a razor-sharp line,
+    // which read as two materials rather than one pitched roof. It is now ONE continuous
+    // material graded across both pitches: brightest along the ridge on the sun (NW) side,
+    // falling steadily to each eave, with the far pitch a whole step darker. Nothing here is a
+    // hard band except the ridge cap itself.
+    {
+      const pitch = ctx.createLinearGradient(
+        ridgeHoriz ? 0 : left, ridgeHoriz ? top : 0,
+        ridgeHoriz ? 0 : left + w, ridgeHoriz ? top + h : 0,
+      );
+      const r = Math.max(0.04, Math.min(0.96, ridgeAt / Math.max(1, across)));
+      // One material throughout — every stop is v.base shaded, so the two pitches read as the same
+      // roof lit from two angles (ref_cc3_1484), not as two different coverings.
+      pitch.addColorStop(0, shadeHex(v.base, -0.04));             // NW eave, under its overhang
+      pitch.addColorStop(r * 0.5, shadeHex(v.base, 0.14));        // up the sunlit pitch
+      pitch.addColorStop(Math.max(0, r - 0.04), shadeHex(v.base, 0.3)); // ridge, sun side
+      pitch.addColorStop(Math.min(1, r + 0.04), shadeHex(v.base, -0.16)); // ridge, shade side
+      pitch.addColorStop(Math.min(1, r + (1 - r) * 0.55), shadeHex(v.base, -0.3));
+      pitch.addColorStop(1, shadeHex(v.base, -0.44));             // SE eave, deepest shade
+      ctx.fillStyle = pitch;
+      ctx.fillRect(left, top, w, h);
+    }
     void along;
 
     // shingle / plank / tile courses at OUTPUT resolution (pattern generated per zoom)
@@ -1711,24 +1824,26 @@ function paintRoof(ctx: CanvasRenderingContext2D, map: GameMap, bb: BuildingBBox
     const pat = getRoofPattern(ctx, texKind, ridgeHoriz, zoom);
     if (pat) {
       ctx.fillStyle = pat;
-      ctx.globalAlpha = snowy ? 0.5 : 0.9;
+      // round-5 fix #5: the courses were too low-contrast to survive at zoom 1 — drawn twice
+      // (the second pass only at zoom 1, where one pattern pixel is one screen pixel) so the
+      // shingle/plank rhythm is actually visible on the map rather than only at zoom 2.
+      ctx.globalAlpha = snowy ? 0.6 : 1;
       ctx.fillRect(left, top, w, h);
+      if (!snowy && zoom <= 1) { ctx.globalAlpha = 0.55; ctx.fillRect(left, top, w, h); }
       ctx.globalAlpha = 1;
     }
-    // slope shading: lit slope brightest just below the ridge, shaded slope darkens toward eave
+    // gable-end falloff ALONG the ridge: a real roof is a little darker where it runs back into
+    // its own gable, which keeps the ridge from reading as a painted stripe of constant value
     {
-      const [lx, ly, lw, lh] = litRect;
-      const g1 = ridgeHoriz ? ctx.createLinearGradient(0, ly + lh, 0, ly) : ctx.createLinearGradient(lx + lw, 0, lx, 0);
-      g1.addColorStop(0, 'rgba(255,248,230,0.16)');
-      g1.addColorStop(1, 'rgba(255,248,230,0)');
-      ctx.fillStyle = g1;
-      ctx.fillRect(lx, ly, lw, lh);
-      const [sx, sy, sw, sh] = shadeRect;
-      const g2 = ridgeHoriz ? ctx.createLinearGradient(0, sy, 0, sy + sh) : ctx.createLinearGradient(sx, 0, sx + sw, 0);
-      g2.addColorStop(0, 'rgba(0,0,0,0.03)');
-      g2.addColorStop(1, 'rgba(0,0,0,0.14)');
-      ctx.fillStyle = g2;
-      ctx.fillRect(sx, sy, sw, sh);
+      const gEnd = ridgeHoriz
+        ? ctx.createLinearGradient(left, 0, left + w, 0)
+        : ctx.createLinearGradient(0, top, 0, top + h);
+      gEnd.addColorStop(0, 'rgba(0,0,0,0.16)');
+      gEnd.addColorStop(0.22, 'rgba(0,0,0,0)');
+      gEnd.addColorStop(0.78, 'rgba(0,0,0,0)');
+      gEnd.addColorStop(1, 'rgba(0,0,0,0.2)');
+      ctx.fillStyle = gEnd;
+      ctx.fillRect(left, top, w, h);
     }
 
     // hipped-end hint: darker triangles at each end of the ridge on the shaded slope
@@ -1975,14 +2090,28 @@ function paintEaveNotches(ctx: CanvasRenderingContext2D, map: GameMap, wx: numbe
   if (!map.windows[i]) return;
   const bid = map.buildingId[i];
   const dirs: [number, number, 'l' | 'r' | 't' | 'b'][] = [[-1, 0, 'l'], [1, 0, 'r'], [0, -1, 't'], [0, 1, 'b']];
-  ctx.fillStyle = 'rgba(230,220,170,0.85)';
+  // Round-5 fix #5: windows used to be cream blobs sitting on the roof edge and read as rivets.
+  // A window seen from above is a DARK RECESS in the eave line with a thin lit sill/lintel on the
+  // sunward side of it — three thin strips, never a filled pale square.
+  const OPENING = 'rgba(14,12,10,0.86)';
+  const SILL_LIT = 'rgba(214,198,158,0.55)';
+  const SILL_DARK = 'rgba(40,34,26,0.7)';
+  const HALF = Math.floor(TILE_PX / 2);
   for (const [dx, dy, side] of dirs) {
     const outer = !inBounds(map, wx + dx, wy + dy) || map.buildingId[idx(map, wx + dx, wy + dy)] !== bid;
     if (!outer) continue;
-    if (side === 'l') ctx.fillRect(ox, oy + 4, 2, 3);
-    else if (side === 'r') ctx.fillRect(ox + TILE_PX - 2, oy + 4, 2, 3);
-    else if (side === 't') ctx.fillRect(ox + 4, oy, 3, 2);
-    else ctx.fillRect(ox + 4, oy + TILE_PX - 2, 3, 2);
+    const horiz = side === 't' || side === 'b';
+    const len = Math.max(4, HALF - 2);        // the opening runs along the wall
+    const a = horiz ? ox + (TILE_PX - len) / 2 : (side === 'l' ? ox : ox + TILE_PX - 3);
+    const b = horiz ? (side === 't' ? oy : oy + TILE_PX - 3) : oy + (TILE_PX - len) / 2;
+    ctx.fillStyle = OPENING;
+    if (horiz) ctx.fillRect(a, b, len, 3); else ctx.fillRect(a, b, 3, len);
+    // sill: lit on the N and W faces (the light comes from the NW), shaded on S and E
+    ctx.fillStyle = side === 't' || side === 'l' ? SILL_LIT : SILL_DARK;
+    if (side === 't') ctx.fillRect(a, b + 3, len, 1);
+    else if (side === 'b') ctx.fillRect(a, b - 1, len, 1);
+    else if (side === 'l') ctx.fillRect(a + 3, b, 1, len);
+    else ctx.fillRect(a - 1, b, 1, len);
   }
 }
 

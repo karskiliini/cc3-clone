@@ -9,45 +9,73 @@ const SEED = 1941;
 // ---------------------------------------------------------------- geometry shared by the
 // terrain painter and the ground-relief painter (the landform has to follow the same stream and
 // road lines the tiles do, or the water runs along a hillside and the road climbs a bank).
+// meanders kept shallow (+-3 tiles): a tighter bulge makes cutRiver's channel run beside its own
+// polyline vertex, which leaves the "bed" on the vertex sitting above both its banks.
 const RIVER = [
-  { x: 145, y: 0 }, { x: 141, y: 20 }, { x: 148, y: 40 }, { x: 140, y: 60 },
-  { x: 150, y: 75 }, { x: 143, y: 95 }, { x: 152, y: 115 }, { x: 148, y: 135 }, { x: 152, y: 150 },
+  { x: 145, y: 0 }, { x: 142, y: 20 }, { x: 147, y: 40 }, { x: 142, y: 60 },
+  { x: 146, y: 75 }, { x: 143, y: 95 }, { x: 148, y: 115 }, { x: 145, y: 135 }, { x: 148, y: 150 },
 ];
 const MAIN_ROAD = [
   { x: 0, y: 78 }, { x: 40, y: 74 }, { x: 80, y: 78 }, { x: 100, y: 75 },
   { x: 130, y: 72 }, { x: 165, y: 76 }, { x: 200, y: 78 },
 ];
+// the north-south road follows the crest of the ridge (a lane on a watershed), so it never has
+// to be cut deeply through it — see paintElevationFor.
 const CROSS_ROAD = [
-  { x: 100, y: 5 }, { x: 96, y: 40 }, { x: 100, y: 75 }, { x: 104, y: 110 }, { x: 100, y: 145 },
+  { x: 82, y: 5 }, { x: 92, y: 40 }, { x: 100, y: 75 }, { x: 94, y: 110 }, { x: 99, y: 145 },
 ];
-const TRACK_N = [{ x: 41, y: 48 }, { x: 60, y: 60 }, { x: 100, y: 75 }];
-const TRACK_S = [{ x: 58, y: 96 }, { x: 75, y: 85 }, { x: 100, y: 75 }];
+const TRACK_N = [{ x: 80, y: 40 }, { x: 90, y: 56 }, { x: 100, y: 75 }];
+const TRACK_S = [{ x: 82, y: 112 }, { x: 92, y: 94 }, { x: 100, y: 75 }];
 
-/** Gentle rolling farmland: a low ridge runs north-south through the middle of the map, between
- * the two deploy zones, so neither side can see the other's assembly area from its own; the
- * frontier stream lies in the low ground toward the east, with the crossroads on the shoulder of
- * the ridge. Total relief ~11 m, working slopes 3-8%. */
+/** Real relief (round-5 fix #2: the old 11 m of swell never read on screen, and no crest ever
+ * masked anything). A long north-south RIDGE divides the two deploy zones, its crest carrying the
+ * crossroads knoll — the commanding ground and the map's main objective. West of the crest two
+ * broad HOLLOWS give the German attacker dead ground to work forward in; east of it the land
+ * falls into the cut valley of the frontier stream. Total relief ~21 m, ~10-17 m of it visible
+ * across a single screen; mean grade ~10%, nothing steeper than 24% (so every tile stays
+ * drivable, VEHICLE_MAX_GRADE 0.25) — the steepest ground is the stream's banks and the knoll's
+ * south shoulder. */
 function paintElevationFor(e: ElevationApi): void {
-  e.base(9);
-  e.rolling(2.0, 46, 1);
-  // the low ridge (crest around x85-95), wide and soft — a rise you walk over, not a hill
-  e.ridge([{ x: 78, y: -10 }, { x: 92, y: 40 }, { x: 88, y: 85 }, { x: 98, y: 165 }], 72, 4.5);
-  // the stream's valley: broad low ground carrying it, deepest along the watercourse
-  e.valley(RIVER, 58, 5);
-  // ground falls away gently past the stream toward the Soviet edge
-  e.slope({ x: 152, y: 0, w: 48, h: 150 }, 0, -2.2, 0);
+  e.base(7);
+  // broad swells only; the short second call supplies the squad-scale folds a man can vanish in
+  e.rolling(3.0, 118, 1);
+  e.rolling(0.8, 30, 21);
+  // the ridge: crest around x82-100, running the full height of the map, 11 m over the plain and
+  // 140 tiles (280 m) wide, so its flanks average ~8% while the crest masks each deploy zone from
+  // the other
+  e.ridge([{ x: 78, y: -20 }, { x: 94, y: 40 }, { x: 89, y: 88 }, { x: 99, y: 175 }], 140, 11);
+  // the commanding knoll the crossroads stands on — the highest ground on the map
+  e.hill(100, 75, 46, 4.0, 'smooth');
+  // dead ground on the western approach: two wide hollows the attacker can work along
+  e.hill(44, 56, 42, -2.6, 'smooth');
+  e.hill(54, 110, 38, -2.2, 'smooth');
+  // the stream's valley: broad low ground carrying it, ~6 m below the shoulders
+  e.valley(RIVER, 130, 6);
+  // the far (eastern) bank climbs again out of the stream's trough, so the watercourse really is
+  // the low ground rather than the near edge of a slab tilting off the map
+  e.slope({ x: 152, y: 0, w: 48, h: 150 }, 0, 3.5, 0);
   e.smoothElevation(2);
-  // the stream bed itself, 1.2 m below its banks
-  e.cutRiver(RIVER, 4, 1.2);
-  // the roads are graded: a cart track never climbs more than ~6-8%
-  e.gradeRoad(MAIN_ROAD, 3, 6);
-  e.gradeRoad(CROSS_ROAD, 3, 6);
-  e.gradeRoad(TRACK_N, 2.5, 8);
-  e.gradeRoad(TRACK_S, 2.5, 8);
-  e.smoothElevation(1);
-  // no cliffs: relax anything the composed features made steeper than 30%% (river banks and the
-  // balka lip do sit near that cap — those are the deliberate "steep bank" cases)
-  e.limitGrade(30);
+  // the stream bed itself, below its banks
+  e.cutRiver(RIVER, 5, 1.2);
+  // Road grading caps are deliberately loose (main roads ~11%, farm tracks 20%). They are a
+  // CEILING, not a target: the corridor follows the natural ground wherever that is already
+  // walkable, and only cuts where it is not. Forcing a cart track flatter than the hillside it
+  // crosses digs a deep cutting whose near-vertical shoulders limitGrade then eats back into the
+  // road itself — which is exactly how a "graded" road ended up at 22% before this pass.
+  e.gradeRoad(MAIN_ROAD, 3, 11);
+  e.gradeRoad(CROSS_ROAD, 3, 11);
+  e.gradeRoad(TRACK_N, 2.5, 20);
+  e.gradeRoad(TRACK_S, 2.5, 20);
+  e.smoothElevation(2);
+  // re-assert the road grades: the smoothing pass above blends the graded corridor back into
+  // the (much steeper) ground beside it, which is what let a "graded" road reach 22%
+  e.gradeRoad(MAIN_ROAD, 3, 11);
+  e.gradeRoad(CROSS_ROAD, 3, 11);
+  e.gradeRoad(TRACK_N, 2.5, 20);
+  e.gradeRoad(TRACK_S, 2.5, 20);
+  // no cliffs: 24% keeps every tile under VEHICLE_MAX_GRADE (0.25), so the relief never splits
+  // the map into unreachable vehicle regions
+  e.limitGrade(24);
   e.clampRange(0, 25);
 }
 
@@ -127,8 +155,11 @@ function paintMap(p: MapPainter): void {
   p.craterLine(mainRoad, { tStart: 0.3, tEnd: 0.75, seedOffset: 70 });
 
   // two farmsteads with yards, fences, orchard, veg patch, decor
-  p.farmstead(41, 45, 20);
-  p.farmstead(60, 98, 22);
+  // round-5 fix #8: both farmsteads moved into the contested middle third, between the two
+  // (now much closer) deploy zones, so they are objectives to fight over rather than ground one
+  // side starts on top of.
+  p.farmstead(80, 40, 20);
+  p.farmstead(82, 112, 22);
 
   // stray fence remnants along the near farmstead's field edge, and a hedge line closing off
   // the SE crop parcel from the road shoulder
@@ -181,15 +212,19 @@ export const border_1941: MapDef = {
   },
   elevation: paintElevationFor,
   victoryLocations: [
-    { id: 0, name: 'Crossroads', x: 100, y: 75, value: 2 },
-    { id: 1, name: 'North Farm', x: 41, y: 45, value: 1 },
-    { id: 2, name: 'South Farm', x: 60, y: 98, value: 1 },
-    { id: 3, name: 'Bridge', x: 149, y: 74, value: 3 },
+    { id: 0, name: 'Crossroads', x: 100, y: 75, value: 3 },
+    { id: 1, name: 'North Farm', x: 80, y: 40, value: 1 },
+    { id: 2, name: 'South Farm', x: 82, y: 112, value: 2 },
+    // the bridge is now well behind the Soviet deploy zone: a deep objective, not the main prize
+    { id: 3, name: 'Bridge', x: 149, y: 74, value: 1 },
     { id: 4, name: 'Orchard', x: 92, y: 38, value: 1 },
   ],
+  // round-5 fix #8: the old zones were 170 tiles (340 m) apart with each force smeared over the
+  // map's full 150-tile height, so a battle spent its first 2-3 minutes walking. Both are now one
+  // screen tall and 90 tiles (180 m) apart, with the ridge crest between them.
   deployZones: {
-    german: { x: 0, y: 0, w: 30, h: 150 },
-    soviet: { x: 170, y: 0, w: 30, h: 150 },
+    german: { x: 24, y: 50, w: 26, h: 50 },
+    soviet: { x: 114, y: 50, w: 26, h: 50 },
   },
   decor,
   vectors,

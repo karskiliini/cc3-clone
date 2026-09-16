@@ -313,15 +313,20 @@ describe('shipped map relief', () => {
       for (const v of g!) { if (v < lo) lo = v; if (v > hi) hi = v; }
       expect(lo, def.id).toBeGreaterThanOrEqual(0);
       expect(hi, def.id).toBeLessThanOrEqual(25);
-      expect(hi - lo, `${def.id} should actually have relief`).toBeGreaterThan(3);
+      // round-5 fix #2: the maps used to carry 5-12 m of swell, which the depth map proved was
+      // invisible in play (2-6 m across a whole screen). Every map now has real landforms.
+      expect(hi - lo, `${def.id} should actually have relief`).toBeGreaterThan(15);
 
       const steep = map.groundSteep!;
       let sum = 0, max = 0;
       for (let i = 0; i < steep.length; i++) { sum += steep[i]; if (steep[i] > max) max = steep[i]; }
       const mean = sum / steep.length;
       expect(mean, `${def.id} mean grade`).toBeGreaterThan(0.005);
-      expect(mean, `${def.id} mean grade`).toBeLessThan(0.09);   // typical 2-8%
-      expect(max, `${def.id} steepest grade (no cliffs)`).toBeLessThanOrEqual(0.302);
+      // ~15-21 m of relief on a 400 m map genuinely costs grade: typical working slopes are now
+      // 4-10% with the ridge flanks and stream banks above that.
+      expect(mean, `${def.id} mean grade`).toBeLessThan(0.11);
+      // every map now relaxes to 24%, below VEHICLE_MAX_GRADE, so relief never strands a tank
+      expect(max, `${def.id} steepest grade (no cliffs)`).toBeLessThanOrEqual(0.245);
     }
   });
 
@@ -362,17 +367,28 @@ describe('shipped map relief', () => {
           }
         }
         if (v.kind === 'road' && v.points.length > 1) {
-          // sampled along the polyline, the road's own grade stays walkable
+          // Sampled along the polyline, the road's own grade stays walkable. Two bounds, because
+          // two different things matter: the ROAD grade (what a cart or a lorry climbs) is a
+          // gradient over tens of metres, measured here over a 3-tile (6 m) window; the per-tile
+          // step matters only in that it must stay drivable (VEHICLE_MAX_GRADE). A single tile
+          // can be steeper than the road as a whole where two graded roads cross and the second
+          // corridor overwrites the first's — a kerb at a junction, not a hill.
+          const WINDOW_TILES = 3;
           for (let k = 0; k < v.points.length - 1; k++) {
             const a = v.points[k], b = v.points[k + 1];
             const len = Math.hypot(b.x - a.x, b.y - a.y);
             const n = Math.max(1, Math.round(len));
+            const at = (s: number) => ({ x: a.x + (b.x - a.x) * (s / n), y: a.y + (b.y - a.y) * (s / n) });
             for (let s = 0; s < n; s++) {
-              const p0 = { x: a.x + (b.x - a.x) * (s / n), y: a.y + (b.y - a.y) * (s / n) };
-              const p1 = { x: a.x + (b.x - a.x) * ((s + 1) / n), y: a.y + (b.y - a.y) * ((s + 1) / n) };
+              const p0 = at(s), p1 = at(s + 1);
               const run = Math.hypot(p1.x - p0.x, p1.y - p0.y) * TILE_M;
               if (run < 0.5) continue;
-              const grade = Math.abs(groundHeightAt(map, p1) - groundHeightAt(map, p0)) / run;
+              const step = Math.abs(groundHeightAt(map, p1) - groundHeightAt(map, p0)) / run;
+              expect(step, `${def.id} road step near ${p0.x.toFixed(0)},${p0.y.toFixed(0)}`).toBeLessThanOrEqual(VEHICLE_MAX_GRADE);
+              const q1 = at(Math.min(n, s + WINDOW_TILES));
+              const wrun = Math.hypot(q1.x - p0.x, q1.y - p0.y) * TILE_M;
+              if (wrun < 2) continue;
+              const grade = Math.abs(groundHeightAt(map, q1) - groundHeightAt(map, p0)) / wrun;
               expect(grade, `${def.id} road grade near ${p0.x.toFixed(0)},${p0.y.toFixed(0)}`).toBeLessThan(0.2);
             }
           }

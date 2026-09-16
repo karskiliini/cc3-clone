@@ -23,33 +23,49 @@ const KOLKHOZ_SPUR = [{ x: 60, y: 82 }, { x: 70, y: 96 }, { x: 60, y: 116 }, { x
 const FORD_ROAD = [{ x: 92, y: 122 }, { x: 100, y: 130 }, { x: 108, y: 138 }];
 const HALT_SPUR = [{ x: 150, y: 77 }, { x: 153, y: 55 }, { x: 155, y: 38 }];
 
-/** A shallow valley running north-south with the frozen river at the bottom of it, and a low
- * rise on the east bank carrying the village and its church — so the church looks down over the
- * bridge and the German approach from the west climbs out of the river flat to reach it.
- * Total relief ~12 m, valley sides 5-9%. */
+/** Real relief (round-5 fix #2). The frozen Skhodnya runs at the bottom of a genuine VALLEY
+ * ~9 m below the shoulders on either side; a RIDGE on each bank carries the two jump-off areas,
+ * and the village's church stands on a knoll on the east shoulder looking straight down onto the
+ * bridge. A hollow west of the river gives the German attacker dead ground short of the crossing.
+ * Total relief ~20 m, ~9-16 m across a screen; mean grade ~9%, nothing above 24% (under
+ * VEHICLE_MAX_GRADE, so the valley never traps a tank). */
 function paintElevationFor(e: ElevationApi): void {
-  e.base(11);
-  e.rolling(1.6, 52, 2);
-  // the valley: a broad, shallow trough centred on the river
-  e.valley(RIVER, 104, 6);
-  // the village rise on the east bank (church at 113,55), and a softer swell carrying the
-  // kolkhoz on the west bank
-  e.hill(116, 58, 36, 3.2);
-  e.hill(58, 110, 32, 2.4);
-  // the ground climbs slowly away from the river toward both map edges
-  e.slope({ x: 160, y: 0, w: 40, h: 150 }, 0, 1.6, 0);
-  e.slope({ x: 0, y: 0, w: 40, h: 150 }, 1.6, 0, 0);
+  e.base(4);
+  e.rolling(2.6, 118, 2);
+  e.rolling(0.8, 28, 22);
+  // the valley itself, built as two long ramps meeting at the river: the ground falls ~16 m over
+  // the 200 m from either map edge down to the water, a steady 8% — the shape you actually walk
+  // down, and the reason the far bank's village looks down on the crossing.
+  e.slope({ x: 0, y: 0, w: 100, h: 150 }, 16, 0, 0);
+  e.slope({ x: 100, y: 0, w: 100, h: 150 }, 0, 17, 0);
+  // the east shoulder is a defined ridge line carrying the village above the flood plain
+  e.ridge([{ x: 146, y: -20 }, { x: 140, y: 50 }, { x: 148, y: 100 }, { x: 142, y: 170 }], 90, 4.0);
+  // the church knoll on the east bank, straight above the bridge, and the kolkhoz swell west
+  e.hill(112, 56, 34, 5.0, 'smooth');
+  e.hill(58, 112, 38, 2.4, 'smooth');
+  // dead ground short of the crossing, on the German side of the river
+  e.hill(78, 96, 38, -2.6, 'smooth');
   e.smoothElevation(2);
-  e.cutRiver(RIVER, 4, 1.0);
-  e.gradeRoad(MAIN_ROAD, 5, 5);
-  e.gradeRoad(SIDE_LANE, 3, 6);
-  e.gradeRoad(KOLKHOZ_SPUR, 3, 7);
-  e.gradeRoad(FORD_ROAD, 3, 8);
-  e.gradeRoad(HALT_SPUR, 3, 7);
-  e.smoothElevation(1);
-  // no cliffs: relax anything the composed features made steeper than 30%% (river banks and the
-  // balka lip do sit near that cap — those are the deliberate "steep bank" cases)
-  e.limitGrade(30);
+  e.cutRiver(RIVER, 4, 0.6);
+  // Road grading caps are a CEILING, not a target (main roads ~11%, minor tracks 20%): the
+  // corridor follows the natural ground where that is already walkable and only cuts where it is
+  // not. Forcing a track flatter than the hillside it crosses digs a cutting whose near-vertical
+  // shoulders limitGrade then eats back into the road itself.
+  e.gradeRoad(MAIN_ROAD, 5, 11);
+  e.gradeRoad(SIDE_LANE, 3, 20);
+  e.gradeRoad(KOLKHOZ_SPUR, 3, 20);
+  e.gradeRoad(FORD_ROAD, 3, 20);
+  e.gradeRoad(HALT_SPUR, 3, 20);
+  e.smoothElevation(2);
+  // re-assert the road grades: the smoothing pass above blends the graded corridor back into
+  // the (much steeper) ground beside it, which is what let a "graded" road reach 22%
+  e.gradeRoad(MAIN_ROAD, 5, 11);
+  e.gradeRoad(SIDE_LANE, 3, 20);
+  e.gradeRoad(KOLKHOZ_SPUR, 3, 20);
+  e.gradeRoad(FORD_ROAD, 3, 20);
+  e.gradeRoad(HALT_SPUR, 3, 20);
+  // no cliffs, and nothing above VEHICLE_MAX_GRADE (0.25)
+  e.limitGrade(24);
   e.clampRange(0, 25);
 }
 
@@ -220,16 +236,19 @@ export const winter_1941: MapDef = {
   victoryLocations: [
     { id: 0, name: 'Church', x: 113, y: 55, value: 3 },
     { id: 1, name: 'Bridge', x: 99, y: 80, value: 3 },
-    { id: 2, name: 'Railway Halt', x: 157, y: 37, value: 2 },
+    // balance (round 5): with the deploy zones pulled in to 90 tiles apart, the Halt sits deep
+    // behind the Soviet line and the Kolkhoz behind the German one, so their values are swapped —
+    // the points now sit on the ground the two sides actually contest across the river.
+    { id: 2, name: 'Railway Halt', x: 157, y: 37, value: 1 },
     { id: 3, name: 'Kolkhoz', x: 56, y: 118, value: 2 },
     { id: 4, name: 'Crossroads', x: 130, y: 81, value: 1 },
   ],
+  // round-5 fix #8: the old zones were 164 tiles (328 m) apart across the whole map height. Both
+  // are now one screen across, 90 tiles (180 m) apart and straddling the river valley, so the
+  // Germans make contact at the crossing in the first minute or two.
   deployZones: {
-    // balance: widened from w:26 - the old narrow strip put the zone centre ~200m+ from the
-    // Church/Bridge objectives, forcing German attackers to cross the entire open snowfield
-    // before making contact; this brings the primary axis into the ~150-200m band.
-    german: { x: 0, y: 0, w: 50, h: 150 },
-    soviet: { x: 178, y: 0, w: 22, h: 150 },
+    german: { x: 32, y: 60, w: 28, h: 28 },
+    soviet: { x: 122, y: 60, w: 28, h: 28 },
   },
   decor,
   vectors,

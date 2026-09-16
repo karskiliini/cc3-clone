@@ -19,19 +19,30 @@ const TRAM_AVENUE = [{ x: -10, y: 55 }, { x: 230, y: 55 }];
  * running in a shallow sunken cutting — the one piece of dead ground in an otherwise exposed
  * street grid. Relief ~6 m, street grades 1-3%, cutting sides ~17%. */
 function paintElevationFor(e: ElevationApi): void {
-  e.base(4);
-  e.rolling(0.5, 64, 7);
-  // the slight rise carrying the Ministry (105,51) and the Platz
-  e.hill(104, 50, 64, 2.8, 'plateau');
-  // the eastern approach is a touch lower still
-  e.slope({ x: 150, y: 0, w: 70, h: 160 }, 0, -1.0, 0);
+  e.base(3);
+  e.rolling(1.8, 124, 7);
+  e.rolling(0.6, 30, 27);
+  // the city is built across a long slope: the ground falls ~17 m over the 440 m from the
+  // Ministry quarter in the west down to the eastern suburbs, so the Soviet assault is always
+  // looking uphill and the Platz stands visibly above the eastern approach streets.
+  e.slope({ x: 0, y: 0, w: 220, h: 160 }, 17, 0, 0);
+  // the knoll the Ministry and the Platz stand on
+  e.hill(112, 50, 72, 6.0, 'smooth');
+  // the tram cutting: 3 m below street level, with the cross streets dipping through it
+  e.valley(TRAM_AVENUE, 24, 3.0);
   e.smoothElevation(2);
-  // the tram cutting: 1.5 m below street level, with the cross streets dipping through it
-  e.valley(TRAM_AVENUE, 15, 1.5);
-  e.smoothElevation(1);
-  // no cliffs: relax anything the composed features made steeper than 30%% (river banks and the
-  // balka lip do sit near that cap — those are the deliberate "steep bank" cases)
-  e.limitGrade(30);
+  // the streets are engineered: each avenue is graded, the cross streets ramping down into the
+  // tram cutting rather than dropping over its lip
+  const gradeStreets = (): void => {
+    e.gradeRoad(TRAM_AVENUE, 7, 11);
+    for (const y of H_STREETS) e.gradeRoad([{ x: 0, y }, { x: 220, y }], 5, 11);
+    for (const x of V_STREETS) e.gradeRoad([{ x, y: 0 }, { x, y: 160 }], 5, 11);
+  };
+  // relaxation: each pass re-reads the field, so a street crossing an already-graded avenue
+  // takes that avenue's height at the junction; after a few passes the whole grid agrees.
+  for (let pass = 0; pass < 4; pass++) gradeStreets();
+  // no cliffs, and nothing above VEHICLE_MAX_GRADE (0.25)
+  e.limitGrade(24);
   e.clampRange(0, 25);
 }
 
@@ -164,9 +175,12 @@ export const berlin_1945: MapDef = {
     { id: 3, name: 'Barricade', x: 43, y: 98, value: 1 },
     { id: 4, name: 'U-Bahn', x: 33, y: 133, value: 1 },
   ],
+  // round-5 fix #8: the deploy zones used to sit on opposite map edges, 130-190 tiles apart,
+  // with each force smeared across the map's full width — minutes of walking before contact.
+  // They are now one screen across and 90 tiles (180 m) apart, straddling the contested ground.
   deployZones: {
-    soviet: { x: 190, y: 0, w: 30, h: 160 },
-    german: { x: 0, y: 0, w: 30, h: 160 },
+    soviet: { x: 127, y: 65, w: 28, h: 28 },
+    german: { x: 37, y: 65, w: 28, h: 28 },
   },
   decor,
   vectors,
