@@ -7,3 +7,4 @@ ref/
 tools/uiScreens_shots/
 *.png
 test-results/
+.scratch/
