@@ -154,7 +154,10 @@ export function makeSlapEcho(ctx: Ctx, dest: AudioNode, delaySec = 0.09, feedbac
 /** Continuously-running oscillator+filter "engine" voice; caller controls
  * frequency/gain live and calls stop() to tear it down. */
 export interface EngineVoice {
-  setSpeed(speedFactor: number): void;
+  /** `volumeMul` (0..1, default 1) is an extra multiplier applied on top of the
+   * speed-derived gain — used by the caller for distance attenuation. */
+  setSpeed(speedFactor: number, volumeMul?: number): void;
+  setPan(pan: number): void;
   stop(when?: number): void;
 }
 
@@ -170,20 +173,35 @@ export function startEngineVoice(ctx: Ctx, dest: AudioNode, baseHz = 45, maxHz =
   const gain = ctx.createGain();
   gain.gain.value = 0.0001;
 
+  let out: AudioNode = gain;
+  let panner: StereoPannerNode | null = null;
+  if (ctx.createStereoPanner) {
+    panner = ctx.createStereoPanner();
+    gain.connect(panner);
+    out = panner;
+  }
+
   osc.connect(lp);
   lp.connect(gain);
-  gain.connect(dest);
+  out.connect(dest);
   osc.start();
 
   let stopped = false;
+  let baseGain = 0.0001;
   return {
-    setSpeed(speedFactor: number) {
+    setSpeed(speedFactor: number, volumeMul = 1) {
       if (stopped) return;
       const now = ctx.currentTime;
       const sf = Math.max(0, Math.min(1, speedFactor));
+      const vm = Math.max(0, Math.min(1, volumeMul));
       const freq = baseHz + (maxHz - baseHz) * sf;
+      baseGain = 0.0001 + sf * 0.12 * vm;
       osc.frequency.setTargetAtTime(freq, now, 0.08);
-      gain.gain.setTargetAtTime(0.0001 + sf * 0.12, now, 0.15);
+      gain.gain.setTargetAtTime(baseGain, now, 0.15);
+    },
+    setPan(pan: number) {
+      if (stopped || !panner) return;
+      panner.pan.setTargetAtTime(Math.max(-1, Math.min(1, pan)), ctx.currentTime, 0.1);
     },
     stop(when?: number) {
       if (stopped) return;

@@ -57,6 +57,12 @@ export class Game {
       const mod = await import('@/audio/sfx');
       this.audio = new mod.Sfx();
       this.audio.setVolume(this.settings.volume);
+      // Dev-only hook so a live/headless browser check can read audio state
+      // (ctx.state, master volume, per-kind play counts) without shipping any
+      // instrumentation into the production build.
+      if ((import.meta as any).env?.DEV) {
+        (window as any).__cc3Audio = this.audio;
+      }
     } catch {
       // audio module not available yet
     }

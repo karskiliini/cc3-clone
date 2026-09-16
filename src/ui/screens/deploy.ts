@@ -166,7 +166,8 @@ export class DeployScreen implements Screen {
       } else if (this.draggingTeamId != null) {
         const dropWorld = this.snappedDropPoint(cam, { x: r.x, y: r.y });
         const ok = this.battle.deployTeam(this.draggingTeamId, dropWorld);
-        if (!ok) this.invalidTimer = 1;
+        if (ok) game.audio?.play('click');
+        else this.invalidTimer = 1;
         this.draggingTeamId = null;
         this.dragInvalid = false;
       }
@@ -191,8 +192,10 @@ export class DeployScreen implements Screen {
     const action = this.bottomStrip.update(input);
     if (action === 'auto') {
       aiDeploy(this.battle.state, this.battle.playerSide(), this.battle.rng, this.battle);
+      game.audio?.play('click');
     } else if (action === 'begin') {
       this.battle.start();
+      game.audio?.play('click');
       game.setScreen(new BattleScreen(this.battle, this.terrain));
     } else if (action === 'map') {
       this.showMinimap = !this.showMinimap;

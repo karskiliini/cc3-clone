@@ -3,7 +3,7 @@ import { Sfx, type SfxKind } from '@/audio/sfx';
 const KINDS: SfxKind[] = [
   'rifle', 'smg', 'lmg', 'hmg', 'pistol',
   'mortarFire', 'mortarHit', 'tankGun', 'atGun', 'explosion', 'grenade',
-  'ricochet', 'smokePop', 'click', 'message', 'flagCapture', 'scream',
+  'ricochet', 'smokePop', 'click', 'message', 'flagCapture', 'scream', 'teamBroken',
 ];
 
 const sfx = new Sfx();

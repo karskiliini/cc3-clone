@@ -3,6 +3,8 @@ import { ORDER_DOT_COLOR, ORDER_HOTKEYS, ORDER_TYPES, VIEW_H, VIEW_W, otherSide 
 import { game } from '@/game';
 import type { Battle } from '@/sim/battle';
 import { teamCanFire, teamHasSmoke } from '@/sim/team';
+import { VEHICLE_DEFS } from '@/data/units';
+import { clamp } from '@/shared/math';
 import { addMessage } from '@/sim/messages';
 import { flee } from '@/sim/victory';
 import { centerCamera, clampCamera, panCamera, screenToWorld, worldToScreen, zoomIn, zoomOut } from '@/engine/camera';
@@ -128,6 +130,13 @@ export class BattleScreen implements Screen {
     const zone = map.def.deployZones[this.battle.playerSide()];
     centerCamera(game.cam, { x: zone.x + zone.w / 2, y: zone.y + zone.h / 2 });
     clampCamera(game.cam, map.width, map.height);
+  }
+
+  onExit(): void {
+    // Stop looping voices so they don't keep playing under the options/debrief
+    // screens; update() re-establishes them (ambient/engines) as soon as this
+    // screen is active again.
+    game.audio?.stopAll();
   }
 
   /** Team-grid roster: every team of `side`, including out-of-action ones (unlike
@@ -518,7 +527,22 @@ export class BattleScreen implements Screen {
       this.visionOverlay.reset();
     }
 
+    game.audio?.setPaused(this.paused || state.phase !== 'running');
     game.audio?.handleEvents(battle.drainEvents(), cam);
+    game.audio?.ambient(state.phase === 'running' && !this.paused);
+    game.audio?.updateVehicles(
+      [...state.vehicles.values()].map((v) => {
+        const def = VEHICLE_DEFS[v.defId];
+        const maxSpeed = Math.max(1, def?.speedRoadMs ?? 8);
+        return {
+          id: v.id,
+          pos: v.pos,
+          speedFactor: clamp(v.speed / maxSpeed, 0, 1),
+          active: v.state !== 'knockedOut',
+        };
+      }),
+      cam,
+    );
   }
 
   draw(ctx: CanvasRenderingContext2D): void {

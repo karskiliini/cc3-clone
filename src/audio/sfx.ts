@@ -19,7 +19,8 @@ import {
 export type SfxKind =
   | 'rifle' | 'smg' | 'lmg' | 'hmg' | 'pistol'
   | 'mortarFire' | 'mortarHit' | 'tankGun' | 'atGun' | 'explosion' | 'grenade'
-  | 'ricochet' | 'smokePop' | 'click' | 'message' | 'flagCapture' | 'scream';
+  | 'ricochet' | 'smokePop' | 'click' | 'message' | 'flagCapture' | 'scream'
+  | 'teamBroken';
 
 /** Kinds that get priority when the polyphony cap is exceeded. */
 const HIGH_PRIORITY: ReadonlySet<SfxKind> = new Set(['explosion', 'tankGun', 'atGun', 'mortarHit']);
@@ -28,11 +29,14 @@ const MAX_CONCURRENT_PER_WINDOW = 12;
 const WINDOW_MS = 100;
 const MAX_ENGINES = 6;
 const MESSAGE_MIN_INTERVAL_S = 2;
+const SCREAM_MIN_INTERVAL_S = 1.2;
+const TEAM_BROKEN_MIN_INTERVAL_S = 3;
 
 export class Sfx {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private masterVolume = 0.7;
+  private paused = false;
 
   private recentPlays: number[] = []; // performance.now() timestamps of one-shots in the current window
 
@@ -41,6 +45,14 @@ export class Sfx {
   private ambientOn = false;
 
   private lastMessageAt = -Infinity;
+  private lastScreamAt = -Infinity;
+  private lastTeamBrokenAt = -Infinity;
+
+  /** Debug/regression-test counter: how many times each sound kind has actually
+   * been scheduled (i.e. survived ready()/admit()/pause checks). Cheap to keep
+   * around always; battle.ts exposes it behind a dev-only flag for manual
+   * verification, and the unit tests read it directly via a fake backend. */
+  readonly counts: Partial<Record<SfxKind, number>> = {};
 
   /** Call on the first user gesture (click/keydown). Safe to call many times. */
   unlock(): void {
@@ -65,11 +77,22 @@ export class Sfx {
 
   setVolume(v: number): void {
     this.masterVolume = clamp(v, 0, 1);
-    if (this.master) this.master.gain.value = this.masterVolume;
+    if (this.master && !this.paused) this.master.gain.value = this.masterVolume;
+  }
+
+  /** Battle pause (F3/space) or the game losing focus: hard-mutes the master
+   * bus (so any already-playing engine/ambient loop goes silent too, not just
+   * new one-shots) and stops admitting new sounds until unpaused. */
+  setPaused(v: boolean): void {
+    if (this.paused === v) return;
+    this.paused = v;
+    if (this.master && this.ctx) {
+      this.master.gain.setTargetAtTime(v ? 0 : this.masterVolume, this.ctx.currentTime, 0.01);
+    }
   }
 
   private ready(): boolean {
-    return this.ctx !== null && this.master !== null && this.ctx.state !== 'closed';
+    return this.ctx !== null && this.master !== null && this.ctx.state !== 'closed' && !this.paused;
   }
 
   private admit(kind: SfxKind): boolean {
@@ -92,6 +115,8 @@ export class Sfx {
     if (!this.ready()) return;
     if (gain <= 0) return;
     if (!this.admit(kind)) return;
+
+    this.counts[kind] = (this.counts[kind] ?? 0) + 1;
 
     const ctx = this.ctx!;
     const dest = this.master!;
@@ -116,11 +141,12 @@ export class Sfx {
       case 'message': message(ctx, dest, when, g); break;
       case 'flagCapture': flagCapture(ctx, dest, when, g); break;
       case 'scream': scream(ctx, dest, when, g, pan); break;
+      case 'teamBroken': teamBrokenAlarm(ctx, dest, when, g); break;
     }
   }
 
   /** Per-vehicle looping engine sound. speedFactor 0..1, null stops/removes it. */
-  engine(id: number, speedFactor: number | null): void {
+  engine(id: number, speedFactor: number | null, volumeMul = 1, pan?: number): void {
     if (speedFactor === null) {
       const v = this.engines.get(id);
       if (v) {
@@ -136,7 +162,41 @@ export class Sfx {
       v = startEngineVoice(this.ctx!, this.master!);
       this.engines.set(id, v);
     }
-    v.setSpeed(speedFactor);
+    v.setSpeed(speedFactor, volumeMul);
+    if (pan !== undefined) v.setPan(pan);
+  }
+
+  /** Drives one looping engine voice per moving vehicle (pitch/volume scaled by
+   * speed, capped at MAX_ENGINES, distance-attenuated from the viewport centre,
+   * panned by horizontal offset) and tears down voices for vehicles that
+   * stopped, were knocked out, or dropped out of the list. Call once per frame
+   * with the full live vehicle set; a no-op (and clears all voices) when not
+   * ready or paused. */
+  updateVehicles(
+    vehicles: Iterable<{ id: number; pos: { x: number; y: number }; speedFactor: number; active: boolean }>,
+    cam: Camera,
+  ): void {
+    if (!this.ready()) {
+      if (this.engines.size > 0) {
+        for (const id of [...this.engines.keys()]) this.engine(id, null);
+      }
+      return;
+    }
+    const centre = { x: cam.x + 40 / cam.zoom, y: cam.y + 24 / cam.zoom };
+    const seen = new Set<number>();
+    for (const veh of vehicles) {
+      if (!veh.active || veh.speedFactor <= 0.02) continue;
+      seen.add(veh.id);
+      const dxTiles = veh.pos.x - centre.x;
+      const dyTiles = veh.pos.y - centre.y;
+      const distM = Math.hypot(dxTiles, dyTiles) * 2; // TILE_M = 2
+      const atten = clamp(1 - distM / 400, 0.05, 1) ** 2;
+      const pan = clamp(dxTiles / 40, -0.8, 0.8);
+      this.engine(veh.id, veh.speedFactor, atten, pan);
+    }
+    for (const id of [...this.engines.keys()]) {
+      if (!seen.has(id)) this.engine(id, null);
+    }
   }
 
   ambient(on: boolean): void {
@@ -150,6 +210,33 @@ export class Sfx {
     }
     if (!this.ready() || this.ambientVoice) return;
     this.ambientVoice = startAmbientWind(this.ctx!, this.master!);
+  }
+
+  /** Tears down every continuous voice (ambient wind + all vehicle engines).
+   * Call when leaving the battle screen so nothing keeps looping underneath
+   * the debrief/menu screens. */
+  stopAll(): void {
+    this.ambient(false);
+    for (const id of [...this.engines.keys()]) this.engine(id, null);
+  }
+
+  /** Debug/test snapshot — not used by gameplay code. */
+  debugState(): {
+    ctxState: AudioContextState | 'none';
+    masterVolume: number;
+    paused: boolean;
+    ambientOn: boolean;
+    engineCount: number;
+    counts: Partial<Record<SfxKind, number>>;
+  } {
+    return {
+      ctxState: this.ctx?.state ?? 'none',
+      masterVolume: this.masterVolume,
+      paused: this.paused,
+      ambientOn: this.ambientOn,
+      engineCount: this.engines.size,
+      counts: this.counts,
+    };
   }
 
   /** Map battle events to sounds with distance attenuation from viewport centre. */
@@ -176,7 +263,9 @@ export class Sfx {
           break;
         }
         case 'kill': {
-          // Kept simple per spec: no automatic sound for kills.
+          // Occasional scream on a casualty — rate-limited so a firefight full
+          // of kills doesn't turn into a scream chorus.
+          this.rateLimitedScream(ev.pos, centre);
           break;
         }
         case 'vlCaptured': {
@@ -197,9 +286,24 @@ export class Sfx {
           break;
         }
         case 'teamBroken':
+          this.rateLimitedTeamBroken();
           break;
       }
     }
+  }
+
+  private rateLimitedScream(pos: { x: number; y: number } | undefined, centre: { x: number; y: number }): void {
+    const now = performance.now() / 1000;
+    if (now - this.lastScreamAt < SCREAM_MIN_INTERVAL_S) return;
+    this.lastScreamAt = now;
+    this.emitAt('scream', pos, centre, 0.85);
+  }
+
+  private rateLimitedTeamBroken(): void {
+    const now = performance.now() / 1000;
+    if (now - this.lastTeamBrokenAt < TEAM_BROKEN_MIN_INTERVAL_S) return;
+    this.lastTeamBrokenAt = now;
+    this.play('teamBroken', 0.55);
   }
 
   private rateLimitedMessage(): void {
@@ -401,6 +505,13 @@ function flagCapture(ctx: AudioContext, dest: AudioNode, when: number, gain: num
   notes.forEach((f, i) => {
     tone(ctx, dest, when + i * 0.09, { freq: f, duration: 0.12, gain: gain * 0.25, type: 'square' });
   });
+}
+
+/** Urgent two-buzz descending alarm for a team breaking/routing — deliberately
+ * distinct from the neutral two-tone `message` chime. */
+function teamBrokenAlarm(ctx: AudioContext, dest: AudioNode, when: number, gain: number): void {
+  tone(ctx, dest, when, { freq: 700, freqTo: 300, duration: 0.22, gain: gain * 0.4, type: 'sawtooth' });
+  tone(ctx, dest, when + 0.26, { freq: 700, freqTo: 300, duration: 0.22, gain: gain * 0.4, type: 'sawtooth' });
 }
 
 function scream(ctx: AudioContext, dest: AudioNode, when: number, gain: number, pan: number | undefined): void {
