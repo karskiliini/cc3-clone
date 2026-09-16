@@ -1,7 +1,8 @@
 import type { BattleState, Side, Soldier, Stance, Vec2 } from '@/shared/types';
 import { SIDES, otherSide, TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
-import { losTrace } from './los';
+import { losTrace, eyeHeightM, EYE_STANDING_M, EYE_VEHICLE_M } from './los';
+import { groundAtTile } from './map';
 import { angleTo, facingAngle, wrapAngle, dist } from '@/shared/math';
 import { onSpotted } from './mind';
 
@@ -52,7 +53,26 @@ function mindSpotFactor(spotter: Soldier, enemyPos: Vec2): number {
  * vehicle (crew spot from the vehicle's position; `soldier` null, no mind bonus). */
 export interface Spotter { pos: Vec2; soldier: Soldier | null }
 
-export type LosVisibilityFn = (from: Vec2, to: Vec2) => number;
+/** Eye height (m) of a spotter: his stance, or a vehicle commander at 2.2 m. */
+export function spotterEyeM(sp: Spotter): number {
+  return sp.soldier ? eyeHeightM(sp.soldier.stance) : EYE_VEHICLE_M;
+}
+
+/** Height-advantage spotting factor: +10% per 5 m the observer stands above the target, capped
+ * at +30%, and the mirror image (down to x0.7) when looking up at higher ground. 1 on a flat map. */
+export const HEIGHT_SPOT_PER_M = 0.1 / 5;
+export const HEIGHT_SPOT_CAP = 0.3;
+export function heightSpotFactor(state: BattleState, from: Vec2, to: Vec2): number {
+  const map = state.map;
+  if (!map.ground) return 1;
+  const dh = groundAtTile(map, Math.floor(from.x), Math.floor(from.y))
+    - groundAtTile(map, Math.floor(to.x), Math.floor(to.y));
+  let f = dh * HEIGHT_SPOT_PER_M;
+  if (f > HEIGHT_SPOT_CAP) f = HEIGHT_SPOT_CAP; else if (f < -HEIGHT_SPOT_CAP) f = -HEIGHT_SPOT_CAP;
+  return 1 + f;
+}
+
+export type LosVisibilityFn = (from: Vec2, to: Vec2, eyeM?: number, targetM?: number) => number;
 
 /** Is this soldier an eligible spotter (alive, conscious, dismounted)? */
 function soldierCanSpot(s: Soldier): boolean {
@@ -77,18 +97,31 @@ export function collectSpotters(state: BattleState, side: Side, teamIds?: Readon
   return spotters;
 }
 
-/** Tile-keyed losTrace visibility cache — the same memo updateSpotting uses per side per tick. */
+/** Tile-keyed losTrace visibility cache — the same memo updateSpotting uses per side per tick.
+ * The key carries the eye/target heights too, since terrain masking (a crest between) depends on
+ * them: two observers in the same tile but different stances can genuinely differ. */
 export function makeLosVisibilityCache(state: BattleState): LosVisibilityFn {
-  const losCache = new Map<string, number>();
-  return (from: Vec2, to: Vec2): number => {
-    const key = `${Math.floor(from.x)},${Math.floor(from.y)}|${Math.floor(to.x)},${Math.floor(to.y)}`;
+  const losCache = new Map<number, number>();
+  const W = state.map.width;
+  const tiles = W * state.map.height;
+  return (from: Vec2, to: Vec2, eyeM = EYE_STANDING_M, targetM = EYE_STANDING_M): number => {
+    // numeric key (exact well inside 2^53 for any map we ship): from-tile, to-tile, and the two
+    // height classes, since terrain masking makes the trace depend on eye/silhouette height too.
+    const a = Math.floor(from.y) * W + Math.floor(from.x);
+    const b = Math.floor(to.y) * W + Math.floor(to.x);
+    const key = ((a * tiles + b) * 4 + eyeClass(eyeM)) * 4 + eyeClass(targetM);
     let v = losCache.get(key);
     if (v === undefined) {
-      v = losTrace(state.map, from, to).visibility;
+      v = losTrace(state.map, from, to, { eyeM, targetM }).visibility;
       losCache.set(key, v);
     }
     return v;
   };
+}
+
+/** 0..3 bucket for an eye/silhouette height (prone, crouching, standing, vehicle). */
+function eyeClass(m: number): number {
+  return m <= 0.7 ? 0 : m <= 1.4 ? 1 : m <= 1.95 ? 2 : 3;
 }
 
 /**
@@ -98,11 +131,14 @@ export function makeLosVisibilityCache(state: BattleState): LosVisibilityFn {
  */
 export function observerVisibility(
   state: BattleState, observer: Spotter, targetPos: Vec2,
-  rangeM: number = SOLDIER_SPOT_RANGE_M, losFor?: LosVisibilityFn,
+  rangeM: number = SOLDIER_SPOT_RANGE_M, losFor?: LosVisibilityFn, targetM: number = EYE_STANDING_M,
 ): number {
   const rangeTiles = rangeM / TILE_M;
   if (distSqTiles(observer.pos, targetPos) > rangeTiles * rangeTiles) return 0;
-  const v = losFor ? losFor(observer.pos, targetPos) : losTrace(state.map, observer.pos, targetPos).visibility;
+  const eyeM = spotterEyeM(observer);
+  const v = losFor
+    ? losFor(observer.pos, targetPos, eyeM, targetM)
+    : losTrace(state.map, observer.pos, targetPos, { eyeM, targetM }).visibility;
   return v > 0 ? v : 0;
 }
 
@@ -119,7 +155,8 @@ export function observerStandingSpotScore(
   if (visibility <= 0) return 0;
   const alwaysTiles = ALWAYS_SPOT_RANGE_M / TILE_M;
   if (distSqTiles(observer.pos, targetPos) <= alwaysTiles * alwaysTiles) return 1;
-  return visibility * (observer.soldier ? mindSpotFactor(observer.soldier, targetPos) : 1);
+  return visibility * (observer.soldier ? mindSpotFactor(observer.soldier, targetPos) : 1)
+    * heightSpotFactor(state, observer.pos, targetPos);
 }
 
 export function updateSpotting(state: BattleState, rng: Rng): void {
@@ -151,8 +188,11 @@ export function updateSpotting(state: BattleState, rng: Rng): void {
       let anyClearLOS = false;
       let alwaysSpotted = false;
 
+      // the target's own silhouette top: a prone man behind a crest is masked where a standing
+      // one is not, so the LOS trace needs his stance as well as the observer's
+      const targetTopM = eyeHeightM(e.stance);
       for (const sp of spotters) {
-        const visibility = observerVisibility(state, sp, e.pos, SOLDIER_SPOT_RANGE_M, losFor);
+        const visibility = observerVisibility(state, sp, e.pos, SOLDIER_SPOT_RANGE_M, losFor, targetTopM);
         if (visibility <= 0) continue;
         const dsq = distSqTiles(sp.pos, e.pos);
         if (visibility > 0.05) anyClearLOS = true;
@@ -160,7 +200,7 @@ export function updateSpotting(state: BattleState, rng: Rng): void {
 
         const mindFactor = sp.soldier ? mindSpotFactor(sp.soldier, e.pos) : 1;
         const p = visibility * visibilityStanceFactor(e.stance) * (isMoving(e.activity) ? 1.5 : 1) *
-          (isFiringRecently(e, state.time) ? 3 : 1) * mindFactor;
+          (isFiringRecently(e, state.time) ? 3 : 1) * mindFactor * heightSpotFactor(state, sp.pos, e.pos);
         if (p > bestP) { bestP = p; bestSpotter = sp.soldier; }
       }
 
@@ -191,7 +231,7 @@ export function updateSpotting(state: BattleState, rng: Rng): void {
       if (ev.side !== enemySide) continue;
       let clear = false;
       for (const sp of spotters) {
-        const visibility = observerVisibility(state, sp, ev.pos, VEHICLE_SPOT_RANGE_M, losFor);
+        const visibility = observerVisibility(state, sp, ev.pos, VEHICLE_SPOT_RANGE_M, losFor, EYE_VEHICLE_M);
         if (visibility > 0) { clear = true; break; }
       }
       if (clear) newSpottedVehicles.add(ev.id);

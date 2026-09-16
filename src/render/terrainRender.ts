@@ -23,7 +23,7 @@
 // chunks at all — it only ever scales that low-res canvas.
 // ============================================================================
 import type { Camera, GameMap, BattleState, MapVectorFeature, Terrain, Season, Vec2 } from '@/shared/types';
-import { TILE_PX, VIEW_W, VIEW_H } from '@/shared/types';
+import { TILE_M, TILE_PX, VIEW_W, VIEW_H } from '@/shared/types';
 import { hash2 } from '@/shared/rng';
 import { fbm, fbm64, fbm14, heightField, fbmClump, angleField } from '@/render/noise';
 import { idx, tileAt, inBounds } from '@/sim/map';
@@ -289,11 +289,37 @@ function groundColorFbm(t: Terrain, season: Season, X: number, Y: number, seed: 
   return rampLerp(ramp, tt);
 }
 
-/** Smooth low-frequency relief shading factor (NW light), 0.85..1.15.
- * heightField's wavelength (~400px) is far larger than a pixel, so this is
- * computed once per 4x4-pixel block and cached for the life of a chunk bake
- * (reset per bakeChunk call) rather than resampled every pixel. */
+/** Hillshading from the map's REAL ground elevation (sim/mapdsl.ts's ElevationPainter, per tile,
+ * bilinearly interpolated), lit from the north-west: a slope facing NW brightens, one falling
+ * away to the SE darkens, +-RELIEF_AMP. A map with no relief (`map.ground` undefined) falls back
+ * to the old low-frequency fbm mottling so hand-built/test maps still get some tonal variety.
+ *
+ * The terms vary over hundreds of pixels, so this is evaluated once per 4x4-pixel block and
+ * memoised for the life of one chunk bake (reset per bakeChunk call), exactly as before — the
+ * bake cost is unchanged apart from two Float32Array bilinear reads per block instead of two
+ * fbm evaluations (strictly cheaper). */
+const RELIEF_AMP = 0.18;
+/** metres of rise per metre of run that saturates the shading (a ~35% slope is fully lit/shaded) */
+const RELIEF_FULL_GRADE = 0.35;
 let reliefCache: Map<number, number> | null = null;
+let reliefGround: Float32Array | null = null;
+let reliefW = 0, reliefH = 0;
+
+/** Bilinear ground elevation (m) at a world pixel. */
+function groundAtPx(X: number, Y: number): number {
+  const g = reliefGround!;
+  const W = reliefW, H = reliefH;
+  const fx = X / TILE_PX - 0.5, fy = Y / TILE_PX - 0.5;
+  let x0 = Math.floor(fx), y0 = Math.floor(fy);
+  const ax = fx - x0, ay = fy - y0;
+  let x1 = x0 + 1, y1 = y0 + 1;
+  if (x0 < 0) x0 = 0; if (x1 < 0) x1 = 0; if (x0 >= W) x0 = W - 1; if (x1 >= W) x1 = W - 1;
+  if (y0 < 0) y0 = 0; if (y1 < 0) y1 = 0; if (y0 >= H) y0 = H - 1; if (y1 >= H) y1 = H - 1;
+  const a = g[y0 * W + x0], b = g[y0 * W + x1], c = g[y1 * W + x0], d = g[y1 * W + x1];
+  const top = a + (b - a) * ax;
+  return top + (c + (d - c) * ax - top) * ay;
+}
+
 function reliefFactor(X: number, Y: number, seed: number): number {
   const bx = X >> 2, by = Y >> 2;
   const key = (bx & 0xffff) * 100003 + (by & 0xffff);
@@ -302,10 +328,22 @@ function reliefFactor(X: number, Y: number, seed: number): number {
     const hit = cache.get(key);
     if (hit !== undefined) return hit;
   }
-  const h1 = heightField(X - 4, Y - 4, seed);
-  const h2 = heightField(X + 4, Y + 4, seed);
-  let f = 1 + 0.18 * (h1 - h2) * 8;
-  f = f < 0.85 ? 0.85 : f > 1.15 ? 1.15 : f;
+  let f: number;
+  if (reliefGround) {
+    // central differences over one tile (2 m) in each axis, in metres of rise per metre of run
+    const runM = 2 * TILE_M;
+    const gx = (groundAtPx(X + TILE_PX, Y) - groundAtPx(X - TILE_PX, Y)) / runM;
+    const gy = (groundAtPx(X, Y + TILE_PX) - groundAtPx(X, Y - TILE_PX)) / runM;
+    // light from the NW: its horizontal direction of travel is (+1,+1)/sqrt2 (toward the SE), so
+    // illumination is -(gradient . lightDir) — ground rising toward the light gets brighter.
+    const lit = -(gx + gy) * Math.SQRT1_2 / RELIEF_FULL_GRADE;
+    f = 1 + RELIEF_AMP * (lit < -1 ? -1 : lit > 1 ? 1 : lit);
+  } else {
+    const h1 = heightField(X - 4, Y - 4, seed);
+    const h2 = heightField(X + 4, Y + 4, seed);
+    f = 1 + 0.18 * (h1 - h2) * 8;
+    f = f < 0.85 ? 0.85 : f > 1.15 ? 1.15 : f;
+  }
   if (cache) cache.set(key, f);
   return f;
 }
@@ -2882,6 +2920,7 @@ export class TerrainRenderer {
     // at true output resolution — bpt px/tile — not zoom-1 and upscaled)
     const img = ctx.createImageData(chunkPx, chunkPx);
     reliefCache = new Map<number, number>();
+    reliefGround = map.ground ?? null; reliefW = map.width; reliefH = map.height;
     paintGroundAndFeatures(
       img.data, chunkPx, map, season, this.seed, x0, y0, CHUNK_TILES, CHUNK_TILES,
       this.groundUnder, map.width, map.height, this.fieldId, this.fieldAxis,
@@ -2890,6 +2929,7 @@ export class TerrainRenderer {
       woodsGrid, leeGrid, trampleGrid,
     );
     reliefCache = null;
+    reliefGround = null;
     ctx.putImageData(img, 0, 0);
 
     // Everything below draws with plain canvas ops in TILE_PX-unit coordinates (unchanged from

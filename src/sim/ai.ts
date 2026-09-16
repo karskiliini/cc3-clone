@@ -4,7 +4,7 @@ import type {
 import { otherSide, TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { angleTo, dist } from '@/shared/math';
-import { inBounds, coverAt, concealmentAt } from './map';
+import { inBounds, coverAt, concealmentAt, groundAtTile } from './map';
 import { isPassable } from './path';
 import { hasLOS } from './los';
 import { VEHICLE_DEFS } from '@/data/units';
@@ -138,7 +138,22 @@ function teamHasLOSToEnemy(state: BattleState, team: Team, enemyPos: Vec2): bool
   return false;
 }
 
-function bestCoverWithin(state: BattleState, centre: Vec2, radiusTiles: number, rng: Rng): Vec2 {
+/** How much a metre of height advantage over the enemy approach is worth against a point of
+ * terrain cover when picking a defensive position ("high ground" in the CC3 manual: better fields
+ * of fire, harder to assault from below). Two metres of command ~= 0.36 cover, i.e. it breaks ties
+ * between comparable positions without overriding a genuinely good hedge/building. */
+const HEIGHT_DEFENCE_WEIGHT = 0.18;
+
+/** Ground height (m) at a tile — 0 on a flat map, so every score below collapses to the old one. */
+function groundAtPos(state: BattleState, p: Vec2): number {
+  return groundAtTile(state.map, Math.floor(p.x), Math.floor(p.y));
+}
+
+/** Picks a defensive fire position near `centre`: best cover, but preferring ground that stands
+ * above where the enemy will come from (`approachFrom`, typically the enemy deploy zone). */
+function bestCoverWithin(state: BattleState, centre: Vec2, radiusTiles: number, rng: Rng, approachFrom?: Vec2): Vec2 {
+  const approachH = approachFrom ? groundAtPos(state, approachFrom) : 0;
+  const useHeight = approachFrom !== undefined && state.map.ground !== undefined;
   let best: Vec2 | null = null;
   let bestScore = -Infinity;
   for (let i = 0; i < 30; i++) {
@@ -149,7 +164,8 @@ function bestCoverWithin(state: BattleState, centre: Vec2, radiusTiles: number, 
     if (!inBounds(state.map, x, y)) continue;
     if (!isPassable(state.map, x, y, 'infantry')) continue;
     const pos = { x: x + 0.5, y: y + 0.5 };
-    const score = coverAt(state.map, pos);
+    let score = coverAt(state.map, pos);
+    if (useHeight) score += (groundAtTile(state.map, x, y) - approachH) * HEIGHT_DEFENCE_WEIGHT;
     if (score > bestScore) { bestScore = score; best = pos; }
   }
   return best ?? centre;
@@ -184,6 +200,14 @@ function goodCoverNearRoad(state: BattleState, centre: Vec2, rng: Rng): Vec2 {
   return best ?? centre;
 }
 
+/** Bonus for a candidate step that sits in DEAD GROUND relative to the objective — out of sight
+ * of whoever is holding it, because a fold or a reverse slope masks it. Worth a few tiles of
+ * progress, so an attacker will take a slightly longer covered route but never stall. Only
+ * evaluated when already closing (preferConcealment), so the extra LOS traces stay off the hot
+ * path, and only on a map with relief (on a flat map the sample would only ever find woods/walls,
+ * which `cover`/`concealment` already score). */
+const DEAD_GROUND_BONUS = 4;
+
 function chooseWaypoint(
   state: BattleState, from: Vec2, objective: Vec2, rng: Rng, preferConcealment = false, flankBiasRad = 0,
 ): Vec2 {
@@ -204,6 +228,8 @@ function chooseWaypoint(
   // re-centred on the flanking bearing.
   const bearing = angleTo(from, objective) + flankBiasRad;
   const maxR = Math.min(25, Math.max(4, toObjective));
+  const useDeadGround = preferConcealment && state.map.ground !== undefined;
+  const objectiveH = useDeadGround ? groundAtPos(state, objective) : 0;
   let best: Vec2 | null = null;
   let bestScore = -Infinity;
   for (let i = 0; i < 30; i++) {
@@ -222,7 +248,11 @@ function chooseWaypoint(
     const concealment = preferConcealment ? concealmentAt(state.map, pos) : 0;
     const dObj = dist(pos, objective);
     const progress = toObjective - dObj; // positive = closer to objective than `from`
-    const score = progress + cover * 0.5 + concealment * 1.5;
+    // cheap gate first: you can only be in dead ground if you are BELOW the objective, so the
+    // LOS trace is only paid for on candidates that could possibly qualify
+    const deadGround = useDeadGround && groundAtTile(state.map, x, y) < objectiveH - 0.5
+      && !hasLOS(state.map, objective, pos) ? DEAD_GROUND_BONUS : 0;
+    const score = progress + cover * 0.5 + concealment * 1.5 + deadGround;
     if (score > bestScore) { bestScore = score; best = pos; }
   }
   return best ?? objective;
@@ -456,7 +486,7 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
       // "already in position" distance check with noise.
       const prev = team.aiObjective;
       const pos = vl && (!prev || dist(prev, { x: vl.x, y: vl.y }) > 10)
-        ? bestCoverWithin(state, { x: vl.x, y: vl.y }, 8, rng)
+        ? bestCoverWithin(state, { x: vl.x, y: vl.y }, 8, rng, enemyZoneCentre)
         : (prev ?? team.pos);
       team.aiObjective = pos;
 

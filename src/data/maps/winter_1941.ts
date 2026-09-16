@@ -1,4 +1,5 @@
 import type { DecorItem, MapDef, MapVectorFeature, Terrain } from '@/shared/types';
+import type { ElevationApi } from '@/shared/types';
 import { MapPainter } from '@/sim/mapdsl';
 
 const WIDTH = 200;
@@ -7,6 +8,51 @@ const SEED = 194112;
 
 /** December 1941: a German drive on the Moscow highway pushes through a snowbound village on
  * the frozen Skhodnya, the Soviet defenders falling back on a dug-in trench line beyond it. */
+// ---------------------------------------------------------------- shared geometry (see the
+// note in border_1941.ts: the landform must follow the same river and road lines as the tiles)
+const RIVER = [
+  { x: 104, y: 0 }, { x: 99, y: 25 }, { x: 106, y: 50 }, { x: 99, y: 80 },
+  { x: 105, y: 105 }, { x: 100, y: 130 }, { x: 103, y: 150 },
+];
+const MAIN_ROAD = [
+  { x: 0, y: 82 }, { x: 30, y: 78 }, { x: 60, y: 82 }, { x: 90, y: 79 },
+  { x: 100, y: 80 }, { x: 120, y: 81 }, { x: 150, y: 77 }, { x: 180, y: 80 }, { x: 200, y: 78 },
+];
+const SIDE_LANE = [{ x: 130, y: 0 }, { x: 132, y: 40 }, { x: 129, y: 81 }, { x: 131, y: 120 }, { x: 130, y: 150 }];
+const KOLKHOZ_SPUR = [{ x: 60, y: 82 }, { x: 70, y: 96 }, { x: 60, y: 116 }, { x: 55, y: 115 }];
+const FORD_ROAD = [{ x: 92, y: 122 }, { x: 100, y: 130 }, { x: 108, y: 138 }];
+const HALT_SPUR = [{ x: 150, y: 77 }, { x: 153, y: 55 }, { x: 155, y: 38 }];
+
+/** A shallow valley running north-south with the frozen river at the bottom of it, and a low
+ * rise on the east bank carrying the village and its church — so the church looks down over the
+ * bridge and the German approach from the west climbs out of the river flat to reach it.
+ * Total relief ~12 m, valley sides 5-9%. */
+function paintElevationFor(e: ElevationApi): void {
+  e.base(11);
+  e.rolling(1.6, 52, 2);
+  // the valley: a broad, shallow trough centred on the river
+  e.valley(RIVER, 104, 6);
+  // the village rise on the east bank (church at 113,55), and a softer swell carrying the
+  // kolkhoz on the west bank
+  e.hill(116, 58, 36, 3.2);
+  e.hill(58, 110, 32, 2.4);
+  // the ground climbs slowly away from the river toward both map edges
+  e.slope({ x: 160, y: 0, w: 40, h: 150 }, 0, 1.6, 0);
+  e.slope({ x: 0, y: 0, w: 40, h: 150 }, 1.6, 0, 0);
+  e.smoothElevation(2);
+  e.cutRiver(RIVER, 4, 1.0);
+  e.gradeRoad(MAIN_ROAD, 5, 5);
+  e.gradeRoad(SIDE_LANE, 3, 6);
+  e.gradeRoad(KOLKHOZ_SPUR, 3, 7);
+  e.gradeRoad(FORD_ROAD, 3, 8);
+  e.gradeRoad(HALT_SPUR, 3, 7);
+  e.smoothElevation(1);
+  // no cliffs: relax anything the composed features made steeper than 30%% (river banks and the
+  // balka lip do sit near that cap — those are the deliberate "steep bank" cases)
+  e.limitGrade(30);
+  e.clampRange(0, 25);
+}
+
 function paintMap(p: MapPainter): void {
   p.fill('snow');
 
@@ -32,10 +78,7 @@ function paintMap(p: MapPainter): void {
   p.treeLine([{ x: 15, y: 108 }, { x: 55, y: 104 }], 22, 0.15);
 
   // the frozen river, a wide bridge carrying the main street across and a narrower ford south
-  const river = [
-    { x: 104, y: 0 }, { x: 99, y: 25 }, { x: 106, y: 50 }, { x: 99, y: 80 },
-    { x: 105, y: 105 }, { x: 100, y: 130 }, { x: 103, y: 150 },
-  ];
+  const river = RIVER;
   p.river(river, 3);
   p.patch(101, 25, 4, 'mud');
   p.patch(103, 105, 4, 'mud');
@@ -47,10 +90,7 @@ function paintMap(p: MapPainter): void {
 
   // main street through the village, gently curving, with telegraph poles and battle damage
   // concentrated in the contested middle third
-  const mainRoad = [
-    { x: 0, y: 82 }, { x: 30, y: 78 }, { x: 60, y: 82 }, { x: 90, y: 79 },
-    { x: 100, y: 80 }, { x: 120, y: 81 }, { x: 150, y: 77 }, { x: 180, y: 80 }, { x: 200, y: 78 },
-  ];
+  const mainRoad = MAIN_ROAD;
   p.road(mainRoad, 4, 'pavedroad');
   // bridge rect computed from the actual road/river intersection (round-3 fix: the old
   // hand-placed rect drifted off the crossing and rendered as two plank blocks straddling the
@@ -61,15 +101,15 @@ function paintMap(p: MapPainter): void {
 
   // north-south side lane through the village (the Crossroads), linking the railway halt to
   // the trench line in the south
-  p.road([{ x: 130, y: 0 }, { x: 132, y: 40 }, { x: 129, y: 81 }, { x: 131, y: 120 }, { x: 130, y: 150 }], 2, 'dirtroad');
+  p.road(SIDE_LANE, 2, 'dirtroad');
   // spur south-west to the kolkhoz (stays on the west bank, no crossing needed)
-  p.road([{ x: 60, y: 82 }, { x: 70, y: 96 }, { x: 60, y: 116 }, { x: 55, y: 115 }], 2, 'dirtroad');
+  p.road(KOLKHOZ_SPUR, 2, 'dirtroad');
   // a farm track fording the river south of the village, well clear of the main bridge
-  const fordRoad = [{ x: 92, y: 122 }, { x: 100, y: 130 }, { x: 108, y: 138 }];
+  const fordRoad = FORD_ROAD;
   p.road(fordRoad, 2, 'dirtroad');
   const fordPt = p.bridgeAcross(fordRoad, 2, river, 3, { near: { x: 100, y: 130 } }) ?? { x: 100, y: 130 };
   // spur north to the railway halt
-  p.road([{ x: 150, y: 77 }, { x: 153, y: 55 }, { x: 155, y: 38 }], 2, 'dirtroad');
+  p.road(HALT_SPUR, 2, 'dirtroad');
 
   // village houses along the main street, staggered rows on either bank of the river; a curving
   // side lane serves the ones set back from the street
@@ -176,6 +216,7 @@ export const winter_1941: MapDef = {
     const p = new MapPainter(tiles, w, h, SEED);
     paintMap(p);
   },
+  elevation: paintElevationFor,
   victoryLocations: [
     { id: 0, name: 'Church', x: 113, y: 55, value: 3 },
     { id: 1, name: 'Bridge', x: 99, y: 80, value: 3 },

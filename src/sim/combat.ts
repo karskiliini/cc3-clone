@@ -7,7 +7,7 @@ import type { Rng } from '@/shared/rng';
 import { clamp, dist, facingAngle, facingTo, angleTo, turnTowards, wrapAngle } from '@/shared/math';
 import { hitChance, penetrates, armorFacingFor, damageRoll } from './ballistics';
 import { tileAt, coverAt, setTile, idx } from './map';
-import { hasLOS } from './los';
+import { hasLOS, eyeHeightM, EYE_VEHICLE_M } from './los';
 import { addSmoke } from './smoke';
 import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';
@@ -220,10 +220,13 @@ function pickTarget(state: BattleState, soldier: Soldier, team: Team | undefined
   if (order?.type === 'ambush') maxRangeM = Math.min(maxRangeM, AMBUSH_TRIGGER_M);
   if (order?.type === 'smoke') return null;
 
+  // A firer's sightline starts at his own eye height and ends at the target's silhouette, so a
+  // crest between them masks the shot for a prone man where a standing one still has it.
+  const firerEyeM = eyeHeightM(soldier.stance);
   const inRangeLOS = (pos: Vec2): boolean => {
     const dM = dist(soldier.pos, pos) * TILE_M;
     if (dM > maxRangeM) return false;
-    return hasLOS(map, soldier.pos, pos);
+    return hasLOS(map, soldier.pos, pos, { eyeM: firerEyeM });
   };
 
   const { soldiers: cands, vehicles: vcands } = gatherCandidates(state, soldier.side);

@@ -1,4 +1,5 @@
 import type { DecorItem, MapDef, MapVectorFeature, Terrain } from '@/shared/types';
+import type { ElevationApi } from '@/shared/types';
 import { MapPainter } from '@/sim/mapdsl';
 
 const WIDTH = 240;
@@ -7,6 +8,49 @@ const SEED = 1943;
 
 /** July 1943: a Soviet rifle regiment storms a dug-in German line on the open Kursk steppe,
  * fighting through a kolkhoz and its sunflower fields toward the trenches and craters beyond. */
+// ---------------------------------------------------------------- shared geometry
+const MAIN_TRACK = [
+  { x: 0, y: 102 }, { x: 45, y: 98 }, { x: 90, y: 103 }, { x: 135, y: 99 },
+  { x: 180, y: 104 }, { x: 240, y: 100 },
+];
+const NS_TRACK = [
+  { x: 180, y: 0 }, { x: 176, y: 40 }, { x: 182, y: 80 }, { x: 178, y: 120 }, { x: 182, y: 170 },
+];
+/** the balka (dry gully) — painted as a trench-terrain line and cut as a real gully below */
+const BALKA = [
+  { x: 40, y: 115 }, { x: 65, y: 122 }, { x: 90, y: 112 }, { x: 115, y: 118 },
+  { x: 145, y: 108 }, { x: 175, y: 116 }, { x: 210, y: 109 },
+];
+const KOLKHOZ_SPUR = [{ x: 62, y: 93 }, { x: 62, y: 102 }];
+
+/** Open steppe: long, low swells rolling east-west (the German line in the north and the Soviet
+ * jump-off in the south each sit on one), a commanding rise carrying the kolkhoz, and the balka
+ * cut 3.5 m below the plain as a genuine gully — dead ground an attacker can work along, and the
+ * reason the dug-in rifle pits on its southern lip matter. Relief ~15 m, swells 2-5%,
+ * gully sides ~20%. */
+function paintElevationFor(e: ElevationApi): void {
+  e.base(12);
+  e.rolling(2.4, 74, 4);
+  // long low swells: one carrying the German trench belt, one through the middle
+  e.ridge([{ x: -20, y: 30 }, { x: 120, y: 26 }, { x: 260, y: 34 }], 52, 2.2);
+  e.ridge([{ x: -20, y: 68 }, { x: 70, y: 74 }, { x: 150, y: 62 }, { x: 260, y: 70 }], 66, 3.0);
+  // the commanding rise the kolkhoz stands on — it looks down the whole southern approach
+  e.hill(62, 82, 42, 5.0);
+  // the ground sags toward the southern (Soviet) edge
+  e.slope({ x: 0, y: 130, w: 240, h: 40 }, 0, -2.4, Math.PI / 2);
+  e.smoothElevation(2);
+  // the balka: 3.5 m deep, ~26 tiles (52 m) across including its sloping sides
+  e.valley(BALKA, 26, 3.5);
+  e.gradeRoad(MAIN_TRACK, 3, 6);
+  e.gradeRoad(NS_TRACK, 3, 7);
+  e.gradeRoad(KOLKHOZ_SPUR, 3, 8);
+  e.smoothElevation(1);
+  // no cliffs: relax anything the composed features made steeper than 30%% (river banks and the
+  // balka lip do sit near that cap — those are the deliberate "steep bank" cases)
+  e.limitGrade(30);
+  e.clampRange(0, 25);
+}
+
 function paintMap(p: MapPainter): void {
   p.fill('grass');
   p.patch(25, 40, 10, 'open');
@@ -45,14 +89,9 @@ function paintMap(p: MapPainter): void {
   p.woods(97, 66, 9, 7);
 
   // dirt tracks crossing the steppe, curved, with a junction
-  const mainTrack = [
-    { x: 0, y: 102 }, { x: 45, y: 98 }, { x: 90, y: 103 }, { x: 135, y: 99 },
-    { x: 180, y: 104 }, { x: 240, y: 100 },
-  ];
+  const mainTrack = MAIN_TRACK;
   p.road(mainTrack, 2, 'dirtroad');
-  p.road([
-    { x: 180, y: 0 }, { x: 176, y: 40 }, { x: 182, y: 80 }, { x: 178, y: 120 }, { x: 182, y: 170 },
-  ], 2, 'dirtroad');
+  p.road(NS_TRACK, 2, 'dirtroad');
   p.rect(177, 101, 3, 3, 'dirtroad');
   p.decorLine(mainTrack, 'pole', 8);
   p.craterLine(mainTrack, { tStart: 0.3, tEnd: 0.75, seedOffset: 80 });
@@ -81,10 +120,7 @@ function paintMap(p: MapPainter): void {
   p.patch(105, 60, 2, 'crater');
 
   // a balka (dry gully) curving through the middle, also a trench-like feature
-  p.line([
-    { x: 40, y: 115 }, { x: 65, y: 122 }, { x: 90, y: 112 }, { x: 115, y: 118 },
-    { x: 145, y: 108 }, { x: 175, y: 116 }, { x: 210, y: 109 },
-  ], 'trench');
+  p.line(BALKA, 'trench');
   p.rect(114, 117, 2, 2, 'trench');
 
   // balance: tallgrass patches giving the approach to the balka gully some concealment short
@@ -99,7 +135,7 @@ function paintMap(p: MapPainter): void {
   p.line([{ x: 52, y: 75 }, { x: 72, y: 75 }, { x: 72, y: 93 }, { x: 62, y: 93 }], 'fence');
   p.line([{ x: 58, y: 93 }, { x: 52, y: 93 }, { x: 52, y: 75 }], 'fence');
   p.rect(61, 80, 2, 5, 'open'); // trodden farmyard, fit exactly in the gap between the two buildings
-  p.road([{ x: 62, y: 93 }, { x: 62, y: 102 }], 2, 'dirtroad');
+  p.road(KOLKHOZ_SPUR, 2, 'dirtroad');
   p.addDecor('well', 62, 84);
   p.addDecor('haystack', 68, 90);
   p.addDecor('cart', 54, 90);
@@ -149,6 +185,7 @@ export const steppe_1943: MapDef = {
     const p = new MapPainter(tiles, w, h, SEED);
     paintMap(p);
   },
+  elevation: paintElevationFor,
   victoryLocations: [
     { id: 0, name: 'Kolkhoz', x: 62, y: 82, value: 3 },
     // balance: Trench Line 2->1, Balka 1->2 - harness runs showed the soviet attacker often

@@ -1,4 +1,5 @@
-import type { DecorItem, DecorKind, MapVectorFeature, Terrain, Vec2 } from '@/shared/types';
+import type { DecorItem, DecorKind, ElevationApi, HillFalloff, MapDef, MapVectorFeature, Rect, Terrain, Vec2 } from '@/shared/types';
+import { TILE_M } from '@/shared/types';
 import { hash2 } from '@/shared/rng';
 
 const NON_DECOR_TILES = new Set<Terrain>(['water', 'buildingWood', 'buildingStone', 'floor']);
@@ -510,4 +511,447 @@ export class MapPainter {
       }
     }
   }
+}
+
+
+// ============================================================================
+// ElevationPainter — the GROUND layer of the height model: one elevation in metres per tile,
+// painted with the same deterministic, declarative style as MapPainter paints terrain.
+//
+// Design notes
+//  * The field is per tile (2 m). heightField.ts bilinearly interpolates it up to the 0.5 m
+//    sample grid, so slopes read smooth; the sim's hot paths read the per-tile array directly.
+//  * Range is meant to stay inside ~0..25 m, with typical slopes of 2-8% (0.04-0.16 m per tile).
+//    `clampRange` and `smoothElevation` are the safety net; `steepestGradeIn` lets tests assert
+//    that nothing became a cliff.
+//  * Everything here is pure arithmetic on a Float32Array — no RNG, only `hash2` — so two builds
+//    of the same map produce bit-identical ground.
+// ============================================================================
+
+function clamp01e(v: number): number { return v < 0 ? 0 : v > 1 ? 1 : v; }
+function smoothstep(t: number): number { const c = clamp01e(t); return c * c * (3 - 2 * c); }
+
+/** Falloff profile f(d) for d = 0 (centre) .. 1 (edge); 1 at the centre, 0 at the edge. */
+function falloffAt(kind: HillFalloff, d: number): number {
+  const t = clamp01e(d);
+  switch (kind) {
+    case 'cone': return 1 - t;
+    case 'dome': return Math.sqrt(Math.max(0, 1 - t * t));
+    case 'plateau': return 1 - smoothstep((t - 0.45) / 0.55);
+    default: return 1 - smoothstep(t);
+  }
+}
+
+interface Station { x: number; y: number; d: number; h: number }
+
+export class ElevationPainter implements ElevationApi {
+  readonly w: number;
+  readonly h: number;
+  readonly seed: number;
+  /** per-tile elevation, metres */
+  readonly e: Float32Array;
+  private scratch: Float32Array | null = null;
+
+  constructor(w: number, h: number, seed = 0) {
+    this.w = w;
+    this.h = h;
+    this.seed = seed;
+    this.e = new Float32Array(w * h);
+  }
+
+  at(x: number, y: number): number {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    if (xi < 0 || yi < 0 || xi >= this.w || yi >= this.h) return 0;
+    return this.e[yi * this.w + xi];
+  }
+
+  add(x: number, y: number, m: number): void {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    if (xi < 0 || yi < 0 || xi >= this.w || yi >= this.h) return;
+    this.e[yi * this.w + xi] += m;
+  }
+
+  base(m: number): void { this.e.fill(m); }
+
+  clampRange(lo: number, hi: number): void {
+    const e = this.e;
+    for (let i = 0; i < e.length; i++) e[i] = e[i] < lo ? lo : e[i] > hi ? hi : e[i];
+  }
+
+  /** Bilinear read at fractional tile coords (tile centres are at x+0.5). */
+  sample(x: number, y: number): number {
+    const fx = x - 0.5, fy = y - 0.5;
+    let x0 = Math.floor(fx), y0 = Math.floor(fy);
+    const ax = fx - x0, ay = fy - y0;
+    let x1 = x0 + 1, y1 = y0 + 1;
+    const W = this.w, H = this.h;
+    if (x0 < 0) x0 = 0; if (x1 < 0) x1 = 0; if (x0 >= W) x0 = W - 1; if (x1 >= W) x1 = W - 1;
+    if (y0 < 0) y0 = 0; if (y1 < 0) y1 = 0; if (y0 >= H) y0 = H - 1; if (y1 >= H) y1 = H - 1;
+    const e = this.e;
+    const a = e[y0 * W + x0], b = e[y0 * W + x1], c = e[y1 * W + x0], d = e[y1 * W + x1];
+    const top = a + (b - a) * ax;
+    return top + (c + (d - c) * ax - top) * ay;
+  }
+
+  // ---------------------------------------------------------------- landforms
+  hill(cx: number, cy: number, radiusTiles: number, peakM: number, falloff: HillFalloff = 'smooth'): void {
+    if (radiusTiles <= 0) return;
+    const x0 = Math.max(0, Math.floor(cx - radiusTiles)), x1 = Math.min(this.w - 1, Math.ceil(cx + radiusTiles));
+    const y0 = Math.max(0, Math.floor(cy - radiusTiles)), y1 = Math.min(this.h - 1, Math.ceil(cy + radiusTiles));
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const dx = x + 0.5 - cx, dy = y + 0.5 - cy;
+        const d = Math.hypot(dx, dy) / radiusTiles;
+        if (d >= 1) continue;
+        // a gentle irregularity so a hill is not a perfect cone of revolution
+        const wob = 1 + (hash2(Math.round(Math.atan2(dy, dx) * 6), Math.round(radiusTiles), this.seed + 6601) - 0.5) * 0.18;
+        this.e[y * this.w + x] += peakM * falloffAt(falloff, d * wob);
+      }
+    }
+  }
+
+  ridge(points: Vec2[], widthTiles: number, heightM: number): void {
+    this.alongPolyline(points, widthTiles, (i, wgt) => { this.e[i] += heightM * wgt; });
+  }
+
+  valley(points: Vec2[], widthTiles: number, depthM: number): void {
+    this.alongPolyline(points, widthTiles, (i, wgt) => { this.e[i] -= depthM * wgt; });
+  }
+
+  /** Shared feathered-corridor walk: calls `apply(tileIndex, weight)` for every tile within
+   * `widthTiles/2` of the polyline (weight 1 on the centreline, smoothly 0 at the edge). */
+  private alongPolyline(points: Vec2[], widthTiles: number, apply: (i: number, w: number) => void): void {
+    if (points.length < 2 || widthTiles <= 0) return;
+    const half = widthTiles / 2;
+    const touched = new Map<number, number>();
+    for (let s = 0; s < points.length - 1; s++) {
+      const a = points[s], b = points[s + 1];
+      const x0 = Math.max(0, Math.floor(Math.min(a.x, b.x) - half - 1));
+      const x1 = Math.min(this.w - 1, Math.ceil(Math.max(a.x, b.x) + half + 1));
+      const y0 = Math.max(0, Math.floor(Math.min(a.y, b.y) - half - 1));
+      const y1 = Math.min(this.h - 1, Math.ceil(Math.max(a.y, b.y) + half + 1));
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          const d = distToSeg(x + 0.5, y + 0.5, a.x, a.y, b.x, b.y);
+          if (d >= half) continue;
+          const wgt = 1 - smoothstep(d / half);
+          const i = y * this.w + x;
+          const prev = touched.get(i) ?? 0;
+          if (wgt > prev) touched.set(i, wgt);
+        }
+      }
+    }
+    for (const [i, wgt] of touched) apply(i, wgt);
+  }
+
+  slope(rect: Rect, fromM: number, toM: number, angleRad: number): void {
+    const ux = Math.cos(angleRad), uy = Math.sin(angleRad);
+    const x0 = Math.max(0, Math.floor(rect.x)), x1 = Math.min(this.w - 1, Math.ceil(rect.x + rect.w) - 1);
+    const y0 = Math.max(0, Math.floor(rect.y)), y1 = Math.min(this.h - 1, Math.ceil(rect.y + rect.h) - 1);
+    // project the rect's own corners on the axis so t spans 0..1 across it
+    let lo = Infinity, hi = -Infinity;
+    for (const [px, py] of [[rect.x, rect.y], [rect.x + rect.w, rect.y], [rect.x, rect.y + rect.h], [rect.x + rect.w, rect.y + rect.h]]) {
+      const t = px * ux + py * uy;
+      if (t < lo) lo = t; if (t > hi) hi = t;
+    }
+    const span = hi - lo || 1;
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const t = ((x + 0.5) * ux + (y + 0.5) * uy - lo) / span;
+        this.e[y * this.w + x] += fromM + (toM - fromM) * clamp01e(t);
+      }
+    }
+  }
+
+  terrace(rect: Rect, m: number): void {
+    const feather = 2;
+    const x0 = Math.max(0, Math.floor(rect.x - feather)), x1 = Math.min(this.w - 1, Math.ceil(rect.x + rect.w + feather));
+    const y0 = Math.max(0, Math.floor(rect.y - feather)), y1 = Math.min(this.h - 1, Math.ceil(rect.y + rect.h + feather));
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const cx = x + 0.5, cy = y + 0.5;
+        const dx = Math.max(rect.x - cx, cx - (rect.x + rect.w), 0);
+        const dy = Math.max(rect.y - cy, cy - (rect.y + rect.h), 0);
+        const d = Math.hypot(dx, dy);
+        if (d >= feather) continue;
+        const wgt = 1 - smoothstep(d / feather);
+        const i = y * this.w + x;
+        this.e[i] += (m - this.e[i]) * wgt;
+      }
+    }
+  }
+
+  rolling(amplitudeM: number, wavelengthTiles: number, seedOffset = 0): void {
+    if (amplitudeM === 0 || wavelengthTiles <= 0) return;
+    const hs = this.seed + 7700 + seedOffset;
+    // two value-noise octaves, bilinearly interpolated between lattice points
+    const lat = (gx: number, gy: number, o: number) => hash2(gx, gy, hs + o) - 0.5;
+    const oct = (x: number, y: number, wl: number, o: number) => {
+      const fx = x / wl, fy = y / wl;
+      const gx = Math.floor(fx), gy = Math.floor(fy);
+      const ax = smoothstep(fx - gx), ay = smoothstep(fy - gy);
+      const a = lat(gx, gy, o), b = lat(gx + 1, gy, o), c = lat(gx, gy + 1, o), d = lat(gx + 1, gy + 1, o);
+      const top = a + (b - a) * ax;
+      return top + (c + (d - c) * ax - top) * ay;
+    };
+    for (let y = 0; y < this.h; y++) {
+      for (let x = 0; x < this.w; x++) {
+        const v = oct(x + 0.5, y + 0.5, wavelengthTiles, 0) + 0.45 * oct(x + 0.5, y + 0.5, wavelengthTiles / 2.3, 11);
+        this.e[y * this.w + x] += v * amplitudeM;
+      }
+    }
+  }
+
+  /** Slope-limiting relaxation: repeatedly finds 4-neighbour pairs whose height difference
+   * exceeds `maxGradePct` and splits the excess between them, until nothing on the map is
+   * steeper than that. This is the "no cliffs" safety net — features can be composed freely
+   * (a road cutting crossing a gully lip, a river bank running into a hillside) and this pass
+   * turns whatever accidental step they made into a bank of the stated maximum grade, conserving
+   * total volume so the landform's shape is preserved. */
+  limitGrade(maxGradePct: number, iterations = 400): void {
+    const maxStep = (maxGradePct / 100) * TILE_M;
+    const W = this.w, H = this.h, e = this.e;
+    for (let it = 0; it < iterations; it++) {
+      let changed = false;
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const i = y * W + x;
+          if (x < W - 1) {
+            const d = e[i + 1] - e[i];
+            if (d > maxStep || d < -maxStep) {
+              const ex = (d > 0 ? d - maxStep : d + maxStep) / 2;
+              e[i] += ex; e[i + 1] -= ex; changed = true;
+            }
+          }
+          if (y < H - 1) {
+            const d = e[i + W] - e[i];
+            if (d > maxStep || d < -maxStep) {
+              const ex = (d > 0 ? d - maxStep : d + maxStep) / 2;
+              e[i] += ex; e[i + W] -= ex; changed = true;
+            }
+          }
+        }
+      }
+      if (!changed) return;
+    }
+  }
+
+  smoothElevation(passes: number): void {
+    if (passes <= 0) return;
+    const W = this.w, H = this.h;
+    if (!this.scratch || this.scratch.length !== W * H) this.scratch = new Float32Array(W * H);
+    const tmp = this.scratch;
+    for (let p = 0; p < passes; p++) {
+      for (let y = 0; y < H; y++) {
+        const ym = y > 0 ? y - 1 : 0, yp = y < H - 1 ? y + 1 : H - 1;
+        for (let x = 0; x < W; x++) {
+          const xm = x > 0 ? x - 1 : 0, xp = x < W - 1 ? x + 1 : W - 1;
+          const e = this.e;
+          tmp[y * W + x] = (
+            e[ym * W + xm] + e[ym * W + x] + e[ym * W + xp] +
+            e[y * W + xm] + e[y * W + x] * 4 + e[y * W + xp] +
+            e[yp * W + xm] + e[yp * W + x] + e[yp * W + xp]
+          ) / 12;
+        }
+      }
+      this.e.set(tmp);
+    }
+  }
+
+  // ------------------------------------------------------------- corridors
+  /** Stations every ~1 tile along a polyline, each carrying its current ground height. */
+  private stations(points: Vec2[]): Station[] {
+    const out: Station[] = [];
+    let travelled = 0;
+    for (let s = 0; s < points.length - 1; s++) {
+      const a = points[s], b = points[s + 1];
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      const n = Math.max(1, Math.round(len));
+      for (let k = 0; k < n; k++) {
+        const t = k / n;
+        const x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t;
+        out.push({ x, y, d: travelled + len * t, h: this.sample(x, y) });
+      }
+      travelled += len;
+    }
+    const last = points[points.length - 1];
+    out.push({ x: last.x, y: last.y, d: travelled, h: this.sample(last.x, last.y) });
+    return out;
+  }
+
+  /** Largest grade an embankment/cutting side is allowed to reach (rise/run). Kept below the
+   * 25% at which path.ts stops letting vehicles climb, so grading a road across a rise never
+   * walls the map in two along the road's own shoulders. */
+  private static readonly BANK_MAX_GRADE = 0.15;
+  private static readonly SHOULDER_MIN = 2.5;
+  private static readonly SHOULDER_MAX = 16;
+
+  /** Paints a corridor of per-station target heights into the field: full replacement inside
+   * `half` tiles of the centreline, fading back to the natural ground over a shoulder that
+   * WIDENS with the size of the cut — a 0.3 m trim gets a crisp 2.5-tile edge, a 3 m cutting
+   * through a hill gets a proportionally longer bank rather than a cliff. `nat[k]` is the
+   * natural ground under each station before grading, which is what sets that depth. */
+  private paintCorridor(st: Station[], nat: number[], half: number): void {
+    const P = ElevationPainter;
+    const shoulderFor = (delta: number): number => {
+      const want = Math.abs(delta) * 1.5 / (P.BANK_MAX_GRADE * TILE_M);
+      return want < P.SHOULDER_MIN ? P.SHOULDER_MIN : want > P.SHOULDER_MAX ? P.SHOULDER_MAX : want;
+    };
+    for (let k = 0; k < st.length - 1; k++) {
+      const a = st[k], b = st[k + 1];
+      const shA = shoulderFor(a.h - nat[k]), shB = shoulderFor(b.h - nat[k + 1]);
+      const reach = half + Math.max(shA, shB);
+      const x0 = Math.max(0, Math.floor(Math.min(a.x, b.x) - reach - 1));
+      const x1 = Math.min(this.w - 1, Math.ceil(Math.max(a.x, b.x) + reach + 1));
+      const y0 = Math.max(0, Math.floor(Math.min(a.y, b.y) - reach - 1));
+      const y1 = Math.min(this.h - 1, Math.ceil(Math.max(a.y, b.y) + reach + 1));
+      const abx = b.x - a.x, aby = b.y - a.y;
+      const len2 = abx * abx + aby * aby;
+      const isFirst = k === 0, isLast = k === st.length - 2;
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          const px = x + 0.5, py = y + 0.5;
+          const raw = len2 > 0 ? ((px - a.x) * abx + (py - a.y) * aby) / len2 : 0;
+          // Stations are ~1 tile apart, so a point far out to the side of the road projects
+          // BEYOND almost every segment. Taking the clamped projection there would let a distant
+          // station's height reach sideways across the map (it did: a graded road pulled ground
+          // 15 tiles away up to the road's own level). Only the segment whose interior actually
+          // faces the point may claim it; the two end segments additionally own their caps.
+          if ((raw < 0 && !isFirst) || (raw > 1 && !isLast)) continue;
+          const t = clamp01e(raw);
+          const qx = a.x + abx * t, qy = a.y + aby * t;
+          const d = Math.hypot(px - qx, py - qy);
+          const shoulder = shA + (shB - shA) * t;
+          if (d >= half + shoulder) continue;
+          const target = a.h + (b.h - a.h) * t;
+          const wgt = d <= half ? 1 : 1 - smoothstep((d - half) / shoulder);
+          const i = y * this.w + x;
+          this.e[i] += (target - this.e[i]) * wgt;
+        }
+      }
+    }
+  }
+
+  gradeRoad(points: Vec2[], widthTiles: number, maxGradePct: number): void {
+    if (points.length < 2) return;
+    const st = this.stations(points);
+    const nat = st.map((s) => s.h); // natural ground before grading, for the shoulder width
+    const maxGrade = Math.max(0.005, maxGradePct / 100);
+    // 1) slope-limit the profile in both directions so no run exceeds the grade
+    for (let pass = 0; pass < 3; pass++) {
+      for (let k = 1; k < st.length; k++) {
+        const runM = Math.max(1e-3, (st[k].d - st[k - 1].d) * TILE_M);
+        const lim = runM * maxGrade;
+        if (st[k].h > st[k - 1].h + lim) st[k].h = st[k - 1].h + lim;
+        else if (st[k].h < st[k - 1].h - lim) st[k].h = st[k - 1].h - lim;
+      }
+      for (let k = st.length - 2; k >= 0; k--) {
+        const runM = Math.max(1e-3, (st[k + 1].d - st[k].d) * TILE_M);
+        const lim = runM * maxGrade;
+        if (st[k].h > st[k + 1].h + lim) st[k].h = st[k + 1].h + lim;
+        else if (st[k].h < st[k + 1].h - lim) st[k].h = st[k + 1].h - lim;
+      }
+    }
+    // 2) smooth the profile so the road surface reads as a graded ribbon, not a chain of kinks
+    for (let pass = 0; pass < 2; pass++) {
+      const prev = st.map((s) => s.h);
+      for (let k = 1; k < st.length - 1; k++) st[k].h = (prev[k - 1] + prev[k] * 2 + prev[k + 1]) / 4;
+    }
+    this.paintCorridor(st, nat, Math.max(0.5, widthTiles / 2));
+  }
+
+  cutRiver(points: Vec2[], widthTiles: number, depthM: number): void {
+    if (points.length < 2) return;
+    const st = this.stations(points);
+    // the bed follows the lowest ground nearby, and never runs uphill (points are in flow order)
+    for (const s of st) {
+      let lo = s.h;
+      for (const [dx, dy] of [[-1.5, 0], [1.5, 0], [0, -1.5], [0, 1.5]]) {
+        const v = this.sample(s.x + dx, s.y + dy);
+        if (v < lo) lo = v;
+      }
+      s.h = lo;
+    }
+    for (let k = 1; k < st.length; k++) if (st[k].h > st[k - 1].h) st[k].h = st[k - 1].h;
+    for (const s of st) s.h -= depthM;
+    // banks: only ever cut down to the bed, never fill a hollow back up
+    // a 3-tile (6 m) shoulder keeps a 1-2 m cut to a ~25-30% bank: steep enough that vehicles
+    // must use the bridge/ford, never a cliff
+    const half = Math.max(0.5, widthTiles / 2), shoulder = 3;
+    const reach = half + shoulder;
+    for (let k = 0; k < st.length - 1; k++) {
+      const a = st[k], b = st[k + 1];
+      const x0 = Math.max(0, Math.floor(Math.min(a.x, b.x) - reach - 1));
+      const x1 = Math.min(this.w - 1, Math.ceil(Math.max(a.x, b.x) + reach + 1));
+      const y0 = Math.max(0, Math.floor(Math.min(a.y, b.y) - reach - 1));
+      const y1 = Math.min(this.h - 1, Math.ceil(Math.max(a.y, b.y) + reach + 1));
+      const abx = b.x - a.x, aby = b.y - a.y;
+      const len2 = abx * abx + aby * aby;
+      const isFirst = k === 0, isLast = k === st.length - 2;
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          const px = x + 0.5, py = y + 0.5;
+          const raw = len2 > 0 ? ((px - a.x) * abx + (py - a.y) * aby) / len2 : 0;
+          if ((raw < 0 && !isFirst) || (raw > 1 && !isLast)) continue; // see paintCorridor
+          const t = clamp01e(raw);
+          const d = Math.hypot(px - (a.x + abx * t), py - (a.y + aby * t));
+          if (d >= reach) continue;
+          const bed = a.h + (b.h - a.h) * t;
+          const i = y * this.w + x;
+          const wgt = d <= half ? 1 : 1 - smoothstep((d - half) / shoulder);
+          const want = this.e[i] + (bed - this.e[i]) * wgt;
+          if (want < this.e[i]) this.e[i] = want;
+        }
+      }
+    }
+  }
+
+  /** Largest |grade| (rise/run) between 4-neighbouring tiles anywhere in the field — a cheap
+   * "did I accidentally build a cliff?" assertion for tests and map QA. */
+  steepestGrade(): number {
+    let worst = 0;
+    const W = this.w, H = this.h, e = this.e;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        if (x < W - 1) { const g = Math.abs(e[i + 1] - e[i]) / TILE_M; if (g > worst) worst = g; }
+        if (y < H - 1) { const g = Math.abs(e[i + W] - e[i]) / TILE_M; if (g > worst) worst = g; }
+      }
+    }
+    return worst;
+  }
+}
+
+function distToSeg(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 > 0 ? clamp01e(((px - ax) * dx + (py - ay) * dy) / len2) : 0;
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+/** Runs a map definition's `elevation()` hook, returning the per-tile ground field (metres), or
+ * null when the map declares no relief (perfectly flat — the pre-elevation behaviour). */
+export function paintElevation(def: MapDef, seed = 0): Float32Array | null {
+  if (!def.elevation) return null;
+  const p = new ElevationPainter(def.width, def.height, seed);
+  def.elevation(p);
+  return p.e;
+}
+
+/** Per-tile steepness (largest |grade| to a 4-neighbour) for a ground field. */
+export function computeGroundSteep(ground: Float32Array, w: number, h: number): Float32Array {
+  const out = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const g = ground[i];
+      let worst = 0;
+      if (x > 0) { const d = Math.abs(ground[i - 1] - g); if (d > worst) worst = d; }
+      if (x < w - 1) { const d = Math.abs(ground[i + 1] - g); if (d > worst) worst = d; }
+      if (y > 0) { const d = Math.abs(ground[i - w] - g); if (d > worst) worst = d; }
+      if (y < h - 1) { const d = Math.abs(ground[i + w] - g); if (d > worst) worst = d; }
+      out[i] = worst / TILE_M;
+    }
+  }
+  return out;
 }

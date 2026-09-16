@@ -1,4 +1,5 @@
 import type { DecorItem, MapDef, MapVectorFeature, Terrain } from '@/shared/types';
+import type { ElevationApi } from '@/shared/types';
 import { MapPainter } from '@/sim/mapdsl';
 
 const WIDTH = 200;
@@ -7,6 +8,40 @@ const SEED = 1944;
 
 /** Summer 1944: Operation Bagration drives Soviet infantry through dense Belarusian forest
  * toward a German-held river crossing, its bridge and ford the only ways across. */
+// ---------------------------------------------------------------- shared geometry
+const RIVER = [
+  { x: 100, y: 0 }, { x: 104, y: 25 }, { x: 98, y: 45 }, { x: 104, y: 60 },
+  { x: 96, y: 80 }, { x: 100, y: 100 }, { x: 94, y: 120 }, { x: 100, y: 140 }, { x: 98, y: 160 },
+];
+const MAIN_ROAD = [
+  { x: 10, y: 145 }, { x: 40, y: 132 }, { x: 65, y: 118 }, { x: 90, y: 100 },
+  { x: 96, y: 88 }, { x: 96, y: 58 }, { x: 110, y: 45 }, { x: 140, y: 32 }, { x: 170, y: 18 }, { x: 190, y: 8 },
+];
+const FORD_ROAD = [{ x: 60, y: 128 }, { x: 74, y: 122 }, { x: 87, y: 118 }, { x: 100, y: 116 }];
+
+/** Low, undulating forest floor — no commanding ground anywhere, just folds of a few metres that
+ * swallow a man at 100 m — with the river lying in a wide, shallow flood plain. Relief ~9 m,
+ * slopes mostly 2-6%. */
+function paintElevationFor(e: ElevationApi): void {
+  e.base(7);
+  e.rolling(2.4, 44, 5);
+  e.rolling(1.1, 19, 6); // finer folds, the scale a section disappears into
+  // the flood plain: wide and very shallow, so both banks read as flat river meadow
+  e.valley(RIVER, 74, 3.0);
+  // slightly higher forest shoulders east and west of the plain
+  e.hill(40, 50, 40, 2.0);
+  e.hill(158, 108, 38, 2.2);
+  e.smoothElevation(2);
+  e.cutRiver(RIVER, 4, 1.0);
+  e.gradeRoad(MAIN_ROAD, 3, 7);
+  e.gradeRoad(FORD_ROAD, 3, 8);
+  e.smoothElevation(1);
+  // no cliffs: relax anything the composed features made steeper than 30%% (river banks and the
+  // balka lip do sit near that cap — those are the deliberate "steep bank" cases)
+  e.limitGrade(30);
+  e.clampRange(0, 25);
+}
+
 function paintMap(p: MapPainter): void {
   p.fill('grass');
 
@@ -31,10 +66,7 @@ function paintMap(p: MapPainter): void {
   p.orchard(40, 35, 8, 8, 2); // remnants of an old homestead orchard gone wild
 
   // river running roughly north-south with meanders, a bridge and a ford, banked with mud
-  const river = [
-    { x: 100, y: 0 }, { x: 104, y: 25 }, { x: 98, y: 45 }, { x: 104, y: 60 },
-    { x: 96, y: 80 }, { x: 100, y: 100 }, { x: 94, y: 120 }, { x: 100, y: 140 }, { x: 98, y: 160 },
-  ];
+  const river = RIVER;
   p.river(river, 3);
   // a few large mud patches along the riverbanks
   p.patch(102, 25, 4, 'mud');
@@ -53,17 +85,14 @@ function paintMap(p: MapPainter): void {
   p.addDecor('log', 165, 101);
 
   // corduroy (dirt) road winding through the woods, crossing the main bridge
-  const mainRoad = [
-    { x: 10, y: 145 }, { x: 40, y: 132 }, { x: 65, y: 118 }, { x: 90, y: 100 },
-    { x: 96, y: 88 }, { x: 96, y: 58 }, { x: 110, y: 45 }, { x: 140, y: 32 }, { x: 170, y: 18 }, { x: 190, y: 8 },
-  ];
+  const mainRoad = MAIN_ROAD;
   p.road(mainRoad, 2, 'dirtroad');
   // bridge rect computed from the actual road/river intersection (round-3 fix: the old
   // hand-placed rect sat well north of where the road really meets the river)
   p.bridgeAcross(mainRoad, 2, river, 3, { near: { x: 103, y: 57 } });
   // spur to the ford — extended so it actually reaches and crosses the river (it used to stop
   // one bank short, leaving a "ford" bridge tile floating on dry ground)
-  const fordRoad = [{ x: 60, y: 128 }, { x: 74, y: 122 }, { x: 87, y: 118 }, { x: 100, y: 116 }];
+  const fordRoad = FORD_ROAD;
   p.road(fordRoad, 2, 'dirtroad');
   p.bridgeAcross(fordRoad, 2, river, 3, { near: { x: 96, y: 118 } });
   p.treeLine([{ x: 10, y: 145 }, { x: 40, y: 132 }, { x: 65, y: 118 }], 3, 0.35);
@@ -121,6 +150,7 @@ export const forest_1944: MapDef = {
     const p = new MapPainter(tiles, w, h, SEED);
     paintMap(p);
   },
+  elevation: paintElevationFor,
   victoryLocations: [
     { id: 0, name: 'Bridge', x: 101, y: 53, value: 3 },
     { id: 1, name: 'Lodge', x: 43, y: 43, value: 2 },

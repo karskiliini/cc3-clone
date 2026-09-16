@@ -1,9 +1,55 @@
 import type { DecorItem, MapDef, MapVectorFeature, Terrain } from '@/shared/types';
+import type { ElevationApi } from '@/shared/types';
 import { MapPainter } from '@/sim/mapdsl';
 
 const WIDTH = 200;
 const HEIGHT = 150;
 const SEED = 1941;
+
+// ---------------------------------------------------------------- geometry shared by the
+// terrain painter and the ground-relief painter (the landform has to follow the same stream and
+// road lines the tiles do, or the water runs along a hillside and the road climbs a bank).
+const RIVER = [
+  { x: 145, y: 0 }, { x: 141, y: 20 }, { x: 148, y: 40 }, { x: 140, y: 60 },
+  { x: 150, y: 75 }, { x: 143, y: 95 }, { x: 152, y: 115 }, { x: 148, y: 135 }, { x: 152, y: 150 },
+];
+const MAIN_ROAD = [
+  { x: 0, y: 78 }, { x: 40, y: 74 }, { x: 80, y: 78 }, { x: 100, y: 75 },
+  { x: 130, y: 72 }, { x: 165, y: 76 }, { x: 200, y: 78 },
+];
+const CROSS_ROAD = [
+  { x: 100, y: 5 }, { x: 96, y: 40 }, { x: 100, y: 75 }, { x: 104, y: 110 }, { x: 100, y: 145 },
+];
+const TRACK_N = [{ x: 41, y: 48 }, { x: 60, y: 60 }, { x: 100, y: 75 }];
+const TRACK_S = [{ x: 58, y: 96 }, { x: 75, y: 85 }, { x: 100, y: 75 }];
+
+/** Gentle rolling farmland: a low ridge runs north-south through the middle of the map, between
+ * the two deploy zones, so neither side can see the other's assembly area from its own; the
+ * frontier stream lies in the low ground toward the east, with the crossroads on the shoulder of
+ * the ridge. Total relief ~11 m, working slopes 3-8%. */
+function paintElevationFor(e: ElevationApi): void {
+  e.base(9);
+  e.rolling(2.0, 46, 1);
+  // the low ridge (crest around x85-95), wide and soft — a rise you walk over, not a hill
+  e.ridge([{ x: 78, y: -10 }, { x: 92, y: 40 }, { x: 88, y: 85 }, { x: 98, y: 165 }], 72, 4.5);
+  // the stream's valley: broad low ground carrying it, deepest along the watercourse
+  e.valley(RIVER, 58, 5);
+  // ground falls away gently past the stream toward the Soviet edge
+  e.slope({ x: 152, y: 0, w: 48, h: 150 }, 0, -2.2, 0);
+  e.smoothElevation(2);
+  // the stream bed itself, 1.2 m below its banks
+  e.cutRiver(RIVER, 4, 1.2);
+  // the roads are graded: a cart track never climbs more than ~6-8%
+  e.gradeRoad(MAIN_ROAD, 3, 6);
+  e.gradeRoad(CROSS_ROAD, 3, 6);
+  e.gradeRoad(TRACK_N, 2.5, 8);
+  e.gradeRoad(TRACK_S, 2.5, 8);
+  e.smoothElevation(1);
+  // no cliffs: relax anything the composed features made steeper than 30%% (river banks and the
+  // balka lip do sit near that cap — those are the deliberate "steep bank" cases)
+  e.limitGrade(30);
+  e.clampRange(0, 25);
+}
 
 /** June 1941: German spearheads cross the frontier stream, brushing aside a thin Soviet border
  * guard screen holding two farmsteads and a crossroads. */
@@ -52,10 +98,7 @@ function paintMap(p: MapPainter): void {
   p.orchard(85, 32, 16, 14, 2);
 
   // stream running roughly north-south with meanders, banks of mud/tallgrass
-  const river = [
-    { x: 145, y: 0 }, { x: 141, y: 20 }, { x: 148, y: 40 }, { x: 140, y: 60 },
-    { x: 150, y: 75 }, { x: 143, y: 95 }, { x: 152, y: 115 }, { x: 148, y: 135 }, { x: 152, y: 150 },
-  ];
+  const river = RIVER;
   p.river(river, 3);
   p.treeLine([{ x: 145, y: 0 }, { x: 141, y: 20 }, { x: 148, y: 40 }, { x: 140, y: 60 }], 13, 0.4);
   // a few large mud patches along the stream banks and one at the crossroads' worn shoulder
@@ -65,19 +108,14 @@ function paintMap(p: MapPainter): void {
   p.patch(60, 76, 3, 'mud');
 
   // curving dirt road west-east through the crossroads, spur south, farm tracks
-  const mainRoad = [
-    { x: 0, y: 78 }, { x: 40, y: 74 }, { x: 80, y: 78 }, { x: 100, y: 75 },
-    { x: 130, y: 72 }, { x: 165, y: 76 }, { x: 200, y: 78 },
-  ];
+  const mainRoad = MAIN_ROAD;
   // widths: ~2 tiles (~40px) for the main roads, 1.5 for farm tracks (ref_cc3_1479 roads are
   // narrow tracks; 1.5 is the narrowest that still rasterises a 4-connected tile path on
   // diagonals — half-width 0.75 > the 0.707 worst-case tile-centre distance).
   p.road(mainRoad, 2, 'dirtroad');
-  p.road([
-    { x: 100, y: 5 }, { x: 96, y: 40 }, { x: 100, y: 75 }, { x: 104, y: 110 }, { x: 100, y: 145 },
-  ], 2, 'dirtroad');
-  p.road([{ x: 41, y: 48 }, { x: 60, y: 60 }, { x: 100, y: 75 }], 1.5, 'dirtroad'); // farm track
-  p.road([{ x: 58, y: 96 }, { x: 75, y: 85 }, { x: 100, y: 75 }], 1.5, 'dirtroad'); // farm track
+  p.road(CROSS_ROAD, 2, 'dirtroad');
+  p.road(TRACK_N, 1.5, 'dirtroad'); // farm track
+  p.road(TRACK_S, 1.5, 'dirtroad'); // farm track
   // bridge rect computed from the actual road/river intersection (round-3 fix: the old
   // hand-placed rect drifted off the true crossing and rendered as planks beside the road)
   const crossing = p.bridgeAcross(mainRoad, 2, river, 3, { near: { x: 141, y: 75 } }) ?? { x: 141, y: 75 };
@@ -141,6 +179,7 @@ export const border_1941: MapDef = {
     const p = new MapPainter(tiles, w, h, SEED);
     paintMap(p);
   },
+  elevation: paintElevationFor,
   victoryLocations: [
     { id: 0, name: 'Crossroads', x: 100, y: 75, value: 2 },
     { id: 1, name: 'North Farm', x: 41, y: 45, value: 1 },

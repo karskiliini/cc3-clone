@@ -81,6 +81,46 @@ export interface MapVectorFeature {
   width: number;             // tiles
 }
 
+/** Ground-relief painting API handed to `MapDef.elevation` (implemented by sim/mapdsl.ts's
+ * ElevationPainter). Declared structurally here so shared/types.ts stays free of sim imports. */
+export interface ElevationApi {
+  readonly w: number;
+  readonly h: number;
+  /** Sets every tile to a constant base elevation (m). */
+  base(m: number): void;
+  /** A rounded hill of `peakM` metres centred on (cx, cy) with radius `radiusTiles`. */
+  hill(cx: number, cy: number, radiusTiles: number, peakM: number, falloff?: HillFalloff): void;
+  /** A raised spine `heightM` metres high along a polyline, `widthTiles` wide (feathered). */
+  ridge(points: Vec2[], widthTiles: number, heightM: number): void;
+  /** A depression `depthM` metres deep along a polyline (a gully / balka / stream cut). */
+  valley(points: Vec2[], widthTiles: number, depthM: number): void;
+  /** A linear ramp across `rect`, going from `fromM` to `toM` along the direction `angleRad`
+   * (0 = +x / east, pi/2 = +y / south). */
+  slope(rect: Rect, fromM: number, toM: number, angleRad: number): void;
+  /** Lifts/lowers a rect to a flat shelf at `m` metres (feathered over 2 tiles at the edge). */
+  terrace(rect: Rect, m: number): void;
+  /** Flattens a corridor along a polyline to a walkable grade (<= `maxGradePct` %), leaving a
+   * small embankment/cutting at the corridor edge. */
+  gradeRoad(points: Vec2[], widthTiles: number, maxGradePct: number): void;
+  /** Cuts a river/stream bed `depthM` metres below the surrounding ground, forced to run
+   * downhill along the polyline (points given in flow order). */
+  cutRiver(points: Vec2[], widthTiles: number, depthM: number): void;
+  /** N passes of a 3x3 box blur over the whole field (smooths the seams between features). */
+  smoothElevation(passes: number): void;
+  /** Relaxes the whole field until no 4-neighbour step exceeds `maxGradePct` % — the "no cliffs"
+   * safety net every map runs last. */
+  limitGrade(maxGradePct: number, iterations?: number): void;
+  /** Reads/writes single tiles (fractional coords are floored). */
+  at(x: number, y: number): number;
+  add(x: number, y: number, m: number): void;
+  /** Clamps the whole field into [lo, hi] metres. */
+  clampRange(lo: number, hi: number): void;
+  /** Low-amplitude coherent undulation over the whole map (m peak-to-peak). */
+  rolling(amplitudeM: number, wavelengthTiles: number, seedOffset?: number): void;
+}
+
+export type HillFalloff = 'smooth' | 'cone' | 'dome' | 'plateau';
+
 export interface MapDef {
   id: string;
   name: string;
@@ -98,6 +138,9 @@ export interface MapDef {
   decor?: DecorItem[];
   /** optional vector geometry for smooth rendering of roads/rivers/linear features */
   vectors?: MapVectorFeature[];
+  /** Optional ground relief: fills a per-tile elevation field (metres above the map datum).
+   * Maps without one are perfectly flat, exactly as before. */
+  elevation?(e: ElevationApi): void;
 }
 
 export interface GameMap {
@@ -121,16 +164,25 @@ export interface GameMap {
   dirtyTiles?: number[];
   /** surface height model (sim/heightField.ts), built at map load and updated by blasts/damage */
   heightField?: HeightField;
+  /** Per-tile GROUND elevation in metres (row-major, width*height) — the landform under every
+   * feature. Undefined on a map with no `elevation()` (perfectly flat, height 0 everywhere).
+   * This is the array the sim's hot paths (LOS, movement, spotting) read directly. */
+  ground?: Float32Array;
+  /** Per-tile steepness: the largest |grade| (rise/run, 1.0 = 45deg) to a 4-neighbour. Used to
+   * keep vehicles off banks steeper than 25%. Undefined together with `ground`. */
+  groundSteep?: Float32Array;
 }
 
 /** Surface height in metres at HF_RES samples per tile edge (0.5 m), row-major over
- * (width*res) x (height*res). `height` = base (terrain/structures) composed with `dig`
- * (craters, foxholes, trenches); `canopy` is tree-crown height (0 = none), kept apart so a
+ * (width*res) x (height*res). `height` = `ground` (the landform) plus base (terrain/structures)
+ * composed with `dig` (craters, foxholes, trenches); `canopy` is tree-crown height (0 = none), kept apart so a
  * view can show the ground under woods. `version` increments on every change. */
 export interface HeightField {
   res: number;
   w: number;
   h: number;
+  /** ground elevation (m) per sample, bilinearly interpolated from the map's per-tile field */
+  ground: Float32Array;
   base: Float32Array;
   dig: Float32Array;
   height: Float32Array;

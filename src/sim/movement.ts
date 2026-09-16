@@ -1,8 +1,8 @@
-import type { BattleState, Soldier, Vec2 } from '@/shared/types';
+import type { BattleState, GameMap, Soldier, Vec2 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { angleTo, dist, facingFromAngle, pointInRect, vadd, vnorm, vscale, vsub } from '@/shared/math';
-import { coverAt, tileAt } from './map';
+import { coverAt, groundHeightAt, tileAt } from './map';
 import { TERRAIN_PROPS } from './terrain';
 import { findPath } from './path';
 import { isFirstFireFrozen } from './mind';
@@ -16,6 +16,25 @@ const SPEEDS: Record<string, number> = {
   panicked: 3.2,
   routed: 3.0,
 };
+
+/** Slope speed model. grade = rise/run along the direction of travel. Uphill costs
+ * `1 - grade*GRADE_UPHILL` down to GRADE_FLOOR (a 46% climb halves you); downhill gives back a
+ * little, capped at GRADE_MAX. Vehicles use a harsher coefficient (see vehicle.ts). */
+export const GRADE_FLOOR = 0.45;
+export const GRADE_MAX = 1.1;
+export const GRADE_UPHILL_INFANTRY = 1.2;
+export const GRADE_UPHILL_VEHICLE = 1.9;
+
+/** Speed multiplier for travelling `distTiles` from `a` to `b` over the map's relief. Returns 1
+ * on a flat map (no `map.ground`), so nothing changes there. */
+export function gradeSpeedMul(map: GameMap, a: Vec2, b: Vec2, coeff = GRADE_UPHILL_INFANTRY): number {
+  if (!map.ground) return 1;
+  const runM = Math.hypot(b.x - a.x, b.y - a.y) * TILE_M;
+  if (runM < 1e-3) return 1;
+  const grade = (groundHeightAt(map, b) - groundHeightAt(map, a)) / runM;
+  const m = 1 - grade * coeff;
+  return m < GRADE_FLOOR ? GRADE_FLOOR : m > GRADE_MAX ? GRADE_MAX : m;
+}
 
 const REPATH_INTERVAL_S = 3;
 const NEAR_ENEMY_RADIUS_TILES = 15;
@@ -82,6 +101,8 @@ function moveAlongPath(state: BattleState, s: Soldier, speedMs: number, dt: numb
   let mul = TERRAIN_PROPS[tile].speedMul;
   if (s.fatigue > 70) mul *= 0.5;
   if (s.health === 'wounded') mul *= 0.7;
+  // slope: slower up, a touch faster down, judged on the leg currently being walked
+  if (s.path.length > 0) mul *= gradeSpeedMul(state.map, s.pos, s.path[0]);
   let remaining = (speedMs * mul * dt) / TILE_M;
 
   while (remaining > 0 && s.path.length > 0) {

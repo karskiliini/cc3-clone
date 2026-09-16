@@ -1,4 +1,4 @@
-import type { GameMap, Vec2 } from '@/shared/types';
+import type { GameMap, Stance, Vec2 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import { TERRAIN_PROPS } from './terrain';
 import { idx, inBounds } from './map';
@@ -8,6 +8,32 @@ export interface LosResult {
   blockedAt: Vec2 | null;
   visibility: number;
 }
+
+// ---------------------------------------------------------------- eye heights (metres)
+export const EYE_STANDING_M = 1.7;
+export const EYE_CROUCHING_M = 1.1;
+export const EYE_PRONE_M = 0.4;
+export const EYE_VEHICLE_M = 2.2;
+
+/** Eye height above the ground for a dismounted soldier in this stance. */
+export function eyeHeightM(stance: Stance): number {
+  switch (stance) {
+    case 'standing': return EYE_STANDING_M;
+    case 'crouching': return EYE_CROUCHING_M;
+    case 'prone': return EYE_PRONE_M;
+  }
+}
+
+/** Observer eye height / target silhouette height above their own ground, in metres. Omitted
+ * values default to a standing man (1.7 m) at both ends — the pre-elevation behaviour on a flat
+ * map, and the neutral choice for callers that don't track stance. */
+export interface LosHeights { eyeM?: number; targetM?: number }
+
+/** Tolerance (m) on the terrain-masking test. A soldier's own tile is sampled at its centre, so
+ * on a uniform slope the intervening tile heights sit exactly on the sight line; without a small
+ * slack, floating point (and the half-tile offset of the endpoints) would make every slope
+ * self-blocking. */
+const GROUND_MASK_SLACK_M = 0.2;
 
 /** 1 at 0m, 0.5 at 200m, 0.2 at 400m, linear piecewise, clamped >= 0 beyond. */
 export function losDistanceFactor(distM: number): number {
@@ -42,7 +68,7 @@ function chebyshevAdjacent(a: Vec2, b: Vec2): boolean {
   return Math.abs(a.x - b.x) <= 1 && Math.abs(a.y - b.y) <= 1;
 }
 
-export function losTrace(map: GameMap, from: Vec2, to: Vec2): LosResult {
+export function losTrace(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeights): LosResult {
   const fx = Math.floor(from.x), fy = Math.floor(from.y);
   const tx = Math.floor(to.x), ty = Math.floor(to.y);
   const startTile: Vec2 = { x: fx, y: fy };
@@ -51,6 +77,23 @@ export function losTrace(map: GameMap, from: Vec2, to: Vec2): LosResult {
 
   const startTerrain = inBounds(map, fx, fy) ? map.tiles[idx(map, fx, fy)] : 'open';
   const startIsWoods = startTerrain === 'woods';
+
+  // ---- terrain masking setup. `ground` is the map's per-tile elevation (no allocation, one
+  // array read per Bresenham step); on a flat map it is undefined and this whole path is skipped,
+  // so an elevation-less map costs exactly what it did before.
+  const ground = map.ground;
+  const W = map.width, H = map.height;
+  let eyeZ = 0, dz = 0, ax = 0, ay = 0, invLen2 = 0;
+  if (ground) {
+    const cfx = fx < 0 ? 0 : fx >= W ? W - 1 : fx, cfy = fy < 0 ? 0 : fy >= H ? H - 1 : fy;
+    const ctx2 = tx < 0 ? 0 : tx >= W ? W - 1 : tx, cty = ty < 0 ? 0 : ty >= H ? H - 1 : ty;
+    eyeZ = ground[cfy * W + cfx] + (heights?.eyeM ?? EYE_STANDING_M);
+    const tgtZ = ground[cty * W + ctx2] + (heights?.targetM ?? EYE_STANDING_M);
+    dz = tgtZ - eyeZ;
+    ax = tx - fx; ay = ty - fy;
+    const len2 = ax * ax + ay * ay;
+    invLen2 = len2 > 0 ? 1 / len2 : 0;
+  }
 
   const tiles = bresenhamTiles(fx, fy, tx, ty);
   let accumulated = 0;
@@ -67,6 +110,16 @@ export function losTrace(map: GameMap, from: Vec2, to: Vec2): LosResult {
       return { clear: false, blockedAt: center, visibility: 0 };
     }
     const i2 = idx(map, t.x, t.y);
+
+    // ---- terrain masking: the ground between rises above the straight line from the observer's
+    // eye to the target's silhouette top. This is what puts a unit in dead ground behind a crest.
+    if (ground && invLen2 > 0) {
+      const f = ((t.x - fx) * ax + (t.y - fy) * ay) * invLen2;
+      if (ground[i2] > eyeZ + dz * f + GROUND_MASK_SLACK_M) {
+        return { clear: false, blockedAt: { x: t.x + 0.5, y: t.y + 0.5 }, visibility: 0 };
+      }
+    }
+
     const terrain = map.tiles[i2];
     const tp = TERRAIN_PROPS[terrain];
 
@@ -102,6 +155,6 @@ export function losTrace(map: GameMap, from: Vec2, to: Vec2): LosResult {
   return { clear: true, blockedAt: null, visibility };
 }
 
-export function hasLOS(map: GameMap, from: Vec2, to: Vec2): boolean {
-  return losTrace(map, from, to).clear;
+export function hasLOS(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeights): boolean {
+  return losTrace(map, from, to, heights).clear;
 }

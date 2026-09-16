@@ -145,7 +145,12 @@ describe('height field model', () => {
       let min = Infinity, max = -Infinity;
       for (let i = 0; i < f.height.length; i++) { const v = f.height[i]; if (!Number.isFinite(v)) throw new Error('NaN'); min = Math.min(min, v); max = Math.max(max, v); }
       expect(max).toBeGreaterThan(1);
-      expect(min).toBeLessThanOrEqual(0);
+      // the composite is now ground + feature, and the ground datum sits above 0 everywhere, so
+      // "something is dug in below the surface" is a comparison against the local ground, not 0
+      let deepest = Infinity;
+      for (let i = 0; i < f.height.length; i++) { const d = f.height[i] - f.ground[i]; if (d < deepest) deepest = d; }
+      expect(deepest).toBeLessThan(-0.4); // craters/foxholes/water cut below their own ground
+      expect(min).toBeGreaterThanOrEqual(-3); // but nothing falls through the world
     }
   });
 });
@@ -256,11 +261,15 @@ describe('structure damage', () => {
 
 describe('depth view', () => {
   it('colour ramp and contours', () => {
-    const deep = depthColor(-1.5), ground = depthColor(0), wall = depthColor(1.5), tall = depthColor(16);
+    // the ramp now spans the 0-30 m the ground layer + structures actually reach
+    const deep = depthColor(-1.5), ground = depthColor(0), rise = depthColor(8), tall = depthColor(30);
     expect(deep[2]).toBeGreaterThan(deep[1]); // blue-violet
     expect(ground[0]).toBe(ground[1]);
-    expect(wall[0]).toBeGreaterThan(wall[2] + 100); // yellow-orange
+    expect(rise[0]).toBeGreaterThan(rise[2] + 100); // yellow-orange by the top of a hill
     expect(tall).toEqual([255, 255, 255]);
+    expect(depthColor(40)).toEqual([255, 255, 255]); // clamped above the top stop
+    // monotonically lighter/warmer as you climb
+    expect(depthColor(12)[0]).toBeGreaterThan(depthColor(4)[0]);
     expect(contourBand(-0.3)).not.toBe(contourBand(-0.7));
     expect(contourBand(0.5)).toBe(contourBand(1.5));
     expect(contourBand(1.5)).not.toBe(contourBand(2.5));

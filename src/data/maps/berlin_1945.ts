@@ -1,4 +1,5 @@
 import type { DecorItem, MapDef, MapVectorFeature, Terrain } from '@/shared/types';
+import type { ElevationApi } from '@/shared/types';
 import { MapPainter } from '@/sim/mapdsl';
 
 const WIDTH = 220;
@@ -7,12 +8,39 @@ const SEED = 1945;
 
 /** April 1945: Soviet assault groups fight block by block through the ruins of Berlin toward the
  * Ministry building, crossing rubble-choked, snow-covered streets under fire. */
+// ---------------------------------------------------------------- shared geometry
+const V_STREETS = [40, 90, 140, 190];
+const H_STREETS = [30, 70, 110, 140];
+/** the tram avenue runs in a shallow cutting along y=55 */
+const TRAM_AVENUE = [{ x: -10, y: 55 }, { x: 230, y: 55 }];
+
+/** City ground: essentially flat, with a slight rise westward toward the Ministry quarter (so
+ * the Soviet assault from the east is always looking very slightly uphill), and the tram avenue
+ * running in a shallow sunken cutting — the one piece of dead ground in an otherwise exposed
+ * street grid. Relief ~6 m, street grades 1-3%, cutting sides ~17%. */
+function paintElevationFor(e: ElevationApi): void {
+  e.base(4);
+  e.rolling(0.5, 64, 7);
+  // the slight rise carrying the Ministry (105,51) and the Platz
+  e.hill(104, 50, 64, 2.8, 'plateau');
+  // the eastern approach is a touch lower still
+  e.slope({ x: 150, y: 0, w: 70, h: 160 }, 0, -1.0, 0);
+  e.smoothElevation(2);
+  // the tram cutting: 1.5 m below street level, with the cross streets dipping through it
+  e.valley(TRAM_AVENUE, 15, 1.5);
+  e.smoothElevation(1);
+  // no cliffs: relax anything the composed features made steeper than 30%% (river banks and the
+  // balka lip do sit near that cap — those are the deliberate "steep bank" cases)
+  e.limitGrade(30);
+  e.clampRange(0, 25);
+}
+
 function paintMap(p: MapPainter): void {
   p.fill('snow');
 
   // street grid: 4 vertical, 4 horizontal, plus a wide tram avenue
-  const vStreets = [40, 90, 140, 190];
-  const hStreets = [30, 70, 110, 140];
+  const vStreets = V_STREETS;
+  const hStreets = H_STREETS;
   for (const x of vStreets) p.road([{ x, y: 0 }, { x, y: 160 }], 5, 'pavedroad');
   for (const y of hStreets) p.road([{ x: 0, y }, { x: 220, y }], 5, 'pavedroad');
   p.road([{ x: 0, y: 55 }, { x: 220, y: 55 }], 7, 'pavedroad'); // tram avenue
@@ -128,6 +156,7 @@ export const berlin_1945: MapDef = {
     const p = new MapPainter(tiles, w, h, SEED);
     paintMap(p);
   },
+  elevation: paintElevationFor,
   victoryLocations: [
     { id: 0, name: 'Ministry', x: 105, y: 51, value: 3 },
     { id: 1, name: 'Platz', x: 129, y: 63, value: 2 },

@@ -1,15 +1,17 @@
 // ============================================================================
 // heightField.ts — surface height model of the battlefield, in metres, at 0.5 m resolution
-// (HF_RES = 4 samples per 2 m tile edge). Ground level is 0.
+// (HF_RES = 4 samples per 2 m tile edge).
 //
-// Two layers are composed per sample:
+// Three layers are composed per sample:
+//   ground — the landform (sim/mapdsl.ts's ElevationPainter, per tile, bilinearly interpolated
+//           up to the 0.5 m sample grid so slopes are smooth). 0 on a map with no relief.
 //   base  — driven by the tile's current terrain (re-derived per tile when a tile changes):
 //           hedges +1.5, fences +1.1 (thin), stone walls +1.8, buildings (wood 4 m eaves / 6 m
 //           ridge, stone 8-12 m by size, big city blocks 15 m), rubble mounds +0.6..1.5, water -0.5.
 //   dig   — stamped earthworks that persist whatever the tile becomes: shell craters (bowl with a
 //           +0.2 m rim, depth by size), foxholes (-1.2 m with a +0.4 m spoil mound toward the
 //           enemy), trenches (-1.5 m along the zig-zag with a low parapet).
-// height = base >= 1 (a standing structure) ? base : base + dig.
+// height = ground + (base >= 1 (a standing structure) ? base : base + dig).
 // Tree crowns live in `canopy` (woods 8-12 m) so a view can draw them over the ground.
 // Vehicles are not part of the field. Render-only consumers (the depth view) read it; nothing
 // in the sim's combat/LOS rules depends on it, so it never affects determinism.
@@ -324,7 +326,37 @@ function tileCanopy(map: GameMap, tx: number, ty: number, out: Float32Array): vo
 // ------------------------------------------------------------------ stamping (dig layer)
 function compose(field: HeightField, i: number): void {
   const b = field.base[i];
-  field.height[i] = b >= 1 ? b : b + field.dig[i];
+  field.height[i] = field.ground[i] + (b >= 1 ? b : b + field.dig[i]);
+}
+
+/** Fills `field.ground` by bilinearly interpolating the map's per-tile elevation field onto the
+ * 0.5 m sample grid (tile centres sit at sample index res/2 - 0.5 in each axis). Leaves the
+ * array at 0 for a map with no relief. */
+function fillGround(map: GameMap, field: HeightField): void {
+  const g = map.ground;
+  if (!g) return;
+  const R = field.res, W = map.width, H = map.height;
+  const out = field.ground;
+  for (let sy = 0; sy < field.h; sy++) {
+    // tile coords of this sample's centre, minus 0.5 so we interpolate between tile CENTRES
+    const fy = (sy + 0.5) / R - 0.5;
+    let y0 = Math.floor(fy);
+    const ay = fy - y0;
+    let y1 = y0 + 1;
+    if (y0 < 0) y0 = 0; if (y1 < 0) y1 = 0; if (y0 >= H) y0 = H - 1; if (y1 >= H) y1 = H - 1;
+    const r0 = y0 * W, r1 = y1 * W;
+    const rowBase = sy * field.w;
+    for (let sx = 0; sx < field.w; sx++) {
+      const fx = (sx + 0.5) / R - 0.5;
+      let x0 = Math.floor(fx);
+      const ax = fx - x0;
+      let x1 = x0 + 1;
+      if (x0 < 0) x0 = 0; if (x1 < 0) x1 = 0; if (x0 >= W) x0 = W - 1; if (x1 >= W) x1 = W - 1;
+      const a = g[r0 + x0], b = g[r0 + x1], c = g[r1 + x0], d = g[r1 + x1];
+      const top = a + (b - a) * ax;
+      out[rowBase + sx] = top + (c + (d - c) * ax - top) * ay;
+    }
+  }
 }
 
 function recomposeRect(field: HeightField, sx0: number, sy0: number, sx1: number, sy1: number): void {
@@ -500,12 +532,14 @@ export function buildHeightField(map: GameMap): HeightField {
   const w = map.width * R, h = map.height * R;
   const field: HeightField = {
     res: R, w, h,
+    ground: new Float32Array(w * h),
     base: new Float32Array(w * h), dig: new Float32Array(w * h),
     height: new Float32Array(w * h), canopy: new Float32Array(w * h),
     version: 1, marksApplied: 0,
   };
   const ctx: FieldCtx = { map, buildings: computeBuildings(map), lineSegs: computeLineSegs(map), overrides: new Map() };
   ctxByField.set(field, ctx);
+  fillGround(map, field);
 
   const tmp = new Float32Array(R * R), can = new Float32Array(R * R);
   for (let ty = 0; ty < map.height; ty++) {
@@ -560,9 +594,20 @@ export function syncCraterMarks(map: GameMap, field: HeightField): void {
   field.marksApplied = marks.length;
 }
 
-/** Composite surface height (m) at tile coords (x,y), bilinear between samples. */
+/** Composite surface height (m) at tile coords (x,y), bilinear between samples: ground landform
+ * plus whatever structure/earthwork stands on it. */
 export function heightAt(field: HeightField, x: number, y: number): number {
   return sampleBilinear(field, field.height, x, y);
+}
+
+/** Ground (landform) height (m) at tile coords, without any feature on top of it. */
+export function groundAt(field: HeightField, x: number, y: number): number {
+  return sampleBilinear(field, field.ground, x, y);
+}
+
+/** Feature height (m) above the local ground at tile coords — walls, buildings, craters, holes. */
+export function featureHeightAt(field: HeightField, x: number, y: number): number {
+  return sampleBilinear(field, field.height, x, y) - sampleBilinear(field, field.ground, x, y);
 }
 
 /** Tree-crown height (m) at tile coords, 0 where there is no canopy. */

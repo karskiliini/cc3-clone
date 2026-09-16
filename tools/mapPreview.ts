@@ -29,6 +29,12 @@ const previewZoom = [0.5, 1, 2].includes(ZOOM_QS) ? ZOOM_QS : 1;
 const mapFilter = qs.get('map');
 // ?depth=1 draws the Tab depth-map view over the 1:1 viewport and adds a whole-map depth thumbnail.
 const depthView = qs.get('depth') === '1';
+// ?flat=1 strips the map's ground relief before rendering — the A/B baseline for measuring what
+// the real-elevation hillshading costs a chunk bake against the old fbm relief term.
+const flatGround = qs.get('flat') === '1';
+// ?bake=N times N cold chunk bakes (private bakeChunk, cache bypassed) and reports the mean in
+// document.body.dataset.bakeMs / .bakeChunks, for the elevation performance budget.
+const bakeRuns = qs.has('bake') ? Math.max(1, Number(qs.get('bake'))) : 0;
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -49,9 +55,25 @@ function renderMap(root: HTMLElement, mapId: string): void {
     return;
   }
 
+  if (flatGround) { map.ground = undefined; map.groundSteep = undefined; }
   const renderer = new TerrainRenderer(map);
 
   const block = el('div', 'map-block');
+
+  if (bakeRuns > 0) {
+    const bake = (renderer as unknown as { bakeChunk(cx: number, cy: number, zoom: number): unknown }).bakeChunk.bind(renderer);
+    const CH = 16; // CHUNK_TILES in terrainRender.ts
+    const cols = Math.max(1, Math.ceil(map.width / CH)), rows = Math.max(1, Math.ceil(map.height / CH));
+    bake(0, 0, 1); // warm up (fonts, sprite atlases, JIT)
+    const t0 = performance.now();
+    for (let i = 0; i < bakeRuns; i++) bake((i * 7) % cols, (i * 5) % rows, 1);
+    const ms = (performance.now() - t0) / bakeRuns;
+    const prev = Number(document.body.dataset.bakeMs ?? 0), n = Number(document.body.dataset.bakeN ?? 0);
+    document.body.dataset.bakeMs = (prev + ms).toFixed(3);
+    document.body.dataset.bakeN = String(n + 1);
+    block.dataset.bakeMs = ms.toFixed(2);
+  }
+
   const title = el('div', 'map-title');
   title.textContent = `${map.def.name} `;
   const meta = el('small');

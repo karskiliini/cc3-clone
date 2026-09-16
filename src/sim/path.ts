@@ -4,13 +4,29 @@ import { idx, inBounds } from './map';
 
 type Mover = 'infantry' | 'vehicle';
 
+/** Steepest local grade a tracked vehicle will attempt (25% ~= 14 degrees). Above that the bank
+ * is a wall as far as the vehicle is concerned; infantry scramble up anything. Map relief is
+ * built to stay well under this except at deliberate river banks and railway cuttings. */
+export const VEHICLE_MAX_GRADE = 0.25;
+
 export function isPassable(map: GameMap, x: number, y: number, mover: Mover): boolean {
   if (!inBounds(map, x, y)) return false;
-  const t = map.tiles[idx(map, x, y)];
+  const i = idx(map, x, y);
+  const t = map.tiles[i];
   const cost = mover === 'infantry' ? TERRAIN_PROPS[t].infantryCost : TERRAIN_PROPS[t].vehicleCost;
-  return Number.isFinite(cost);
+  if (!Number.isFinite(cost)) return false;
+  if (mover === 'vehicle') {
+    const steep = map.groundSteep;
+    if (steep && steep[i] > VEHICLE_MAX_GRADE) return false;
+  }
+  return true;
 }
 
+/** Step cost is terrain only — deliberately NOT slope-weighted. Adding a slope term to A* was
+ * tried and reverted: it inflates every step above the octile heuristic's 1-per-step assumption,
+ * which weakens the heuristic and cost 40-120% more node expansions across the maps for a
+ * marginal routing improvement. Slope is modelled where it belongs — in how fast you actually
+ * move (movement.ts's gradeSpeedMul) and in what a vehicle can climb at all (isPassable). */
 function costOf(map: GameMap, x: number, y: number, mover: Mover): number {
   const t = map.tiles[idx(map, x, y)];
   return mover === 'infantry' ? TERRAIN_PROPS[t].infantryCost : TERRAIN_PROPS[t].vehicleCost;

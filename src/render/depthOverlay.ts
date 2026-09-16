@@ -2,9 +2,10 @@
 // depthOverlay.ts — the Tab "depth map" view: the sim's height field (sim/heightField.ts) drawn
 // as a readable relief map over the viewport.
 //
-//   colour ramp: deep blue-violet (< -1 m) -> dark teal (shallow holes) -> neutral grey (0) ->
-//                yellow-orange (1-2 m walls/hedges/fences) -> red -> white (tall buildings)
-//   contours:    every 0.5 m below ground, every 2 m above
+//   colour ramp: deep blue-violet (< -1 m) -> dark teal (shallow holes) -> neutral grey (0 m,
+//                the map datum) -> olive/yellow (low hills) -> orange (high ground) -> red ->
+//                white (tall buildings standing on high ground), over an absolute 0-30 m
+//   contours:    every 0.5 m below the datum, every 2 m above (a hill reads as broad bands)
 //   hillshade:   subtle, lit from the NW
 //   canopy:      translucent green diagonal hatch over the ground height under the trees
 //
@@ -24,7 +25,13 @@ const REGION_SNAP = 8;
 const MARGIN_TILES = 6;
 
 type Stop = [number, number, number, number];
-/** [metres, r, g, b] */
+/** [metres, r, g, b]
+ *
+ * The colour sequence is unchanged (blue-violet holes -> teal -> neutral grey at the datum ->
+ * yellow -> orange -> red -> white), but the above-ground half is now spread over the 0-30 m
+ * range the model actually spans since the ground layer arrived: a map's landform is 0-19 m and
+ * structures stack another 4-15 m on top of that. Spread over the old 0-16 m instead, every
+ * hilltop saturated at white and the whole view read as one flat pink wash. */
 export const DEPTH_RAMP: Stop[] = [
   [-2.0, 52, 22, 96],
   [-1.2, 62, 44, 150],
@@ -32,16 +39,17 @@ export const DEPTH_RAMP: Stop[] = [
   [-0.3, 26, 104, 112],
   [-0.05, 84, 118, 116],
   [0, 124, 124, 120],
-  [0.35, 142, 138, 112],
-  [1.0, 214, 184, 64],
-  [2.0, 236, 132, 36],
-  [4.5, 206, 58, 38],
-  [8.0, 176, 34, 46],
-  [12.0, 232, 150, 150],
-  [16.0, 255, 255, 255],
+  [1.5, 140, 137, 113],
+  [4.0, 172, 162, 94],
+  [8.0, 214, 184, 64],
+  [12.0, 236, 132, 36],
+  [16.0, 206, 58, 38],
+  [20.0, 176, 34, 46],
+  [25.0, 232, 150, 150],
+  [30.0, 255, 255, 255],
 ];
 
-const LUT_MIN = -2.5, LUT_MAX = 17, LUT_STEP = 0.02;
+const LUT_MIN = -2.5, LUT_MAX = 32, LUT_STEP = 0.02;
 const LUT_N = Math.ceil((LUT_MAX - LUT_MIN) / LUT_STEP) + 1;
 let lut: Uint8Array | null = null;
 function rampLut(): Uint8Array {
@@ -70,7 +78,8 @@ export function depthColor(h: number): [number, number, number] {
   return [l[1], l[2], l[3]];
 }
 
-/** Contour band index: 0.5 m bands below ground, 2 m bands above. */
+/** Contour band index: 0.5 m bands below the datum, 2 m bands above — with the ground layer in
+ * play the 2 m bands are what draw a hill as a set of broad, readable contour rings. */
 export function contourBand(h: number): number {
   return h < -0.02 ? Math.floor(h / 0.5) - 1 : Math.floor(h / 2);
 }
@@ -207,7 +216,7 @@ export class DepthOverlay {
 }
 
 const LEGEND_TICKS: [number, string][] = [
-  [-2, '-2'], [-1, '-1'], [0, '0'], [1, '1'], [2, '2'], [4, '4'], [8, '8'], [12, '12'], [16, '16+'],
+  [-2, '-2'], [-1, '-1'], [0, '0'], [1, '1'], [2, '2'], [6, '6'], [12, '12'], [20, '20'], [30, '30+'],
 ];
 
 export function drawDepthLegend(ctx: CanvasRenderingContext2D, x: number, y: number): void {
@@ -219,12 +228,13 @@ export function drawDepthLegend(ctx: CanvasRenderingContext2D, x: number, y: num
   ctx.lineWidth = 1;
   ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
   drawText(ctx, 'DEPTH MAP (Tab)', x + 6, y + 5, '#e8d890');
-  // the scale is piecewise so the shallow range gets room: -2..2 m over half the bar
+  // the scale is piecewise so the shallow range gets room: -2..2 m over half the bar, 2..30 m
+  // (ground relief plus structures) over the other half
   const barX = x + 8, barY = y + 18, barW = w - 16, barH = 9;
-  const toX = (m: number) => m <= 2 ? barX + ((m + 2) / 4) * barW * 0.5 : barX + barW * 0.5 + ((Math.min(16, m) - 2) / 14) * barW * 0.5;
+  const toX = (m: number) => m <= 2 ? barX + ((m + 2) / 4) * barW * 0.5 : barX + barW * 0.5 + ((Math.min(30, m) - 2) / 28) * barW * 0.5;
   for (let i = 0; i < barW; i++) {
     const f = i / barW;
-    const m = f <= 0.5 ? -2 + (f / 0.5) * 4 : 2 + ((f - 0.5) / 0.5) * 14;
+    const m = f <= 0.5 ? -2 + (f / 0.5) * 4 : 2 + ((f - 0.5) / 0.5) * 28;
     const c = depthColor(m);
     ctx.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`;
     ctx.fillRect(barX + i, barY, 1, barH);

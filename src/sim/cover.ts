@@ -41,6 +41,28 @@ function linearCoverOf(map: GameMap, x: number, y: number, ctx?: CoverContext): 
   return 0;
 }
 
+/** Extra protection from a REVERSE SLOPE: ground between this tile and the threat that rises
+ * above it masks the firer's view of the lower body/legs and eats grazing fire. Looks 1-4 tiles
+ * (2-8 m) toward the threat and scores the largest rise above the tile itself — a full 1.5 m
+ * crest is worth CREST_MAX. Costs at most four Float32Array reads and is skipped entirely on a
+ * flat map. (Hard masking — the crest blocking the shot outright — is losTrace's job; this is the
+ * partial-defilade case where the firer can still see the head and shoulders.) */
+const CREST_FULL_M = 1.5;
+const CREST_MAX = 0.35;
+function crestProtection(map: GameMap, tx: number, ty: number, stepX: number, stepY: number): number {
+  const g = map.ground;
+  if (!g) return 0;
+  const here = g[ty * map.width + tx];
+  let rise = 0;
+  for (let k = 1; k <= 4; k++) {
+    const nx = tx + stepX * k, ny = ty + stepY * k;
+    if (nx < 0 || ny < 0 || nx >= map.width || ny >= map.height) break;
+    const d = g[ny * map.width + nx] - here;
+    if (d > rise) rise = d;
+  }
+  return clamp01(rise / CREST_FULL_M) * CREST_MAX;
+}
+
 /** Directional protection 0..1 against fire arriving FROM `dirRad` (radians, 0 = north, clockwise,
  * matching angleTo's convention): the tile's own omni cover plus linear cover from the neighbouring
  * tile toward the threat (full weight) and the two diagonal neighbours (half weight each). */
@@ -72,7 +94,9 @@ export function coverFrom(map: GameMap, tile: Vec2, dirRad: number, ctx?: CoverC
   );
   const rawLinear = Math.min(1, primaryCover + diagCover * 0.5);
 
-  return clamp01(omni + rawLinear * (1 - omni));
+  const c = omni + rawLinear * (1 - omni);
+  const crest = crestProtection(map, tx, ty, stepX, stepY);
+  return clamp01(c + crest * (1 - c));
 }
 
 function clamp01(v: number): number { return v < 0 ? 0 : v > 1 ? 1 : v; }

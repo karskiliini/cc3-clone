@@ -7,6 +7,7 @@ import { TERRAIN_PROPS } from './terrain';
 import { VEHICLE_DEFS } from '@/data/units';
 import { WEAPONS } from '@/data/weapons';
 import { hasLOS, losTrace } from './los';
+import { gradeSpeedMul, GRADE_UPHILL_VEHICLE } from './movement';
 import { isPassable } from './path';
 import { addStress, addOrMergeBelief } from './mind';
 import { expectedPenetrationChance } from './ballistics';
@@ -406,7 +407,9 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     const props = TERRAIN_PROPS[tile];
     const onRoad = tile === 'dirtroad' || tile === 'pavedroad' || tile === 'bridge';
     const baseSpeed = onRoad ? def.speedRoadMs : def.speedOffroadMs;
-    const speedMs = onRoad ? baseSpeed : baseSpeed * props.speedMul;
+    // slope: tracks lose far more than legs do on a climb (GRADE_UPHILL_VEHICLE)
+    const speedMs = (onRoad ? baseSpeed : baseSpeed * props.speedMul)
+      * gradeSpeedMul(map, v.pos, wp, GRADE_UPHILL_VEHICLE);
     v.speed = speedMs;
 
     const distTiles = (speedMs * dt) / TILE_M;

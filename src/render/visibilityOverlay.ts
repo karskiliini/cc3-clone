@@ -27,7 +27,7 @@ import type { BattleState, Camera, Side } from '@/shared/types';
 import { TILE_M, TILE_PX, VIEW_H, VIEW_W } from '@/shared/types';
 import { losTrace } from '@/sim/los';
 import {
-  collectSpotters, observerStandingSpotScore, SOLDIER_SPOT_RANGE_M, type Spotter,
+  collectSpotters, observerStandingSpotScore, SOLDIER_SPOT_RANGE_M, spotterEyeM, type Spotter,
 } from '@/sim/spotting';
 
 /** Spot score at/above which a standing enemy is spotted every tick (updateSpotting's bestP >= 0.5). */
@@ -68,6 +68,10 @@ export function groupSpotters(spotters: Spotter[]): SpotterGroup[] {
     if (!g) { g = { members: [] }; byTile.set(key, g); }
     g.members.push(sp);
   }
+  // tallest eye first: terrain masking is monotone in eye height, so if the tallest member's
+  // trace is blocked every shorter member in the same tile is blocked too — which keeps the
+  // `if (vis === 0) break` early-out below correct for mixed-stance groups.
+  for (const g of byTile.values()) g.members.sort((a, b) => spotterEyeM(b) - spotterEyeM(a));
   return [...byTile.values()];
 }
 
@@ -80,9 +84,12 @@ export function visibilityScore(state: BattleState, groups: SpotterGroup[] | Spo
   const rangeSq = rangeTiles * rangeTiles;
   let best = 0;
   for (const g of gs) {
-    let vis = -1;
-    const losFor = (from: { x: number; y: number }, to: { x: number; y: number }): number => {
-      if (vis < 0) vis = losTrace(state.map, from, to).visibility;
+    // Terrain masking makes the trace depend on the observer's eye height as well as his tile,
+    // so the per-group memo is keyed by eye height: a prone rifleman and the tank beside him
+    // genuinely see different ground behind a crest.
+    let visEye = NaN, vis = -1;
+    const losFor = (from: { x: number; y: number }, to: { x: number; y: number }, eyeM = 1.7, targetM = 1.7): number => {
+      if (vis < 0 || visEye !== eyeM) { vis = losTrace(state.map, from, to, { eyeM, targetM }).visibility; visEye = eyeM; }
       return vis;
     };
     for (const sp of g.members) {

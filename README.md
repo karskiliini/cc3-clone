@@ -31,9 +31,10 @@ order first (hotkey, order bar, or right-click menu), then click the target.
   untouched where he would be spotted for sure, a dark-green tint where only obscured (concealment, distance,
   behind the soldiers' facing), darkened where out of range (300 m ring) or blocked. **L** toggles it
   (also Options → Show Unit Vision); **Shift+L** toggles unit labels.
-- **Tab** depth map: the battlefield's surface height as a relief map (blue-violet holes, grey ground,
-  yellow-orange hedges/fences/walls, red-to-white buildings, green hatch for tree crowns, contours every
-  0.5 m below ground and 2 m above). Craters, foxholes and trenches show as depressions; blasts breach walls,
+- **Tab** depth map: the battlefield's surface height as a relief map. The colour ramp spans about
+  0-30 m above the datum (blue-violet for holes below ground, through greens and yellows for low ground,
+  to orange and red on hilltops and tall buildings), with a green hatch for tree crowns and contours every
+  0.5 m below ground and 2 m above. Hills, ridges, valleys and river beds show as broad bands. Craters, foxholes and trenches show as depressions; blasts breach walls,
   flatten hedges and fences and bring buildings down, and the map follows. The vision overlay is hidden
   while it is on. **.** / **,** select the next / previous team.
 - **F3** pause, **F5** team data, **F6** inset map, **F7** soldier monitor, **F8** options, **O** overview map,

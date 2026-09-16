@@ -2,6 +2,7 @@ import type { GameMap, MapDef, Terrain, Vec2, VictoryLocation } from '@/shared/t
 import { otherSide } from '@/shared/types';
 import { TERRAIN_PROPS } from './terrain';
 import { buildHeightField } from './heightField';
+import { computeGroundSteep, paintElevation } from './mapdsl';
 
 const BUILDING_TILES = new Set<Terrain>(['buildingWood', 'buildingStone', 'floor']);
 const WALL_TILES = new Set<Terrain>(['buildingWood', 'buildingStone']);
@@ -33,6 +34,40 @@ export function coverAt(map: GameMap, p: Vec2): number {
   const y = Math.floor(p.y);
   if (!inBounds(map, x, y)) return 0;
   return TERRAIN_PROPS[tileAt(map, x, y)].cover;
+}
+
+/** Ground elevation (m) at a point, bilinearly interpolated between tile centres. The per-tile
+ * field is the model of record; interpolating here keeps slopes smooth for movement/LOS maths
+ * instead of stepping at tile boundaries. Returns 0 on a flat (elevation-less) map. */
+export function groundHeightAt(map: GameMap, p: Vec2): number {
+  const g = map.ground;
+  if (!g) return 0;
+  const W = map.width, H = map.height;
+  const fx = p.x - 0.5, fy = p.y - 0.5;
+  let x0 = Math.floor(fx), y0 = Math.floor(fy);
+  const ax = fx - x0, ay = fy - y0;
+  let x1 = x0 + 1, y1 = y0 + 1;
+  if (x0 < 0) x0 = 0; if (x1 < 0) x1 = 0; if (x0 >= W) x0 = W - 1; if (x1 >= W) x1 = W - 1;
+  if (y0 < 0) y0 = 0; if (y1 < 0) y1 = 0; if (y0 >= H) y0 = H - 1; if (y1 >= H) y1 = H - 1;
+  const a = g[y0 * W + x0], b = g[y0 * W + x1], c = g[y1 * W + x0], d = g[y1 * W + x1];
+  const top = a + (b - a) * ax;
+  return top + (c + (d - c) * ax - top) * ay;
+}
+
+/** Nearest-tile ground elevation (m) — the cheap form the LOS walk uses per step. */
+export function groundAtTile(map: GameMap, x: number, y: number): number {
+  const g = map.ground;
+  if (!g) return 0;
+  const cx = x < 0 ? 0 : x >= map.width ? map.width - 1 : x;
+  const cy = y < 0 ? 0 : y >= map.height ? map.height - 1 : y;
+  return g[cy * map.width + cx];
+}
+
+/** Steepest local grade (rise/run) at a tile; 0 on a flat map. */
+export function groundSteepAt(map: GameMap, x: number, y: number): number {
+  const g = map.groundSteep;
+  if (!g || !inBounds(map, x, y)) return 0;
+  return g[idx(map, x, y)];
 }
 
 export function concealmentAt(map: GameMap, p: Vec2): number {
@@ -151,6 +186,13 @@ export function buildMap(def: MapDef): GameMap {
 
   floodFillBuildings(map);
   markWindows(map);
+  let idHash = 0;
+  for (let i = 0; i < def.id.length; i++) idHash = (idHash * 31 + def.id.charCodeAt(i)) | 0;
+  const ground = paintElevation(def, (idHash >>> 0) % 100000);
+  if (ground) {
+    map.ground = ground;
+    map.groundSteep = computeGroundSteep(ground, w, h);
+  }
   map.heightField = buildHeightField(map);
 
   return map;

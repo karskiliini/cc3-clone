@@ -1,4 +1,5 @@
 import type { DecorItem, MapDef, MapVectorFeature, Terrain } from '@/shared/types';
+import type { ElevationApi } from '@/shared/types';
 import { MapPainter } from '@/sim/mapdsl';
 
 const WIDTH = 220;
@@ -7,6 +8,40 @@ const SEED = 1942;
 
 /** Autumn 1942: a Soviet rifle division counterattacks a German-held village strung along the
  * paved main street, anchored on the stone church and school. */
+// ---------------------------------------------------------------- shared geometry
+const MAIN_STREET = [
+  { x: 8, y: 82 }, { x: 40, y: 79 }, { x: 75, y: 81 }, { x: 110, y: 80 },
+  { x: 145, y: 78 }, { x: 180, y: 81 }, { x: 212, y: 79 },
+];
+const TRACK_NW = [{ x: 20, y: 79 }, { x: 22, y: 50 }];
+const TRACK_SE = [{ x: 160, y: 80 }, { x: 165, y: 118 }];
+
+/** The village sits on a hill with the church (105,62) on the crown — both deploy zones
+ * (Soviet north, German south) are on the low ground and have to climb to reach it, which is
+ * exactly the "harder to assault from below" case the manual describes. A subsidiary spur
+ * carries the school to the east; the fields fall away north and south. Relief ~13 m,
+ * hill slopes 6-9%. */
+function paintElevationFor(e: ElevationApi): void {
+  e.base(5);
+  e.rolling(1.6, 58, 3);
+  // the hill: wide and rounded, crown just north of the main street where the church stands
+  e.hill(105, 66, 56, 7.5, 'smooth');
+  // a lower shoulder running east to the school, so the street is a saddle rather than a ledge
+  e.ridge([{ x: 105, y: 72 }, { x: 140, y: 82 }, { x: 158, y: 94 }], 46, 2.6);
+  // low ground both sides: the northern crop parcels and the southern meadows
+  e.valley([{ x: 0, y: 16 }, { x: 110, y: 10 }, { x: 220, y: 18 }], 46, 2.2);
+  e.valley([{ x: 0, y: 148 }, { x: 110, y: 154 }, { x: 220, y: 146 }], 46, 2.4);
+  e.smoothElevation(2);
+  e.gradeRoad(MAIN_STREET, 5, 6);
+  e.gradeRoad(TRACK_NW, 3, 8);
+  e.gradeRoad(TRACK_SE, 3, 8);
+  e.smoothElevation(1);
+  // no cliffs: relax anything the composed features made steeper than 30%% (river banks and the
+  // balka lip do sit near that cap — those are the deliberate "steep bank" cases)
+  e.limitGrade(30);
+  e.clampRange(0, 25);
+}
+
 function paintMap(p: MapPainter): void {
   p.fill('grass');
 
@@ -31,13 +66,10 @@ function paintMap(p: MapPainter): void {
   p.orchard(95, 110, 14, 12, 2);
 
   // main street, gently curving, paved; farm tracks feeding it
-  const mainStreet = [
-    { x: 8, y: 82 }, { x: 40, y: 79 }, { x: 75, y: 81 }, { x: 110, y: 80 },
-    { x: 145, y: 78 }, { x: 180, y: 81 }, { x: 212, y: 79 },
-  ];
+  const mainStreet = MAIN_STREET;
   p.road(mainStreet, 4, 'pavedroad');
-  p.road([{ x: 20, y: 79 }, { x: 22, y: 50 }], 2, 'dirtroad');
-  p.road([{ x: 160, y: 80 }, { x: 165, y: 118 }], 2, 'dirtroad');
+  p.road(TRACK_NW, 2, 'dirtroad');
+  p.road(TRACK_SE, 2, 'dirtroad');
   p.decorLine(mainStreet, 'pole', 6);
   p.craterLine(mainStreet, { tStart: 0.3, tEnd: 0.75, seedOffset: 100 });
 
@@ -127,6 +159,7 @@ export const village_1942: MapDef = {
     const p = new MapPainter(tiles, w, h, SEED);
     paintMap(p);
   },
+  elevation: paintElevationFor,
   victoryLocations: [
     { id: 0, name: 'Church', x: 105, y: 62, value: 3 },
     { id: 1, name: 'School', x: 154, y: 95, value: 2 },
