@@ -15,7 +15,7 @@ import { VEHICLE_DEFS } from '@/data/units';
 import { teamBarColor } from '@/ui/hud/hudChrome';
 import { drawOrderMarkers } from '@/render/orderMarkers';
 import { getWeaponSprite } from '@/render/sprites';
-import { getCrewPoseSprite, type CrewPose } from '@/render/soldierArt';
+import { getCrewPoseSprite, type CrewPose, type SoldierPose } from '@/render/soldierArt';
 import { weaponMuzzleM, weaponTowLengthM } from '@/render/weaponArt';
 import { CREW_LAYOUT, crewServedClass, crewWeaponView, weaponFramePoint } from '@/sim/crewWeapon';
 import { FLASH_LIFE, TILE_M } from '@/shared/types';
@@ -366,6 +366,57 @@ function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, state: Batt
   }
 }
 
+/** round5-battle.md fix #4 §1: pick the sprite pose from the soldier's health, `activity`
+ * (already mental-state-driven by the sim: cowering/pinned/panicked/routed/berserk/surrendered)
+ * and `mind.state` (adds wary/shaken, which don't have their own `Activity` value), so a
+ * panicked/pinned/cowering/berserk/surrendered/wary man is never drawn the same as a calm one.
+ * `activity` wins over `mind.state` where both could apply (it's the more specific, sim-owned
+ * signal); `mind.state` only adds poses `Activity` has no room for. Exported for tests. */
+export function poseForSoldier(s: Soldier): SoldierPose {
+  if (s.health === 'incapacitated') return 'woundedCrawl';
+  switch (s.activity) {
+    case 'surrendered': return 'surrendered';
+    case 'berserk': return 'berserk';
+    case 'panicked':
+    case 'routed': return 'panicked';
+    case 'cowering': return 'cowering';
+    case 'pinned': return 'pinned';
+    default: break;
+  }
+  if (s.mind.state === 'wary' || s.mind.state === 'shaken') return 'wary';
+  return s.stance;
+}
+
+/** round5-battle.md fix #4 §2: a soldier under heavy suppression gets a faint dust stipple
+ * around him — a handful of small pale specks, low alpha, positioned with a cheap deterministic
+ * hash (soldier id + frame) so they don't scream "particle system" but do shimmer slightly frame
+ * to frame. Only ever computed for soldiers actually over the threshold, so it costs nothing for
+ * the common case of an unsuppressed battlefield. Stays legible with many units on screen because
+ * it's a handful of 1px dots, not a filled shape. */
+const SUPPRESSION_STIPPLE_THRESHOLD = 55;
+function hash01(n: number): number {
+  let h = n * 2654435761;
+  h = (h ^ (h >>> 13)) * 2246822519;
+  h = h ^ (h >>> 15);
+  return ((h >>> 0) % 1000) / 1000;
+}
+export function drawSuppressionStipple(ctx: CanvasRenderingContext2D, p: { x: number; y: number }, s: Soldier, radiusPx: number): void {
+  if (s.suppression < SUPPRESSION_STIPPLE_THRESHOLD) return;
+  const strength = Math.min(1, (s.suppression - SUPPRESSION_STIPPLE_THRESHOLD) / (100 - SUPPRESSION_STIPPLE_THRESHOLD));
+  const flicker = Math.floor(Date.now() / 90); // slow shimmer, independent of animFrame
+  const n = 3 + Math.round(strength * 2);
+  ctx.save();
+  ctx.fillStyle = `rgba(198,190,170,${(0.22 + strength * 0.16).toFixed(2)})`;
+  for (let i = 0; i < n; i++) {
+    const a = hash01(s.id * 97 + i * 13 + flicker);
+    const b = hash01(s.id * 251 + i * 29 + flicker);
+    const ang = a * Math.PI * 2;
+    const r = radiusPx * (0.5 + b * 0.9);
+    ctx.fillRect(Math.round(p.x + Math.cos(ang) * r) - 1, Math.round(p.y + Math.sin(ang) * r) - 1, 1, 1);
+  }
+  ctx.restore();
+}
+
 function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side, selectedTeamIds: readonly number[]): void {
   if (cam.zoom <= 0.5) {
     drawSoldierDotClusters(ctx, cam, state, playerSide);
@@ -383,14 +434,15 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
     const p = worldToScreen(cam, crewDraw ? crewDraw.pos : s.pos);
     const selected = selectedTeamIds.includes(s.teamId);
     if (selected) drawSelectionRing(ctx, p);
-    const stance = s.health === 'incapacitated' ? 'prone' : crewDraw?.pose === 'mgProne' ? 'prone' : crewDraw?.stance ?? s.stance;
+    const stance: SoldierPose = crewDraw?.pose === 'mgProne' ? 'prone' : crewDraw?.stance ?? poseForSoldier(s);
     const outline = s.side === playerSide ? 'friendly' : 'enemy';
     const sprite = crewDraw?.pose
       ? getCrewPoseSprite(s.side, season, crewDraw.pose, crewDraw.facing, crewDraw.frame, outline, scale)
       : getSoldierSprite(s.side, season, stance, crewDraw ? crewDraw.facing : s.facing, frameOf(s), outline, scale);
     const { dw, dh } = spriteDrawSize(sprite, cam.zoom, scale);
-    if (stance !== 'prone') drawSoldierShadow(ctx, p, dw, dh, cam.zoom);
+    if (stance !== 'prone' && stance !== 'pinned' && stance !== 'dead' && stance !== 'woundedCrawl') drawSoldierShadow(ctx, p, dw, dh, cam.zoom);
     ctx.drawImage(sprite, Math.round(p.x - dw / 2), Math.round(p.y - dh / 2), dw, dh);
+    drawSuppressionStipple(ctx, p, s, Math.max(dw, dh) * 0.6);
     // 2px facing tick in front of the soldier, only for the selected team.
     if (selected) drawFacingTick(ctx, p, s.facing);
   }

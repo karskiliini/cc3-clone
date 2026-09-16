@@ -301,20 +301,161 @@ function proneFigure(side: Side): Figure {
   return { ops, px: 6, py: 12, extent: 12.2 };
 }
 
+/** A corpse must read as unmistakably dead at 1x (round5 critique fix #4): flatter than a
+ * living prone man (no raised torso trapezoid, just a thin flattened slab), limbs splayed wide
+ * and asymmetrically rather than tucked forward, a visible blood pool, and no weapon presented
+ * — any weapon lies well clear of the hands, never aimed. Colours are darkened/desaturated by
+ * `colorsFor(..., dead=true, ...)`. */
 function deadFigure(side: Side): Figure {
   const ops: Op[] = [];
-  // Irregular blood pool under the torso.
-  ops.push(rect(5, 15, 7, 16, 'R', { max: 1 }), rect(6, 16, 8, 17, 'R', { max: 1 }));
-  ops.push(ell(6.5, 16, 2.3, 1.4, 'R', { min: 2 }), ell(8, 17.5, 1.3, 1, 'R', { min: 2 }), ell(4.8, 14.8, 0.9, 0.7, 'R', { min: 2 }));
-  ops.push(...proneBody(side));
-  // One arm tucked, the other flung out wide.
-  ops.push(rect(3, 10, 5, 12, 'U', { max: 1 }), rect(9, 9, 12, 11, 'U', { max: 1 }));
-  ops.push(seg(3.5, 13, 3.2, 10, 1.6, 'U', { min: 2 }), seg(9.5, 13, 11.8, 9.5, 1.6, 'U', { min: 2 }), rect(11.5, 8.5, 12.5, 9.5, 'G', { min: 2 }));
-  // Weapon dropped beside the body.
-  ops.push(rect(8, 0, 10, 6, 'W', { max: 1 }));
-  ops.push(...rifleOps(8.5, -1, 5, false).filter((o) => o.min === 2));
-  ops.push(helmetOf(6.5, 9.5, 3.5, side));
+  // Irregular blood pool under the torso — bigger and darker than a living scene ever shows.
+  ops.push(rect(4, 14, 8, 17, 'R', { max: 1 }), rect(6, 16, 9, 18, 'R', { max: 1 }));
+  ops.push(ell(6.5, 15.5, 3, 2, 'R', { min: 2 }), ell(8.5, 17.7, 1.7, 1.3, 'R', { min: 2 }), ell(4, 14.5, 1.2, 0.9, 'R', { min: 2 }));
+  // Flattened body: a thin slab (shorter than proneBody's raised trapezoid), legs splayed
+  // apart (not parallel) and one boot twisted outward.
+  ops.push(rect(3, 20.5, 5.2, 21.6, 'k', { max: 1 }), rect(8, 21.3, 10.4, 22.4, 'k', { max: 1 }));
+  ops.push(rect(2.6, 19.8, 5.4, 22, 'b', { edge: 'k', lit: 'B', min: 2, round: 0.6 }));
+  ops.push(rect(7.6, 20.6, 10.6, 22.8, 'b', { edge: 'k', lit: 'B', min: 2, round: 0.6 }));
+  ops.push({ k: 'trap', cx: 6.7, y0: 14.5, y1: 20.2, hw0: 4, hw1: 2.6, ch: 'T', edge: 'S', lit: 'T' });
+  ops.push(rect(4, 18, 9.5, 19.8, 'S', { min: 2 }));
+  ops.push(...beltKitOps(side, 4, 9.5, 12.5, 18));
+  // Arms flung wide and asymmetrically — one straight out to the side, one bent back —
+  // nothing reaching toward a weapon.
+  ops.push(rect(2, 8, 4, 11, 'U', { max: 1 }), rect(10, 6, 13.5, 8.5, 'U', { max: 1 }));
+  ops.push(seg(3.5, 12.5, 1.5, 8, 1.6, 'U', { min: 2 }), seg(9.5, 12, 13, 7, 1.6, 'U', { min: 2 }));
+  ops.push(rect(0.8, 6.8, 1.9, 7.9, 'G', { min: 2 }), rect(13, 5.8, 14, 6.9, 'G', { min: 2 }));
+  // Weapon dropped clear of the body, off to one side at an angle — never pointed forward.
+  ops.push(rect(11, 15, 13, 21, 'W', { max: 1 }));
+  ops.push(seg(11.5, 21, 13.5, 14.5, 0.9, 'W', { min: 2 }), seg(11.6, 20.6, 13.2, 15.3, 0.35, 'w', { min: 2 }));
+  ops.push(helmetOf(6.5, 9.5, 3.4, side));
   return { ops, px: 6, py: 12, extent: 12.2 };
+}
+
+/** Wounded but alive: crawls low, still gripping his weapon (spec §1 item 3). Similar silhouette
+ * to `proneFigure` (so a glance still reads "man on the ground") but the head is lifted and one
+ * arm drags the body forward while the other keeps the rifle close to the chest rather than
+ * aimed out front — distinct from both calm prone (weapon presented forward) and a corpse (no
+ * weapon, flat, blood pool). */
+function woundedCrawlFigure(side: Side): Figure {
+  const ops = proneBody(side);
+  ops.push(rect(2, 11, 4, 13, 'U', { max: 1 }), rect(9, 9, 11, 11, 'U', { max: 1 }));
+  ops.push(rect(4, 1, 6, 6, 'W', { max: 1 }));
+  // Dragging arm reaches far forward-side; the other cradles the weapon in close.
+  ops.push(seg(3, 13.5, 2, 8, 1.6, 'U', { min: 2 }), seg(9, 13, 8.3, 10, 1.6, 'U', { min: 2 }));
+  ops.push(rect(1.5, 7.3, 2.5, 8.3, 'G', { min: 2 }), rect(7.8, 9.3, 8.8, 10.3, 'G', { min: 2 }));
+  ops.push(...rifleOps(4.5, 3.5, 4.5, false).filter((o) => o.min === 2).map((o) => ({ ...o })));
+  ops.push(helmetOf(6.5, 10.2, 3.5, side));
+  return { ops, px: 6, py: 12, extent: 12.2 };
+}
+
+/** Pinned: flat on the ground, head down, holding still — no weapon presented, hands drawn in
+ * under the chest rather than out front aiming (spec §1 item "pinned (flat prone, head down)").
+ * Lower profile than the calm prone pose (no forward-reaching arms/rifle silhouette) but not as
+ * flattened/splayed as a corpse and no blood. */
+function pinnedFigure(side: Side): Figure {
+  const ops = proneBody(side);
+  ops.push(rect(4, 10, 6, 12, 'U', { max: 1 }), rect(7, 10, 9, 12, 'U', { max: 1 }));
+  ops.push(seg(4.5, 13, 5.5, 10.8, 1.4, 'U', { min: 2 }), seg(8.5, 13, 7.5, 10.8, 1.4, 'U', { min: 2 }));
+  ops.push(rect(5, 10.2, 6, 11.2, 'G', { min: 2 }), rect(7, 10.2, 8, 11.2, 'G', { min: 2 }));
+  // Head tucked low: the helmet sits lower and closer to the shoulders than any other pose.
+  ops.push(helmetOf(6.5, 11.5, 3.1, side));
+  return { ops, px: 6, py: 12, extent: 12.2 };
+}
+
+/** Cowering: curled into the smallest possible ball, knees drawn to the chest, head buried
+ * between the shoulders, weapon slack on the ground beside him rather than presented. Much
+ * shorter/rounder footprint than crouching so it reads instantly at 1x. */
+function cowerFigure(side: Side): Figure {
+  const ops: Op[] = [];
+  ops.push(rect(7.5, 12, 10.5, 13.5, 'b', { max: 1 }), rect(7.5, 13.5, 10.5, 14.5, 'k', { max: 1 }));
+  ops.push(rect(7.5, 12, 10.5, 14.5, 'b', { edge: 'k', lit: 'B', min: 2, round: 0.9 }));
+  // A rounded huddled mass — no shoulder-vs-hip taper, the whole body pulled inward.
+  ops.push(ell(9, 10, 4, 3.2, 'U', { edge: 'S', min: 2 }));
+  ops.push(rect(5.2, 8.5, 12.8, 12.6, 'U', { edge: 'S', lit: 'L', round: 3, max: 1 }));
+  ops.push(...beltKitOps(side, 5.5, 12.5, 9.5, 12.6));
+  // Arms wrapped up over the head, hugging it down — never reaching for the weapon.
+  ops.push(rect(5.5, 6.8, 8, 9.3, 'U', { max: 1 }), rect(10, 6.8, 12.5, 9.3, 'U', { max: 1 }));
+  ops.push(seg(6.2, 10.2, 7.4, 7, 1.3, 'S', { min: 2 }), seg(11.8, 10.2, 10.6, 7, 1.3, 'U', { min: 2 }));
+  // Weapon left lying flat on the ground beside him.
+  ops.push(rect(12, 12.5, 16.5, 13.4, 'W', { max: 1 }));
+  ops.push(seg(12, 13, 16.5, 13, 0.7, 'W', { min: 2 }), seg(12.2, 13, 16.2, 13, 0.28, 'w', { min: 2 }));
+  ops.push(helmetOf(9, 7.2, 2.9, side));
+  return { ops, px: 9, py: 10, extent: 9.5 };
+}
+
+/** Panicked / broken: running crouched low with the weapon lowered/trailing and both arms
+ * flung wide for balance — nothing like the disciplined crouch of `crouchingFigure`. Wide
+ * asymmetric leg stride reads as a man in flight even at 1x. */
+function panickedFigure(side: Side, frame: 0 | 1): Figure {
+  const ops: Op[] = [];
+  const lead = frame === 0 ? 1 : -1;
+  ops.push(...legOps(4 + lead, 12.5, 8), ...legOps(11 - lead, 13.5, 5));
+  ops.push(rect(5, 8.5, 13, 13.5, 'U', { edge: 'S', lit: 'L', round: 1 }));
+  ops.push(...beltKitOps(side, 5, 13, 9, 13.5));
+  // Arms flung wide, well away from the body — no weapon in a firing grip.
+  ops.push(rect(2, 8, 4.5, 10, 'U', { max: 1 }), rect(13.5, 7.5, 16, 9.5, 'U', { max: 1 }));
+  ops.push(seg(6, 10, 2.5, 8.5, 1.4, 'S', { min: 2 }), seg(12, 9.5, 15.5, 8, 1.4, 'U', { min: 2 }));
+  ops.push(rect(1.5, 7.5, 2.5, 8.5, 'G', { min: 2 }), rect(15, 7, 16, 8, 'G', { min: 2 }));
+  // Weapon dragged low behind him by a sling, never raised.
+  ops.push(rect(-1, 14, 5, 16, 'W', { max: 1 }));
+  ops.push(seg(-1, 15, 5.5, 15.4, 0.7, 'W', { min: 2 }), seg(-0.8, 15, 5.2, 15.4, 0.28, 'w', { min: 2 }));
+  ops.push(helmetOf(9, 7, 3.4, side));
+  return { ops, px: 9, py: 10, extent: 11 };
+}
+
+/** Wary / alert: a deeper, more tense crouch than the ordinary crouching stance, weapon raised
+ * and levelled with both hands (rather than the relaxed one-hand grip), facing the threat
+ * direction the caller passes in as `facing`. */
+function waryFigure(side: Side, frame: 0 | 1): Figure {
+  const ops: Op[] = [];
+  const wob = frame === 1 ? 0.6 : 0;
+  ops.push(rect(6.5 + wob, 12.5, 8.5 + wob, 15, 'b', { max: 1 }), rect(6.5 + wob, 15, 8.5 + wob, 16, 'k', { max: 1 }));
+  ops.push(rect(6.5 + wob, 12.5, 8.5 + wob, 16, 'b', { edge: 'k', lit: 'B', min: 2, round: 0.75 }));
+  ops.push(seg(10, 12.5, 12.6, 15.6, 2, 'b', { max: 1 }), rect(12.8, 15.3, 13.8, 16.3, 'k', { max: 1 }));
+  ops.push(seg(10, 12.2, 11.8, 14.4, 2, 'T', { min: 2 }), seg(11.7, 14.2, 13, 15.9, 1.9, 'b', { min: 2 }), seg(12.7, 15.6, 13.3, 16.1, 1, 'k', { min: 2 }));
+  // Lower, tighter torso than the calm crouch — hunkered down watching the threat direction.
+  ops.push(rect(5, 7.8, 12, 12.6, 'U', { edge: 'S', lit: 'L', round: 1.2 }));
+  ops.push(...beltKitOps(side, 5, 12, 8.2, 12.6));
+  // Weapon shouldered and levelled two-handed, held higher/further forward than the calm pose.
+  ops.push(seg(10.6, 9.5, 12.4, 8, 1.5, 'U', { min: 2 }), rect(12.2, 7.4, 13.2, 8.4, 'G', { min: 2 }));
+  ops.push(seg(6, 8.6, 11.6, 3.6, 1.4, 'S', { min: 2 }), rect(12, 2.8, 13, 3.8, 'G', { min: 2 }));
+  ops.push(...rifleOps(11.6, -0.5, 8, true));
+  ops.push(helmetOf(8.5, 6.5, 3.7, side));
+  return { ops, px: 8.5, py: 9, extent: 10 };
+}
+
+/** Berserk: upright, leaning hard into a charge, weapon presented aggressively out front
+ * (bayonet-forward) — a wider, more forward-leaning stride than the calm standing walk. */
+function berserkFigure(side: Side, frame: 0 | 1): Figure {
+  const ops: Op[] = [];
+  ops.push(...legOps(5, 12.5, frame === 0 ? 9 : 7), ...legOps(11, 12.5, frame === 0 ? 7 : 9));
+  // Torso pitched forward: shifted north of the hip pivot with a pronounced lean.
+  ops.push(rect(5, 6.5, 12.5, 12.5, 'U', { edge: 'S', lit: 'L', round: 1.5 }));
+  ops.push(...beltKitOps(side, 5, 12.5, 7, 12.5));
+  ops.push(seg(11.5, 8.5, 13.5, 8, 1.4, 'U', { min: 2 }), rect(13.25, 7.25, 14.25, 8.25, 'G', { min: 2 }));
+  ops.push(seg(6.5, 7.5, 12.5, 2, 1.3, 'S', { min: 2 }), rect(12.75, 1.25, 13.75, 2.25, 'G', { min: 2 }));
+  // Rifle thrust out ahead of the body, further forward than the calm presented pose.
+  ops.push(...rifleOps(12.5, -3.5, 9, true));
+  ops.push(helmetOf(8.75, 5.5, 3.5, side));
+  return { ops, px: 8.75, py: 9.5, extent: 12.5 };
+}
+
+/** Surrendered: standing straight, both arms raised high, weapon absent — must be unmistakable
+ * even at 1x, so the raised arms are drawn as two long light bars well clear of the silhouette. */
+function surrenderedFigure(side: Side): Figure {
+  const ops: Op[] = [];
+  ops.push(...legOps(6, 12.5, 6.5), ...legOps(10, 12.5, 6.5));
+  ops.push(rect(5.5, 8.5, 12.5, 13.5, 'U', { edge: 'S', lit: 'L', round: 1.5 }));
+  ops.push(...beltKitOps(side, 5.5, 12.5, 9, 13.5));
+  // Both arms raised and converging to a point just above the helmet — a narrow "V", which
+  // (unlike a weapon silhouette, always a single bar off to one side) stays close to the body
+  // and reads as "hands up" under any facing rotation rather than smearing into a long spike.
+  ops.push(seg(6.6, 8.7, 9, 1.2, 1.3, 'S', { max: 1 }), seg(11.4, 8.7, 9, 1.2, 1.3, 'U', { max: 1 }));
+  ops.push(rect(8.3, 0.3, 9.7, 1.7, 'G', { max: 1 }));
+  ops.push(seg(6.6, 8.5, 9, 0.6, 1.1, 'S', { min: 2 }), seg(11.4, 8.5, 9, 0.6, 1.1, 'U', { min: 2 }));
+  ops.push(rect(8.4, 0, 9.6, 1.3, 'G', { min: 2 }));
+  ops.push(helmetOf(9, 7.5, 3.5, side));
+  return { ops, px: 9.5, py: 10.5, extent: 11 };
 }
 
 // ------------------------------------------------------------- palette ----
@@ -417,12 +558,32 @@ function parseColor(c: string): [number, number, number, number] {
   return [p[0], p[1], p[2], Math.round((p[3] ?? 1) * 255)];
 }
 
-function figureFor(side: Side, stance: Stance | 'dead', frame: 0 | 1): Figure {
-  if (stance === 'dead') return deadFigure(side);
-  if (stance === 'prone') return proneFigure(side);
-  if (stance === 'crouching') return crouchingFigure(side, frame);
-  return standingFigure(side, frame);
+/** Every pose `unitRender.ts` can ask for: the three calm stances, `dead`, and the mental-state
+ * / health poses from round5-battle.md fix #4 §1/§3 — cowering, panicked (also used for
+ * routed/broken, which likewise "cannot act"), pinned, wary (also used for shaken), berserk,
+ * surrendered, and woundedCrawl (incapacitated but alive). */
+export type SoldierPose =
+  | Stance | 'dead' | 'cowering' | 'panicked' | 'pinned' | 'wary' | 'berserk' | 'surrendered' | 'woundedCrawl';
+
+function figureFor(side: Side, stance: SoldierPose, frame: 0 | 1): Figure {
+  switch (stance) {
+    case 'dead': return deadFigure(side);
+    case 'woundedCrawl': return woundedCrawlFigure(side);
+    case 'pinned': return pinnedFigure(side);
+    case 'cowering': return cowerFigure(side);
+    case 'panicked': return panickedFigure(side, frame);
+    case 'wary': return waryFigure(side, frame);
+    case 'berserk': return berserkFigure(side, frame);
+    case 'surrendered': return surrenderedFigure(side);
+    case 'prone': return proneFigure(side);
+    case 'crouching': return crouchingFigure(side, frame);
+    default: return standingFigure(side, frame);
+  }
 }
+
+/** Poses that hold still (no run-cycle second frame) share frame 0 regardless of the caller's
+ * animation frame, same as the existing prone/dead handling. */
+const STILL_POSES = new Set<SoldierPose>(['dead', 'prone', 'pinned', 'cowering', 'surrendered', 'woundedCrawl']);
 
 /** Rasterise a figure at `scale` and `facing` into an N x N character grid
  * (row-major, '' = empty) with the pivot exactly at the canvas centre. */
@@ -504,11 +665,11 @@ function paint(n: number, cells: string[], colors: Record<string, string>): HTML
  * per 1x pixel — draw it at `canvas.width * zoom / scale`. Cached by the
  * caller (sprites.ts). */
 export function buildSoldierSprite(
-  side: Side, season: Season, stance: Stance | 'dead', facing: Facing8, frame: 0 | 1,
+  side: Side, season: Season, stance: SoldierPose, facing: Facing8, frame: 0 | 1,
   outline: SoldierOutline = 'enemy', scale = 1,
 ): HTMLCanvasElement {
   const s = scale >= 2 ? 2 : 1;
-  const fig = figureFor(side, stance, stance === 'dead' || stance === 'prone' ? 0 : frame);
+  const fig = figureFor(side, stance, STILL_POSES.has(stance) ? 0 : frame);
   const { n, cells } = rasterise(fig, facing, s, season === 'winter');
   growRings(n, cells, s);
   return paint(n, cells, colorsFor(side, season, stance === 'dead', stance === 'dead' ? 'enemy' : outline));

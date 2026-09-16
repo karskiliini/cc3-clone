@@ -11,7 +11,9 @@ import {
   getTreeSprite,
   getWeaponSprite,
 } from '@/render/sprites';
-import { getCrewPoseSprite, CREW_POSES } from '@/render/soldierArt';
+import { getCrewPoseSprite, CREW_POSES, type SoldierPose } from '@/render/soldierArt';
+import { drawSuppressionStipple, poseForSoldier } from '@/render/unitRender';
+import type { Soldier, MentalState, Activity } from '@/shared/types';
 import { weaponTowLengthM } from '@/render/weaponArt';
 import { CREW_LAYOUT, crewServedClass } from '@/sim/crewWeapon';
 import { drawText, textWidth, FONT_SMALL_H, FONT_BIG_H } from '@/render/pixelfont';
@@ -272,6 +274,62 @@ const walkRow = section('Soldier walk frames (standing, german, summer, facing 0
 for (const facing of [0, 2, 4, 6] as Facing8[]) {
   cellPair(walkRow, `f${facing} frame0`, getSoldierSprite('german', 'summer', 'standing', facing, 0));
   cellPair(walkRow, `f${facing} frame1`, getSoldierSprite('german', 'summer', 'standing', facing, 1));
+}
+
+// ------------------------------------------ round5-battle.md fix #4 states --
+// Every mental-state / health pose (soldierArt.ts SoldierPose) at 1x and 3x, for both sides,
+// summer and winter, plus corpses — makes the psychology visible on the map, not just in the
+// monitor. See docs/critique/round5-battle.md fix #4 and
+// docs/superpowers/specs/2026-09-13-soldier-mind-design.md section 3.
+const STATE_POSES: SoldierPose[] = [
+  'standing', 'crouching', 'prone', 'wary', 'cowering', 'pinned', 'panicked', 'berserk', 'surrendered', 'woundedCrawl', 'dead',
+];
+for (const side of SIDES) {
+  for (const season of ['summer', 'winter'] as Season[]) {
+    const row = section(`Mental-state / health poses (round5 fix #4) — ${side} / ${season}, friendly outline (dead is always the enemy/no-rim tone)`);
+    for (const pose of STATE_POSES) {
+      for (const facing of [2, 6] as Facing8[]) {
+        const outline = pose === 'dead' ? 'enemy' : 'friendly';
+        cellPair(row, `${pose} f${facing}`, getSoldierSprite(side, season, pose, facing, 0, outline));
+      }
+    }
+  }
+}
+
+// Suppression stipple demo: the same wary soldier at three suppression levels, at 1x and 3x, on
+// a ground-tone backdrop, drawn through the exact same drawSuppressionStipple used in
+// unitRender.ts so this preview can't drift from what the battle actually shows.
+function fakeSoldier(id: number, suppression: number): Soldier {
+  return {
+    id, teamId: 1, side: 'german', name: 'Preview', rank: 'Gefr', weaponId: 'kar98k',
+    ammo: 10, ammoReserve: 0, grenades: 0, health: 'healthy', morale: 50, fatigue: 0, suppression,
+    experience: 50, stance: 'crouching', activity: 'idle' as Activity, pos: { x: 0, y: 0 }, facing: 2,
+    targetSoldierId: null, targetVehicleId: null, targetPoint: null, path: [],
+    reloadTimer: 0, fireTimer: 0, animFrame: 0, isLeader: false, vehicleId: null,
+    formationOffset: { x: 0, y: 0 }, lastFiredAt: -99, cover: 0, kills: 0,
+    mind: {
+      state: 'wary' as MentalState, motivation: 50, stress: 0, fear: 0, beliefs: [], threatDir: null,
+      threatLevel: 0, lastIncomingAt: -99, hesitation: 0, surrounded: false, helpless: false,
+      stateSince: 0, anchor: null, lastCoverSeekAt: -99,
+    },
+  };
+}
+{
+  const row = section('Suppression stipple cue (round5 fix #4 §2) — same soldier at rising suppression, ground backdrop');
+  for (const suppression of [0, 60, 80, 100]) {
+    const s = fakeSoldier(suppression, suppression);
+    const c = document.createElement('canvas');
+    c.width = 40; c.height = 40;
+    const ctx = c.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = '#6f7a45';
+    ctx.fillRect(0, 0, c.width, c.height);
+    const sprite = getSoldierSprite(s.side, 'summer', poseForSoldier(s), s.facing, 0, 'friendly', 1);
+    const p = { x: c.width / 2, y: c.height / 2 };
+    ctx.drawImage(sprite, Math.round(p.x - sprite.width / 2), Math.round(p.y - sprite.height / 2));
+    drawSuppressionStipple(ctx, p, s, Math.max(sprite.width, sprite.height) * 0.6);
+    cell(row, `suppression ${suppression}`, c, 3);
+  }
 }
 
 // --------------------------------------------------------------- vehicles --
