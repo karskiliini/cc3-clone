@@ -2,7 +2,7 @@
 // structures.ts — damage to walls, roofs, buildings, hedges and fences, and the debris casualties
 // it causes.
 //
-// Structure values: wood building wall 60, stone wall 150, stone building wall 200, hedge 40,
+// Structure values: wood building wall 50, stone wall 150, stone building wall 200, hedge 40,
 // fence 15; roofs (per interior floor tile) wood 50, stone 160.
 //
 // HE blasts damage structure tiles within a structure-blast radius by the weapon's HE power
@@ -15,9 +15,10 @@
 //   - hedge/fence -> 'open' (flattened), height 0
 //   - wall tile   -> breach: 'rubble' (passable, partial cover, no LOS block), +0.6 m lip
 //   - roof        -> cave-in: the floor tile below turns to rubble
-// A building with more than 30% of its wall tiles breached (or 60% of its roof caved) is DAMAGED:
-// the roof over the breached part caves in. Above 70% breached it is RUINED: roof gone, interior
-// rubble, the remaining walls reduced to 1.5-3 m stubs.
+// A building with 30% or more of its wall tiles breached (or 60% of its roof caved) is DAMAGED:
+// the roof over the breached part caves in. At 70% breached — or once nearly the whole roof has
+// come down (90% caved), which is what a sustained mortar barrage does — it is RUINED: roof gone,
+// interior rubble, the remaining walls reduced to 1.5-3 m stubs.
 //
 // Debris casualties at every stage (through combat's applyHit, so health transitions and casualty
 // messages happen exactly once): a breach hits men on and just inside the breached tile, a cave-in
@@ -28,7 +29,7 @@
 // Tile terrain is the sim truth, so cover/LOS/pathing pick changes up immediately; the height
 // field and the terrain renderer (map.dirtyTiles) are updated alongside.
 // ============================================================================
-import type { BattleState, GameMap, Soldier, Terrain, Vec2, WeaponDef } from '@/shared/types';
+import type { BattleState, GameMap, Side, Soldier, Terrain, Vec2, WeaponDef } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import { Rng, hash2 } from '@/shared/rng';
 import { getHeightField, refreshTiles, setTileOverride, syncCraterMarks, buildingIsBig, H_BREACH_LIP } from './heightField';
@@ -37,7 +38,7 @@ import { applyHit } from './combat';
 import { addStress } from './mind';
 
 export const STRUCTURE_HP: Partial<Record<Terrain, number>> = {
-  buildingWood: 60,
+  buildingWood: 50,
   stonewall: 150,
   buildingStone: 200,
   hedge: 40,
@@ -49,6 +50,8 @@ export const MORTAR_ROOF_MULT = { wood: 1.5, stone: 0.8 };
 export const DAMAGED_FRACTION = 0.3;
 export const RUINED_FRACTION = 0.7;
 const CAVED_ROOF_DAMAGED_FRACTION = 0.6;
+/** Roof gone over this much of the floor: the shell of the building comes down with it. */
+export const RUINED_ROOF_FRACTION = 0.9;
 
 /** Debris casualty tuning: chance a man is hit, and the lethality of the hit. */
 export const DEBRIS = {
@@ -82,6 +85,8 @@ interface StructState {
 
 /** One blast's accumulated consequences, resolved after all tiles are damaged. */
 interface BlastEvent {
+  /** the side that fired the round (null when unknown) */
+  side: Side | null;
   changed: number[];
   breaches: { tile: number; bid: number; stone: boolean; power: number }[];
   caveIns: Map<number, number[]>;     // building id -> tiles caved this blast
@@ -130,6 +135,10 @@ export function buildingStatus(map: GameMap, bid: number): BuildingStatus {
   return getState(map).buildings.get(bid)?.status ?? 'intact';
 }
 
+/** Who fired the round: `side` decides whether the player hears about it, `from` is the gun's
+ * position for direct fire (which face of a building the blast works on). */
+export interface BlastSource { side?: Side | null; from?: Vec2 | null }
+
 /** HE power against structures and the radius (m) it reaches. AT rockets: the burst tile only. */
 export function structureBlast(weapon: WeaponDef): { power: number; radiusM: number; singleTile: boolean } | null {
   if (weapon.heRadiusM <= 0 || weapon.cls === 'flamethrower') return null;
@@ -149,8 +158,9 @@ function isCrushed(t: Terrain): boolean { return t === 'hedge' || t === 'fence';
 function isWall(t: Terrain): boolean { return t === 'buildingWood' || t === 'buildingStone'; }
 
 /** Where a direct-fire round came from: this tick's tracer ending at the burst. */
-function shooterFor(state: BattleState, pos: Vec2, weapon: WeaponDef): Vec2 | null {
+function shooterFor(state: BattleState, pos: Vec2, weapon: WeaponDef, from?: Vec2 | null): Vec2 | null {
   if (weapon.cls !== 'tankgun' && weapon.cls !== 'atgun') return null;
+  if (from) return from;
   for (let k = state.tracers.length - 1; k >= 0 && k >= state.tracers.length - 12; k--) {
     const tr = state.tracers[k];
     if (tr.t === 0 && Math.hypot(tr.to.x - pos.x, tr.to.y - pos.y) < 1.5) return tr.from;
@@ -160,7 +170,7 @@ function shooterFor(state: BattleState, pos: Vec2, weapon: WeaponDef): Vec2 | nu
 
 /** Damages structures around an HE burst at `pos` (tile coords) and keeps the height field's
  * craters in step with map.craterMarks. Called by combat.ts next to leaveCrater. */
-export function applyBlastDamage(state: BattleState, pos: Vec2, weapon: WeaponDef): void {
+export function applyBlastDamage(state: BattleState, pos: Vec2, weapon: WeaponDef, opts?: BlastSource): void {
   const map = state.map;
   const field = getHeightField(map);
   syncCraterMarks(map, field);
@@ -168,7 +178,7 @@ export function applyBlastDamage(state: BattleState, pos: Vec2, weapon: WeaponDe
   if (!blast) return;
   const st = getState(map);
   const tx0 = Math.floor(pos.x), ty0 = Math.floor(pos.y);
-  const ev: BlastEvent = { changed: [], breaches: [], caveIns: new Map(), collapses: [] };
+  const ev: BlastEvent = { side: opts?.side ?? null, changed: [], breaches: [], caveIns: new Map(), collapses: [] };
 
   // ---- plunging fire: a mortar round bursting on a building hits its roof
   if (weapon.cls === 'mortar' && tx0 >= 0 && ty0 >= 0 && tx0 < map.width && ty0 < map.height) {
@@ -177,13 +187,16 @@ export function applyBlastDamage(state: BattleState, pos: Vec2, weapon: WeaponDe
     const b = bid >= 0 ? st.buildings.get(bid) : undefined;
     if (b && (map.tiles[bi] === 'floor' || isWall(map.tiles[bi]))) {
       const mult = b.stone ? MORTAR_ROOF_MULT.stone : MORTAR_ROOF_MULT.wood;
+      // a round that bursts on the wall still tears the eaves open: with no roof over the burst
+      // tile itself the neighbouring roof tiles take more of it than the usual half.
+      const near = map.tiles[bi] === 'floor' ? 0.5 : 0.75;
       for (let dy = -1; dy <= 1; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
           const x = tx0 + dx, y = ty0 + dy;
           if (x < 0 || y < 0 || x >= map.width || y >= map.height) continue;
           const i = y * map.width + x;
           if (map.buildingId[i] !== bid) continue;
-          damageRoof(state, st, b, i, blast.power * mult * (dx === 0 && dy === 0 ? 1 : 0.5), ev);
+          damageRoof(state, st, b, i, blast.power * mult * (dx === 0 && dy === 0 ? 1 : near), ev);
         }
       }
     }
@@ -194,7 +207,7 @@ export function applyBlastDamage(state: BattleState, pos: Vec2, weapon: WeaponDe
   if (blast.singleTile) {
     hits.push(...singleTileHit(map, st, pos, blast.power));
   } else {
-    const shooter = shooterFor(state, pos, weapon);
+    const shooter = shooterFor(state, pos, weapon, opts?.from);
     const rT = blast.radiusM / TILE_M;
     const reach = Math.ceil(rT);
     for (let dy = -reach; dy <= reach; dy++) {
@@ -249,10 +262,7 @@ function damageRoof(state: BattleState, st: StructState, b: BuildingRec, i: numb
   st.roofHp[i] = Math.max(0, st.roofHp[i] - dmg);
   if (st.roofHp[i] > 0) return;
   caveIn(state, st, b, i, ev);
-  if (b.status === 'intact' && b.floorTiles.length > 0 && b.caved.size / b.floorTiles.length >= CAVED_ROOF_DAMAGED_FRACTION) {
-    b.status = 'damaged';
-    for (const wi of b.wallTiles) ev.changed.push(wi);
-  }
+  updateBuilding(state, st, b, ev);
 }
 
 function caveIn(state: BattleState, st: StructState, b: BuildingRec, i: number, ev: BlastEvent): void {
@@ -290,7 +300,7 @@ function destroyTile(state: BattleState, st: StructState, i: number, power: numb
   map.windows[i] = 0;
   ev.changed.push(i);
   setTileOverride(map, x, y, H_BREACH_LIP);
-  notifyBreach(state, st, { x: x + 0.5, y: y + 0.5 });
+  notifyBreach(state, st, { x: x + 0.5, y: y + 0.5 }, ev.side);
   const bid = map.buildingId[i];
   ev.breaches.push({ tile: i, bid, stone, power });
   if (bid >= 0) {
@@ -303,9 +313,13 @@ function updateBuilding(state: BattleState, st: StructState, b: BuildingRec, ev:
   const map = state.map;
   if (b.wallTiles.length === 0) return;
   const frac = b.breached.size / b.wallTiles.length;
+  // a roof that has almost entirely come down leaves a ruin even when most walls still stand:
+  // this is what a sustained mortar barrage produces, and without it a wood farm building could
+  // be shelled indefinitely and never collapse.
+  const roofFrac = b.floorTiles.length > 0 ? b.caved.size / b.floorTiles.length : 0;
   const prev = b.status;
-  if (frac > RUINED_FRACTION) b.status = 'ruined';
-  else if (frac > DAMAGED_FRACTION && b.status === 'intact') b.status = 'damaged';
+  if (frac >= RUINED_FRACTION || roofFrac >= RUINED_ROOF_FRACTION) b.status = 'ruined';
+  else if ((frac >= DAMAGED_FRACTION || roofFrac >= CAVED_ROOF_DAMAGED_FRACTION) && b.status === 'intact') b.status = 'damaged';
 
   if (b.status === 'ruined') {
     if (prev === 'ruined') return;
@@ -489,9 +503,11 @@ function nearPlayerUnits(state: BattleState, p: Vec2, rTiles: number): boolean {
   return false;
 }
 
-function notifyBreach(state: BattleState, st: StructState, p: Vec2): void {
+/** "Wall breached." — reported when the player can know about it: his own round did it (a fire
+ * mission is his order, however far away it lands) or one of his men is close enough to see. */
+function notifyBreach(state: BattleState, st: StructState, p: Vec2, side: Side | null): void {
   if (state.time - st.lastBreachMsgAt < 8) return;
-  if (!nearPlayerUnits(state, p, 25)) return;
+  if (side !== state.config.playerSide && !nearPlayerUnits(state, p, 25)) return;
   st.lastBreachMsgAt = state.time;
   addMessage(state, 'Wall breached.', 'warn');
 }

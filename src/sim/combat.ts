@@ -401,7 +401,7 @@ function reportEnemyKill(state: BattleState, killerTeam: Team | undefined): void
   m.set(key, { at: state.time, count: 1, msg: state.messages[state.messages.length - 1] });
 }
 
-export function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: WeaponDef, shooterSide: Side): void {
+export function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: WeaponDef, shooterSide: Side, from?: Vec2): void {
   const map = state.map;
   const radiusTiles = weapon.heRadiusM / TILE_M;
   if (radiusTiles > 0) {
@@ -433,7 +433,21 @@ export function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: W
   state.explosions.push({ pos: { ...pos }, radiusM: weapon.heRadiusM, t: 0, kind });
   state.events.push({ kind: 'explosion', pos: { ...pos }, side: shooterSide, weaponId: weapon.id });
   leaveCrater(state, pos, weapon);
-  applyBlastDamage(state, pos, weapon);
+  applyBlastDamage(state, pos, weapon, { side: shooterSide, from });
+}
+
+/** A shell fired flat by a gun crew (AT gun, infantry gun, Panzerfaust) bursts where it lands.
+ * resolveRound has already rolled the direct hit and the suppression it causes, so this adds only
+ * what an explosion does to the WORLD — the burst effect, the ground mark and the structure damage
+ * — never a second casualty roll against the men it has already been resolved against. Without it
+ * a gun crew could shell a building all day and never scratch it: applyHESplash is reached only
+ * from the vehicle, mortar and grenade paths. */
+function heBurstAt(state: BattleState, pos: Vec2, weapon: WeaponDef, shooter: Soldier): void {
+  if (weapon.heRadiusM <= 0 || weapon.cls === 'flamethrower' || weapon.cls === 'grenade') return;
+  state.explosions.push({ pos: { ...pos }, radiusM: weapon.heRadiusM, t: 0, kind: weapon.heRadiusM >= 3 ? 'he' : 'small' });
+  state.events.push({ kind: 'explosion', pos: { ...pos }, side: shooter.side, weaponId: weapon.id });
+  leaveCrater(state, pos, weapon);
+  applyBlastDamage(state, pos, weapon, { side: shooter.side, from: shooter.pos });
 }
 
 /** Blast mark size by explosive: grenade ~1 m scorched hole, AT rocket a small scorch, mortar
@@ -596,6 +610,7 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
     }
     if (wantTracer) state.tracers.push({ from: { ...shooter.pos }, to: { ...target.pos }, t: 0, hit: false, kind: tracerKindFor(weapon) });
     if (weapon.heRadiusM === 0) state.explosions.push({ pos: { ...target.pos }, radiusM: 0, t: 0, kind: 'small' });
+    else heBurstAt(state, target.pos, weapon, shooter);
     return;
   }
 
@@ -627,11 +642,13 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
     if (wantTracer) state.tracers.push({ from: { ...shooter.pos }, to: { ...victim.pos }, t: 0, hit: true, kind: tracerKindFor(weapon) });
     onIncomingFire(state, rng, victim, shooter, victim.pos, weapon.cls, false);
     applyHit(state, victim, weapon, rng, shooter.side, shooter);
+    heBurstAt(state, victim.pos, weapon, shooter);
   } else {
     const spread = 0.5 + distM / 200;
     const impact = { x: victim.pos.x + rng.gauss() * spread, y: victim.pos.y + rng.gauss() * spread };
     if (wantTracer) state.tracers.push({ from: { ...shooter.pos }, to: impact, t: 0, hit: false, kind: tracerKindFor(weapon) });
     if (weapon.heRadiusM === 0) state.explosions.push({ pos: { ...impact }, radiusM: 0, t: 0, kind: 'small' });
+    else heBurstAt(state, impact, weapon, shooter);
     onIncomingFire(state, rng, victim, shooter, impact, weapon.cls);
     for (const s2 of state.soldiers.values()) {
       if (s2.side === shooter.side) continue;
@@ -1262,10 +1279,10 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
         fireAtVehicle(state, rng, weapon, vehicle.pos, vehicle.side, target.vehicle, p, true);
       } else if (target.kind === 'soldier') {
         state.tracers.push({ from: { ...vehicle.pos }, to: { ...target.soldier.pos }, t: 0, hit: true, kind: 'shell' });
-        if (weapon.heRadiusM > 0) applyHESplash(state, rng, target.soldier.pos, weapon, vehicle.side);
+        if (weapon.heRadiusM > 0) applyHESplash(state, rng, target.soldier.pos, weapon, vehicle.side, vehicle.pos);
       } else {
         state.tracers.push({ from: { ...vehicle.pos }, to: { ...target.pos }, t: 0, hit: true, kind: 'shell' });
-        if (weapon.heRadiusM > 0) applyHESplash(state, rng, target.pos, weapon, vehicle.side);
+        if (weapon.heRadiusM > 0) applyHESplash(state, rng, target.pos, weapon, vehicle.side, vehicle.pos);
       }
     }
   }
