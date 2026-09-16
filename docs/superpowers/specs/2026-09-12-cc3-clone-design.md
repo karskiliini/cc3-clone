@@ -168,3 +168,47 @@ Module contracts live in `src/shared/types.ts`; every module imports from there 
 - Unit: path (A* finds road route, avoids water), LOS (wall blocks, hedge partial), ballistics (hit chance monotonic in range/cover), morale thresholds, victory scoring, map DSL produces expected tiles, spotting reveals firing units.
 - Integration: headless `Battle` run 20 min with AI vs AI on each map completes without exceptions and produces a result.
 - Manual: browser playtest with screenshots compared against the layout spec.
+
+---
+
+## 11. Systems added after the original spec (2026-09-13 → 09-16)
+
+These were requested during play and supersede the corresponding "non-goal" notes above.
+
+**Soldier mind** (`src/sim/mind.ts`, spec: `2026-09-13-soldier-mind-design.md`). Every soldier has
+stress, fear, motivation, hidden traits and a mental state machine (calm → alert → wary → shaken →
+pinned → cowering → panicked → broken, plus berserk), beliefs about where enemies are, and a threat
+direction from incoming fire. Panicked men cannot act. Leaders rally; conscripts freeze on first fire;
+veterans conserve ammunition. Vehicle crews use the same model with armour-specific alarms.
+
+**Directional cover and cover seeking** (`src/sim/cover.ts`, `coverSeek.ts`). Protection is computed
+against the direction fire comes from; soldiers automatically move to the best nearby cover against
+all known threat directions without abandoning their order. Tanks reverse behind cover keeping frontal
+armour to the threat, and only when the threat can actually hurt them.
+
+**Formations** (`src/sim/spawn.ts`, `orders.ts`). Loose wedges and skirmish lines per team type that
+rotate with the order direction; soldiers settle into cover on arrival.
+
+**Crew-served weapons** (`src/sim/crewWeapon.ts`, `src/render/weaponArt.ts`). Mortars, HMGs and AT guns
+are visible objects with posed crews; they pack, set up, aim and load before firing, can be abandoned
+and re-manned.
+
+**Indirect fire** (`src/sim/combat.ts`). Mortars fire without line of sight. Accuracy depends on
+observation: a spotter who sees the area *and* the spotted enemy in it walks rounds onto the target;
+seeing only the ground is worse; unobserved fire is poor.
+
+**Attack-unit orders** (`src/sim/orders.ts`, `src/render/orderMarkers.ts`). A Fire order on a spotted
+enemy tracks that unit; soldiers each engage the member they can see; a lost target is suppressed at
+its last known position, then watched, then reacquired.
+
+**Structure damage and height** (`src/sim/structures.ts`, `heightField.ts`). Blasts breach walls,
+flatten hedges and fences, cave in roofs and collapse buildings, injuring the men inside; a 0.5 m
+height field tracks craters, foxholes, trenches, walls, buildings and (from 09-16) ground elevation.
+
+**Player aids** (`src/render/visibilityOverlay.ts`, `depthOverlay.ts`). L shades what the selected
+units cannot see, using the sim's own spotting rules; Tab shows the depth/height map. Order endpoints
+are always visible, and hovering one draws its line.
+
+**Controls.** Orders Z X C V B N M (no order is ever implicit); Shift-click adds waypoints; two-finger
+scroll pans, pinch/Ctrl+wheel zooms; marquee selection; Tab depth map; '.'/',' cycle teams; L vision,
+Shift+L labels; F3/F5/F6/F7/F8 as in the original.
