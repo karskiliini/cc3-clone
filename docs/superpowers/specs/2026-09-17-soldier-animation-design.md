@@ -175,3 +175,77 @@ ellipse that shrinks with height) so the sprite itself carries no shadow during 
 **Runtime (`src/render/spriteAtlas.ts`).** Loads atlases and JSON before a battle starts (progress on
 the deploy screen), exposes `drawSoldier(ctx, key, dir, frame, x, y, zoom)` etc., falls back to the
 code-drawn sprite when an entry is missing, and frees atlases for unused side/season combinations.
+
+## 6. Crew-served weapons are worked by men, task by task (user request)
+
+> When a PaK crew is setting up the gun we should see the full animation: setting up the legs of the
+> cannon, opening them up and placing them on the ground; one man has to take the leg and extend it.
+> The weapon can't be used until it's all done. It doesn't matter who does it, but it can't extend
+> without a person doing it. Same for loading: a person needs to load a round into the chamber and then
+> it's ready to fire. One person needs to be aiming it, and firing it.
+
+**Model.** A crew-served weapon is a small state machine whose transitions are TASKS. A task only
+progresses while a living, able crewman (not dead, incapacitated, stunned, pinned, cowering, panicked,
+routed or surrendered) stands at that task's station and works it. Any crewman may take any task;
+the team assigns free men to open tasks each step (nearest able man first, leader last). A man walks
+to the station, works for the task's duration, and the task completes; if he is hit or breaks
+mid-task, progress is kept but stops until someone else takes over. With fewer men, tasks that could
+run in parallel run one after the other, so a short crew is slow rather than blocked.
+
+**AT and infantry guns** (PaK 36/38/40, 45 mm, ZiS-3)
+
+| State | Tasks to leave it | Station | Time per man |
+| --- | --- | --- | --- |
+| `limbered` (trails closed, being hauled) | `unhook` | gun tail | 2 s |
+| `trailsClosed` | `spreadLeft`, `spreadRight` (parallel: one man per trail leg) | each trail end | 3 s each |
+| `trailsOpen` | `digSpades` (seat both spades) | trail ends | 2 s per spade |
+| `emplaced`, breech empty | `load` (loader takes a round from the ammo stack, rams it, closes the breech) | breech, loader's side | 3–4 s |
+| `loaded` | `lay` (gunner at the sight traverses and elevates onto the target) | gunner's seat | 1.5–4 s by angle |
+| `laid` | `fire` (gunner) → recoil → breech opens, case ejects → back to `emplaced` | gunner's seat | instant + 0.6 s recoil |
+
+Packing up reverses it (`liftSpades`, `closeLeft`, `closeRight`, `hook`). The gunner must be at the
+sight to lay and fire; the loader must be at the breech to load; one man can do both jobs in turn but
+must walk between the stations (about 1.5 m), so a one-man gun fires slowly. The gun cannot fire unless
+it is `laid`, cannot be laid unless `loaded`, and cannot be loaded unless `emplaced`.
+
+**Mortars:** `placeBaseplate` (1 man, 3 s) → `mountTube` (1 man, 2 s) → `setBipod` (1 man, 2 s) →
+`lay` (gunner, 6–10 s by range) → `dropRound` (loader, 2 s per bomb). Baseplate and bipod are carried
+by different men, so both must arrive.
+**Heavy MGs:** `placeTripod` (1 man, 3 s) → `mountGun` (1 man, 2 s) → `feedBelt` (assistant, 2 s; again
+every 250 rounds) → gunner fires; without an assistant the gunner feeds his own belts (4 s).
+
+**Experience** scales every task time (green ×1.25, veteran ×0.8). **Status words** follow the open
+task: "Unlimbering", "Spreading trails", "Digging in", "Loading", "Aiming", "Firing", "Packing up".
+The soldier monitor shows each crewman's current task in his activity cell.
+
+**Visuals.** The weapon sprite has one state per step (`limbered`, `trailsClosed`, `trailLeftOpen`,
+`trailRightOpen`, `trailsOpen`, `emplaced`, plus `recoil`), and the man working a task plays that
+task's pose at the station, so you watch a man walk to a trail leg, swing it out and set it down.
+Crew pose keys: `crew.haul`, `crew.trail` (gripping and swinging a trail leg), `crew.dig`,
+`crew.load.gun` (round in arms → ram → step back), `crew.lay` (at the sight, hand on the traverse
+wheel), `crew.fire` (lanyard pull, flinch), `crew.baseplate`, `crew.tube`, `crew.bipod`,
+`crew.load.mortar` (bomb over the muzzle → drop → duck), `crew.tripod`, `crew.mountmg`, `crew.belt`,
+`crew.mg`.
+
+**Tests:** a gun with no crewman at a trail never opens it; two men open both trails in parallel and
+one man opens them in sequence; killing the man mid-task pauses progress until another arrives; the gun
+fires only after load → lay; a one-man crew still fires, slowly; determinism stays green; the balance
+harness stays in range (guns and mortars get slower to bring into action, so tune times if needed).
+
+## 7. Tank overrun (user request)
+
+> It could just crush the man under the tracks, leaving a squished body, with bloodstains.
+
+- **Sim:** a vehicle moving faster than 1 m/s whose hull footprint passes over an ENEMY soldier
+  overruns him. Men who can react (standing or crouched, not pinned, stunned, cowering or wounded)
+  dodge aside to the nearest free tile with probability 0.85 (green 0.7, veteran 0.95) and take a
+  large stress spike; men who cannot react, and those who fail the dodge, are killed. Friendly men
+  always step aside (drivers avoid their own troops). An overrun raises stress for every enemy within
+  15 m who sees it. Seeded Rng only. Message: "<team>\n<Rank>. <Name> was run down." (rate-limited).
+- **Look:** the body is left as a flattened corpse pressed into the ground in the vehicle's direction
+  of travel, with a dark blood stain and the track's tread pattern running through it, and a short
+  smeared trail where the track carried on. Kept at the game's small sprite scale and muted palette,
+  like its other casualties; no flying body parts. Corpse entry keys: `corpse.crushed<N>` (4
+  variants, 16 dirs), falling back to a normal corpse with a larger stain when the atlas lacks them.
+- **Tests:** a prone pinned enemy under a moving tank dies; a standing calm veteran usually dodges;
+  a friendly is never crushed; a stationary tank crushes no one; determinism green.
