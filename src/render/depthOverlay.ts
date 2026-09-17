@@ -18,6 +18,7 @@
 import type { Camera, GameMap, HeightField } from '@/shared/types';
 import { TILE_PX, VIEW_H, VIEW_W } from '@/shared/types';
 import { getHeightField, syncCraterMarks } from '@/sim/heightField';
+import { getGrowth } from '@/sim/growth';
 import { drawText } from './pixelfont';
 
 export const DEPTH_ALPHA = 0.85;
@@ -88,7 +89,7 @@ export interface DepthRegion { x0: number; y0: number; cols: number; rows: numbe
 
 /** Pure rasteriser (node-testable): RGBA pixels for tiles [x0,x0+cols) x [y0,y0+rows) at `ppt`
  * pixels per tile. */
-export function rasterizeDepth(field: HeightField, r: DepthRegion): { data: Uint8ClampedArray; w: number; h: number } {
+export function rasterizeDepth(field: HeightField, r: DepthRegion, growthM?: Float32Array): { data: Uint8ClampedArray; w: number; h: number } {
   const W = r.cols * r.ppt, H = r.rows * r.ppt;
   const data = new Uint8ClampedArray(W * H * 4);
   const heights = new Float32Array((W + 1) * (H + 1));
@@ -108,7 +109,9 @@ export function rasterizeDepth(field: HeightField, r: DepthRegion): { data: Uint
       let sx0 = Math.floor(fx); const ax = fx - sx0;
       let sx1 = sx0 + 1;
       if (sx0 < 0) sx0 = 0; if (sx1 < 0) sx1 = 0; if (sx0 >= fw) sx0 = fw - 1; if (sx1 >= fw) sx1 = fw - 1;
-      const a = hArr[row0 + sx0], b = hArr[row0 + sx1], c = hArr[row1 + sx0], d = hArr[row1 + sx1];
+      let a = hArr[row0 + sx0], b = hArr[row0 + sx1], c = hArr[row1 + sx0], d = hArr[row1 + sx1];
+      // tall growth stands on the surface; ruts pressed into it show as lanes at ground level
+      if (growthM) { a += growthM[row0 + sx0]; b += growthM[row0 + sx1]; c += growthM[row1 + sx0]; d += growthM[row1 + sx1]; }
       const top = a + (b - a) * ax;
       heights[py * (W + 1) + px] = top + (c + (d - c) * ax - top) * ay;
       if (px < W && py < H) {
@@ -169,7 +172,7 @@ export interface DepthOverlayStats { lastBuildMs: number; builds: number }
 
 export class DepthOverlay {
   private canvas: HTMLCanvasElement | null = null;
-  private shown: { region: DepthRegion; version: number; field: HeightField } | null = null;
+  private shown: { region: DepthRegion; version: number; growthVersion: number; field: HeightField } | null = null;
   readonly stats: DepthOverlayStats = { lastBuildMs: 0, builds: 0 };
 
   constructor() {
@@ -184,14 +187,15 @@ export class DepthOverlay {
     syncCraterMarks(map, field);
     const want = depthRegion(map, cam);
     const s = this.shown;
-    if (s && s.field === field && s.version === field.version && s.region.x0 === want.x0 && s.region.y0 === want.y0
+    const growth = getGrowth(map);
+    if (s && s.field === field && s.version === field.version && s.growthVersion === growth.version && s.region.x0 === want.x0 && s.region.y0 === want.y0
       && s.region.cols === want.cols && s.region.rows === want.rows && s.region.ppt === want.ppt) return;
     const t0 = performance.now();
-    const img = rasterizeDepth(field, want);
+    const img = rasterizeDepth(field, want, growth.heightM);
     if (!this.canvas) this.canvas = document.createElement('canvas');
     if (this.canvas.width !== img.w || this.canvas.height !== img.h) { this.canvas.width = img.w; this.canvas.height = img.h; }
     this.canvas.getContext('2d')!.putImageData(new ImageData(img.data as Uint8ClampedArray<ArrayBuffer>, img.w, img.h), 0, 0);
-    this.shown = { region: want, version: field.version, field };
+    this.shown = { region: want, version: field.version, growthVersion: growth.version, field };
     this.stats.lastBuildMs = performance.now() - t0;
     this.stats.builds++;
   }

@@ -3,6 +3,7 @@ import { VIEW_W } from '@/shared/types';
 import { screenToWorld } from '@/engine/camera';
 import { featureHeightAt, getHeightField, groundAt, syncCraterMarks } from '@/sim/heightField';
 import { drawText, textWidth } from '@/render/pixelfont';
+import { growthHeightAt } from '@/sim/growth';
 
 /** "12.4 m" for bare ground; with something standing on it or dug into it, the difference too:
  * "12.4 m +6.0" on a roof, "12.4 m -1.2" in a foxhole. Small differences are ground noise. */
@@ -19,7 +20,7 @@ export function drawElevationReadout(ctx: CanvasRenderingContext2D, cam: Camera,
   if (w.x < 0 || w.y < 0 || w.x >= map.width || w.y >= map.height) return;
   const field = getHeightField(map);
   syncCraterMarks(map, field);
-  const text = elevationLabel(groundAt(field, w.x, w.y), featureHeightAt(field, w.x, w.y));
+  const text = elevationLabel(groundAt(field, w.x, w.y), featureHeightAt(field, w.x, w.y) + growthHeightAt(map, w.x, w.y));
   const tw = textWidth(text);
   let x = Math.round(mouse.x + 16);
   const y = Math.round(mouse.y + 18);

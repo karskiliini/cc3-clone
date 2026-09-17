@@ -2,6 +2,7 @@ import type { GameMap, Stance, Terrain, Vec2 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import { TERRAIN_PROPS } from './terrain';
 import { idx, inBounds } from './map';
+import { GROWTH_HEIGHT_M, tileStanding } from './growth';
 
 export interface LosResult {
   clear: boolean;
@@ -153,8 +154,14 @@ export function losTrace(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeight
       // Low growth only hides what the sight line actually passes through: a standing man or a
       // tank commander looks over a field of tall grass, while the line down to a prone man dips
       // into it near him. Holes (craters, trenches) hide their occupants, never the ground beyond.
-      const vegM = LOW_GROWTH_HEIGHT_M[terrain];
+      let vegM = LOW_GROWTH_HEIGHT_M[terrain];
       let conceal = tp.concealment;
+      // Tall grass and crops pressed down by vehicles or blasts: what is left standing in the tile
+      // sets both how high the screen is and how much it hides.
+      if (vegM !== undefined && GROWTH_HEIGHT_M[terrain]) {
+        const standing = tileStanding(map, i2);
+        if (standing < 1) { vegM *= standing; conceal *= standing; }
+      }
       if (vegM !== undefined) {
         const eyeM = heights?.eyeM ?? EYE_STANDING_M;
         const tgtM = heights?.targetM ?? EYE_STANDING_M;

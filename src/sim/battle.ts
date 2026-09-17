@@ -13,6 +13,7 @@ import { spawnTeam, layoutTeamPositions } from './spawn';
 import { applyOrder, stepAttackOrders, spottedEnemyTeamAt } from './orders';
 import { stepMovement } from './movement';
 import { stepVehicles } from './vehicle';
+import { stepGrowth } from './growth';
 import { stepVictory } from './victory';
 import { updateSpotting } from './spotting';
 import { stepSmoke } from './smoke';
@@ -143,6 +144,7 @@ export class Battle {
     stepCoverSeeking(state, this.rng, dt);
     stepMovement(state, this.rng, dt);
     stepVehicles(state, this.rng, dt);
+    stepGrowth(state);
 
     this.spotAccum += dt;
     if (this.spotAccum >= SPOT_INTERVAL) {
