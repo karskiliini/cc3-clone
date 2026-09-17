@@ -44,6 +44,9 @@ export const WEAPONS: Record<string, WeaponDef> = {
 
   // ---------------------------------------------------------- coax weapons
   coax_mg34: w({ id: 'coax_mg34', name: 'MG34 (coax)', cls: 'coaxmg', rangeM: 800, rate: 3, burst: 5, accuracy: 0.3, lethality: 0.5, suppression: 0.35, penetrationMm: 0, heRadiusM: 0, ammo: 250, reloadS: 4 }),
+  // hull MGs in a ball mount: the same guns through a poorer sight (sim/combat.ts bow MG)
+  bow_mg34: w({ id: 'bow_mg34', name: 'MG34 (bow)', cls: 'coaxmg', rangeM: 800, rate: 3, burst: 5, accuracy: 0.22, lethality: 0.5, suppression: 0.35, penetrationMm: 0, heRadiusM: 0, ammo: 250, reloadS: 4 }),
+  bow_dt: w({ id: 'bow_dt', name: 'DT (bow)', cls: 'coaxmg', rangeM: 800, rate: 2, burst: 4, accuracy: 0.22, lethality: 0.5, suppression: 0.35, penetrationMm: 0, heRadiusM: 0, ammo: 250, reloadS: 4 }),
   coax_dt: w({ id: 'coax_dt', name: 'DT (coax)', cls: 'coaxmg', rangeM: 800, rate: 2, burst: 4, accuracy: 0.3, lethality: 0.5, suppression: 0.35, penetrationMm: 0, heRadiusM: 0, ammo: 250, reloadS: 4 }),
 
   // ------------------------------------------------------------- mortars

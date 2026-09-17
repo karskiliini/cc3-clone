@@ -156,3 +156,16 @@ describe('tank overrun', () => {
     expect(run()).toBe(run());
   });
 });
+
+describe('daze and overrun', () => {
+  it('a man still dazed by a blast (on his feet again, no longer stunned) cannot throw himself aside', () => {
+    const { state } = tankSetup();
+    const s = addInfantry(state, 5, 'soviet', { x: 30.5, y: 30.5 }, { experience: 90 });
+    state.time = 10;
+    expect(canReactToOverrun(state, s)).toBe(true);
+    s.stunnedUntil = 8; s.dazedUntil = 25;
+    expect(canReactToOverrun(state, s)).toBe(false);
+    state.time = 26;
+    expect(canReactToOverrun(state, s)).toBe(true);
+  });
+});

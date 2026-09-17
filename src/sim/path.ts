@@ -119,7 +119,11 @@ function nextGen(): number {
   return scratchGen;
 }
 
-export function findPath(map: GameMap, from: Vec2, to: Vec2, mover: Mover, maxNodes = 20000): Vec2[] {
+/** Extra cost of stepping onto a tile, on top of its terrain cost (>= 0, so the heuristic stays
+ * admissible): a danger to go round where there is a way round, never a block. */
+export type TileCostFn = (x: number, y: number) => number;
+
+export function findPath(map: GameMap, from: Vec2, to: Vec2, mover: Mover, maxNodes = 20000, extraCost?: TileCostFn): Vec2[] {
   const sx = Math.floor(from.x), sy = Math.floor(from.y);
   let tx = Math.floor(to.x), ty = Math.floor(to.y);
 
@@ -178,7 +182,7 @@ export function findPath(map: GameMap, from: Vec2, to: Vec2, mover: Mover, maxNo
         }
         const ni = key(nx, ny);
         if (closedStamp[ni] === gen) continue;
-        const stepCost = (dx !== 0 && dy !== 0 ? Math.SQRT2 : 1) * costOf(map, nx, ny, mover);
+        const stepCost = (dx !== 0 && dy !== 0 ? Math.SQRT2 : 1) * (extraCost ? costOf(map, nx, ny, mover) + extraCost(nx, ny) : costOf(map, nx, ny, mover));
         const tentativeG = cur.g + stepCost;
         if (tentativeG < gOf(ni)) {
           setG(ni, tentativeG, ci);

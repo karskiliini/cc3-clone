@@ -316,3 +316,41 @@ describe('status vocabulary (round5 critique #9)', () => {
     expect(team.status).toBe('Moving');
   });
 });
+
+describe('vehicle gun status words', () => {
+  it('a halted vehicle reads Loading / Aiming with its main gun, its usual word when the gun is ready, and Moving while it drives', () => {
+    const state = makeState();
+    state.teams.get(1)!.vehicleId = 42;
+    state.vehicles.set(42, {
+      id: 42, teamId: 1, side: 'german', defId: 'pz4gh', pos: { x: 5, y: 5 }, hullFacing: 0, turretFacing: 0,
+      state: 'ok', mainAmmo: 50, coaxAmmo: 200, path: [], speed: 0, targetVehicleId: null, targetSoldierId: null, targetPoint: null,
+      mainFireTimer: 0, coaxFireTimer: 0, burnTimer: 0, hits: 0,
+    });
+    for (const s of state.soldiers.values()) s.vehicleId = 42;
+    const rng = new Rng(1);
+    const v = state.vehicles.get(42)!, team = state.teams.get(1)!;
+    for (const s of state.soldiers.values()) s.activity = 'idle';
+    const word = (): string => { stepMorale(state, rng, 0.1); return team.status; };
+    v.gunState = 'ready';
+    expect(word()).toBe('Waiting');
+    v.gunState = 'loading';
+    expect(word()).toBe('Loading');
+    v.gunState = 'laying';
+    expect(word()).toBe('Aiming');
+    for (const s of state.soldiers.values()) s.activity = 'firing';
+    expect(word()).toBe('Aiming');
+    v.gunState = 'ready';
+    expect(word()).toBe('Firing');
+    team.order = { type: 'defend', target: { x: 5, y: 5 }, issuedAt: 0 };
+    for (const s of state.soldiers.values()) s.activity = 'defending';
+    v.gunState = 'loading';
+    expect(word()).toBe('Loading');
+    // on the move the word stays Moving
+    for (const s of state.soldiers.values()) s.activity = 'moving';
+    v.path = [{ x: 10, y: 10 }]; v.speed = 3;
+    expect(word()).toBe('Moving');
+    // halted again (stale crew activity): the gun word is back
+    v.path = []; v.speed = 0;
+    expect(word()).toBe('Loading');
+  });
+});

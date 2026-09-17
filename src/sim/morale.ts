@@ -1,7 +1,7 @@
 import { crewMayReturn, crewOutsideWord } from './vehicleCrew';
 import { transportWord } from './transport';
 import type {
-  Activity, BattleState, Health, Side, Soldier, Team, TeamMoraleWord, TeamStatusWord, Vec2,
+  Activity, BattleState, Health, Side, Soldier, Team, TeamMoraleWord, TeamStatusWord, Vec2, Vehicle,
 } from '@/shared/types';
 import { SIDES, TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
@@ -205,6 +205,11 @@ function maybeAnnounceHesitating(state: BattleState, team: Team, track: MoraleTr
   addMessage(state, `${team.name}\nis hesitating.`, 'warn');
 }
 
+/** 'Loading' / 'Aiming' for a vehicle whose main gun is being loaded or laid, else null. */
+export function vehicleGunWord(v: Vehicle): TeamStatusWord | null {
+  return v.gunState === 'loading' ? 'Loading' : v.gunState === 'laying' ? 'Aiming' : null;
+}
+
 function computeTeamStatus(state: BattleState, team: Team, track: MoraleTrack): { status: TeamStatusWord; outOfAction: boolean; morale: number } {
   const soldiers = team.soldierIds.map((id) => state.soldiers.get(id)).filter((s): s is Soldier => !!s);
   const vehicle = team.vehicleId != null ? state.vehicles.get(team.vehicleId) : undefined;
@@ -273,6 +278,14 @@ function computeTeamStatus(state: BattleState, team: Team, track: MoraleTrack): 
       const orderType = team.order?.type;
       word = orderType === 'defend' ? 'Defending' : orderType === 'ambush' ? 'Ambushing' : 'Waiting';
     }
+  }
+
+  // a vehicle's main gun, like a crew-served one: the word follows what the gun is waiting for
+  // (`Vehicle.gunState`, sim/combat.ts) — the loader ramming a round, or the gunner laying on a
+  // target. Never while it drives: 'Moving' tells the player more.
+  if (vehicle && (word === 'Waiting' || word === 'Defending' || word === 'Ambushing' || word === 'Firing')) {
+    const gunWord = vehicleGunWord(vehicle);
+    if (gunWord) return { status: gunWord, outOfAction, morale };
   }
 
   // crew-served weapon being assembled (sim/crewWeapon.ts) reads 'Setting up' unless the crew is

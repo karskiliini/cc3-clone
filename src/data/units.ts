@@ -19,6 +19,9 @@ function v(d: VehicleDef): VehicleDef { return d; }
  * 22, Panther 16, Tiger 12, T-26 22, BT-7 24, T-70 25, T-34/76 20, T-34/85 18, KV-1 11, IS-2 13,
  * SU-76 22, SU-85 18. The SdKfz 251 steers with its front wheels and cannot pivot: `turnRadiusM`
  * 5.5 (turn rate = speed / radius, zero at rest).
+ * `bowWeaponId`: the hull MG of tanks that had one (Pz III/IV, Panther, Tiger: MG34 in a ball
+ * mount; T-34, KV-1: DT in a ball mount; IS-2: a fixed DT fired by the driver). None on the StuG,
+ * T-26, BT-7, T-70, the SPGs and the halftrack.
  * `readyRack`: rounds to hand in the turret/fighting compartment (4-8); the rest load x1.25. */
 /* `layout`: what sits where (defaults by class and crew size in sim/vehicleDamage.ts: rear
  * transmission, no side fuel); `weakSpots`: plates an ace gunner knows, effective mm by aim point. */
@@ -28,21 +31,21 @@ export const VEHICLE_DEFS: Record<string, VehicleDef> = {
     id: 'pz3j', name: 'PzKw III J', kind: 'tank', lengthM: 5.6, widthM: 2.9,
     speedRoadMs: 11, speedOffroadMs: 5, turretTraverseDegS: 8, turretTraverseHandDegS: 8, hullTurnDegS: 20, readyRack: 6,
     armor: { front: 50, side: 30, rear: 30, top: 10 },
-    mainWeaponId: 'kwk39_50', coaxWeaponId: 'coax_mg34', hasTurret: true, crew: 5, mainAmmo: 90,
+    mainWeaponId: 'kwk39_50', coaxWeaponId: 'coax_mg34', bowWeaponId: 'bow_mg34', hasTurret: true, crew: 5, mainAmmo: 90,
     layout: { transmission: 'front' }, weakSpots: { lowerHull: 40 },
   }),
   pz4f1: v({
     id: 'pz4f1', name: 'PzKw IV F1', kind: 'tank', lengthM: 5.9, widthM: 2.9,
     speedRoadMs: 11, speedOffroadMs: 5, turretTraverseDegS: 14, turretTraverseHandDegS: 4, hullTurnDegS: 18, readyRack: 8,
     armor: { front: 50, side: 30, rear: 20, top: 10 },
-    mainWeaponId: 'kwk37_75', coaxWeaponId: 'coax_mg34', hasTurret: true, crew: 5, mainAmmo: 80,
+    mainWeaponId: 'kwk37_75', coaxWeaponId: 'coax_mg34', bowWeaponId: 'bow_mg34', hasTurret: true, crew: 5, mainAmmo: 80,
     layout: { transmission: 'front' }, weakSpots: { turretRing: 40 },
   }),
   pz4gh: v({
     id: 'pz4gh', name: 'PzKw IV H', kind: 'tank', lengthM: 5.9, widthM: 2.9,
     speedRoadMs: 11, speedOffroadMs: 5, turretTraverseDegS: 14, turretTraverseHandDegS: 4, hullTurnDegS: 18, readyRack: 8,
     armor: { front: 80, side: 30, rear: 20, top: 12 },
-    mainWeaponId: 'kwk40_75', coaxWeaponId: 'coax_mg34', hasTurret: true, crew: 5, mainAmmo: 87,
+    mainWeaponId: 'kwk40_75', coaxWeaponId: 'coax_mg34', bowWeaponId: 'bow_mg34', hasTurret: true, crew: 5, mainAmmo: 87,
     layout: { transmission: 'front' }, weakSpots: { turretRing: 50 },
   }),
   stug3g: v({
@@ -56,14 +59,14 @@ export const VEHICLE_DEFS: Record<string, VehicleDef> = {
     id: 'panther', name: 'Panther G', kind: 'tank', lengthM: 6.9, widthM: 3.4,
     speedRoadMs: 12, speedOffroadMs: 5, turretTraverseDegS: 15, turretTraverseHandDegS: 3, hullTurnDegS: 16, readyRack: 6,
     armor: { front: 110, side: 45, rear: 40, top: 16 },
-    mainWeaponId: 'kwk42_75', coaxWeaponId: 'coax_mg34', hasTurret: true, crew: 5, mainAmmo: 79,
+    mainWeaponId: 'kwk42_75', coaxWeaponId: 'coax_mg34', bowWeaponId: 'bow_mg34', hasTurret: true, crew: 5, mainAmmo: 79,
     layout: { transmission: 'front' }, weakSpots: { gunMantlet: 70, sideHull: 40 },
   }),
   tiger: v({
     id: 'tiger', name: 'Tiger I', kind: 'tank', lengthM: 6.3, widthM: 3.6,
     speedRoadMs: 10, speedOffroadMs: 4, turretTraverseDegS: 7, turretTraverseHandDegS: 2, hullTurnDegS: 12, readyRack: 6,
     armor: { front: 100, side: 80, rear: 80, top: 25 },
-    mainWeaponId: 'kwk36_88', coaxWeaponId: 'coax_mg34', hasTurret: true, crew: 5, mainAmmo: 92,
+    mainWeaponId: 'kwk36_88', coaxWeaponId: 'coax_mg34', bowWeaponId: 'bow_mg34', hasTurret: true, crew: 5, mainAmmo: 92,
     layout: { transmission: 'front' },
   }),
   sdkfz251: v({
@@ -100,14 +103,14 @@ export const VEHICLE_DEFS: Record<string, VehicleDef> = {
     id: 't34_76', name: 'T-34/76', kind: 'tank', lengthM: 6.7, widthM: 3.0,
     speedRoadMs: 14, speedOffroadMs: 7, turretTraverseDegS: 25, turretTraverseHandDegS: 6, hullTurnDegS: 20, readyRack: 6,
     armor: { front: 60, side: 45, rear: 40, top: 20 },
-    mainWeaponId: 'f34_76', coaxWeaponId: 'coax_dt', hasTurret: true, crew: 4, mainAmmo: 77,
+    mainWeaponId: 'f34_76', coaxWeaponId: 'coax_dt', bowWeaponId: 'bow_dt', hasTurret: true, crew: 4, mainAmmo: 77,
     layout: { twoManTurret: true, sideFuel: true }, weakSpots: { driverPlate: 45, turretRing: 45 },
   }),
   kv1: v({
     id: 'kv1', name: 'KV-1', kind: 'tank', lengthM: 6.8, widthM: 3.3,
     speedRoadMs: 9, speedOffroadMs: 4, turretTraverseDegS: 10, turretTraverseHandDegS: 3, hullTurnDegS: 11, readyRack: 8,
     armor: { front: 75, side: 75, rear: 70, top: 20 },
-    mainWeaponId: 'kv_zis5', coaxWeaponId: 'coax_dt', hasTurret: true, crew: 5, mainAmmo: 114,
+    mainWeaponId: 'kv_zis5', coaxWeaponId: 'coax_dt', bowWeaponId: 'bow_dt', hasTurret: true, crew: 5, mainAmmo: 114,
     layout: { sideFuel: true }, weakSpots: { turretRing: 60, rear: 60 },
   }),
   t70: v({
@@ -121,14 +124,14 @@ export const VEHICLE_DEFS: Record<string, VehicleDef> = {
     id: 't34_85', name: 'T-34/85', kind: 'tank', lengthM: 6.7, widthM: 3.0,
     speedRoadMs: 14, speedOffroadMs: 7, turretTraverseDegS: 20, turretTraverseHandDegS: 5, hullTurnDegS: 18, readyRack: 8,
     armor: { front: 90, side: 45, rear: 45, top: 20 },
-    mainWeaponId: 'zis_s53_85', coaxWeaponId: 'coax_dt', hasTurret: true, crew: 5, mainAmmo: 55,
+    mainWeaponId: 'zis_s53_85', coaxWeaponId: 'coax_dt', bowWeaponId: 'bow_dt', hasTurret: true, crew: 5, mainAmmo: 55,
     layout: { sideFuel: true }, weakSpots: { driverPlate: 60 },
   }),
   is2: v({
     id: 'is2', name: 'IS-2', kind: 'tank', lengthM: 6.8, widthM: 3.1,
     speedRoadMs: 10, speedOffroadMs: 5, turretTraverseDegS: 13, turretTraverseHandDegS: 3, hullTurnDegS: 13, readyRack: 4,
     armor: { front: 120, side: 90, rear: 60, top: 30 },
-    mainWeaponId: 'd25t_122', coaxWeaponId: 'coax_dt', hasTurret: true, crew: 4, mainAmmo: 28,
+    mainWeaponId: 'd25t_122', coaxWeaponId: 'coax_dt', bowWeaponId: 'bow_dt', hasTurret: true, crew: 4, mainAmmo: 28,
     weakSpots: { lowerHull: 100 },
   }),
   su76: v({
@@ -160,6 +163,13 @@ const Y44_45 = [1944, 1945];
 const Y41_43 = [1941, 1942, 1943];
 const ALL_YEARS = [1941, 1942, 1943, 1944, 1945];
 
+/* `quality`: how the team's men compare with the side's line troops of the year
+ * (data/experience.ts: Germans 1941-42 a veteran army, sliding to the replacements of 1944-45; the
+ * Red Army the other way). Elite: snipers, company command (Soviet from 1943), Tiger and IS-2
+ * (Guards heavy tank regiment) crews, Guards SMG companies of 1944-45. Seasoned: assault squads,
+ * pioneers and sappers, StuG (artillery arm) and Panther crews, KV-1, T-34/85 and SU-85 crews,
+ * SMG squads before 1944. Militia: the Panzerfaust teams of 1944-45 (Volkssturm and hasty
+ * replacements). */
 function t(d: TeamDef): TeamDef { return d; }
 
 export const TEAM_DEFS: Record<string, TeamDef> = {
@@ -189,7 +199,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     iconId: 'rifle',
   }),
   ger_assault_42: t({
-    id: 'ger_assault_42', name: 'Assault Squad', type: 'smg', side: 'german', years: Y42_45, cost: 35,
+    id: 'ger_assault_42', name: 'Assault Squad', type: 'smg', side: 'german', years: Y42_45, cost: 35, quality: 'seasoned',
     soldiers: [
       { rank: 'Uffz', weaponId: 'mp40' },
       { rank: 'Gefr', weaponId: 'mp40' }, { rank: 'Gefr', weaponId: 'mp40' },
@@ -245,7 +255,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     iconId: 'atgun',
   }),
   ger_sniper: t({
-    id: 'ger_sniper', name: 'Sniper', type: 'sniper', side: 'german', years: ALL_YEARS, cost: 20,
+    id: 'ger_sniper', name: 'Sniper', type: 'sniper', side: 'german', years: ALL_YEARS, cost: 20, quality: 'elite',
     soldiers: [{ rank: 'Fw', weaponId: 'kar98k_scoped' }],
     iconId: 'sniper',
   }),
@@ -258,7 +268,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     iconId: 'atteam',
   }),
   ger_pzfaust_44: t({
-    id: 'ger_pzfaust_44', name: 'Panzerfaust Team', type: 'atteam', side: 'german', years: Y44_45, cost: 20,
+    id: 'ger_pzfaust_44', name: 'Panzerfaust Team', type: 'atteam', side: 'german', years: Y44_45, cost: 20, quality: 'militia',
     soldiers: [
       { rank: 'Uffz', weaponId: 'kar98k' },
       { rank: 'Schtz', weaponId: 'panzerfaust' },
@@ -267,7 +277,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     iconId: 'atteam',
   }),
   ger_command: t({
-    id: 'ger_command', name: 'Command', type: 'command', side: 'german', years: ALL_YEARS, cost: 20,
+    id: 'ger_command', name: 'Command', type: 'command', side: 'german', years: ALL_YEARS, cost: 20, quality: 'elite',
     soldiers: [
       { rank: 'Lt', weaponId: 'mp40' },
       { rank: 'Uffz', weaponId: 'kar98k' }, { rank: 'Schtz', weaponId: 'kar98k' }, { rank: 'Schtz', weaponId: 'kar98k' },
@@ -275,7 +285,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     iconId: 'command',
   }),
   ger_engineers: t({
-    id: 'ger_engineers', name: 'Pioneers', type: 'engineer', side: 'german', years: ALL_YEARS, cost: 30,
+    id: 'ger_engineers', name: 'Pioneers', type: 'engineer', side: 'german', years: ALL_YEARS, cost: 30, quality: 'seasoned',
     soldiers: [
       { rank: 'Uffz', weaponId: 'mp40' },
       { rank: 'Gefr', weaponId: 'satchel' }, { rank: 'Gefr', weaponId: 'satchel' },
@@ -308,7 +318,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     vehicleDefId: 'pz4gh', iconId: 'tank',
   }),
   ger_stug3g: t({
-    id: 'ger_stug3g', name: 'StuG III G', type: 'spg', side: 'german', years: Y42_45, cost: 55,
+    id: 'ger_stug3g', name: 'StuG III G', type: 'spg', side: 'german', years: Y42_45, cost: 55, quality: 'seasoned',
     soldiers: [
       { rank: 'Uffz', weaponId: 'pistol_p38' }, { rank: 'Gefr', weaponId: 'pistol_p38' },
       { rank: 'Gefr', weaponId: 'pistol_p38' }, { rank: 'Schtz', weaponId: 'pistol_p38' },
@@ -316,7 +326,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     vehicleDefId: 'stug3g', iconId: 'spg',
   }),
   ger_panther: t({
-    id: 'ger_panther', name: 'Panther G', type: 'tank', side: 'german', years: Y43_45, cost: 75,
+    id: 'ger_panther', name: 'Panther G', type: 'tank', side: 'german', years: Y43_45, cost: 75, quality: 'seasoned',
     soldiers: [
       { rank: 'Uffz', weaponId: 'pistol_p38' }, { rank: 'Gefr', weaponId: 'pistol_p38' },
       { rank: 'Gefr', weaponId: 'pistol_p38' }, { rank: 'Schtz', weaponId: 'pistol_p38' }, { rank: 'Schtz', weaponId: 'pistol_p38' },
@@ -324,7 +334,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     vehicleDefId: 'panther', iconId: 'tank',
   }),
   ger_tiger: t({
-    id: 'ger_tiger', name: 'Tiger I', type: 'tank', side: 'german', years: Y43_45, cost: 90,
+    id: 'ger_tiger', name: 'Tiger I', type: 'tank', side: 'german', years: Y43_45, cost: 90, quality: 'elite',
     soldiers: [
       { rank: 'Uffz', weaponId: 'pistol_p38' }, { rank: 'Gefr', weaponId: 'pistol_p38' },
       { rank: 'Gefr', weaponId: 'pistol_p38' }, { rank: 'Schtz', weaponId: 'pistol_p38' }, { rank: 'Schtz', weaponId: 'pistol_p38' },
@@ -372,7 +382,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     iconId: 'rifle',
   }),
   sov_smg_42: t({
-    id: 'sov_smg_42', name: 'SMG Squad', type: 'smg', side: 'soviet', years: Y42_45, cost: 32,
+    id: 'sov_smg_42', name: 'SMG Squad', type: 'smg', side: 'soviet', years: Y42_45, cost: 32, quality: { default: 'seasoned', 1944: 'elite', 1945: 'elite' },
     soldiers: [
       { rank: 'Serzh', weaponId: 'ppsh41' },
       { rank: 'Efr', weaponId: 'ppsh41' }, { rank: 'Efr', weaponId: 'ppsh41' },
@@ -419,7 +429,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     iconId: 'atgun',
   }),
   sov_sniper: t({
-    id: 'sov_sniper', name: 'Sniper', type: 'sniper', side: 'soviet', years: ALL_YEARS, cost: 18,
+    id: 'sov_sniper', name: 'Sniper', type: 'sniper', side: 'soviet', years: ALL_YEARS, cost: 18, quality: 'elite',
     soldiers: [{ rank: 'StSzh', weaponId: 'mosin_scoped' }],
     iconId: 'sniper',
   }),
@@ -432,7 +442,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     iconId: 'atteam',
   }),
   sov_command: t({
-    id: 'sov_command', name: 'Command', type: 'command', side: 'soviet', years: ALL_YEARS, cost: 20,
+    id: 'sov_command', name: 'Command', type: 'command', side: 'soviet', years: ALL_YEARS, cost: 20, quality: { default: 'seasoned', 1943: 'elite', 1944: 'elite', 1945: 'elite' },
     soldiers: [
       { rank: 'Lt', weaponId: 'ppsh41' },
       { rank: 'Serzh', weaponId: 'mosin' }, { rank: 'Ryad', weaponId: 'mosin' }, { rank: 'Ryad', weaponId: 'mosin' },
@@ -440,7 +450,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     iconId: 'command',
   }),
   sov_sappers: t({
-    id: 'sov_sappers', name: 'Sappers', type: 'engineer', side: 'soviet', years: ALL_YEARS, cost: 30,
+    id: 'sov_sappers', name: 'Sappers', type: 'engineer', side: 'soviet', years: ALL_YEARS, cost: 30, quality: 'seasoned',
     soldiers: [
       { rank: 'Serzh', weaponId: 'ppsh41' },
       { rank: 'Efr', weaponId: 'satchel' }, { rank: 'Efr', weaponId: 'satchel' },
@@ -471,7 +481,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     vehicleDefId: 't34_76', iconId: 'tank',
   }),
   sov_kv1: t({
-    id: 'sov_kv1', name: 'KV-1', type: 'tank', side: 'soviet', years: Y41_42, cost: 80,
+    id: 'sov_kv1', name: 'KV-1', type: 'tank', side: 'soviet', years: Y41_42, cost: 80, quality: 'seasoned',
     soldiers: [
       { rank: 'Serzh', weaponId: 'pistol_tt' }, { rank: 'Ryad', weaponId: 'pistol_tt' },
       { rank: 'Ryad', weaponId: 'pistol_tt' }, { rank: 'Ryad', weaponId: 'pistol_tt' }, { rank: 'Ryad', weaponId: 'pistol_tt' },
@@ -486,7 +496,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     vehicleDefId: 't70', iconId: 'tank',
   }),
   sov_t34_85: t({
-    id: 'sov_t34_85', name: 'T-34/85', type: 'tank', side: 'soviet', years: Y44_45, cost: 70,
+    id: 'sov_t34_85', name: 'T-34/85', type: 'tank', side: 'soviet', years: Y44_45, cost: 70, quality: 'seasoned',
     soldiers: [
       { rank: 'Serzh', weaponId: 'pistol_tt' }, { rank: 'Ryad', weaponId: 'pistol_tt' },
       { rank: 'Ryad', weaponId: 'pistol_tt' }, { rank: 'Ryad', weaponId: 'pistol_tt' }, { rank: 'Ryad', weaponId: 'pistol_tt' },
@@ -494,7 +504,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     vehicleDefId: 't34_85', iconId: 'tank',
   }),
   sov_is2: t({
-    id: 'sov_is2', name: 'IS-2', type: 'tank', side: 'soviet', years: Y44_45, cost: 95,
+    id: 'sov_is2', name: 'IS-2', type: 'tank', side: 'soviet', years: Y44_45, cost: 95, quality: 'elite',
     soldiers: [
       { rank: 'Serzh', weaponId: 'pistol_tt' }, { rank: 'Ryad', weaponId: 'pistol_tt' },
       { rank: 'Ryad', weaponId: 'pistol_tt' }, { rank: 'Ryad', weaponId: 'pistol_tt' },
@@ -510,7 +520,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     vehicleDefId: 'su76', iconId: 'spg',
   }),
   sov_su85: t({
-    id: 'sov_su85', name: 'SU-85', type: 'spg', side: 'soviet', years: Y43_45, cost: 55,
+    id: 'sov_su85', name: 'SU-85', type: 'spg', side: 'soviet', years: Y43_45, cost: 55, quality: 'seasoned',
     soldiers: [
       { rank: 'Serzh', weaponId: 'pistol_tt' }, { rank: 'Ryad', weaponId: 'pistol_tt' },
       { rank: 'Ryad', weaponId: 'pistol_tt' }, { rank: 'Ryad', weaponId: 'pistol_tt' },

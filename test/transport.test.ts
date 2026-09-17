@@ -12,7 +12,7 @@ import { stepCombat, applyHESplash } from '@/sim/combat';
 import { stepMorale } from '@/sim/morale';
 import { applyOrder } from '@/sim/orders';
 import { resolveVehicleHit } from '@/sim/vehicleDamage';
-import { BOARD_S, passengersAboard, roomLeft, canTeamMount } from '@/sim/transport';
+import { BOARD_S, passengersAboard, roomLeft, canTeamMount, transportHolds } from '@/sim/transport';
 import { angleTo, dist, wrapAngle } from '@/shared/math';
 import { makeState, addTank, soldier, mkTeam, W, H } from './vehicleDamageHelpers';
 
@@ -230,5 +230,19 @@ describe('determinism', () => {
       return JSON.stringify([Array.from(state.vehicles.values()), Array.from(state.soldiers.values()).map((s) => [s.id, s.health, s.vehicleId, s.seat, s.pos, s.hatch])]);
     };
     expect(run()).toBe(run());
+  });
+});
+
+describe('daze and mounting', () => {
+  it('a dazed man does not board: like a stunned one he is left to follow on foot, and the vehicle does not wait for him', () => {
+    const { state, v, team, men, rng } = scene(4);
+    men[3].dazedUntil = 40; // knocked about earlier, no longer lying stunned
+    mount(state, team, v, rng);
+    step(state, rng, 35);
+    expect(aboard(men, v).length).toBe(3);
+    expect(men[3].vehicleId).toBeNull();
+    expect(men[3].hatch).toBeUndefined();
+    expect(team.order).toBeNull(); // loading is over without him
+    expect(transportHolds(state, v)).toBe(false);
   });
 });

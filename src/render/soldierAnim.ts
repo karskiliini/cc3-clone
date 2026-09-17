@@ -329,9 +329,10 @@ export function crewTaskAnim(s: Soldier, time: number): CrewTaskAnim | null {
 
 // ------------------------------------------------------------------ hatches (§10) ---
 /** A man climbing out of or into a vehicle: the atlas keys to try, how far through the climb he
- * is, and which way he faces (along the climb). Until the atlas carries `crew.bailout` /
- * `crew.mount` (progress-indexed, 6 frames) he is shown stooped (`crouched.sneak`) on the hull and
- * kneeling (`kneeling.idle`) by it, at the interpolated position the sim gives him. */
+ * is, and which way he faces (along the climb). Every soldier atlas carries `crew.bailout` /
+ * `crew.mount` (progress-indexed, 6 frames, rendered against a hull `hullHeightM` = 1.5 m high), so
+ * those come first in the chain; the stooped (`crouched.sneak`) / kneeling (`kneeling.idle`) keys
+ * after them are only the fallback for an atlas without them. */
 export interface HatchClimbAnim { keys: string[]; progress: number; heading: number }
 export const HATCH_PROGRESS_KEYS = ['crew.bailout', 'crew.mount'] as const;
 

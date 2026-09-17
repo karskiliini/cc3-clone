@@ -357,3 +357,26 @@ describe('determinism', () => {
     expect(run()).toBe(run());
   });
 });
+
+describe('daze and remounting', () => {
+  it('a calm crew with a dazed man does not go back, ordered or not; nobody dazed is sent to a hatch', () => {
+    const { state, v, team, crew } = tank('pz4gh', 85);
+    const rng = new Rng(9);
+    bailOut(state, v, team, 'abandoned', null, { panicked: false, cause: 'shortCrew' });
+    let t = 0;
+    while (crew.some((c) => c.hatch || c.vehicleId != null) && t < 60) { step(state, rng, 0.5); t += 0.5; }
+    v.remount = undefined; v.crewShockUntil = undefined;
+    for (const c of crew) { c.mind.state = 'calm'; c.mind.stress = 0; }
+    crew[1].dazedUntil = state.time + 30;
+    expect(crew[1].stunnedUntil == null || crew[1].stunnedUntil <= state.time).toBe(true);
+    expect(crewReturnRefusal(state, v, false)).toBe('notCalm');
+    expect(crewReturnRefusal(state, v, true)).toBe('notCalm');
+    // a return already under way: the dazed man is not sent to a hatch while the others climb in
+    v.remount = { ordered: true } as NonNullable<Vehicle['remount']>;
+    step(state, rng, 3);
+    expect(crew[1].hatch).toBeUndefined();
+    expect(crew[1].vehicleId).toBeNull();
+    crew[1].dazedUntil = undefined;
+    expect(crewReturnRefusal(state, v, true) === null || v.remount != null).toBe(true);
+  });
+});

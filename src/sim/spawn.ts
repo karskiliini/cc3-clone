@@ -5,6 +5,7 @@ import { angleTo, vadd } from '@/shared/math';
 import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';
 import { randomName } from '@/data/names';
+import { rollExperience } from '@/data/experience';
 import { baseMotivation, createMind, rollTrait } from './mind';
 import { isPassable } from './path';
 
@@ -372,7 +373,8 @@ export function spawnTeam(state: BattleState, def: TeamDef, side: Side, pos: Vec
     const reserveMul = weapon && RELOAD_HEAVY.has(weapon.cls) ? 12 : 6;
     const isCrew = !!def.vehicleDefId;
     const grenades = sd.grenades ?? (isCrew ? 0 : (weapon && (weapon.cls === 'rifle' || weapon.cls === 'smg') ? 2 : 0));
-    const experience = rng.range(20, 60);
+    // by side, year and kind of unit (data/experience.ts); one draw per man, as ever
+    const experience = rollExperience(def, state.config.year, i === 0, rng.next());
     totalExp += experience;
     const offset = offsets[i];
     const soldierPos = vehicle || !positions ? { x: pos.x, y: pos.y } : positions[i];

@@ -31,7 +31,7 @@ import {
   gunnerSkill, noteOutOf, soldierRounds, spotHitMul, vehicleRounds,
 } from './aimPoint';
 import {
-  coaxUsable, crewEffects, expectedArmorMm, isImmobile, mainGunUsable, onBlastNearVehicle, resolveVehicleHit, sightAccuracyMul,
+  bowGunner, bowMgUsable, coaxUsable, crewEffects, systemState, expectedArmorMm, isImmobile, mainGunUsable, onBlastNearVehicle, resolveVehicleHit, sightAccuracyMul,
   turretFrozen, vehicleLayout,
 } from './vehicleDamage';
 import { attackPhase } from './orders';
@@ -1457,6 +1457,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
   }
   if (vehicle.loadTotalS != null) vehicle.loadProgress = vehicle.loadTotalS > 0 ? clamp(1 - vehicle.mainFireTimer / vehicle.loadTotalS, 0, 1) : 1;
   vehicle.coaxFireTimer -= dt;
+  if (vehicle.bowFireTimer != null && vehicle.bowFireTimer > 0) vehicle.bowFireTimer -= dt;
 
   const crew = crewEffects(state, vehicle);
   const mainWeapon = def.mainWeaponId ? WEAPONS[def.mainWeaponId] : undefined;
@@ -1715,6 +1716,80 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
       addShots(state, vehicle.side, coaxRounds);
     }
   }
+
+  stepBowMg(state, rng, vehicle, def);
+}
+
+// ------------------------------------------------------------------- bow MG
+/** Half-width of the bow MG's field of fire either side of the HULL facing. */
+export const BOW_MG_HALF_ARC_RAD = (15 * Math.PI) / 180;
+/** Like the coax it engages out to here. */
+export const BOW_MG_RANGE_M = 400;
+export const BOW_MG_AMMO = 250;
+/** A damaged ball mount jams and binds. */
+export const BOW_MG_DAMAGED_MUL = 0.6;
+/** Fired on the move it is for keeping heads down: half as likely to hit (misses still suppress). */
+export const BOW_MG_MOVING_MUL = 0.5;
+
+/** Is `p` inside the bow MG's arc and range? */
+export function inBowMgArc(vehicle: Vehicle, p: Vec2): boolean {
+  if (dist(vehicle.pos, p) * TILE_M > BOW_MG_RANGE_M) return false;
+  return Math.abs(wrapAngle(angleTo(vehicle.pos, p) - vehicle.hullFacing)) <= BOW_MG_HALF_ARC_RAD;
+}
+
+/** Nearest spotted enemy on foot ahead of the hull with a line of fire (infantry only). */
+function pickBowMgTarget(state: BattleState, vehicle: Vehicle): Soldier | null {
+  let best: Soldier | null = null;
+  let bestD = Infinity;
+  for (const id of state.spotted[vehicle.side]) {
+    const s = state.soldiers.get(id);
+    if (!s || s.health === 'dead' || s.health === 'incapacitated' || s.activity === 'surrendered' || s.vehicleId != null) continue;
+    const d = dist(vehicle.pos, s.pos);
+    if (d >= bestD || !inBowMgArc(vehicle, s.pos) || !hasLOS(state.map, vehicle.pos, s.pos)) continue;
+    bestD = d; best = s;
+  }
+  return best;
+}
+
+/** The hull MG (`VehicleDef.bowWeaponId`): worked by the radio operator / bow gunner at his seat,
+ * at infantry only, through a narrow arc along the hull — it bears where the HULL points, whatever
+ * the turret is doing. Silent when he is dead or has taken another seat, or the mount is destroyed.
+ * Mirrors the coax: bursts on its own timer, misses suppress. */
+function stepBowMg(state: BattleState, rng: Rng, vehicle: Vehicle, def: VehicleDef): void {
+  if (!def.bowWeaponId || (vehicle.bowFireTimer ?? 0) > 0) return;
+  const mg = WEAPONS[def.bowWeaponId];
+  if (!mg || !bowMgUsable(vehicle)) return;
+  vehicle.bowAmmo ??= BOW_MG_AMMO;
+  if (vehicle.bowAmmo <= 0) return;
+  const gunner = bowGunner(state, vehicle);
+  if (!gunner) return;
+  const target = pickBowMgTarget(state, vehicle);
+  if (!target) return;
+  vehicle.bowFireTimer = 1 / mg.rate;
+  // the muzzle is in the bow plate
+  const fx = Math.sin(vehicle.hullFacing), fy = -Math.cos(vehicle.hullFacing);
+  const muzzle = { x: vehicle.pos.x + (fx * def.lengthM * 0.4) / TILE_M, y: vehicle.pos.y + (fy * def.lengthM * 0.4) / TILE_M };
+  state.events.push({ kind: 'shot', pos: { ...muzzle }, weaponId: mg.id, side: vehicle.side });
+  const skillMul = clamp(0.7 + gunner.experience / 200, 0.7, 1.2) * (systemState(vehicle, 'bowMg') === 'damaged' ? BOW_MG_DAMAGED_MUL : 1);
+  let rounds = 0;
+  for (let i = 0; i < mg.burst && vehicle.bowAmmo > 0; i++) {
+    vehicle.bowAmmo--;
+    rounds++;
+    const distM = dist(vehicle.pos, target.pos) * TILE_M;
+    const moving = target.activity === 'moving' || target.activity === 'movingFast';
+    const p = vehicleHitChance(mg, distM, coverAt(state.map, target.pos), target.stance, moving) * skillMul * (Math.abs(vehicle.speed) > 0.5 ? BOW_MG_MOVING_MUL : 1);
+    const hit = rng.chance(p);
+    state.tracers.push({ from: { ...muzzle }, to: { ...target.pos }, t: 0, hit, kind: 'bullet' });
+    if (hit) { applyHit(state, target, mg, rng, vehicle.side); continue; }
+    for (const s2 of state.soldiers.values()) {
+      if (s2.side === vehicle.side || s2.health === 'dead' || s2.health === 'incapacitated') continue;
+      if (dist(s2.pos, target.pos) > SUPPRESSION_SPLASH_RADIUS_TILES) continue;
+      const amount = mg.suppression * 35 * (1 - (s2.cover ?? 0) * 0.5);
+      s2.suppression = clamp(s2.suppression + amount, 0, 100);
+      addSuppressionStat(state, vehicle.side, amount);
+    }
+  }
+  addShots(state, vehicle.side, rounds);
 }
 
 // ------------------------------------------------------------------- main

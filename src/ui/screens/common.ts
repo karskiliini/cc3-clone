@@ -13,6 +13,7 @@ import { drawText, textWidth } from '@/render/pixelfont';
 import { getTeamIcon } from '@/render/sprites';
 import { TEAM_DEFS, VEHICLE_DEFS, teamsForYear } from '@/data/units';
 import { WEAPONS } from '@/data/weapons';
+import { experienceLevel, typicalExperience } from '@/data/experience';
 
 // ------------------------------------------------------------------- noise --
 /** Deterministic 2D hash in [0,1), used for the painted-texture backdrop dither. */
@@ -872,7 +873,8 @@ export class ForcePicker {
       ctx.fillText(truncateToWidth(ctx, selDef.name, cb.x - tx - 6), tx, ir.y + 18);
       ctx.font = 'bold italic 11px Arial, Helvetica, sans-serif';
       ctx.fillStyle = '#e8a33d';
-      ctx.fillText(truncateToWidth(ctx, subtypeLabel(selDef), cb.x - tx - 6), tx, ir.y + 32);
+      // the typical man of the team this year: Recruit / Regular / Veteran / Hero (data/experience.ts)
+      ctx.fillText(truncateToWidth(ctx, `${experienceLevel(typicalExperience(selDef, this.year))} · ${subtypeLabel(selDef)}`, cb.x - tx - 6), tx, ir.y + 32);
       const lines = wordWrapCtx(ctx, TEAM_FLAVOR[selDef.type] ?? '', ir.w - 20, '11px Arial, Helvetica, sans-serif');
       ctx.font = '11px Arial, Helvetica, sans-serif';
       ctx.fillStyle = '#e8e8e0';

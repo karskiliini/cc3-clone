@@ -278,7 +278,7 @@ export const MONITOR_ABBREV: Record<string, string[]> = {
 const SHORT_WEAPON_NAME: Record<string, string> = {
   mosin: 'Mosin', mosin_scoped: 'Mosin', kar98k_scoped: 'Kar98k', ppsh41: 'PPSh', svt40: 'SVT-40',
   pistol_p38: 'P38', pistol_tt: 'TT-33', mg34_hmg: 'MG34', mg42_hmg: 'MG42', maxim: 'Maxim',
-  coax_mg34: 'MG34', coax_dt: 'DT', panzerschreck: 'Pz.schreck', satchel: 'Satchel',
+  coax_mg34: 'MG34', coax_dt: 'DT', bow_mg34: 'MG34', bow_dt: 'DT', panzerschreck: 'Pz.schreck', satchel: 'Satchel',
 };
 export function shortWeaponName(weaponId: string): string {
   const w = WEAPONS[weaponId];

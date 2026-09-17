@@ -15,6 +15,7 @@ import { addStress } from './mind';
 import { settleTile } from './coverSeek';
 import { vehicleLayout } from './vehicleDamage';
 import { BESIDE_HULL_M, besideHatch, hullToWorld } from './vehicleCrew';
+import { isDazed } from './daze';
 
 /** Seconds one man needs through the door (a squad of ten: about 15 s). */
 export const BOARD_S = 1.5;
@@ -264,6 +265,7 @@ const SEVERE = new Set(['pinned', 'cowering', 'panicked', 'broken', 'berserk']);
 function canBoard(state: BattleState, s: Soldier): boolean {
   if (!isAble(s) || s.vehicleId != null || s.hatch || s.activity === 'surrendered') return false;
   if (s.stunnedUntil != null && state.time < s.stunnedUntil) return false;
+  if (isDazed(s, state.time)) return false; // dazed by a blast: in no state to climb aboard
   return !SEVERE.has(s.mind.state);
 }
 

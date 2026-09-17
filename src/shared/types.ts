@@ -506,6 +506,9 @@ export interface VehicleDef {
   armor: { front: number; side: number; rear: number; top: number };  // mm
   mainWeaponId: string | null;
   coaxWeaponId: string | null;
+  /** hull machine gun in the bow (ball mount, or the IS-2's fixed one), worked by the radio
+   * operator / bow gunner through a narrow arc along the HULL facing (sim/combat.ts); absent = none */
+  bowWeaponId?: string;
   hasTurret: boolean;
   crew: number;
   mainAmmo: number;
@@ -568,6 +571,11 @@ export interface Vehicle {
   /** battle time until which the gunner holds fire for a better presentation */
   aimHoldUntil?: number;
   // ---- loading and laying phases of the main gun (sim/gunTiming.ts, sim/combat.ts; all optional) ----
+  // ---- bow machine gun (sim/combat.ts; optional, additive) ----
+  /** seconds until the bow MG may fire its next burst */
+  bowFireTimer?: number;
+  /** rounds left for the bow MG (absent = a full load, BOW_MG_AMMO) */
+  bowAmmo?: number;
   /** what the main gun is waiting for: the loader, the gunner's lay, or nothing */
   gunState?: 'loading' | 'laying' | 'ready';
   /** 0..1 progress of the round being loaded (1 = in the breech, breech closed) */
@@ -705,7 +713,15 @@ export interface TeamDef {
   soldiers: { rank: string; weaponId: string; grenades?: number }[];
   vehicleDefId?: string;
   iconId: string;             // sprite key for team list icon
+  /** how good its men are relative to the side's line troops of the year (data/experience.ts);
+   * a tag, or tags by year with a `default`. Absent = 'line'. */
+  quality?: TeamQuality | (Partial<Record<number, TeamQuality>> & { default?: TeamQuality });
+  /** overrides the year/quality band outright: [min, max] experience of its men */
+  experience?: [number, number];
 }
+
+/** militia: hasty replacements; line; seasoned: picked or long-serving men; elite */
+export type TeamQuality = 'militia' | 'line' | 'seasoned' | 'elite';
 
 export interface Team {
   id: number;

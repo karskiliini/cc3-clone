@@ -199,9 +199,9 @@ export interface CrewEffects {
   gunnerMul: number;
   /** reload time multiplier: x1.8 when the loader's seat is empty (the commander loads) */
   reloadMul: number;
+  /** the commander is at his post. Spotting needs no multiplier for this: each seat is its own eye
+   * (vehicleVision.ts), so losing him already removes the only wide all-round eye. */
   commanderUp: boolean;
-  /** spotting multiplier: x0.5 without a commander */
-  spotMul: number;
   /** seconds added to a change of target without a commander */
   retargetS: number;
 }
@@ -227,7 +227,6 @@ export function crewEffects(state: BattleState, v: Vehicle): CrewEffects {
     gunner, gunnerMul,
     reloadMul: hasLoaderSeat && !seatOccupant(state, v, 'loader') ? LOADER_DOWN_RELOAD_MUL : 1,
     commanderUp,
-    spotMul: commanderUp ? 1 : 0.5,
     retargetS: commanderUp ? 0 : 3,
   };
 }
@@ -279,6 +278,17 @@ export function trackPullRad(v: Vehicle): number {
 }
 export function mainGunUsable(v: Vehicle): boolean { return systemState(v, 'mainGun') !== 'destroyed'; }
 export function coaxUsable(v: Vehicle): boolean { return systemState(v, 'coaxMg') !== 'destroyed'; }
+export function bowMgUsable(v: Vehicle): boolean { return systemState(v, 'bowMg') !== 'destroyed'; }
+
+/** The man at the bow MG, or null: the radio operator / bow gunner AT HIS OWN SEAT (dead, bailed
+ * out, or moved to another seat = nobody; `stepCrewSeats` empties the seat he leaves). A vehicle
+ * with a hull MG but no radio operator's seat (IS-2: a fixed gun) has the driver fire it. */
+export function bowGunner(state: BattleState, v: Vehicle): Soldier | null {
+  const def = VEHICLE_DEFS[v.defId];
+  if (!def?.bowWeaponId) return null;
+  const seats = ensureSeats(state, v);
+  return seatOccupant(state, v, 'radioOp' in seats ? 'radioOp' : 'driver');
+}
 export function turretFrozen(v: Vehicle): boolean { return systemState(v, 'traverse') === 'destroyed' || !!v.turretBlown; }
 /** Turret traverse rate multiplier (a jammed ring that still moves is slow). */
 export function traverseMul(v: Vehicle): number { return systemState(v, 'traverse') === 'damaged' ? 0.4 : 1; }

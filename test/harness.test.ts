@@ -44,6 +44,9 @@ const BATTLE_SECONDS = 20 * 60;
 const ENV = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {};
 const SEED_COUNT = Math.max(1, Math.floor(Number(ENV.HARNESS_SEEDS ?? 3)) || 3);
 /** `HARNESS_SEED_FROM=4 HARNESS_SEEDS=9` runs seeds 4..9 only (to split a long run in two). */
+/** `HARNESS_MAPS=village_1942,steppe_1943` restricts the run to those maps (quick AI iterations). */
+const MAP_FILTER = (ENV.HARNESS_MAPS ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+const HARNESS_MAP_DEFS = MAPS.filter((m) => MAP_FILTER.length === 0 || MAP_FILTER.includes(m.id));
 const SEED_FROM = Math.max(1, Math.floor(Number(ENV.HARNESS_SEED_FROM ?? 1)) || 1);
 const SEEDS = Array.from({ length: Math.max(0, SEED_COUNT - SEED_FROM + 1) }, (_, i) => i + SEED_FROM);
 
@@ -329,7 +332,7 @@ describe('harness smoke', () => {
 describe.skipIf(!(globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.HARNESS)('AI-vs-AI balance harness', () => {
   it(`runs every map at seeds 1..${SEED_COUNT} and prints a balance report`, () => {
     const reports: RunReport[] = [];
-    for (const mapDef of MAPS) {
+    for (const mapDef of HARNESS_MAP_DEFS) {
       for (const seed of SEEDS) {
         const r = runOne(mapDef.id, seed);
         reports.push(r);
@@ -343,7 +346,7 @@ describe.skipIf(!(globalThis as { process?: { env?: Record<string, string | unde
       }
     }
     printReport(reports);
-    expect(reports.length).toBe(MAPS.length * SEEDS.length);
+    expect(reports.length).toBe(HARNESS_MAP_DEFS.length * SEEDS.length);
   }, 600_000 * Math.max(1, SEED_COUNT / 3) * 2);
 });
 

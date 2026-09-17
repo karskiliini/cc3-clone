@@ -6,7 +6,8 @@ import { VEHICLE_DEFS } from '@/data/units';
 import { addMessage } from './messages';
 import type { Rng } from '@/shared/rng';
 import { clamp, dist, facingTo, vadd, vnorm, vscale, vsub } from '@/shared/math';
-import { findPath, isPassable } from './path';
+import { findPath, isPassable, type TileCostFn } from './path';
+import { fireHazards, nearFireHazard } from './vehicleExplosion';
 import { teamHasSmoke } from './team';
 import { isFirstFireFrozen, isLeaderless } from './mind';
 import { angleTo } from '@/shared/math';
@@ -111,11 +112,29 @@ export function orderRoutePoints(order: Order): Vec2[] {
 /** Per-point heading (radians) of the leg each point of a routed path belongs to. */
 const pathLegHeadings = new WeakMap<Vec2[], number[]>();
 
-/** A* path from `from` through each of `points` in turn. An unreachable intermediate point is
+/** Path cost added per tile within FIRE_HAZARD_M of a burning vehicle: enough that a route bends
+ * up to ~100 m out of its way round the fire, but still a cost — with no way round, it goes through. */
+export const FIRE_HAZARD_PATH_COST = 4;
+
+/** The extra path cost for routes while something burns, or undefined when nothing does (the usual
+ * case: findPath then runs exactly as before). Men on foot and open-topped vehicles (halftracks)
+ * keep clear of a hulk that may cook off; closed-up armour does not care. */
+export function fireHazardCost(state: BattleState, mover: 'infantry' | 'vehicle', softVehicle = false): TileCostFn | undefined {
+  if (mover === 'vehicle' && !softVehicle) return undefined;
+  const hazards = fireHazards(state);
+  if (hazards.length === 0) return undefined;
+  const p = { x: 0, y: 0 };
+  return (x, y) => { p.x = x + 0.5; p.y = y + 0.5; return nearFireHazard(hazards, p) ? FIRE_HAZARD_PATH_COST : 0; };
+}
+
+/** A* path from `from` through each of `points` in turn. Burning vehicles are gone round
+ * (`fireHazardCost`; `softVehicle`: an open-topped vehicle, which avoids them like infantry).
+ * An unreachable intermediate point is
  * skipped (the route goes on to the next one). Records per-point leg headings for followers. */
-export function routeVia(state: BattleState, from: Vec2, points: readonly Vec2[], mover: 'infantry' | 'vehicle'): Vec2[] {
+export function routeVia(state: BattleState, from: Vec2, points: readonly Vec2[], mover: 'infantry' | 'vehicle', softVehicle = false): Vec2[] {
+  const hazardCost = fireHazardCost(state, mover, softVehicle);
   if (points.length === 1) {
-    const path = findPath(state.map, from, points[0], mover);
+    const path = findPath(state.map, from, points[0], mover, undefined, hazardCost);
     if (path.length > 0) pathLegHeadings.set(path, new Array(path.length).fill(dist(from, points[0]) > 1e-6 ? angleTo(from, points[0]) : 0));
     return path;
   }
@@ -123,7 +142,7 @@ export function routeVia(state: BattleState, from: Vec2, points: readonly Vec2[]
   const headings: number[] = [];
   let cur = from;
   for (const p of points) {
-    const leg = findPath(state.map, cur, p, mover);
+    const leg = findPath(state.map, cur, p, mover, undefined, hazardCost);
     if (leg.length === 0) continue;
     const h = dist(cur, p) > 1e-6 ? angleTo(cur, p) : (headings.length ? headings[headings.length - 1] : 0);
     path = path.concat(leg);
@@ -315,7 +334,7 @@ export function applyOrderToSoldier(state: BattleState, team: Team, s: Soldier, 
         path = followerPathFromLeader(state, s, leaderPath, shift, rng) ?? followLeaderRoute(state, s, leaderPath, dest);
       }
       if (!path) {
-        path = wps ? routeVia(state, s.pos, [...wps, dest], 'infantry') : findPath(state.map, s.pos, dest, 'infantry');
+        path = wps ? routeVia(state, s.pos, [...wps, dest], 'infantry') : findPath(state.map, s.pos, dest, 'infantry', undefined, fireHazardCost(state, 'infantry'));
         if (path.length === 0) path = routeVia(state, s.pos, orderRoutePoints(order), 'infantry');
       }
     }
@@ -443,7 +462,7 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
 
   if (type === 'move' || type === 'moveFast' || type === 'sneak') {
     if (isVehicleTeam) {
-      if (vehicle) vehicle.path = routeVia(state, vehicle.pos, orderRoutePoints(order), 'vehicle');
+      if (vehicle) vehicle.path = routeVia(state, vehicle.pos, orderRoutePoints(order), 'vehicle', VEHICLE_DEFS[vehicle.defId]?.layout?.openTop === true);
     } else {
       const leader = state.soldiers.get(team.leaderId);
       leaderPath = leader ? routeVia(state, leader.pos, orderRoutePoints(order), 'infantry') : [];

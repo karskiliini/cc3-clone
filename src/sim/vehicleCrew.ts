@@ -16,6 +16,7 @@ import { hasLOS } from './los';
 import { bestRoundAgainst } from './ballistics';
 import { addMessage } from './messages';
 import { onPassengerBoarded, onPassengerOut } from './transport';
+import { isDazed } from './daze';
 import {
   coaxUsable, crewRoleOf, ensureSeats, expectedArmorMm, hasSystem, hurtCrewman, isImmobile, mainGunUsable, seatRoles, systemState, vehicleLayout,
 } from './vehicleDamage';
@@ -301,6 +302,11 @@ function avgExperience(men: Soldier[]): number {
   return men.length > 0 ? men.reduce((a, s) => a + s.experience, 0) / men.length : 0;
 }
 
+/** Lying stunned or still dazed by a blast (daze.ts): he cannot climb a hull in that state. */
+function knockedSilly(state: BattleState, s: Soldier): boolean {
+  return (s.stunnedUntil != null && state.time < s.stunnedUntil) || isDazed(s, state.time);
+}
+
 function calmEnough(s: Soldier, allowWary: boolean): boolean {
   const st = s.mind.state;
   return st === 'calm' || st === 'alert' || (allowWary && st === 'wary');
@@ -359,7 +365,7 @@ export function crewReturnRefusal(state: BattleState, v: Vehicle, ordered: boole
   if (men.length === 0) return 'noCrew';
   if (v.noReturn) return 'refuses';
   const veteran = avgExperience(men) >= VETERAN_EXP;
-  if (men.some((s) => s.hatch || !calmEnough(s, ordered || veteran))) return 'notCalm';
+  if (men.some((s) => s.hatch || !calmEnough(s, ordered || veteran) || knockedSilly(state, s))) return 'notCalm';
   if (men.some((s) => dist(s.pos, v.pos) * TILE_M > REMOUNT_REACH_M)) return 'far';
   if (ordered) return null;
   if (v.crewShockUntil != null && state.time < v.crewShockUntil) return 'shock';
@@ -464,7 +470,7 @@ function stepRemount(state: BattleState, v: Vehicle, team: Team, def: VehicleDef
   let coming = 0;
   for (const s of outside) {
     if (s.hatch) { coming++; continue; }
-    if (!calmEnough(s, rm.ordered || veteran) || (s.stunnedUntil != null && state.time < s.stunnedUntil)) continue; // lost his nerve on the way
+    if (!calmEnough(s, rm.ordered || veteran) || knockedSilly(state, s)) continue; // lost his nerve on the way
     coming++;
     sendToHatch(state, v, def, s, rm.ordered);
   }

@@ -205,7 +205,7 @@ describe('crew casualties by role', () => {
     expect(seatOccupant(state, v, 'radioOp')).toBeNull(); // the man beside him took the seat
   });
 
-  it('dead loader: reload x1.8; dead commander: slower target changes, spotting x0.5', () => {
+  it('dead loader: reload x1.8; dead commander: slower target changes (his eye is lost in vehicleVision, no extra multiplier)', () => {
     const { state, v } = fresh('panther');
     seatOccupant(state, v, 'loader')!.health = 'dead';
     expect(crewEffects(state, v).reloadMul).toBe(LOADER_DOWN_RELOAD_MUL);
@@ -213,7 +213,7 @@ describe('crew casualties by role', () => {
     seatOccupant(state, v, 'commander')!.health = 'incapacitated';
     const e = crewEffects(state, v);
     expect(e.commanderUp).toBe(false);
-    expect(e.spotMul).toBe(0.5);
+    expect('spotMul' in e).toBe(false);
     expect(e.retargetS).toBeGreaterThan(0);
   });
 

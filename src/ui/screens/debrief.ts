@@ -1,5 +1,6 @@
 import type { BattleResult, CursorKind, InputState, Screen, Side, Team } from '@/shared/types';
 import { SIDES } from '@/shared/types';
+import { experienceLevel } from '@/data/experience';
 import { game } from '@/game';
 import type { Battle } from '@/sim/battle';
 import { drawDarkPanel, drawLogo, drawScreenTitle, drawShadowText } from '@/ui/chrome';
@@ -157,6 +158,9 @@ export class DebriefScreen implements Screen {
       }).length;
       ctx.fillStyle = '#f0d840';
       ctx.fillText(team.name, x, y);
+      // how good they were (data/experience.ts: the one set of words for it)
+      ctx.fillStyle = '#a8a89c';
+      ctx.fillText(experienceLevel(team.experience), x + 98, y);
       ctx.fillStyle = '#e8e8e0';
       ctx.fillText(`${alive}/${team.soldierIds.length}`, x + 140, y);
       ctx.fillText(`Kills: ${team.kills}`, x + 190, y);

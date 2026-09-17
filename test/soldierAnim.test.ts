@@ -216,3 +216,32 @@ describe('ragdoll flight (pure half)', () => {
     });
   });
 });
+
+// ------------------------------------------------------------------ hatch climbs ---
+// @ts-expect-error -- node builtins carry no type declarations in this project (no @types/node)
+import * as nodeFs from 'node:fs';
+const { readFileSync, readdirSync } = nodeFs as { readFileSync(p: string, enc: string): string; readdirSync(p: string): string[] };
+import { hatchClimbAnim, hatchClimbFrame, resolveEntryKey } from '@/render/soldierAnim';
+
+describe('hatch climb sprites', () => {
+  const dir = 'public/sprites';
+  const atlases = readdirSync(dir).filter((f) => /^soldiers_.*\.json$/.test(f));
+  it('every soldier atlas carries crew.bailout / crew.mount and the climb chain resolves to them first', () => {
+    expect(atlases.length).toBeGreaterThan(0);
+    for (const f of atlases) {
+      const entries = (JSON.parse(readFileSync(`${dir}/${f}`, 'utf8')) as { entries: Record<string, { frames: number; hullHeightM?: number }> }).entries;
+      for (const kind of ['bailout', 'mount'] as const) {
+        const s = sol({ hatch: { vehicleId: 1, hatch: 0, kind, from: { x: 10, y: 10 }, to: { x: 12, y: 10 }, start: 0, until: 4, panicked: false } });
+        const a = hatchClimbAnim(s, 2)!;
+        expect(a.keys[0]).toBe(`crew.${kind}`);
+        const key = resolveEntryKey(entries, a.keys)!;
+        expect(key).toBe(`crew.${kind}`);
+        expect(entries[key].frames).toBe(6);
+        expect(entries[key].hullHeightM).toBe(1.5);
+        expect(hatchClimbFrame(key, 6, 0, 0)).toBe(0);
+        expect(hatchClimbFrame(key, 6, a.progress, 2)).toBeGreaterThan(0);
+        expect(hatchClimbFrame(key, 6, 1, 4)).toBe(5);
+      }
+    }
+  });
+});

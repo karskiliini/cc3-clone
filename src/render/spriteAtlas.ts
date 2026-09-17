@@ -16,7 +16,13 @@
 import type { Season, Side } from '@/shared/types';
 import { resolveEntryKey } from '@/render/soldierAnim';
 
-export interface AtlasEntry { start: number; frames: number; fps: number; loop: boolean }
+export interface AtlasEntry {
+  start: number; frames: number; fps: number; loop: boolean;
+  /** frame chosen by a 0..1 progress rather than by time (crew tasks, hatch climbs) */
+  progress?: boolean;
+  /** `crew.bailout` / `crew.mount`: the hull height (m) the climb was rendered against */
+  hullHeightM?: number;
+}
 export interface AtlasMeta {
   scale: number;
   cell: { w: number; h: number };

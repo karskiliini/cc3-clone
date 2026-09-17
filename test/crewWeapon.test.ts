@@ -163,7 +163,7 @@ describe('crew-served weapons: placement and abandonment', () => {
     gunner.activity = 'dead';
     mate.pos = { ...cw.pos };
     mate.path = [];
-    mate.experience = 50;
+    mate.experience = 95; // the quickest of the crew to take over (crews are no longer all 20-60)
     battle.step(1);
     expect(cw.abandoned).toBe(true);
     battle.step(5);

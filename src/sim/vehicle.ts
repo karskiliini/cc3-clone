@@ -23,6 +23,7 @@ import { addMessage } from './messages';
 import { crushTile } from './structures';
 import { stepVehicleCrews } from './vehicleCrew';
 import { stepTransport, transportHolds } from './transport';
+import { isDazed } from './daze';
 
 const HEADING_ALIGN_RAD = 0.35;
 /** Tracked vehicles: beyond this heading error they stop and pivot; beyond SHARP_TURN_RAD they
@@ -636,10 +637,11 @@ export function overrunDodgeChance(s: Soldier): number {
   return s.experience < 40 ? OVERRUN_DODGE.green : s.experience >= 70 ? OVERRUN_DODGE.veteran : OVERRUN_DODGE.regular;
 }
 
-/** Standing or crouched, unhurt and not pinned, stunned or cowering: he can throw himself aside. */
+/** Standing or crouched, unhurt and not pinned, stunned, dazed or cowering: he can throw himself aside. */
 export function canReactToOverrun(state: BattleState, s: Soldier): boolean {
   if (s.health !== 'healthy' || s.stance === 'prone') return false;
   if (s.stunnedUntil != null && state.time < s.stunnedUntil) return false;
+  if (isDazed(s, state.time)) return false; // reeling from a blast: he does not see it coming
   if (s.activity === 'pinned' || s.activity === 'cowering' || s.activity === 'surrendered') return false;
   return s.mind.state !== 'pinned' && s.mind.state !== 'cowering';
 }
