@@ -115,7 +115,9 @@ export function transitionPosture(prev: Posture, next: Posture, since: number): 
 
 export function actionFor(s: Soldier, time: number, posture: Posture = postureFor(s, time), speedMps?: number): AnimAction {
   if (s.health === 'dead') return 'hit';
-  if (s.health === 'incapacitated') return 'woundedCrawl';
+  // A man who is down lies still. He only shows the wounded crawl if he is really dragging
+  // himself along (measured ground speed), never as an idle loop on the spot.
+  if (s.health === 'incapacitated') return speedMps !== undefined && speedMps >= STILL_MPS ? 'woundedCrawl' : 'hit';
   if (s.stunnedUntil != null && time < s.stunnedUntil) return 'hide';
   if (s.pickup?.until != null) return 'pickup';
   const mood = moodFor(s, time, speedMps);

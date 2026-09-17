@@ -61,7 +61,11 @@ describe('action and mood', () => {
     expect(actionFor(sol({ activity: 'ambushing' }), 100)).toBe('hide');
     expect(actionFor(sol({ activity: 'cowering', path: [{ x: 1, y: 1 }] }), 100)).toBe('hide');
     expect(actionFor(sol({ activity: 'panicked', path: [{ x: 1, y: 1 }] }), 100)).toBe('run');
-    expect(actionFor(sol({ health: 'incapacitated' }), 100)).toBe('woundedCrawl');
+    // down and still: the fallen pose, no crawl loop; crawling only while he really moves
+    expect(actionFor(sol({ health: 'incapacitated' }), 100)).toBe('hit');
+    expect(actionFor(sol({ health: 'incapacitated' }), 100, 'prone', 0)).toBe('hit');
+    expect(actionFor(sol({ health: 'incapacitated' }), 100, 'prone', 0.3)).toBe('woundedCrawl');
+    expect(actionFor(sol({ health: 'dead', path: [{ x: 1, y: 1 }] }), 100, 'prone', 0.3)).toBe('hit');
     expect(actionFor(sol({ health: 'dead' }), 100)).toBe('hit');
     expect(actionFor(sol({ stunnedUntil: 101, activity: 'firing', lastFiredAt: 99.95 }), 100)).toBe('hide');
   });
