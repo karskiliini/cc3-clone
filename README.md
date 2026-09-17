@@ -35,6 +35,8 @@ order first (hotkey, order bar, or right-click menu), then click the target.
   untouched where he would be spotted for sure, a dark-green tint where only obscured (concealment, distance,
   behind the soldiers' facing), darkened where out of range (300 m ring) or blocked. **L** toggles it
   (also Options → Show Unit Vision); **Shift+L** toggles unit labels.
+- Elevation: the ground height under the pointer is always shown beside it, with the height of whatever
+  stands there or is dug in (for example `12.4 m +6.0` on a roof, `12.4 m -1.2` in a foxhole).
 - **Tab** depth map: the battlefield's surface height as a relief map. The colour ramp spans about
   0-30 m above the datum (blue-violet for holes below ground, through greens and yellows for low ground,
   to orange and red on hilltops and tall buildings), with a green hatch for tree crowns and contours every

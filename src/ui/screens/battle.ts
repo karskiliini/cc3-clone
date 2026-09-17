@@ -17,6 +17,7 @@ import { pickOrderMarker } from '@/render/orderMarkers';
 import { cycleTeamKey, handleDepthMapKey, offsetOrderPoints } from './viewKeys';
 import { hitRect } from '@/ui/hud/hudChrome';
 import { drawLOSLine } from '@/ui/losTool';
+import { drawElevationReadout } from '@/ui/elevationReadout';
 import { drawTargetHighlight, targetableEnemyAt, teamObserver, type TargetHover } from '@/ui/targetHover';
 import { TeamGrid } from '@/ui/hud/teamGrid';
 import { CombatMessages } from '@/ui/hud/combatMessages';
@@ -641,6 +642,9 @@ export class BattleScreen implements Screen {
     }
 
     if (game.settings.showDepthMap) this.depthOverlay.drawLegend(ctx);
+
+    // Elevation under the pointer is always shown while it is over the map.
+    if (!this.overHud(game.input.state.mouse) && !this.commandMenu.isOpen) drawElevationReadout(ctx, cam, state.map, game.input.state.mouse);
 
     ctx.restore();
 
