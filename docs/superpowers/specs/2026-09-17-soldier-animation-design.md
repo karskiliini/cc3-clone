@@ -249,3 +249,62 @@ harness stays in range (guns and mortars get slower to bring into action, so tun
   variants, 16 dirs), falling back to a normal corpse with a larger stain when the atlas lacks them.
 - **Tests:** a prone pinned enemy under a moving tank dies; a standing calm veteran usually dodges;
   a friendly is never crushed; a stationary tank crushes no one; determinism green.
+
+## 8. Bodies stay physical (user request)
+
+> Any dead bodies may still be thrown around by explosions, or torn apart.
+
+- A corpse is a physical object for the rest of the battle. A later HE burst applies the same
+  knockback to dead and incapacitated men as to the living (§4), so the sim position moves and the
+  renderer plays a ragdoll flight, then keeps the new landed pose. Blood stains stay where they were.
+- **Severe blasts** break a body up: a burst whose force on the man exceeds a threshold (a mortar bomb
+  or larger landing within about 1 m, a 75 mm+ shell within about 2 m, a satchel charge, a collapsing
+  building on top of him) replaces the body with parts scattered 1–8 m along the blast direction,
+  positions and spins from the seeded Rng. This applies to men killed by that burst and to corpses
+  caught by it. The sim records `state.debris: { kind, side, season, pos, dir, variant }[]` (capped
+  at about 300, oldest removed) and marks the soldier `dismembered`, so replays are identical.
+- **Sprites** (`parts_<side>_<season>_<1|2>.png/.json`, 16 directions, several variants each):
+  `part.torso`, `part.head` (with or without helmet), `part.arm`, `part.leg`, `part.boot`, plus the
+  man's kit scattered as items (§9). Small, muted, in the same style as the corpses; each lands with a
+  small stain. Parts fly with the same detaching-shadow treatment as ragdolls, then lie still; later
+  blasts can move them again.
+- Witnesses within 20 m who see it take a stress spike (green troops more).
+- Tests: a corpse inside a blast radius is moved and blocked by walls like the living; a severe
+  blast produces debris deterministically and marks the casualty; the debris cap holds.
+
+## 9. Kit as objects, and picking things up (user request)
+
+> Make sprites for individual rifles, weapons, grenades, helmets, backpacks, anything a WW2 soldier
+> would be carrying. Soldiers may pick up ammo or a better weapon if they come across it close
+> enough; grenades or explosives would often be useful.
+
+- **Items exist on the ground.** `state.items: { id, kind, weaponId?, rounds?, count?, side, pos, dir }[]`.
+  When a man is killed, incapacitated, surrenders, or drops his weapon in panic, his weapon (with the
+  rounds left in it), spare ammunition, grenades and any special kit (Panzerfaust, satchel charge,
+  AT-rifle rounds, mortar bombs, MG belts) become items at his position, scattered a little; blasts
+  throw items like bodies. Helmets and packs can come off in a blast as purely visual items.
+- **Sprites** (`items_<1|2>.png/.json`, 16 directions): bolt rifles (Kar98k, Mosin), semi-auto
+  rifle, SMGs (MP40, PPSh), LMGs (MG34, DP-28), pistols, stick grenade and egg grenade, Panzerfaust,
+  AT rifle, satchel charge, ammo pouch, ammo box, MG belt box, mortar bomb, the two helmet shapes,
+  backpack, bread bag, rolled greatcoat, entrenching tool, canteen, binoculars, map case. All our own
+  generic models of period equipment.
+- **Picking up is an individual decision** taken by each soldier when an item is within about 3 m
+  (5 m if he is out of ammunition), he is not pinned, cowering, panicked or stunned, and no enemy is
+  firing at him right now. He walks to it, crouches for 2–3 s (`<posture>.pickup` animation), and
+  takes it. Priorities, highest first:
+  1. **Ammunition he can use** when below half load (same weapon, or same cartridge family per side).
+  2. **The squad's machine gun** when its gunner is down: the nearest able rifleman takes over the
+     gun and its belts, as squads really did.
+  3. **Grenades and explosives** when he carries fewer than two grenades; a Panzerfaust, satchel
+     charge or AT grenade when the team has no anti-tank weapon and enemy armour is known.
+  4. **A better weapon** for his situation: pistol < bolt rifle < semi-auto rifle or SMG < LMG; an
+     SMG is preferred over a rifle in woods, buildings and at night-close ranges, a rifle in open
+     country. Captured enemy weapons are allowed but he only has the rounds found with them.
+  He drops what he replaces, which becomes an item. Leaders and specialists keep their role weapons
+  unless out of ammunition. Green troops loot less under stress; veterans scavenge readily.
+- **Feedback:** the soldier monitor shows the new weapon and rounds; a message such as
+  "<team>\n<Rank>. <Name> takes over the MG34." or "…picks up grenades." (rate-limited).
+- **AI** uses the same behaviour. Determinism: seeded Rng only, stable iteration order.
+- Tests: ammunition pickup when low and compatible; MG takeover by the nearest able man; no pickup
+  while pinned or under fire; grenades topped up to the cap; the replaced weapon becomes an item;
+  captured weapon has only found rounds; items move with blasts.
