@@ -19,6 +19,9 @@ import { hitRect } from '@/ui/hud/hudChrome';
 import { drawLOSLine } from '@/ui/losTool';
 import { drawElevationReadout } from '@/ui/elevationReadout';
 import { GrassFx } from '@/render/grassFx';
+import { transportAt } from '@/sim/transport';
+import { isRemountTarget } from '@/sim/vehicleCrew';
+import { drawText, textWidth } from '@/render/pixelfont';
 import { drawTargetHighlight, targetableEnemyAt, teamObserver, type TargetHover } from '@/ui/targetHover';
 import { TeamGrid } from '@/ui/hud/teamGrid';
 import { CombatMessages } from '@/ui/hud/combatMessages';
@@ -102,6 +105,9 @@ export class BattleScreen implements Screen {
   private pendingOrder: OrderType | null = null;
   /** Fire order pending and the pointer is over an enemy team that can be targeted right now. */
   private targetHover: TargetHover | null = null;
+  /** Move-type order pending over a vehicle a selected team can board: a transport with room, or
+   * the crew's own abandoned vehicle. */
+  private mountHover: { pos: Vec2; halfM: number; label: string } | null = null;
   private pendingWaypoints: Vec2[] = [];
   private paused = false;
   /** Real seconds elapsed since the battle ended, driving the debrief transition below — must be
@@ -452,6 +458,22 @@ export class BattleScreen implements Screen {
       if (sel.length > 0) this.targetHover = targetableEnemyAt(state, battle.playerSide(), sel, screenToWorld(cam, input.mouse));
     }
 
+    this.mountHover = null;
+    if (this.pendingOrder && MOVE_TYPES.includes(this.pendingOrder) && !this.overHud(input.mouse) && !this.commandMenu.isOpen) {
+      const world = screenToWorld(cam, input.mouse);
+      for (const id of this.selectedTeamIds) {
+        const t = state.teams.get(id);
+        if (!t || t.outOfAction) continue;
+        const v = transportAt(state, t, world);
+        const own = !v && isRemountTarget(state, t, world) && t.vehicleId != null ? state.vehicles.get(t.vehicleId) : null;
+        const hit = v ?? own;
+        if (!hit) continue;
+        const def = VEHICLE_DEFS[hit.defId];
+        this.mountHover = { pos: hit.pos, halfM: (def ? Math.max(def.lengthM, def.widthM) : 6) / 2 + 0.8, label: v ? 'Mount' : 'Re-man' };
+        break;
+      }
+    }
+
     if (this.showMinimap) this.minimap.update(input, cam, state.map.width, state.map.height);
 
     this.combatMessages.update(input, state);
@@ -618,6 +640,25 @@ export class BattleScreen implements Screen {
       }
     }
 
+    if (this.mountHover) {
+      // green corner brackets on the vehicle and a word by the pointer
+      const p = worldToScreen(cam, this.mountHover.pos);
+      const h = this.mountHover.halfM * 10 * cam.zoom, arm = h * 0.4;
+      const corners = (): void => {
+        ctx.beginPath();
+        for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+          const x = p.x + sx * h, y = p.y + sy * h;
+          ctx.moveTo(x - sx * arm, y); ctx.lineTo(x, y); ctx.lineTo(x, y - sy * arm);
+        }
+        ctx.stroke();
+      };
+      ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.lineWidth = 3.5; corners();
+      ctx.strokeStyle = '#6ee06a'; ctx.lineWidth = 1.5; corners();
+      const m = game.input.state.mouse, tw = textWidth(this.mountHover.label);
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(m.x + 13, m.y - 2, tw + 6, 11);
+      drawText(ctx, this.mountHover.label, m.x + 16, m.y, '#9af09a');
+    }
     if (this.targetHover) drawTargetHighlight(ctx, cam, state, battle.playerSide(), this.targetHover, performance.now() / 1000);
 
     // hover ring: a subtle highlight under the friendly team the pointer is over

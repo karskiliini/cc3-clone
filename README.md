@@ -35,6 +35,9 @@ order first (hotkey, order bar, or right-click menu), then click the target.
   untouched where he would be spotted for sure, a dark-green tint where only obscured (concealment, distance,
   behind the soldiers' facing), darkened where out of range (300 m ring) or blocked. **L** toggles it
   (also Options → Show Unit Vision); **Shift+L** toggles unit labels.
+- Vehicles: a Move order clicked on a friendly halftrack with room makes the team mount it (the vehicle is
+  bracketed in green and the pointer says Mount); any new order to the passengers makes them dismount. A crew that
+  bailed out can be sent back to its own serviceable vehicle the same way (Re-man), if their nerves allow it.
 - Elevation: the ground height under the pointer is always shown beside it, with the height of whatever
   stands there or is dug in (for example `12.4 m +6.0` on a roof, `12.4 m -1.2` in a foxhole).
 - Tall grass and crops stand about a metre high and limit sight by that height. Vehicles press them down as
