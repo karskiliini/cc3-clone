@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { Soldier, Team, Vehicle } from '@/shared/types';
 import {
   weaponReadout, shortWeaponName, MONITOR_TEXT_CELLS, MONITOR_ROLE_WORDS, MONITOR_STATUS_WORDS,
-  MONITOR_ACTIVITY_WORDS, MONITOR_ABBREV,
+  MONITOR_ACTIVITY_WORDS, MONITOR_ABBREV, MONITOR_DAMAGE_WORDS, MONITOR_DAMAGE_CELL,
 } from '@/ui/hud/soldierMonitor';
 import { fitHudText, setHudFont } from '@/ui/hud/hudChrome';
 import { VEHICLE_DEFS } from '@/data/units';
@@ -54,16 +54,24 @@ describe('soldier monitor weapon readout', () => {
     expect(weaponReadout(soldier('mortar81'), team('defend'), undefined, 'Gunner').label).toBe('HE');
     expect(weaponReadout(soldier('mortar81'), team('smoke'), undefined, 'Gunner').label).toBe('Smk');
   });
-  it('AT gun shows AP against armour, HE against infantry', () => {
-    expect(weaponReadout(soldier('pak40', { targetVehicleId: 3 }), team(), undefined, 'Gunner').label).toBe('AP');
-    expect(weaponReadout(soldier('pak40', { targetSoldierId: 9 }), team(), undefined, 'Gunner').label).toBe('HE');
+  // Ammunition types (req_ammo_damage A5): the monitor shows the round actually LOADED and the
+  // rounds of that type left; the old guess from the target is gone.
+  it('AT gun shows the round in the breech and the rounds of that type left', () => {
+    const gunTeam = (type: 'ap' | 'apcr' | 'he' | undefined): Team => ({
+      order: null, crewWeapon: { gunnerId: 1, chambered: !!type, chamberedType: type },
+    } as unknown as Team);
+    const g = soldier('pak38', { id: 1, ammo: 5, ammoReserve: 0, targetSoldierId: 9, rounds: { ap: 2, apcr: 1, he: 2, smoke: 0 } });
+    expect(weaponReadout(g, gunTeam('apcr'), undefined, 'Gunner')).toEqual({ glyph: 'atgun', label: 'APCR', rounds: 1 });
+    expect(weaponReadout(g, gunTeam('ap'), undefined, 'Gunner').label).toBe('AP'); // not "HE" because he points at infantry
+    expect(weaponReadout(g, gunTeam(undefined), undefined, 'Gunner')).toEqual({ glyph: 'atgun', label: '', rounds: 5 });
   });
-  it('vehicle crew: gunner round + rounds, loader rounds only, driver/commander nothing', () => {
-    const armed = tank({ defId: realTankDefId() });
+  it('vehicle crew: gunner loaded round + rounds of that type, loader rounds only, driver/commander nothing', () => {
+    const armed = tank({ defId: realTankDefId(), loadedRound: 'he', rounds: { ap: 20, apcr: 2, he: 19, smoke: 0 }, mainAmmo: 41 });
     const g = weaponReadout(soldier('pistol_p38'), team(), armed, 'Gunner');
-    expect(g).toEqual({ glyph: 'tankgun', label: 'AP', rounds: 42 });
-    expect(weaponReadout(soldier('pistol_p38'), team(), { ...armed, targetSoldierId: 5 }, 'Gunner').label).toBe('HE');
-    expect(weaponReadout(soldier('pistol_p38'), team(), armed, 'Loader')).toEqual({ glyph: null, label: '', rounds: 42 });
+    expect(g).toEqual({ glyph: 'tankgun', label: 'HE', rounds: 19 });
+    expect(weaponReadout(soldier('pistol_p38'), team(), { ...armed, loadedRound: 'apcr' }, 'Gunner')).toEqual({ glyph: 'tankgun', label: 'APCR', rounds: 2 });
+    expect(weaponReadout(soldier('pistol_p38'), team(), { ...armed, loadedRound: undefined }, 'Gunner')).toEqual({ glyph: 'tankgun', label: '', rounds: 41 });
+    expect(weaponReadout(soldier('pistol_p38'), team(), armed, 'Loader')).toEqual({ glyph: null, label: '', rounds: 41 });
     for (const r of ['Driver', 'Commander']) {
       expect(weaponReadout(soldier('pistol_p38'), team(), armed, r)).toEqual({ glyph: null, label: '', rounds: null });
     }
@@ -89,6 +97,7 @@ describe('soldier monitor text fitting', () => {
   it('every role word fits the role cell', () => fits(MONITOR_ROLE_WORDS, MONITOR_TEXT_CELLS.role));
   it('every status word fits the status cell', () => fits(MONITOR_STATUS_WORDS, MONITOR_TEXT_CELLS.status));
   it('every activity word fits the activity cell', () => fits(MONITOR_ACTIVITY_WORDS, MONITOR_TEXT_CELLS.activity));
+  it('every damaged-system word fits its half of the vehicle header', () => fits(MONITOR_DAMAGE_WORDS, MONITOR_DAMAGE_CELL));
   it('Commander shrinks or abbreviates rather than truncating', () => {
     const ctx = fakeCtx();
     setHudFont(ctx, 'map');

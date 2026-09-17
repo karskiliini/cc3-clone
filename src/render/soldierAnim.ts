@@ -14,15 +14,17 @@
 //                mind.lastIncomingAt.
 // Also the pure half of the blast ragdoll (§4): flight timing / arc / variant choice.
 // ============================================================================
-import type { Soldier, Vec2 } from '@/shared/types';
+import type { CrewTaskId, CrewWeaponVisual, Soldier, Vec2 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import { WEAPONS } from '@/data/weapons';
 
 export type Posture = 'standing' | 'crouched' | 'kneeling' | 'prone';
 export type AnimAction =
-  | 'idle' | 'aim' | 'fire' | 'reload' | 'hide' | 'walk' | 'run' | 'sneak' | 'crawl' | 'throw' | 'hit' | 'woundedCrawl';
+  | 'idle' | 'aim' | 'fire' | 'reload' | 'hide' | 'walk' | 'run' | 'sneak' | 'crawl' | 'throw' | 'hit' | 'woundedCrawl'
+  /** stooping over an item on the ground (spec 2026-09-17 §9; sim/pickup.ts) */
+  | 'pickup';
 export type Mood = 'calm' | 'alert' | 'shaken' | 'pinned' | 'cowering' | 'panicked' | 'berserk' | 'surrendered';
-export type WeaponSuffix = 'rifle' | 'smg' | 'lmg';
+export type WeaponSuffix = 'rifle' | 'smg' | 'lmg' | 'none';
 
 /** What an atlas says about one entry (subset of spriteAtlas.AtlasEntry this module needs). */
 export interface AnimEntryInfo { frames: number; fps: number; loop: boolean }
@@ -46,8 +48,16 @@ export function phaseOffset(id: number): number {
   return ((h ^ (h >>> 13)) >>> 0) / 4294967296;
 }
 
-export function isMoving(s: Soldier): boolean {
-  return s.path.length > 0 && s.health !== 'dead' && s.health !== 'incapacitated';
+/** Below this measured ground speed (m/s) a man counts as standing still, whatever his path says. */
+export const STILL_MPS = 0.06;
+
+/** Is he actually going somewhere? A path alone is not enough: men who hide, lie in ambush or are
+ * held by the sim keep a leftover path while not moving a step, and must not crawl on the spot.
+ * `speedMps` is the ground speed the renderer measured; omit it when unknown (first frame, tests)
+ * and the path decides. */
+export function isMoving(s: Soldier, speedMps?: number): boolean {
+  if (s.path.length === 0 || s.health === 'dead' || s.health === 'incapacitated') return false;
+  return speedMps === undefined || speedMps >= STILL_MPS;
 }
 
 export function moodFor(s: Soldier): Mood {
@@ -76,12 +86,12 @@ export function moodFor(s: Soldier): Mood {
 /** §1 posture. `kneeling` is derived, the sim has no such stance: crouching + stationary + aiming /
  * firing / reloading / defending = one knee down; crouching while moving or merely alert = crouched.
  * Pinned men flatten: a pinned kneeler goes prone. Incapacitated / stunned men lie down. */
-export function postureFor(s: Soldier, time = 0): Posture {
+export function postureFor(s: Soldier, time = 0, speedMps?: number): Posture {
   if (s.health === 'incapacitated' || s.health === 'dead') return 'prone';
   if (s.stunnedUntil != null && time < s.stunnedUntil) return 'prone';
   if (s.stance === 'prone') return 'prone';
   if (s.stance === 'standing') return 'standing';
-  if (isMoving(s)) return 'crouched';
+  if (isMoving(s, speedMps)) return 'crouched';
   if (moodFor(s) === 'pinned') return 'prone';
   const aiming = s.targetSoldierId != null || s.targetVehicleId != null || s.targetPoint != null;
   if (STEADY_ACTIVITIES.has(s.activity) || aiming) return 'kneeling';
@@ -97,12 +107,13 @@ export function transitionPosture(prev: Posture, next: Posture, since: number): 
   return Math.abs(tall(prev) - tall(next)) === 2 ? 'kneeling' : next;
 }
 
-export function actionFor(s: Soldier, time: number, posture: Posture = postureFor(s, time)): AnimAction {
+export function actionFor(s: Soldier, time: number, posture: Posture = postureFor(s, time), speedMps?: number): AnimAction {
   if (s.health === 'dead') return 'hit';
   if (s.health === 'incapacitated') return 'woundedCrawl';
   if (s.stunnedUntil != null && time < s.stunnedUntil) return 'hide';
+  if (s.pickup?.until != null) return 'pickup';
   const mood = moodFor(s);
-  if (isMoving(s) && mood !== 'cowering' && mood !== 'surrendered') {
+  if (isMoving(s, speedMps) && mood !== 'cowering' && mood !== 'surrendered') {
     if (posture === 'prone') return 'crawl';
     if (posture === 'crouched' || posture === 'kneeling' || s.activity === 'sneaking') return 'sneak';
     return s.activity === 'movingFast' || mood === 'panicked' || mood === 'berserk' ? 'run' : 'walk';
@@ -118,6 +129,7 @@ export function actionFor(s: Soldier, time: number, posture: Posture = postureFo
 }
 
 export function weaponSuffix(weaponId: string): WeaponSuffix {
+  if (weaponId === 'none') return 'none'; // empty hands: dropped his weapon (sim/items.ts UNARMED)
   const cls = WEAPONS[weaponId]?.cls;
   if (cls === 'smg') return 'smg';
   if (cls === 'lmg' || cls === 'hmg') return 'lmg';
@@ -169,9 +181,9 @@ export function quantiseDir(rad: number, dirs = 16): number {
 
 /** The heading to draw: along the path when moving, at the target when aiming, else the sim's
  * 8-way facing. Gives moving / aiming figures real 16-way turns. */
-export function headingFor(s: Soldier, targetPos?: Vec2 | null): number {
+export function headingFor(s: Soldier, targetPos?: Vec2 | null, speedMps?: number): number {
   const to = (p: Vec2) => Math.atan2(p.x - s.pos.x, -(p.y - s.pos.y));
-  if (isMoving(s)) {
+  if (isMoving(s, speedMps)) {
     const next = s.path[0];
     if (Math.hypot(next.x - s.pos.x, next.y - s.pos.y) > 0.05) return to(next);
   } else if (targetPos) return to(targetPos);
@@ -206,6 +218,13 @@ export function frameFor(s: Soldier, time: number, action: AnimAction, entry: An
     const prog = total > 0 ? 1 - Math.max(0, Math.min(total, s.reloadTimer)) / total : 1;
     return Math.min(n - 1, Math.floor(prog * n));
   }
+  if (action === 'pickup') {
+    // down to the item and up again over the 2-3 s the sim gives him
+    const pk = s.pickup;
+    const from = pk?.from ?? time, until = pk?.until ?? time;
+    const prog = until > from ? Math.max(0, Math.min(1, (time - from) / (until - from))) : 1;
+    return Math.min(n - 1, Math.floor(prog * n));
+  }
   if (action === 'hit') return n - 1;
   const fps = entry.fps > 0 ? entry.fps : n / 1.2;
   const f = Math.floor(time * fps + off * n);
@@ -233,13 +252,130 @@ export interface AnimPick {
 }
 
 /** Everything but the atlas lookup, in one call. */
-export function pickAnimation(s: Soldier, time: number, targetPos?: Vec2 | null, posture: Posture = postureFor(s, time)): AnimPick {
+export function pickAnimation(s: Soldier, time: number, targetPos?: Vec2 | null, posture: Posture = postureFor(s, time), speedMps?: number): AnimPick {
   const mood = moodFor(s);
-  let action = actionFor(s, time, posture);
+  let action = actionFor(s, time, posture, speedMps);
   const flinch = isFlinching(s, time) && !GAITS.has(action) && action !== 'fire';
   if (flinch && action !== 'hit') action = 'hide';
   const weapon = weaponSuffix(s.weaponId);
-  return { posture, action, mood, weapon, heading: headingFor(s, targetPos), keys: entryKeyChain(posture, action, mood, weapon), flinch };
+  return { posture, action, mood, weapon, heading: headingFor(s, targetPos, speedMps), keys: entryKeyChain(posture, action, mood, weapon), flinch };
+}
+
+// ------------------------------------------------------------------ crew-served weapons (§6) ---
+/** How a crewman working a task is shown: the `crew.*` atlas keys to try (most specific first) and
+ * how far through the pose he is (0..1 -> frame), or null for a pose that simply loops on the
+ * clock (laying at the sight, behind the MG). */
+export interface CrewTaskAnim { keys: string[]; progress: number | null; fallbackPose: 'gunnerKneel' | 'loaderRound' | 'loaderShell' | 'mgProne' | 'haul' }
+
+const CREW_TASK_KEY: Record<CrewTaskId, { key: string; rev?: boolean; legacy: string[]; pose: CrewTaskAnim['fallbackPose'] }> = {
+  unhook: { key: 'crew.haul', legacy: [], pose: 'haul' },
+  hook: { key: 'crew.haul', rev: true, legacy: [], pose: 'haul' },
+  spreadLeft: { key: 'crew.trail', legacy: ['crew.haul'], pose: 'haul' },
+  spreadRight: { key: 'crew.trail', legacy: ['crew.haul'], pose: 'haul' },
+  closeLeft: { key: 'crew.trail', rev: true, legacy: ['crew.haul'], pose: 'haul' },
+  closeRight: { key: 'crew.trail', rev: true, legacy: ['crew.haul'], pose: 'haul' },
+  digLeft: { key: 'crew.dig', legacy: ['crew.loader.gun'], pose: 'gunnerKneel' },
+  digRight: { key: 'crew.dig', legacy: ['crew.loader.gun'], pose: 'gunnerKneel' },
+  liftLeft: { key: 'crew.dig', rev: true, legacy: ['crew.loader.gun'], pose: 'gunnerKneel' },
+  liftRight: { key: 'crew.dig', rev: true, legacy: ['crew.loader.gun'], pose: 'gunnerKneel' },
+  load: { key: 'crew.load.gun', legacy: ['crew.loader.gun', 'crew.loader'], pose: 'loaderShell' },
+  unload: { key: 'crew.load.gun', rev: true, legacy: ['crew.loader.gun', 'crew.loader'], pose: 'loaderShell' },
+  dropRound: { key: 'crew.load.mortar', legacy: ['crew.loader.mortar', 'crew.loader'], pose: 'loaderRound' },
+  feedBelt: { key: 'crew.belt', legacy: ['crew.loader'], pose: 'gunnerKneel' },
+  lay: { key: 'crew.lay', legacy: ['crew.gunner'], pose: 'gunnerKneel' },
+  fire: { key: 'crew.fire', legacy: ['crew.gunner'], pose: 'gunnerKneel' },
+  placeBaseplate: { key: 'crew.baseplate', legacy: ['crew.loader'], pose: 'gunnerKneel' },
+  liftBaseplate: { key: 'crew.baseplate', rev: true, legacy: ['crew.loader'], pose: 'gunnerKneel' },
+  mountTube: { key: 'crew.tube', legacy: ['crew.loader'], pose: 'loaderRound' },
+  dismountTube: { key: 'crew.tube', rev: true, legacy: ['crew.loader'], pose: 'loaderRound' },
+  setBipod: { key: 'crew.bipod', legacy: ['crew.loader'], pose: 'gunnerKneel' },
+  liftBipod: { key: 'crew.bipod', rev: true, legacy: ['crew.loader'], pose: 'gunnerKneel' },
+  placeTripod: { key: 'crew.tripod', legacy: ['crew.loader'], pose: 'gunnerKneel' },
+  liftTripod: { key: 'crew.tripod', rev: true, legacy: ['crew.loader'], pose: 'gunnerKneel' },
+  mountGun: { key: 'crew.mountmg', legacy: ['crew.loader'], pose: 'gunnerKneel' },
+  dismountGun: { key: 'crew.mountmg', rev: true, legacy: ['crew.loader'], pose: 'gunnerKneel' },
+};
+
+/** Seconds the lanyard pull / flinch is shown after a gun fires. */
+export const CREW_FIRE_S = 0.5;
+
+/** The pose of a man with a crew task (spec §6 Visuals): null while he is still walking to the
+ * station (he is drawn with his normal gait). The frame comes from the task's progress, so the
+ * trail leg is seen swinging out, the round rammed home, the lanyard pulled. Packing tasks play
+ * their into-action pose backwards. */
+export function crewTaskAnim(s: Soldier, time: number): CrewTaskAnim | null {
+  const sinceFire = time - s.lastFiredAt;
+  const t = s.crewTask;
+  if (t && t.id !== 'fire' && t.walking) return null;
+  if (t?.id === 'fire' || (t?.id === 'lay' && sinceFire >= 0 && sinceFire < CREW_FIRE_S)) {
+    const d = CREW_TASK_KEY.fire;
+    return { keys: [d.key, ...d.legacy, 'kneeling.aim', 'kneeling.idle'], progress: Math.max(0, Math.min(1, sinceFire / CREW_FIRE_S)), fallbackPose: d.pose };
+  }
+  if (!t) return null;
+  const d = CREW_TASK_KEY[t.id];
+  const p = Math.max(0, Math.min(1, t.progress));
+  return {
+    keys: [d.key, ...d.legacy, 'kneeling.reload', 'kneeling.idle'],
+    progress: t.id === 'lay' ? null : d.rev ? 1 - p : p,
+    fallbackPose: d.pose,
+  };
+}
+
+// ------------------------------------------------------------------ hatches (§10) ---
+/** A man climbing out of or into a vehicle: the atlas keys to try, how far through the climb he
+ * is, and which way he faces (along the climb). Until the atlas carries `crew.bailout` /
+ * `crew.mount` (progress-indexed, 6 frames) he is shown stooped (`crouched.sneak`) on the hull and
+ * kneeling (`kneeling.idle`) by it, at the interpolated position the sim gives him. */
+export interface HatchClimbAnim { keys: string[]; progress: number; heading: number }
+export const HATCH_PROGRESS_KEYS = ['crew.bailout', 'crew.mount'] as const;
+
+export function hatchClimbAnim(s: Soldier, time: number): HatchClimbAnim | null {
+  const c = s.hatch;
+  if (!c) return null;
+  const p = Math.max(0, Math.min(1, (time - c.start) / Math.max(1e-6, c.until - c.start)));
+  const dx = c.to.x - c.from.x, dy = c.to.y - c.from.y;
+  const heading = Math.abs(dx) + Math.abs(dy) > 1e-6 ? Math.atan2(dx, -dy) : 0;
+  const out = c.kind === 'bailout';
+  // on the hull he is stooped over the hatch; on the ground he kneels
+  const onGround = out ? p >= 0.8 : p < 0.2;
+  const fallback = onGround ? ['kneeling.idle', 'crouched.idle'] : ['crouched.sneak', 'crouched.idle'];
+  return { keys: [out ? 'crew.bailout' : 'crew.mount', ...fallback, 'standing.idle'], progress: p, heading };
+}
+
+/** Frame for the entry `key` that `hatchClimbAnim`'s chain resolved to. */
+export function hatchClimbFrame(key: string, frames: number, progress: number, time: number): number {
+  if (key === 'crew.bailout' || key === 'crew.mount') return progressFrame(progress, frames);
+  if (key.endsWith('.sneak')) return Math.floor(time / 0.16) % Math.max(1, frames);
+  return 0;
+}
+
+/** Frame of a progress-driven entry: progress 0..1 mapped over its frames (the last frame only at
+ * the very end, so a finished pose is held for a moment rather than skipped). */
+export function progressFrame(progress: number, frames: number): number {
+  const n = Math.max(1, frames | 0);
+  return Math.max(0, Math.min(n - 1, Math.floor(Math.max(0, Math.min(1, progress)) * n)));
+}
+
+/** Weapon atlas states to try for a task-state look, most specific first (spec §6: the atlas may
+ * lack the drill-step states and only carry setup / half / packed). */
+export function weaponStateChain(visual: CrewWeaponVisual): string[] {
+  switch (visual) {
+    case 'limbered': return ['limbered', 'packed'];
+    // (one leg out has no legacy equivalent: without the exact state the caller draws the code
+    // sprite, whose legs follow the men swinging them)
+    case 'trailsClosed': return ['trailsClosed'];
+    case 'trailLeftOpen': return ['trailLeftOpen'];
+    case 'trailRightOpen': return ['trailRightOpen'];
+    case 'trailsOpen': return ['trailsOpen', 'setup'];
+    case 'emplaced': return ['emplaced', 'setup'];
+    case 'recoil': return ['recoil', 'emplaced', 'setup'];
+    case 'baseplate': return ['baseplate', 'half'];
+    case 'tube': return ['tube', 'half'];
+    case 'tripod': return ['tripod', 'half'];
+    case 'setup': return ['setup'];
+    case 'half': return ['half'];
+    default: return ['packed'];
+  }
 }
 
 // ------------------------------------------------------------------ blast ragdoll (pure half) ---

@@ -42,8 +42,8 @@ describe('atlas index maths', () => {
   it('names the atlases a battle needs', () => {
     expect(soldierAtlasName('german', 'autumn', 1)).toBe('soldiers_german_summer_1');
     expect(battleAtlasNames(['german', 'soviet'], 'winter')).toEqual([
-      'soldiers_german_winter_1', 'soldiers_soviet_winter_1', 'weapons_1',
-      'soldiers_german_winter_2', 'soldiers_soviet_winter_2', 'weapons_2',
+      'soldiers_german_winter_1', 'soldiers_soviet_winter_1', 'weapons_1', 'items_1', 'parts_german_winter_1', 'parts_soviet_winter_1',
+      'soldiers_german_winter_2', 'soldiers_soviet_winter_2', 'weapons_2', 'items_2', 'parts_german_winter_2', 'parts_soviet_winter_2',
     ]);
   });
 

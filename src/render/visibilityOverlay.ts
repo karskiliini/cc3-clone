@@ -3,8 +3,9 @@
 //
 // For the selected friendly teams, every map cell in (and just around) the viewport is scored with
 // the sim's own spotting rules (observerStandingSpotScore in sim/spotting.ts), taking the best
-// score over all eligible spotters of those teams (dismounted soldiers; a vehicle spots from its
-// own position for its crew):
+// score over all eligible spotters of those teams (dismounted soldiers; a vehicle contributes one
+// spotter per living crewman's eye — turret ring, hull front — each with its own facing arc, so a
+// selected buttoned-up tank visibly shows its blind flanks on the overlay, see sim/vehicleVision.ts):
 //   - score >= 0.5  -> a standing enemy there is spotted for certain: left untouched
 //   - 0 < score < 0.5 -> only a per-tick chance (concealment / distance / facing): light dark-green
 //   - score 0       -> out of detection range or LOS blocked: darkened ~40%
@@ -100,7 +101,11 @@ export function visibilityScore(state: BattleState, groups: SpotterGroup[] | Spo
         best = score;
         if (best >= CERTAIN_SPOT_SCORE) return CERTAIN_SPOT_SCORE;
       }
-      if (vis === 0) break; // LOS from this tile is blocked for every member
+      // A vehicle eye can score 0 from its facing arc alone, without `losFor` (and so `vis`) ever
+      // being consulted for it — `vis` would then be stale from a *different* member's eyeM, and
+      // breaking on it could wrongly skip a shorter member with a real (unblocked) view. Only take
+      // the early-out for plain point spotters, where `vis` always reflects this member's own trace.
+      if (vis === 0 && !sp.vehicleEye) break; // LOS from this tile is blocked for every (point) member
     }
   }
   return best;

@@ -6,6 +6,8 @@ import type { Side, TeamDef, VehicleDef } from '@/shared/types';
 
 function v(d: VehicleDef): VehicleDef { return d; }
 
+/* `layout`: what sits where (defaults by class and crew size in sim/vehicleDamage.ts: rear
+ * transmission, no side fuel); `weakSpots`: plates an ace gunner knows, effective mm by aim point. */
 export const VEHICLE_DEFS: Record<string, VehicleDef> = {
   // ------------------------------------------------------------- German
   pz3j: v({
@@ -13,48 +15,56 @@ export const VEHICLE_DEFS: Record<string, VehicleDef> = {
     speedRoadMs: 11, speedOffroadMs: 5, turnRateRad: 0.8,
     armor: { front: 50, side: 30, rear: 30, top: 10 },
     mainWeaponId: 'kwk39_50', coaxWeaponId: 'coax_mg34', hasTurret: true, crew: 5, mainAmmo: 90,
+    layout: { transmission: 'front' }, weakSpots: { lowerHull: 40 },
   }),
   pz4f1: v({
     id: 'pz4f1', name: 'PzKw IV F1', kind: 'tank', lengthM: 5.9, widthM: 2.9,
     speedRoadMs: 11, speedOffroadMs: 5, turnRateRad: 0.75,
     armor: { front: 50, side: 30, rear: 20, top: 10 },
     mainWeaponId: 'kwk37_75', coaxWeaponId: 'coax_mg34', hasTurret: true, crew: 5, mainAmmo: 80,
+    layout: { transmission: 'front' }, weakSpots: { turretRing: 40 },
   }),
   pz4gh: v({
     id: 'pz4gh', name: 'PzKw IV H', kind: 'tank', lengthM: 5.9, widthM: 2.9,
     speedRoadMs: 11, speedOffroadMs: 5, turnRateRad: 0.75,
     armor: { front: 80, side: 30, rear: 20, top: 12 },
     mainWeaponId: 'kwk40_75', coaxWeaponId: 'coax_mg34', hasTurret: true, crew: 5, mainAmmo: 87,
+    layout: { transmission: 'front' }, weakSpots: { turretRing: 50 },
   }),
   stug3g: v({
     id: 'stug3g', name: 'StuG III G', kind: 'spg', lengthM: 5.4, widthM: 2.9,
     speedRoadMs: 11, speedOffroadMs: 5, turnRateRad: 0.8,
     armor: { front: 80, side: 30, rear: 30, top: 16 },
     mainWeaponId: 'stuk40', coaxWeaponId: 'coax_mg34', hasTurret: false, crew: 4, mainAmmo: 54,
+    layout: { transmission: 'front' }, weakSpots: { lowerHull: 50 },
   }),
   panther: v({
     id: 'panther', name: 'Panther G', kind: 'tank', lengthM: 6.9, widthM: 3.4,
     speedRoadMs: 12, speedOffroadMs: 5, turnRateRad: 0.6,
     armor: { front: 110, side: 45, rear: 40, top: 16 },
     mainWeaponId: 'kwk42_75', coaxWeaponId: 'coax_mg34', hasTurret: true, crew: 5, mainAmmo: 79,
+    layout: { transmission: 'front' }, weakSpots: { gunMantlet: 70, sideHull: 40 },
   }),
   tiger: v({
     id: 'tiger', name: 'Tiger I', kind: 'tank', lengthM: 6.3, widthM: 3.6,
     speedRoadMs: 10, speedOffroadMs: 4, turnRateRad: 0.5,
     armor: { front: 100, side: 80, rear: 80, top: 25 },
     mainWeaponId: 'kwk36_88', coaxWeaponId: 'coax_mg34', hasTurret: true, crew: 5, mainAmmo: 92,
+    layout: { transmission: 'front' },
   }),
   sdkfz251: v({
     id: 'sdkfz251', name: 'SdKfz 251', kind: 'halftrack', lengthM: 5.8, widthM: 2.1,
     speedRoadMs: 14, speedOffroadMs: 6, turnRateRad: 0.9,
     armor: { front: 14, side: 8, rear: 8, top: 6 },
     mainWeaponId: null, coaxWeaponId: 'coax_mg34', hasTurret: false, crew: 2, mainAmmo: 0,
+    layout: { transmission: 'front', openTop: true, bowMg: false }, passengers: 10,
   }),
   marder3: v({
     id: 'marder3', name: 'Marder III', kind: 'spg', lengthM: 4.65, widthM: 2.95,
     speedRoadMs: 12, speedOffroadMs: 5, turnRateRad: 0.75,
     armor: { front: 15, side: 10, rear: 10, top: 0 },
     mainWeaponId: 'pak40', coaxWeaponId: null, hasTurret: false, crew: 4, mainAmmo: 38,
+    layout: { transmission: 'front', openTop: true, bowMg: false },
   }),
 
   // ------------------------------------------------------------- Soviet
@@ -63,54 +73,63 @@ export const VEHICLE_DEFS: Record<string, VehicleDef> = {
     speedRoadMs: 8, speedOffroadMs: 4, turnRateRad: 0.7,
     armor: { front: 15, side: 15, rear: 10, top: 10 },
     mainWeaponId: '45mm_20k', coaxWeaponId: 'coax_dt', hasTurret: true, crew: 3, mainAmmo: 96,
+    layout: { transmission: 'front', twoManTurret: true, bowMg: false, radio: false },
   }),
   bt7: v({
     id: 'bt7', name: 'BT-7', kind: 'tank', lengthM: 5.7, widthM: 2.3,
     speedRoadMs: 14, speedOffroadMs: 6, turnRateRad: 0.8,
     armor: { front: 20, side: 13, rear: 10, top: 10 },
     mainWeaponId: '45mm_20k', coaxWeaponId: 'coax_dt', hasTurret: true, crew: 3, mainAmmo: 132,
+    layout: { twoManTurret: true, bowMg: false, radio: false },
   }),
   t34_76: v({
     id: 't34_76', name: 'T-34/76', kind: 'tank', lengthM: 6.7, widthM: 3.0,
     speedRoadMs: 14, speedOffroadMs: 7, turnRateRad: 0.65,
     armor: { front: 60, side: 45, rear: 40, top: 20 },
     mainWeaponId: 'f34_76', coaxWeaponId: 'coax_dt', hasTurret: true, crew: 4, mainAmmo: 77,
+    layout: { twoManTurret: true, sideFuel: true }, weakSpots: { driverPlate: 45, turretRing: 45 },
   }),
   kv1: v({
     id: 'kv1', name: 'KV-1', kind: 'tank', lengthM: 6.8, widthM: 3.3,
     speedRoadMs: 9, speedOffroadMs: 4, turnRateRad: 0.5,
     armor: { front: 75, side: 75, rear: 70, top: 20 },
     mainWeaponId: 'kv_zis5', coaxWeaponId: 'coax_dt', hasTurret: true, crew: 5, mainAmmo: 114,
+    layout: { sideFuel: true }, weakSpots: { turretRing: 60, rear: 60 },
   }),
   t70: v({
     id: 't70', name: 'T-70', kind: 'tank', lengthM: 4.3, widthM: 2.3,
     speedRoadMs: 10, speedOffroadMs: 5, turnRateRad: 0.75,
     armor: { front: 35, side: 20, rear: 15, top: 10 },
     mainWeaponId: '45mm_20k', coaxWeaponId: 'coax_dt', hasTurret: true, crew: 2, mainAmmo: 90,
+    layout: { twoManTurret: true, bowMg: false },
   }),
   t34_85: v({
     id: 't34_85', name: 'T-34/85', kind: 'tank', lengthM: 6.7, widthM: 3.0,
     speedRoadMs: 14, speedOffroadMs: 7, turnRateRad: 0.6,
     armor: { front: 90, side: 45, rear: 45, top: 20 },
     mainWeaponId: 'zis_s53_85', coaxWeaponId: 'coax_dt', hasTurret: true, crew: 5, mainAmmo: 55,
+    layout: { sideFuel: true }, weakSpots: { driverPlate: 60 },
   }),
   is2: v({
     id: 'is2', name: 'IS-2', kind: 'tank', lengthM: 6.8, widthM: 3.1,
     speedRoadMs: 10, speedOffroadMs: 5, turnRateRad: 0.5,
     armor: { front: 120, side: 90, rear: 60, top: 30 },
     mainWeaponId: 'd25t_122', coaxWeaponId: 'coax_dt', hasTurret: true, crew: 4, mainAmmo: 28,
+    weakSpots: { lowerHull: 100 },
   }),
   su76: v({
     id: 'su76', name: 'SU-76', kind: 'spg', lengthM: 5.0, widthM: 2.7,
     speedRoadMs: 12, speedOffroadMs: 6, turnRateRad: 0.7,
     armor: { front: 35, side: 15, rear: 15, top: 0 },
     mainWeaponId: 'zis3_su76', coaxWeaponId: null, hasTurret: false, crew: 4, mainAmmo: 60,
+    layout: { openTop: true, bowMg: false },
   }),
   su85: v({
     id: 'su85', name: 'SU-85', kind: 'spg', lengthM: 6.1, widthM: 3.0,
     speedRoadMs: 14, speedOffroadMs: 7, turnRateRad: 0.6,
     armor: { front: 45, side: 45, rear: 40, top: 20 },
     mainWeaponId: 'zis_s53_85', coaxWeaponId: null, hasTurret: false, crew: 4, mainAmmo: 48,
+    layout: { sideFuel: true, bowMg: false },
   }),
 };
 

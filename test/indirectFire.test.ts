@@ -66,7 +66,8 @@ function team(id: number, type: Team['type'], ids: number[]): Team {
 /** A German 81 mm mortar team west of the wall: gunner (id 1) and leader (id 2). */
 function mortarSetup(): { state: BattleState; mortar: Team; gunner: Soldier } {
   const state = makeState();
-  const gunner = soldier(1, 1, { x: 10, y: 20 }, 'mortar81');
+  // (the gunner kneels at the sight: CREW_LAYOUT.mortar.gunner of a mortar at (10.8,20.2) facing east)
+  const gunner = soldier(1, 1, { x: 11.0, y: 19.4 }, 'mortar81');
   const leader = soldier(2, 1, { x: 9, y: 21 }, 'kar98k', { isLeader: true });
   state.soldiers.set(1, gunner);
   state.soldiers.set(2, leader);
@@ -136,10 +137,12 @@ describe('indirect fire: mortars', () => {
     const target = { x: 100, y: 20 };
     mortar.order = { type: 'fire', target, issuedAt: 0 };
     const hits = run(state, new Rng(5), 24);
-    const prep = layTimeS('mortar81', gunner.experience, 180, 0) + loadTimeS('mortar81', gunner.experience);
-    expect(prep).toBeGreaterThan(8);
-    expect(hits[0].t).toBeGreaterThanOrEqual(prep - 0.05);
-    expect(hits[0].t).toBeLessThan(prep + 0.6);
+    // (the loader hangs the bomb over the muzzle while the gunner finishes the lay)
+    const lay = layTimeS('mortar81', gunner.experience, 180, 0);
+    expect(lay).toBeGreaterThan(6);
+    expect(loadTimeS('mortar81', gunner.experience)).toBeCloseTo(2, 5);
+    expect(hits[0].t).toBeGreaterThanOrEqual(lay - 0.05);
+    expect(hits[0].t).toBeLessThan(lay + 1.2);
     expect(hits.length).toBeGreaterThanOrEqual(2);
     expect(hits[1].t - hits[0].t).toBeLessThan(1 / 0.15 + 0.6);
   });
@@ -149,6 +152,7 @@ describe('indirect fire: mortars', () => {
     mortar.order = { type: 'fire', target: { x: 100, y: 20 }, issuedAt: 0 };
     run(state, new Rng(5), 1);
     expect(crewWeaponStatus(mortar)).toBe('Aiming');
+    // the loader hangs the bomb over the muzzle as the lay is finished
     run(state, new Rng(5), 6.5);
     expect(crewWeaponStatus(mortar)).toBe('Loading');
   });
@@ -229,13 +233,18 @@ describe('indirect fire: mortars', () => {
     expect(near.mul).toBeLessThan(1.25);
   });
 
-  it('set-up still blocks firing', () => {
+  it('set-up still blocks firing: a mortar that is not assembled fires nothing until its crew has set it up', () => {
     const { state, mortar } = mortarSetup();
     mortar.crewWeapon!.phase = 'settingUp';
-    mortar.crewWeapon!.timer = 1000;
-    mortar.crewWeapon!.phaseTotal = 1000;
     mortar.order = { type: 'fire', target: { x: 100, y: 20 }, issuedAt: 0 };
-    expect(run(state, new Rng(3), 40)).toHaveLength(0);
+    expect(run(state, new Rng(3), 6)).toHaveLength(0);
+    expect(mortar.crewWeapon!.phase).toBe('settingUp');
+    // ... and never, when nobody is able to work on it
+    const stuck = mortarSetup();
+    stuck.mortar.crewWeapon!.phase = 'settingUp';
+    stuck.mortar.order = { type: 'fire', target: { x: 100, y: 20 }, issuedAt: 0 };
+    for (const s of stuck.state.soldiers.values()) s.stunnedUntil = 1e9;
+    expect(run(stuck.state, new Rng(3), 40)).toHaveLength(0);
   });
 
   it('a cowering crew aborts the mission and does not fire', () => {
@@ -282,7 +291,8 @@ describe('fire-mission preparation (crew-served direct fire)', () => {
     const { state, mortar, gunner } = mortarSetup();
     const cw = mortar.crewWeapon!;
     expect(fireMissionWait(state, mortar, gunner, { aim: { x: 100, y: 20 }, targetTeamId: 7 })).toBeGreaterThan(8);
-    cw.firePhase = 'ready'; cw.mission!.timer = 0; cw.mission!.loaded = true; cw.mission!.rounds = 2;
+    // laid, a bomb dropped, two rounds already out
+    cw.laid = true; cw.chambered = true; cw.mission!.rounds = 2;
     expect(fireMissionWait(state, mortar, gunner, { aim: { x: 100, y: 22 }, targetTeamId: 7 })).toBe(0);
     // tracked team moved 12 m: re-lay 1-2 s, mission (and its rounds) kept
     const relay = fireMissionWait(state, mortar, gunner, { aim: { x: 106, y: 20 }, targetTeamId: 7 });
@@ -290,9 +300,9 @@ describe('fire-mission preparation (crew-served direct fire)', () => {
     expect(relay).toBeLessThanOrEqual(2);
     expect(cw.mission!.rounds).toBe(2);
     // a different point far away: a whole new mission
-    cw.firePhase = 'ready'; cw.mission!.timer = 0;
+    cw.laid = true;
     const far = { x: 106 + MISSION_NEW_AIM_M / TILE_M + 2, y: 20 };
-    expect(fireMissionWait(state, mortar, gunner, { aim: far, targetTeamId: null })).toBeGreaterThan(8);
+    expect(fireMissionWait(state, mortar, gunner, { aim: far, targetTeamId: null })).toBeGreaterThan(6);
     expect(cw.mission!.rounds).toBe(0);
   });
 });

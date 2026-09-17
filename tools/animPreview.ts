@@ -15,6 +15,9 @@ import type { SoldierPose } from '@/render/soldierArt';
 import { applyBlastKnockback } from '@/sim/combat';
 import { createMind } from '@/sim/mind';
 import { Rng } from '@/shared/rng';
+import { drawUnits } from '@/render/unitRender';
+import { stepCrewWeapons, crewWeaponStatus, crewTaskWord, isInAction, fireMissionWait, onMissionRound } from '@/sim/crewWeapon';
+import type { GameSettings, Team } from '@/shared/types';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const root = $('root'), status = $('status');
@@ -178,8 +181,72 @@ function drawDemo(canvas: HTMLCanvasElement, time: number): void {
   drawEffects(ctx, demoCam, demo);
 }
 
+// ------------------------------------------------------------------ crew drill demo (spec §6) ---
+const drillWeaponSel = $<HTMLSelectElement>('drillWeapon'), drillCrewSel = $<HTMLSelectElement>('drillCrew');
+const drillCam: Camera = { x: 0, y: 0, zoom: 2 };
+const DRILL_SETTINGS = { volume: 0, unitLabels: false, losLines: false, speed: 1 } as GameSettings;
+let drill = demoState('summer');
+let drillTeam: Team | null = null;
+let drillPhaseAt = 0;
+function resetDrill(): void {
+  drill = demoState(seasonSel.value as Season);
+  const side = sideSel.value as Side;
+  const weaponId = drillWeaponSel.value;
+  const n = Number(drillCrewSel.value);
+  const ids: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const s = fakeSoldier(300 + i, side, { teamId: 9, pos: { x: 6.2 + i * 0.8, y: 5.6 + (i % 2) * 0.5 }, weaponId: i === 0 ? weaponId : side === 'german' ? 'kar98k' : 'mosin', isLeader: n > 1 && i === n - 1, ammo: 20, stance: 'crouching' });
+    drill.soldiers.set(s.id, s); ids.push(s.id);
+  }
+  drillTeam = {
+    id: 9, defId: 'demo', side, name: 'Demo gun', type: 'atgun', soldierIds: ids, leaderId: ids[ids.length - 1], vehicleId: null, order: null,
+    facing: 0, experience: 50, morale: 80, status: 'Idle', pos: { x: 8, y: 4 }, outOfAction: false, kills: 0, aiObjective: null,
+    crewWeapon: { weaponId, pos: { x: 8, y: 3.6 }, facing: 0.5, phase: 'settingUp', timer: 0, phaseTotal: 0, gunnerId: ids[0], abandoned: false, abandonedAt: 0, setAt: 0 },
+  };
+  drill.teams.set(9, drillTeam);
+  drillPhaseAt = 0;
+}
+/** One sim step of the demo: into action, a few rounds at a far point, pack up, repeat. */
+function stepDrill(dt: number): void {
+  const team = drillTeam; if (!team?.crewWeapon) return;
+  const cw = team.crewWeapon;
+  drill.time += dt;
+  const gunner = drill.soldiers.get(cw.gunnerId)!;
+  const t = drill.time - drillPhaseAt;
+  if (cw.goal !== 'pack' && isInAction(cw) && t > 4) {
+    // serve the gun: ask to fire like combat does, and fire when it is loaded and laid
+    gunner.fireTimer = Math.max(0, gunner.fireTimer - dt);
+    const aim = { x: 8 + Math.sin(drill.time / 9) * 30, y: -40 };
+    if (gunner.fireTimer <= 0 && fireMissionWait(drill, team, gunner, { aim, targetTeamId: null }) === 0) {
+      gunner.lastFiredAt = drill.time; gunner.fireTimer = 4;
+      onMissionRound(drill, team, gunner);
+    }
+  }
+  if (cw.goal !== 'pack' && isInAction(cw) && t > 26) {
+    team.order = { type: 'move', target: { x: 30, y: 4 }, issuedAt: drill.time };
+    for (const id of team.soldierIds) drill.soldiers.get(id)!.path = [{ x: 30, y: 4 }];
+  }
+  if (cw.phase === 'packed' && cw.goal === 'pack') {
+    // packed: "arrive" on the spot and start over
+    team.order = null;
+    for (const id of team.soldierIds) drill.soldiers.get(id)!.path = [];
+    drillPhaseAt = drill.time;
+  }
+  stepCrewWeapons(drill, dt);
+}
+function drawDrill(canvas: HTMLCanvasElement): void {
+  const ctx = canvas.getContext('2d')!;
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = GROUND[drill.map.def.season === 'winter' ? 'winter' : 'summer']; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (!drillTeam) return;
+  drawUnits(ctx, drillCam, drill, drillTeam.side, [], DRILL_SETTINGS);
+  const words = drillTeam.soldierIds.map((id) => crewTaskWord(drill.soldiers.get(id)!) ?? '-').join(' | ');
+  $('drillStatus').textContent = `${crewWeaponStatus(drillTeam) ?? (drillTeam.crewWeapon!.phase)}  —  ${words}`;
+}
+for (const sel of [drillWeaponSel, drillCrewSel]) sel.addEventListener('change', resetDrill);
+
 // deterministic strips for capture scripts
-declare global { interface Window { __animStrip: (atlasName: string, key: string, dir: number, n?: number, dt?: number, zoom?: number) => string | null; __ragdollStrip: (n?: number, dt?: number) => string; __ready: boolean } }
+declare global { interface Window { __drillStrip: (n?: number, dt?: number) => string; __animStrip: (atlasName: string, key: string, dir: number, n?: number, dt?: number, zoom?: number) => string | null; __ragdollStrip: (n?: number, dt?: number) => string; __ready: boolean } }
 window.__animStrip = (atlasName, key, dir, n = 8, dt = 0.1, zoom = 3) => {
   const atlas = getAtlas(atlasName);
   if (!atlas || !atlas.meta.entries[key]) return null;
@@ -203,8 +270,23 @@ window.__ragdollStrip = (n = 8, dt = 0.1) => {
   return c.toDataURL('image/png');
 };
 
+window.__drillStrip = (n = 24, dt = 0.5) => {
+  resetDrill();
+  const frame = document.createElement('canvas'); frame.width = 640; frame.height = 300;
+  const cols = 4, rows = Math.ceil(n / cols);
+  const c = document.createElement('canvas'); c.width = 360 * cols; c.height = 240 * rows;
+  const ctx = c.getContext('2d')!;
+  for (let i = 0; i < n; i++) {
+    for (let k = 0; k < Math.round(dt / 0.1); k++) stepDrill(0.1);
+    drawDrill(frame);
+    ctx.drawImage(frame, 140, 60, 360, 240, (i % cols) * 360, Math.floor(i / cols) * 240, 360, 240);
+  }
+  resetDrill();
+  return c.toDataURL('image/png');
+};
+
 $('ragdoll').addEventListener('click', () => { resetDemo(); fireBlast(now() - demoT0 + 0.0001); });
-for (const sel of [srcSel, sideSel, seasonSel]) sel.addEventListener('change', () => { void rebuild().then(resetDemo); });
+for (const sel of [srcSel, sideSel, seasonSel]) sel.addEventListener('change', () => { void rebuild().then(() => { resetDemo(); resetDrill(); }); });
 
 function tick(): void {
   const t = now();
@@ -217,8 +299,15 @@ function tick(): void {
     ctx.drawImage(sp, Math.round(f.canvas.width / 2 - (sp.width * k) / 2), Math.round(f.canvas.height / 2 - (sp.height * k) / 2), sp.width * k, sp.height * k);
   }
   drawDemo($<HTMLCanvasElement>('ragdollCanvas'), t - demoT0);
+  const want = (t - drillT0);
+  let guard = 0;
+  while (drill.time < want && guard++ < 5) stepDrill(0.1);
+  if (drill.time < want - 1) drillT0 = t - drill.time;
+  drawDrill($<HTMLCanvasElement>('drillCanvas'));
   requestAnimationFrame(tick);
 }
 resetDemo();
+resetDrill();
+let drillT0 = now();
 void rebuild().then(() => { window.__ready = true; });
 requestAnimationFrame(tick);

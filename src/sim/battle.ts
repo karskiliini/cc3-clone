@@ -22,6 +22,8 @@ import { stepAI, aiDeploy } from './ai';
 import { addMessage } from './messages';
 import { stepMinds } from './mind';
 import { stepCoverSeeking } from './coverSeek';
+import { stepItemDrops } from './items';
+import { stepPickups } from './pickup';
 import { TEAM_DEFS, VEHICLE_DEFS } from '@/data/units';
 import { getMap } from '@/data/maps';
 
@@ -153,6 +155,9 @@ export class Battle {
     stepAttackOrders(state, this.rng);
     stepCombat(state, this.rng, dt);
     stepMorale(state, this.rng, dt);
+    // kit as objects (spec 2026-09-17 §9): casualties leave theirs, able men pick things up
+    stepItemDrops(state, this.rng);
+    stepPickups(state, this.rng, dt);
     stepVictory(state, dt);
     stepSmoke(state.map, dt);
 

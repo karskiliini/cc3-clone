@@ -352,6 +352,8 @@ def solve(pose, weapon):
         c = sum((v.translation for v in out.values()), Vector((0, 0, 0))) / max(1, len(out))
         shift = T((-c.x, -c.y, 0))
         out = {k_: shift @ v for k_, v in out.items()}
+    for k_ in P.get("hide", ()):
+        out.pop(k_, None)
     if P.get("squash"):
         out["_squash"] = T((0, 0, 0.03)) @ S(*P["squash"])
     for name, (fr, pos, rot) in (P.get("props") or {}).items():
@@ -1223,6 +1225,52 @@ def build_part_entries():
     return E
 
 
+HULL_H = 1.5 / FIG          # a hull roof about 1.5 m above the ground (true metres)
+
+
+def a_bailout(reverse=False):
+    """Climbing out of a hatch and dropping to the ground (or, reversed, mounting).  Frame = progress."""
+    H = HULL_H
+
+    def f(t, w):
+        i = min(5, int(t * 6))
+        if reverse:
+            i = 5 - i
+        sl = dict(frame="chest", pos=(0.04, -0.20, 0.22), rot=(78, 8, 0))       # rifle slung on the back
+        if i == 0:      # head and shoulders, arms braced on the rim
+            p = dict(pelvis_pos=(0, -0.05, H - 0.38), pelvis_rot=(4, 0, 0, 0), chest_rot=(8, 0, 0), head_rot=(-6, 0, 10),
+                     footL=foot(-0.1, 0, z=H - 1.2), footR=foot(0.1, 0, z=H - 1.2),
+                     hide=("pelvis", "thighL", "thighR", "shinL", "shinR", "footL", "footR"))
+            _hands(p, (-0.40, 0.12, H + 0.03), (0.40, 0.12, H + 0.03), frame="root", polel=(-1, -0.4, 0.4), poler=(1, -0.4, 0.4))
+        elif i == 1:    # torso pushed up on straight arms
+            p = dict(pelvis_pos=(0, -0.02, H + 0.02), pelvis_rot=(12, 0, 0, 0), chest_rot=(12, 0, 0), head_rot=(-10, 0, 0),
+                     footL=foot(-0.1, 0, z=H - 0.8), footR=foot(0.1, 0, z=H - 0.8),
+                     hide=("thighL", "thighR", "shinL", "shinR", "footL", "footR"))
+            _hands(p, (-0.36, 0.06, H + 0.03), (0.36, 0.06, H + 0.03), frame="root", polel=(-1, -0.6, 0.2), poler=(1, -0.6, 0.2))
+        elif i == 2:    # one knee on the rim
+            p = dict(pelvis_pos=(0, 0.02, H + 0.34), pelvis_rot=(30, 0, 12, 0), chest_rot=(18, 0, 0), head_rot=(-20, 0, 0),
+                     footL=foot(-0.12, -0.05, z=H - 0.35, pole=(0, 1, 0)),
+                     footR=foot(0.22, -0.34, z=H + 0.10, pitch=60, pole=(0.3, 1, -0.6)),
+                     hide=("shinL", "footL"))
+            _hands(p, (-0.34, 0.30, H + 0.03), (0.30, 0.34, H + 0.03), frame="root", polel=(-1, -0.4, 0.3), poler=(1, -0.4, 0.3))
+        elif i == 3:    # sitting on the edge, legs swinging over
+            p = dict(pelvis_pos=(0, 0.10, H + 0.13), pelvis_rot=(-8, 0, 0, 0), chest_rot=(18, 0, 0), head_rot=(10, 0, 0),
+                     footL=foot(-0.14, 0.62, z=H - 0.30, pitch=20, pole=(0, 0.3, 1)),
+                     footR=foot(0.14, 0.50, z=H - 0.42, pitch=20, pole=(0, 0.3, 1)))
+            _hands(p, (-0.30, 0.02, H + 0.03), (0.30, 0.02, H + 0.03), frame="root", polel=(-1, -0.6, 0.2), poler=(1, -0.6, 0.2))
+        elif i == 4:    # dropping
+            p = dict(pelvis_pos=(0, 0.22, 1.12), pelvis_rot=(10, 0, 0, 0), chest_rot=(10, 0, 0), head_rot=(14, 0, 0),
+                     footL=foot(-0.14, 0.30, z=0.42, pitch=25), footR=foot(0.14, 0.16, z=0.34, pitch=25))
+            _hands(p, (-0.46, 0.10, 0.62), (0.46, 0.10, 0.56), polel=(-1, -0.3, -0.4), poler=(1, -0.3, -0.4))
+        else:           # landed in a crouch, one hand down
+            p = dict(pelvis_pos=(0, 0.20, 0.50), pelvis_rot=(30, 0, -6, 0), chest_rot=(34, 0, 0), head_rot=(-30, 0, 0),
+                     footL=foot(-0.17, 0.38, yaw=12), footR=foot(0.17, 0.12, yaw=-16, z=0.10, pitch=20))
+            _hands(p, (-0.20, 0.46, -0.10), (0.34, 0.16, 0.10), polel=(-1, 0, 0), poler=(1, -0.4, 0))
+        p["weapon"] = sl
+        return p
+    return f
+
+
 # ---- sprawls: corpses, landed ragdolls, last hit frame -----------------------------------
 def sprawl(face_up=False, twist=0, heading=0, armL=(120, 0.5), armR=(60, 0.5), legL=(12, 0.85), legR=(25, 0.8),
            head=(0, 0, 30), chest=(0, 0, 0), weapon=(0.5, 0.1, 20), z=0.12, lift=0.0, y_bias=0.0):
@@ -1394,8 +1442,9 @@ def build_entries():
     """-> ordered dict key -> dict(fn, frames, fps, loop, weapons, shadow, extra)"""
     E = {}
 
-    def add(k, fn, frames, fps, loop=True, weapons=("rifle",), shadow=True, sample="loop", **extra):
-        E[k] = dict(fn=fn, frames=frames, fps=fps, loop=loop, weapons=weapons, shadow=shadow, sample=sample, extra=extra)
+    def add(k, fn, frames, fps, loop=True, weapons=("rifle",), shadow=True, sample="loop", shadow_rows=None, **extra):
+        E[k] = dict(fn=fn, frames=frames, fps=fps, loop=loop, weapons=weapons, shadow=shadow, sample=sample,
+                    shadow_rows=shadow_rows, extra=extra)
 
     ALLW = ("rifle", "smg", "lmg")
     ALLN = ("rifle", "smg", "lmg", "none")
@@ -1458,6 +1507,11 @@ def build_entries():
         add(f"ragdoll.flight{i}", a_flight(i), 6, 9, loop=False, shadow=False, sample="step", landed=FLIGHTS[i][3])
     for i, spec in enumerate(LANDED):
         add(f"ragdoll.landed{i}", a_static(spec), 1, 1, loop=False)
+    # appended later: keep new entries at the END so existing `start` indices never move
+    add("crew.bailout", a_bailout(False), 6, 5, loop=False, sample="step", progress=True, hullHeightM=1.5,
+        shadow_rows={3: 0.45, 4: 0.75, 5: 1.0})
+    add("crew.mount", a_bailout(True), 6, 5, loop=False, sample="step", progress=True, hullHeightM=1.5,
+        shadow_rows={0: 1.0, 1: 0.75, 2: 0.45})
     return E
 
 
@@ -1567,6 +1621,8 @@ def grade(img, scale):
     # shadows: render noise makes PNGs huge, so smooth the alpha (3x3) and quantise it; one flat tint
     sh = ~fig & (img[..., 3] > 0)
     al = img[..., 3].astype(np.float32)
+    # the catcher leaves a faint haze (alpha 2-6) over the whole cell: remove that floor
+    al = np.where(sh, np.clip((al - 12.0) * (255.0 / 243.0), 0, 255), al)
     pad = np.pad(al, 1, mode="edge")
     blur = sum(pad[dy:dy + al.shape[0], dx:dx + al.shape[1]] for dy in range(3) for dx in range(3)) / 9.0
     outline = sh & (al > 1.25 * blur + 20)                                  # keep the crisp dark rim
@@ -1613,7 +1669,7 @@ def render_atlas(side, season, scale, only, force, pack_only, samples, kind="sol
         meshes = build_meshes(side)
         coll = bpy.data.collections.new("rigs")
         ctx.scene.collection.children.link(coll)
-        rigs = [[Rig(meshes, coll, ctx.cell_origin(d, r), d) for d in range(DIRS)] for r in range(MAX_FRAMES)]
+        rigs = [[Rig(meshes, coll, ctx.cell_origin(d, r, exact=True), d) for d in range(DIRS)] for r in range(MAX_FRAMES)]
         for n, (ak, ek, w, path) in enumerate(todo):
             e = E[ek]
             t1 = time.time()
@@ -1630,8 +1686,18 @@ def render_atlas(side, season, scale, only, force, pack_only, samples, kind="sol
             r_.use_border, r_.use_crop_to_border = True, False
             r_.border_min_x, r_.border_max_x, r_.border_max_y = 0.0, 1.0, 1.0
             r_.border_min_y = 1.0 - e["frames"] / MAX_FRAMES
-            C.set_shadow(ctx, e["shadow"])
+            srows = e.get("shadow_rows")
+            C.set_shadow(ctx, e["shadow"] and not srows)
             cells = C.render_grid(ctx)
+            if srows:       # per-frame shadow strength: second pass with the catcher, mixed in per row
+                C.set_shadow(ctx, True)
+                with_sh = C.render_grid(ctx)
+                for r, k_ in srows.items():
+                    for d in range(DIRS):
+                        c2 = with_sh[r][d].copy()
+                        shm = (c2[..., :3].max(axis=2) <= 46) & (c2[..., 3] > 0)
+                        c2[..., 3][shm] = (c2[..., 3][shm] * k_).astype(np.uint8)
+                        cells[r][d] = c2
             strip = np.zeros((e["frames"] * cell, DIRS * cell, 4), dtype=np.uint8)
             spill, where = 0, []
             for r in range(e["frames"]):

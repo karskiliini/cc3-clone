@@ -197,4 +197,22 @@ describe('ragdoll flight (pure half)', () => {
     expect(seen.size).toBe(RAGDOLL_FLIGHT_VARIANTS);
     expect(ragdollHeading(blast, pos)).toBeCloseTo(Math.PI / 2, 9); // thrown east
   });
+
+  describe('men who are not going anywhere stay still', () => {
+    it('a hiding or ambushing man with a leftover path does not crawl on the spot', () => {
+      for (const activity of ['hiding', 'ambushing'] as const) {
+        const s = { ...sol(), stance: 'prone', activity, path: [{ x: 9, y: 9 }] } as Soldier;
+        expect(actionFor(s, 10, 'prone', 0)).toBe('hide');
+        expect(pickAnimation(s, 10, null, 'prone', 0.01).action).toBe('hide');
+        // really crawling, or speed not yet measured: the gait plays
+        expect(actionFor(s, 10, 'prone', 0.5)).toBe('crawl');
+        expect(actionFor(s, 10, 'prone')).toBe('crawl');
+      }
+    });
+    it('a held crouching man kneels instead of showing the moving crouch', () => {
+      const s = { ...sol(), stance: 'crouching', activity: 'defending', path: [{ x: 9, y: 9 }] } as Soldier;
+      expect(postureFor(s, 0, 0)).toBe('kneeling');
+      expect(postureFor(s, 0, 1)).toBe('crouched');
+    });
+  });
 });

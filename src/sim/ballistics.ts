@@ -1,4 +1,4 @@
-import type { Health, Soldier, Stance, Vec2, Vehicle, WeaponDef } from '@/shared/types';
+import type { Health, RoundType, Soldier, Stance, Vec2, Vehicle, WeaponDef } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { clamp, wrapAngle, angleTo } from '@/shared/math';
 
@@ -36,14 +36,46 @@ function shooterFactor(shooter: Soldier): number {
   return suppressionTerm * expTerm * fatigueTerm * stateTerm * wildFireTerm;
 }
 
+/** Penetration (mm) of `round` from this weapon at `distM`. AP: penetrationMm * max(0.4, 1 - dist/1000).
+ * APCR: its own value and a steeper loss with range (HEAT: none). HE: a thin-plate value from the
+ * burst size; smoke: none. Weapons without round types (`rounds` absent) only have 'ap'. */
+export function roundPenetrationMm(weapon: WeaponDef, distM: number, round: RoundType = 'ap'): number {
+  switch (round) {
+    case 'apcr':
+      if (!weapon.apcr) return 0;
+      return weapon.apcr.penetrationMm * Math.max(0.25, 1 - (distM * weapon.apcr.falloffPerKm) / 1000);
+    case 'he': return weapon.rounds ? weapon.heRadiusM * HE_PEN_MM_PER_M : weapon.penetrationMm * Math.max(0.4, 1 - distM / 1000);
+    case 'smoke': return 0;
+    default: return weapon.penetrationMm * Math.max(0.4, 1 - distM / 1000);
+  }
+}
+/** Plate an HE shell of a gun defeats, per metre of its burst radius (7.5 cm: ~18 mm). */
+export const HE_PEN_MM_PER_M = 4;
+
 /** Expectation of `penetrates()` (spec §10 "danger"): probability the round beats the armour,
  * derived from the same pen*(1+gauss()*0.12) > armour model via the normal CDF. */
-export function expectedPenetrationChance(weapon: WeaponDef, distM: number, armorMm: number): number {
-  if (weapon.penetrationMm <= 0) return 0;
-  const pen = weapon.penetrationMm * Math.max(0.4, 1 - distM / 1000);
+export function expectedPenetrationChance(weapon: WeaponDef, distM: number, armorMm: number, round: RoundType = 'ap'): number {
+  const pen = roundPenetrationMm(weapon, distM, round);
   if (pen <= 0) return 0;
+  if (armorMm <= 0) return 1;
   const z = (armorMm / pen - 1) / 0.12;
   return clamp(1 - normalCdf(z), 0, 1);
+}
+
+/** Is the APCR (or HEAT) round of this gun issued in `year`? */
+export function apcrIssued(weapon: WeaponDef, year: number | undefined): boolean {
+  return !!weapon.apcr && (weapon.apcr.from == null || year == null || year >= weapon.apcr.from);
+}
+
+/** The better of AP and (when issued and, if counts are given, still carried) APCR against this
+ * plate at this range: what an enemy judging the gun's danger, or the gun's own crew, reckons with. */
+export function bestRoundAgainst(
+  weapon: WeaponDef, distM: number, armorMm: number, year?: number, counts?: { ap: number; apcr: number },
+): { round: RoundType; chance: number } {
+  const ap = !counts || counts.ap > 0 || !weapon.rounds ? expectedPenetrationChance(weapon, distM, armorMm, 'ap') : 0;
+  const hasApcr = apcrIssued(weapon, year) && (!counts || counts.apcr > 0);
+  const apcr = hasApcr ? expectedPenetrationChance(weapon, distM, armorMm, 'apcr') : 0;
+  return apcr > ap ? { round: 'apcr', chance: apcr } : { round: 'ap', chance: ap };
 }
 
 function erf(x: number): number {
@@ -94,9 +126,10 @@ export function hitChance(
   return clamp(Math.max(p, closeFloor), 0.02, 0.95);
 }
 
-/** pen = penetrationMm * max(0.4, 1 - dist/1000); spread = gauss()*0.12; penetrates if pen*(1+spread) > armorMm. */
-export function penetrates(weapon: WeaponDef, distM: number, armorMm: number, rng: Rng): boolean {
-  const pen = weapon.penetrationMm * Math.max(0.4, 1 - distM / 1000);
+/** pen = roundPenetrationMm (AP: penetrationMm * max(0.4, 1 - dist/1000)); spread = gauss()*0.12;
+ * penetrates if pen*(1+spread) > armorMm. Closed form: `expectedPenetrationChance` / penChance.ts. */
+export function penetrates(weapon: WeaponDef, distM: number, armorMm: number, rng: Rng, round: RoundType = 'ap'): boolean {
+  const pen = roundPenetrationMm(weapon, distM, round);
   const spread = rng.gauss() * 0.12;
   return pen * (1 + spread) > armorMm;
 }

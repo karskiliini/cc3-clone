@@ -142,6 +142,8 @@ export function teamStatusTextColor(word: TeamStatusWord): string {
       return HUD.statusGreen;
     case 'Pinned':
     case 'Hesitating':
+    case 'Abandoned': // a serviceable vehicle waiting for its crew (spec 2026-09-17 §10)
+    case 'Bailing out':
       return HUD.yellow;
     case 'Broken':
     case 'Panicked':

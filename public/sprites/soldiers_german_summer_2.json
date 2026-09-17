@@ -1024,6 +1024,22 @@
    "fps": 1,
    "loop": false
   },
+  "crew.bailout": {
+   "start": 8336,
+   "frames": 6,
+   "fps": 5,
+   "loop": false,
+   "progress": true,
+   "hullHeightM": 1.5
+  },
+  "crew.mount": {
+   "start": 8432,
+   "frames": 6,
+   "fps": 5,
+   "loop": false,
+   "progress": true,
+   "hullHeightM": 1.5
+  },
   "standing.idle@rifle": {
    "start": 0,
    "frames": 4,
@@ -1386,6 +1402,24 @@
    "loop": true,
    "strideM": 1.352,
    "alias": "crew.carry.tripod"
+  },
+  "crew.bailout@none": {
+   "start": 8336,
+   "frames": 6,
+   "fps": 5,
+   "loop": false,
+   "progress": true,
+   "hullHeightM": 1.5,
+   "alias": "crew.bailout"
+  },
+  "crew.mount@none": {
+   "start": 8432,
+   "frames": 6,
+   "fps": 5,
+   "loop": false,
+   "progress": true,
+   "hullHeightM": 1.5,
+   "alias": "crew.mount"
   },
   "kneeling.sneak": {
    "start": 4064,

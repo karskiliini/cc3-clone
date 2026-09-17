@@ -7,13 +7,24 @@ import { eyeHeightM, EYE_VEHICLE_M } from '@/sim/los';
 import { aimLineProfile, aimPointClass, type AimClass } from '@/sim/losProfile';
 import { spottedEnemyTeamAt } from '@/sim/orders';
 import { penRating, teamPenetrationChance, type PenRating } from '@/sim/penChance';
+import { vehicleEyes } from '@/sim/vehicleVision';
 
-/** Where a team looks from when it aims: its leader (or first living man) at his eye height, or
- * the vehicle at commander height. Null when nobody is left to look. */
+/** Where a team looks from when it aims: its leader (or first living man) at his eye height, or —
+ * for a vehicle — the turret eye (gunner's sight, or the commander laying the gun himself in a
+ * two-man turret; falling back to the commander alone if no gunner lives) since that is the sight
+ * the aiming line represents; if no turret crew lives, the hull eye (driver, then radio operator).
+ * Only when every crewman is dead does this fall back to the hull centre at commander height. Null
+ * when nobody is left to look (dismounted teams only — a vehicle always has the last-resort
+ * fallback). */
 export function teamObserver(state: BattleState, t: Team): { from: Vec2; eyeM: number } | null {
   if (t.vehicleId != null) {
     const veh = state.vehicles.get(t.vehicleId);
-    return { from: veh ? veh.pos : t.pos, eyeM: EYE_VEHICLE_M };
+    if (!veh) return null;
+    const eyes = vehicleEyes(state, veh);
+    const turret = eyes.find((e) => e.role === 'gunner') ?? eyes.find((e) => e.role === 'commander');
+    const hull = turret ?? eyes.find((e) => e.role === 'driver') ?? eyes.find((e) => e.role === 'radioOp');
+    if (hull) return { from: hull.pos, eyeM: hull.eyeM };
+    return { from: veh.pos, eyeM: EYE_VEHICLE_M };
   }
   const leader = state.soldiers.get(t.leaderId);
   const obs = leader && leader.health !== 'dead'

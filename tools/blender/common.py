@@ -12,8 +12,10 @@ WORLD CONVENTIONS (everything a model script needs to know)
     `anchor` pixel.
   * Camera: orthographic, tilted TILT_DEG (12 deg) from vertical, standing south of the subject
     and looking north/down, so tall things lean "up" the screen and south faces show a bit.
-    Ground scale is exactly px_per_m in BOTH screen axes (the tilt's cos() foreshortening is
-    compensated with the pixel aspect); height z shifts a point up-screen by z*tan(12deg)*ppm.
+    Ground scale is px_per_m along screen-x and px_per_m*cos(12deg) (= 0.978) along screen-y: Blender
+    5.2 does not let the pixel aspect cancel the tilt's foreshortening (measured).  Height z shifts a
+    point up-screen by z*sin(12deg)*ppm.  For grids use cell_origin(col, row, exact=True) so every
+    cell's ground point lands exactly on its anchor pixel.
   * Light: sun from the NW (azimuth 315 deg, elevation 45 deg) so shadows fall to the SE, plus
     a soft sky fill.  Film is transparent.  A shadow-catcher plane at z=0 keeps the contact
     shadow in the sprite as semi-transparent dark pixels.
@@ -21,7 +23,9 @@ WORLD CONVENTIONS (everything a model script needs to know)
 API (keep small; only backwards-compatible changes after v1)
   ctx = setup_scene(px_per_m, cell_w, cell_h, anchor=(ax, ay), grid=(1, 1),
                     supersample=2, shadow=True, engine="CYCLES", samples=24)
-  x, y = ctx.cell_origin(col, row)      # world XY whose ground point is that cell's anchor
+  x, y = ctx.cell_origin(col, row, exact=True)   # world XY whose ground point is that cell's anchor
+                                        # (exact=False, the v1 default, ignores the 0.978 y factor:
+                                        #  up to 2.2 % of the offset from the image centre)
   rgba = render_cell(ctx)               # (cell_h, cell_w, 4) uint8, straight alpha, cell (0,0)
   cells = render_grid(ctx)              # list[row][col] of such arrays: many cells, ONE render
   set_shadow(ctx, on)                   # toggle the baked contact shadow (off for ragdoll flights)
@@ -114,14 +118,17 @@ class SceneCtx:
         self.engine = "CYCLES"
         self._tmp = None
 
-    def cell_origin(self, col=0, row=0):
+    def cell_origin(self, col=0, row=0, exact=False):
         """World (x, y) of the ground point that lands on the anchor pixel of grid cell col,row
-        (row 0 is the TOP row of the rendered image)."""
+        (row 0 is the TOP row of the rendered image).  exact=True divides y by the real screen-y
+        ground factor cos(tilt); the default keeps the v1 behaviour for callers that compensate
+        themselves (vehicles_common.ground_y_factor)."""
         gw, gh = self.grid
         tw, th = gw * self.cell_w, gh * self.cell_h
         px = col * self.cell_w + self.anchor[0]
         py = row * self.cell_h + self.anchor[1]
-        return ((px - tw / 2.0) / self.px_per_m, -(py - th / 2.0) / self.px_per_m)
+        ky = math.cos(math.radians(TILT_DEG)) if exact else 1.0
+        return ((px - tw / 2.0) / self.px_per_m, -(py - th / 2.0) / (self.px_per_m * ky))
 
 
 def setup_scene(px_per_m, cell_w, cell_h, anchor=None, grid=(1, 1), supersample=2,

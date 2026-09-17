@@ -6,7 +6,7 @@ import { coverAt, groundHeightAt, tileAt } from './map';
 import { TERRAIN_PROPS } from './terrain';
 import { findPath } from './path';
 import { isFirstFireFrozen } from './mind';
-import { stepCrewWeapons, isHeldForPacking } from './crewWeapon';
+import { stepCrewWeapons, isHeldForPacking, isHaulingGun } from './crewWeapon';
 import { stepOrderWaypoints } from './orders';
 
 const SPEEDS: Record<string, number> = {
@@ -37,6 +37,8 @@ export function gradeSpeedMul(map: GameMap, a: Vec2, b: Vec2, coeff = GRADE_UPHI
 }
 
 const REPATH_INTERVAL_S = 3;
+/** Sprint of a man throwing himself clear of a vehicle, m/s. */
+const DODGE_SPEED_MS = 4.5;
 const NEAR_ENEMY_RADIUS_TILES = 15;
 
 /** Advances all soldiers along their current paths, drives panicked/routed flight behaviour,
@@ -57,12 +59,30 @@ export function stepMovement(state: BattleState, rng: Rng, dt: number): void {
       continue;
     }
 
+    // on a hatch, half out of the vehicle (sim/vehicleCrew.ts, spec 2026-09-17 §10): exposed, and
+    // moved by the climb itself
+    if (s.hatch) { s.cover = 0; s.animFrame = 0; continue; }
+
     s.cover = coverAt(state.map, s.pos);
+    // just out of a vehicle in a panic: a short dash clear of it before his mind takes over again
+    if (s.bailRun) {
+      if (state.time >= s.bailRun.until || dist(s.pos, s.bailRun.to) < 0.2 || (s.stunnedUntil != null && state.time < s.stunnedUntil)) s.bailRun = undefined;
+      else { s.path = [s.bailRun.to]; s.stance = 'standing'; moveAlongPath(state, s, SPEEDS.panicked, dt); s.animFrame = Math.floor(state.time / 0.15) % 2; continue; }
+    }
     // knocked down by a blast (spec 2026-09-17 §4): lies where he landed until the stun ends
     if (s.stunnedUntil != null && state.time < s.stunnedUntil) { s.animFrame = 0; continue; }
 
+    // stooping over an item on the ground (sim/pickup.ts, spec 2026-09-17 §9): holds still
+    if (s.pickup?.until != null) { s.animFrame = 0; continue; }
+
     // First-fire shock (spec §11): frozen soldiers do not move at all.
     if (isFirstFireFrozen(state, s.id)) continue;
+
+    // leaping out of a vehicle's way (spec 2026-09-17 §7): a short sprint whatever else he was doing
+    if (s.dodgeUntil != null) {
+      if (state.time >= s.dodgeUntil || s.path.length === 0) s.dodgeUntil = undefined;
+      else { moveAlongPath(state, s, DODGE_SPEED_MS, dt); s.animFrame = Math.floor(state.time / 0.15) % 2; continue; }
+    }
 
     if (s.activity === 'panicked') handleFleeing(state, s, dt);
     else if (s.activity === 'routed') handleRouting(state, s, dt);
@@ -70,7 +90,7 @@ export function stepMovement(state: BattleState, rng: Rng, dt: number): void {
     applyMindStanceAndFacing(state, s);
 
     const speed = SPEEDS[s.activity];
-    if (speed != null && s.path.length > 0 && !isHeldForPacking(state, s)) {
+    if (speed != null && s.path.length > 0 && !isHeldForPacking(state, s) && !isHaulingGun(state, s)) {
       const fatigueFast = s.mind.state !== 'panicked' && s.mind.state !== 'broken' && s.fatigue > 70 && s.activity === 'movingFast';
       moveAlongPath(state, s, fatigueFast ? SPEEDS.moving : speed, dt);
       if (Math.floor(state.time / 0.3) % 2 === 0) s.animFrame = 0; else s.animFrame = 1;

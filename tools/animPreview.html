@@ -28,6 +28,13 @@
     </div>
     <h2>Ragdoll demo (a burst in front of a row of men: flight, landing dust, landed pose; survivors get up)</h2>
     <canvas id="ragdollCanvas" width="640" height="200" style="image-rendering: pixelated; border: 1px solid #444"></canvas>
+    <h2>Crew drill demo (real sim + real unit renderer: into action task by task, load, lay; then packing up; loops)</h2>
+    <div class="bar">
+      <label>weapon <select id="drillWeapon"><option>pak40</option><option>pak38</option><option>zis3</option><option>m1937_45mm</option><option>mortar81</option><option>mg42_hmg</option><option>maxim</option></select></label>
+      <label>crew <select id="drillCrew"><option>3</option><option>1</option><option>2</option><option>4</option></select></label>
+      <span id="drillStatus"></span>
+    </div>
+    <canvas id="drillCanvas" width="640" height="300" style="image-rendering: pixelated; border: 1px solid #444"></canvas>
     <div id="root"></div>
     <script type="module" src="./animPreview.ts"></script>
   </body>

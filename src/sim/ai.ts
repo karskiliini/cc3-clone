@@ -7,10 +7,12 @@ import { angleTo, dist } from '@/shared/math';
 import { inBounds, coverAt, concealmentAt, groundAtTile } from './map';
 import { isPassable } from './path';
 import { spaceOutVehicles } from './spawn';
+import { mainGunUsable } from './vehicleDamage';
 import { hasLOS } from './los';
 import { VEHICLE_DEFS } from '@/data/units';
 import { WEAPONS } from '@/data/weapons';
 import { mortarBeliefAimFor } from './combat';
+import { canTeamMount, passengerCapacity, passengersAboard, roomLeft } from './transport';
 
 export interface AIBattle {
   issueOrder(teamId: number, order: Order): void;
@@ -289,6 +291,100 @@ function tryIssueOrder(state: BattleState, battle: AIBattle, track: Map<number, 
   track.set(team.id, { key, at: state.time });
 }
 
+// ---------------------------------------------------------------- halftracks
+/** Squads a halftrack has already carried forward (they are not picked up again). */
+const carriedTeams = new WeakMap<BattleState, Set<number>>();
+const DISMOUNT_SHORT_M = 110;   // set down this far short of the objective ...
+const DISMOUNT_ENEMY_M = 150;   // ... or as soon as known enemy is this close
+const PICKUP_RANGE_M = 70;
+const WORTH_RIDING_M = 260;
+
+function knownAtGunSees(state: BattleState, side: Side, p: Vec2): boolean {
+  for (const id of state.spotted[side]) {
+    const e = state.soldiers.get(id);
+    if (!e || e.health === 'dead' || e.health === 'incapacitated') continue;
+    const cls = WEAPONS[e.weaponId]?.cls;
+    if (cls !== 'atgun' && cls !== 'atrocket') continue;
+    if (dist(e.pos, p) * TILE_M <= 600 && hasLOS(state.map, e.pos, p)) return true;
+  }
+  for (const id of state.spottedVehicles[side]) {
+    const ev = state.vehicles.get(id);
+    if (!ev || (ev.state !== 'ok' && ev.state !== 'immobilized') || !VEHICLE_DEFS[ev.defId]?.mainWeaponId) continue;
+    if (dist(ev.pos, p) * TILE_M <= 600 && hasLOS(state.map, ev.pos, p)) return true;
+  }
+  return false;
+}
+
+/** A halftrack carries a squad forward to a covered point short of the objective (80-150 m from
+ * known or suspected enemy, never into a known AT gun's line of fire), sets it down, and then
+ * supports with its MG from where it stands. Returns true when it has dealt with the vehicle. */
+function stepTransportAI(
+  state: BattleState, battle: AIBattle, track: Map<number, OrderRecord>, side: Side, team: Team, vehicle: Vehicle,
+  attackerTeams: Team[], enemyZoneCentre: Vec2, rng: Rng,
+): boolean {
+  if (vehicle.state !== 'ok') return false;
+  let carried = carriedTeams.get(state);
+  if (!carried) { carried = new Set(); carriedTeams.set(state, carried); }
+  const riders = passengersAboard(state, vehicle).filter((s) => s.health !== 'dead' && s.health !== 'incapacitated');
+  const boarding = attackerTeams.find((t) => t.transportId === vehicle.id && t.order?.mountVehicleId === vehicle.id);
+  const enemy = nearestSpottedSoldier(state, side, vehicle.pos);
+  const enemyM = enemy ? dist(enemy.pos, vehicle.pos) * TILE_M : Infinity;
+
+  if (riders.length > 0 && !boarding) {
+    const riderTeam = state.teams.get(riders[0].teamId);
+    const objective = riderTeam?.aiObjective ?? enemyZoneCentre;
+    const toObjM = dist(vehicle.pos, objective) * TILE_M;
+    const setDown = (): void => {
+      for (const s of riders) carried!.add(s.teamId);
+      battle.issueOrder(team.id, { type: 'defend', target: objective, issuedAt: state.time, dismount: true });
+    };
+    if (enemyM <= DISMOUNT_ENEMY_M || toObjM <= DISMOUNT_SHORT_M + 10 || knownAtGunSees(state, side, vehicle.pos)) { setDown(); return true; }
+    // a covered point short of the objective, pulled back while a known gun looks at it
+    const ang = angleTo(objective, vehicle.pos);
+    let point: Vec2 = objective;
+    for (let back = DISMOUNT_SHORT_M; back <= DISMOUNT_SHORT_M + 120; back += 40) {
+      const c = { x: objective.x + (Math.sin(ang) * back) / TILE_M, y: objective.y + (-Math.cos(ang) * back) / TILE_M };
+      point = c;
+      if (!knownAtGunSees(state, side, c)) break;
+    }
+    const prev = team.aiObjective;
+    const dest = prev && dist(prev, point) <= 12 ? prev : bestCoverWithin(state, point, 5, rng, vehicle.pos);
+    team.aiObjective = dest;
+    if (dist(vehicle.pos, dest) * TILE_M <= 12) { setDown(); return true; }
+    tryIssueOrder(state, battle, track, team, { type: 'moveFast', target: dest, issuedAt: state.time });
+    return true;
+  }
+  if (boarding) {
+    // wait for them; if the enemy turns up meanwhile the ordinary vehicle logic (fire) takes over
+    if (enemyM <= 200) return false;
+    tryIssueOrder(state, battle, track, team, { type: 'defend', target: enemyZoneCentre, issuedAt: state.time });
+    return true;
+  }
+  // empty: pick up a squad that still has a long way to go
+  if (enemyM > 250 && roomLeft(state, vehicle) > 0) {
+    let pick: Team | null = null, bd = Infinity;
+    for (const t of attackerTeams) {
+      if (carried.has(t.id) || t.transportId != null || !canTeamMount(t) || t.crewWeapon) continue;
+      if (t.status === 'Pinned' || t.status === 'Cowering' || t.status === 'Broken' || t.status === 'Panicked' || t.status === 'Routed') continue;
+      const d = dist(t.pos, vehicle.pos) * TILE_M;
+      const toGo = t.aiObjective ? dist(t.pos, t.aiObjective) * TILE_M : 0;
+      if (d > PICKUP_RANGE_M || toGo < WORTH_RIDING_M || d >= bd) continue;
+      pick = t; bd = d;
+    }
+    if (pick) {
+      battle.issueOrder(pick.id, { type: 'moveFast', target: { ...vehicle.pos }, issuedAt: state.time, mountVehicleId: vehicle.id });
+      tryIssueOrder(state, battle, track, team, { type: 'defend', target: enemyZoneCentre, issuedAt: state.time });
+      return true;
+    }
+  }
+  // it has delivered its squad: support from a standoff position instead of driving onto the objective
+  if (carried.size > 0 && !enemy) {
+    tryIssueOrder(state, battle, track, team, { type: 'defend', target: enemyZoneCentre, issuedAt: state.time });
+    return true;
+  }
+  return false;
+}
+
 // -------------------------------------------------------------------- deploy
 export function aiDeploy(state: BattleState, side: Side, rng: Rng, battle: AIBattle): void {
   const zone = state.map.def.deployZones[side];
@@ -408,6 +504,8 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
 
   for (const team of myTeams) {
     if (team.status === 'Pinned' || team.status === 'Cowering') continue;
+    // boarding or riding in a halftrack: the halftrack's plan is theirs until they are set down
+    if (team.vehicleId == null && team.transportId != null) continue;
 
     if (team.status === 'Broken' || team.status === 'Panicked' || team.status === 'Routed') {
       tryIssueOrder(state, battle, track, team, { type: 'move', target: ownZoneCentre, issuedAt: state.time });
@@ -590,6 +688,7 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
   for (const team of vehicleTeams) {
     const vehicle = state.vehicles.get(team.vehicleId!);
     if (!vehicle || vehicle.state === 'knockedOut' || vehicle.state === 'burning' || vehicle.state === 'abandoned') continue;
+    if (passengerCapacity(vehicle) > 0 && stepTransportAI(state, battle, track, side, team, vehicle, attackerTeams, enemyZoneCentre, rng)) continue;
 
     const enemyVehicle = nearestSpottedVehicle(state, side, 300, vehicle.pos);
     const enemySoldier = nearestSpottedSoldier(state, side, vehicle.pos);
@@ -597,6 +696,13 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
 
     if (vehicle.state === 'immobilized') {
       if (target) tryIssueOrder(state, battle, track, team, { type: 'fire', target: { ...target.pos }, issuedAt: state.time });
+      continue;
+    }
+
+    // a tank whose main gun is destroyed is pulled back out of the fight (it keeps its MG for
+    // self-defence on the way)
+    if (VEHICLE_DEFS[vehicle.defId]?.mainWeaponId && !mainGunUsable(vehicle)) {
+      if (dist(vehicle.pos, ownZoneCentre) > 6) tryIssueOrder(state, battle, track, team, { type: 'moveFast', target: ownZoneCentre, issuedAt: state.time });
       continue;
     }
 

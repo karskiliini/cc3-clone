@@ -1,3 +1,5 @@
+import { tryRemountOrder } from './vehicleCrew';
+import { transportOrderHook } from './transport';
 import type { BattleState, Team, Order, Side, Soldier, Vec2 } from '@/shared/types';
 import { TILE_M, otherSide } from '@/shared/types';
 import { VEHICLE_DEFS } from '@/data/units';
@@ -10,6 +12,8 @@ import { isFirstFireFrozen, isLeaderless } from './mind';
 import { angleTo } from '@/shared/math';
 import { formationBaseHeading, rotateOffset } from './spawn';
 import { settleTile } from './coverSeek';
+import { onCrewOrder } from './crewWeapon';
+import { RADIO_OUT_ORDER_DELAY_S, radioOut } from './vehicleDamage';
 
 const INCAPABLE_ACTIVITIES = new Set(['pinned', 'cowering', 'panicked', 'routed', 'surrendered']);
 
@@ -376,14 +380,49 @@ export function applyOrderToSoldier(state: BattleState, team: Team, s: Soldier, 
 
 /** Validate and apply an order to a team: sets team.order, computes paths, and updates each
  * soldier's (or the team's vehicle's) activity/stance/facing per spec §6.3. */
-export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rng): void {
+const delayedOrders = new WeakMap<BattleState, Map<number, { order: Order; at: number }>>();
+let releasingDelayed = false;
+/** An order waiting to reach a vehicle without a radio (HUD / tests). */
+export function delayedOrderOf(state: BattleState, teamId: number): Order | null {
+  return delayedOrders.get(state)?.get(teamId)?.order ?? null;
+}
+function releaseDelayedOrders(state: BattleState, rng: Rng): void {
+  const m = delayedOrders.get(state);
+  if (!m || m.size === 0) return;
+  for (const [teamId, rec] of Array.from(m.entries()).sort((a, b) => a[0] - b[0])) {
+    if (state.time < rec.at) continue;
+    m.delete(teamId);
+    const team = state.teams.get(teamId);
+    if (!team) continue;
+    releasingDelayed = true;
+    try { applyOrder(state, team, { ...rec.order, issuedAt: state.time }, rng); } finally { releasingDelayed = false; }
+  }
+}
+
+export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rng, own = false): void {
+  // a Move order onto the team's own abandoned vehicle sends the crew back into it, or is refused
+  // while they are too shaken (spec 2026-09-17 §10)
+  if (tryRemountOrder(state, team, order)) return;
   if (team.outOfAction) return;
+  // a Move order onto a friendly transport is a mount order; any other order gets a riding team
+  // out first; a transport's Dismount order unloads it (sim/transport.ts)
+  if (transportOrderHook(state, team, order) === 'handled') return;
 
   const isVehicleTeam = team.vehicleId != null;
   // team.outOfAction lags a tick behind a kill (morale.ts refreshes it); a burning/knocked-out/
   // abandoned hull and its crew must not take a movement order in that window.
   const deadHull = isVehicleTeam ? state.vehicles.get(team.vehicleId!) : undefined;
   if (deadHull && (deadHull.state === 'knockedOut' || deadHull.state === 'burning' || deadHull.state === 'abandoned')) return;
+  // a vehicle whose radio is shot away gets its orders by hand signal or runner: they are acted on
+  // RADIO_OUT_ORDER_DELAY_S later (released by stepAttackOrders)
+  if (deadHull && !own && !releasingDelayed && radioOut(deadHull)) {
+    let m = delayedOrders.get(state);
+    if (!m) { m = new Map(); delayedOrders.set(state, m); }
+    const prev = m.get(team.id);
+    const same = !!prev && prev.order.type === order.type && dist(prev.order.target, order.target) <= 1 && prev.order.targetTeamId === order.targetTeamId;
+    m.set(team.id, { order, at: same ? prev!.at : state.time + RADIO_OUT_ORDER_DELAY_S });
+    return;
+  }
   // never share the waypoint list with the UI or other teams: it is consumed as they are reached
   if (order.waypoints) {
     if (order.type === 'move' || order.type === 'moveFast' || order.type === 'sneak') order.waypoints = order.waypoints.map((w) => ({ x: w.x, y: w.y }));
@@ -430,6 +469,9 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
     if (!s) continue;
     applyOrderToSoldier(state, team, s, rng, leaderPath);
   }
+  // crew-served weapons: a move order starts the pack-up tasks, a fire order the chain onto the
+  // new target (spec 2026-09-17 §6)
+  if (!isVehicleTeam) onCrewOrder(state, team, type);
 }
 
 // ------------------------------------------------------------------ attack-unit fire orders
@@ -544,6 +586,7 @@ function initAttackOrder(state: BattleState, team: Team, order: Order): void {
  * known position when it is lost, and complete (Defend facing it, "Target destroyed.") once the
  * target is out of the fight. */
 export function stepAttackOrders(state: BattleState, rng: Rng): void {
+  releaseDelayedOrders(state, rng);
   for (const team of state.teams.values()) {
     const order = team.order;
     if (!order || order.type !== 'fire' || order.targetTeamId == null || team.outOfAction) continue;
@@ -551,7 +594,7 @@ export function stepAttackOrders(state: BattleState, rng: Rng): void {
     const last = order.lastKnownPos ?? order.target;
     if (attackTargetDestroyed(state, target)) {
       if (team.side === state.config.playerSide) addMessage(state, `${team.name}\nTarget destroyed.`, 'good');
-      applyOrder(state, team, { type: 'defend', target: { x: last.x, y: last.y }, issuedAt: state.time }, rng);
+      applyOrder(state, team, { type: 'defend', target: { x: last.x, y: last.y }, issuedAt: state.time }, rng, true);
       continue;
     }
     const centre = spottedTargetCentre(state, team.side, target!);

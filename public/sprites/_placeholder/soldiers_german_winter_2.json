@@ -1,0 +1,375 @@
+{
+ "scale": 2,
+ "cell": {
+  "w": 80,
+  "h": 80
+ },
+ "anchor": {
+  "x": 40,
+  "y": 48
+ },
+ "columns": 32,
+ "dirs": 16,
+ "entries": {
+  "standing.idle": {
+   "start": 0,
+   "frames": 4,
+   "fps": 3.3,
+   "loop": true
+  },
+  "standing.aim": {
+   "start": 64,
+   "frames": 2,
+   "fps": 2,
+   "loop": true
+  },
+  "standing.fire": {
+   "start": 96,
+   "frames": 3,
+   "fps": 12,
+   "loop": false
+  },
+  "standing.reload": {
+   "start": 144,
+   "frames": 4,
+   "fps": 2,
+   "loop": false
+  },
+  "standing.hide": {
+   "start": 208,
+   "frames": 2,
+   "fps": 2,
+   "loop": true
+  },
+  "standing.walk": {
+   "start": 240,
+   "frames": 4,
+   "fps": 6,
+   "loop": true
+  },
+  "standing.run": {
+   "start": 304,
+   "frames": 6,
+   "fps": 9,
+   "loop": true
+  },
+  "standing.throw": {
+   "start": 400,
+   "frames": 4,
+   "fps": 8,
+   "loop": false
+  },
+  "standing.hit": {
+   "start": 464,
+   "frames": 3,
+   "fps": 8,
+   "loop": false
+  },
+  "crouched.idle": {
+   "start": 512,
+   "frames": 4,
+   "fps": 3.3,
+   "loop": true
+  },
+  "crouched.aim": {
+   "start": 576,
+   "frames": 2,
+   "fps": 2,
+   "loop": true
+  },
+  "crouched.fire": {
+   "start": 608,
+   "frames": 3,
+   "fps": 12,
+   "loop": false
+  },
+  "crouched.reload": {
+   "start": 656,
+   "frames": 4,
+   "fps": 2,
+   "loop": false
+  },
+  "crouched.hide": {
+   "start": 720,
+   "frames": 2,
+   "fps": 2,
+   "loop": true
+  },
+  "crouched.sneak": {
+   "start": 752,
+   "frames": 4,
+   "fps": 5,
+   "loop": true
+  },
+  "crouched.hit": {
+   "start": 816,
+   "frames": 3,
+   "fps": 8,
+   "loop": false
+  },
+  "kneeling.idle": {
+   "start": 864,
+   "frames": 4,
+   "fps": 3.3,
+   "loop": true
+  },
+  "kneeling.aim": {
+   "start": 928,
+   "frames": 2,
+   "fps": 2,
+   "loop": true
+  },
+  "kneeling.fire": {
+   "start": 960,
+   "frames": 3,
+   "fps": 12,
+   "loop": false
+  },
+  "kneeling.reload": {
+   "start": 1008,
+   "frames": 4,
+   "fps": 2,
+   "loop": false
+  },
+  "kneeling.hide": {
+   "start": 1072,
+   "frames": 2,
+   "fps": 2,
+   "loop": true
+  },
+  "kneeling.throw": {
+   "start": 1104,
+   "frames": 4,
+   "fps": 8,
+   "loop": false
+  },
+  "kneeling.hit": {
+   "start": 1168,
+   "frames": 3,
+   "fps": 8,
+   "loop": false
+  },
+  "prone.idle": {
+   "start": 1216,
+   "frames": 4,
+   "fps": 3.3,
+   "loop": true
+  },
+  "prone.aim": {
+   "start": 1280,
+   "frames": 2,
+   "fps": 2,
+   "loop": true
+  },
+  "prone.fire": {
+   "start": 1312,
+   "frames": 3,
+   "fps": 12,
+   "loop": false
+  },
+  "prone.reload": {
+   "start": 1360,
+   "frames": 4,
+   "fps": 2,
+   "loop": false
+  },
+  "prone.hide": {
+   "start": 1424,
+   "frames": 2,
+   "fps": 2,
+   "loop": true
+  },
+  "prone.crawl": {
+   "start": 1456,
+   "frames": 4,
+   "fps": 4,
+   "loop": true
+  },
+  "prone.hit": {
+   "start": 1520,
+   "frames": 3,
+   "fps": 8,
+   "loop": false
+  },
+  "prone.woundedCrawl": {
+   "start": 1568,
+   "frames": 4,
+   "fps": 2,
+   "loop": true
+  },
+  "standing.run.panicked": {
+   "start": 1632,
+   "frames": 6,
+   "fps": 9,
+   "loop": true
+  },
+  "standing.idle.surrendered": {
+   "start": 1728,
+   "frames": 4,
+   "fps": 3.3,
+   "loop": true
+  },
+  "kneeling.idle.surrendered": {
+   "start": 1792,
+   "frames": 4,
+   "fps": 3.3,
+   "loop": true
+  },
+  "prone.hide.pinned": {
+   "start": 1856,
+   "frames": 2,
+   "fps": 2,
+   "loop": true
+  },
+  "crouched.hide.cowering": {
+   "start": 1888,
+   "frames": 2,
+   "fps": 2,
+   "loop": true
+  },
+  "standing.idle.alert": {
+   "start": 1920,
+   "frames": 4,
+   "fps": 3.3,
+   "loop": true
+  },
+  "standing.idle@lmg": {
+   "start": 1984,
+   "frames": 4,
+   "fps": 3.3,
+   "loop": true
+  },
+  "ragdoll.flight0": {
+   "start": 2048,
+   "frames": 8,
+   "fps": 10,
+   "loop": false
+  },
+  "ragdoll.flight1": {
+   "start": 2176,
+   "frames": 8,
+   "fps": 10,
+   "loop": false
+  },
+  "ragdoll.flight2": {
+   "start": 2304,
+   "frames": 8,
+   "fps": 10,
+   "loop": false
+  },
+  "ragdoll.flight3": {
+   "start": 2432,
+   "frames": 8,
+   "fps": 10,
+   "loop": false
+  },
+  "ragdoll.flight4": {
+   "start": 2560,
+   "frames": 8,
+   "fps": 10,
+   "loop": false
+  },
+  "ragdoll.flight5": {
+   "start": 2688,
+   "frames": 8,
+   "fps": 10,
+   "loop": false
+  },
+  "ragdoll.landed0": {
+   "start": 2816,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "ragdoll.landed1": {
+   "start": 2832,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "ragdoll.landed2": {
+   "start": 2848,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "ragdoll.landed3": {
+   "start": 2864,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "ragdoll.landed4": {
+   "start": 2880,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "ragdoll.landed5": {
+   "start": 2896,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "ragdoll.landed6": {
+   "start": 2912,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "ragdoll.landed7": {
+   "start": 2928,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "corpse0": {
+   "start": 2944,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "corpse1": {
+   "start": 2960,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "corpse2": {
+   "start": 2976,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "corpse3": {
+   "start": 2992,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "corpse4": {
+   "start": 3008,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "corpse5": {
+   "start": 3024,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "corpse6": {
+   "start": 3040,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "corpse7": {
+   "start": 3056,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  }
+ }
+}

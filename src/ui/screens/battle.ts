@@ -18,6 +18,7 @@ import { cycleTeamKey, handleDepthMapKey, offsetOrderPoints } from './viewKeys';
 import { hitRect } from '@/ui/hud/hudChrome';
 import { drawLOSLine } from '@/ui/losTool';
 import { drawElevationReadout } from '@/ui/elevationReadout';
+import { GrassFx } from '@/render/grassFx';
 import { drawTargetHighlight, targetableEnemyAt, teamObserver, type TargetHover } from '@/ui/targetHover';
 import { TeamGrid } from '@/ui/hud/teamGrid';
 import { CombatMessages } from '@/ui/hud/combatMessages';
@@ -93,6 +94,7 @@ export class BattleScreen implements Screen {
   private orderBar = new OrderBar();
   private visionOverlay = new VisibilityOverlay();
   private depthOverlay = new DepthOverlay();
+  private grassFx = new GrassFx();
   /** order endpoint/waypoint marker under the pointer (hover shows its line, click selects) */
   private hoveredOrderMarker: { teamId: number; kind: 'target' | 'waypoint'; index: number } | null = null;
   private selectedTeamId: number | null = null;
@@ -571,7 +573,11 @@ export class BattleScreen implements Screen {
     this.terrain.drawOverlays(ctx, cam, state);
     if (game.settings.showDepthMap) this.depthOverlay.draw(ctx, cam);
     else if (game.settings.showUnitVision ?? true) this.visionOverlay.draw(ctx, cam, state, this.selectedTeamIds);
+    // tall growth: flattened wakes under the units, standing blades over their lower edges
+    this.grassFx.update(state, battle.playerSide());
+    if (!game.settings.showDepthMap) this.grassFx.drawTrails(ctx, cam);
     drawUnits(ctx, cam, state, battle.playerSide(), this.selectedTeamIds, game.settings, this.showDead, this.hoveredOrderMarker, this.hoverTeamId);
+    this.grassFx.drawStanding(ctx, cam, state, battle.playerSide());
     drawEffects(ctx, cam, state);
 
     const selTeam = this.selectedTeamId != null ? state.teams.get(this.selectedTeamId) ?? null : null;

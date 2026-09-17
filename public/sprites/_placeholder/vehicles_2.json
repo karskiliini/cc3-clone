@@ -1,0 +1,77 @@
+{
+ "scale": 2,
+ "cell": {
+  "w": 192,
+  "h": 192
+ },
+ "anchor": {
+  "x": 96,
+  "y": 96
+ },
+ "columns": 32,
+ "dirs": 64,
+ "entries": {
+  "pz3j.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "pz3j.hull.ko": {
+   "start": 64,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "pz3j.turret.ok": {
+   "start": 128,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "pz3j.turret.ko": {
+   "start": 192,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "t34_76.hull.ok": {
+   "start": 256,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "t34_76.hull.ko": {
+   "start": 320,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "t34_76.turret.ok": {
+   "start": 384,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "t34_76.turret.ko": {
+   "start": 448,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  }
+ },
+ "vehicles": {
+  "pz3j": {
+   "turretPivotM": {
+    "x": 0,
+    "y": -0.2
+   }
+  },
+  "t34_76": {
+   "turretPivotM": {
+    "x": 0,
+    "y": -0.8
+   }
+  }
+ }
+}

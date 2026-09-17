@@ -1,10 +1,13 @@
 import type { BattleState, Side, Soldier, Stance, Vec2 } from '@/shared/types';
 import { SIDES, otherSide, TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
+import { hash2 } from '@/shared/rng';
 import { losTrace, eyeHeightM, EYE_STANDING_M, EYE_VEHICLE_M } from './los';
 import { groundAtTile } from './map';
 import { angleTo, facingAngle, wrapAngle, dist } from '@/shared/math';
 import { onSpotted } from './mind';
+import { VEHICLE_DEFS } from '@/data/units';
+import { vehicleEyes, type VehicleEye } from './vehicleVision';
 
 export const SOLDIER_SPOT_RANGE_M = 300;
 export const VEHICLE_SPOT_RANGE_M = 400;
@@ -49,13 +52,66 @@ function mindSpotFactor(spotter: Soldier, enemyPos: Vec2): number {
   return 1;
 }
 
-/** An eye on the battlefield: a dismounted soldier (with his mind's spotting bonuses) or a
- * vehicle (crew spot from the vehicle's position; `soldier` null, no mind bonus). */
-export interface Spotter { pos: Vec2; soldier: Soldier | null }
+// ------------------------------------------------------------------ pain vision (wounded men)
+// A wounded man's visibility suffers periodically, not steadily: most of the time a mild penalty
+// (he is favouring the wound but still watching), and in recurring bouts of real pain a much
+// stronger one. Bout timing (phase, period, length) is derived from the soldier's id via hash2 —
+// deterministic and NOT drawn from the seeded Rng stream, so calling this never perturbs any other
+// random draw, and the same (soldier, time) always answers the same way (repeatable, no state).
+export const PAIN_MILD_FACTOR = 0.85;
+export const PAIN_BOUT_FACTOR = 0.35;
+export const PAIN_BOUT_FACTOR_LOW_MORALE = 0.2;
+export const PAIN_BOUT_FACTOR_VETERAN = 0.5;
+const PAIN_PERIOD_MIN_S = 12, PAIN_PERIOD_RANGE_S = 13; // bouts recur every 12-25 s
+const PAIN_BOUT_MIN_S = 3, PAIN_BOUT_RANGE_S = 3;       // each bout lasts 3-6 s
+/** Below this experience, or this morale, a wounded man's pain bouts hit him hardest (green troops
+ * and men who have had enough); at/above VETERAN experience he grits his teeth instead. */
+const PAIN_LOW_EXPERIENCE = 35, PAIN_LOW_MORALE = 30, PAIN_VETERAN_EXPERIENCE = 65;
 
-/** Eye height (m) of a spotter: his stance, or a vehicle commander at 2.2 m. */
+/** Spotting-factor multiplier from pain: 1 for every healthy (or dead/incapacitated — moot, they
+ * don't spot) man. A wounded man is at PAIN_MILD_FACTOR most of the time, dropping into a strong,
+ * recurring bout (PAIN_BOUT_FACTOR, harder on green/shaken troops, easier on veterans) roughly
+ * 15-35% of the time. Also usable directly by combat code (e.g. a wounded gunner's aim) — exported
+ * for exactly that. Pure: same inputs, same answer, every time. */
+export function painVisionFactor(soldier: Soldier, time: number): number {
+  if (soldier.health !== 'wounded') return 1;
+  const id = soldier.id;
+  const period = PAIN_PERIOD_MIN_S + hash2(id, 0, 11) * PAIN_PERIOD_RANGE_S;
+  const boutLen = PAIN_BOUT_MIN_S + hash2(id, 0, 23) * PAIN_BOUT_RANGE_S;
+  const phase = hash2(id, 0, 37) * period;
+  const t = ((time + phase) % period + period) % period;
+  if (t >= boutLen) return PAIN_MILD_FACTOR;
+  if (soldier.experience >= PAIN_VETERAN_EXPERIENCE) return PAIN_BOUT_FACTOR_VETERAN;
+  if (soldier.experience < PAIN_LOW_EXPERIENCE || soldier.morale < PAIN_LOW_MORALE) return PAIN_BOUT_FACTOR_LOW_MORALE;
+  return PAIN_BOUT_FACTOR;
+}
+
+/** painVisionFactor of whichever soldier is behind this spotter (himself, or — for a vehicle
+ * eye — the crewman whose eye it is); 1 for the no-crew-data fallback spotter. */
+function spotterPainFactor(state: BattleState, sp: Spotter): number {
+  const s = sp.soldier ?? (sp.vehicleEye ? state.soldiers.get(sp.vehicleEye.soldierId) : undefined);
+  return s ? painVisionFactor(s, state.time) : 1;
+}
+
+/** An eye on the battlefield: a dismounted soldier (with his mind's spotting bonuses), or one of a
+ * vehicle's living crew (`soldier` null, no mind bonus, but its own `vehicleEye` — position, eye
+ * height, facing arc, range and spotting factor — from sim/vehicleVision.ts `vehicleEyes`). A
+ * vehicle spotter without `vehicleEye` is the pre-crew-vision fallback for an unrecognised
+ * `defId` (test fixtures): the vehicle's own position at commander height, no arc restriction. */
+export interface Spotter { pos: Vec2; soldier: Soldier | null; vehicleEye?: VehicleEye }
+
+/** Eye height (m) of a spotter: his stance, his vehicle eye's height, or a vehicle commander at
+ * 2.2 m (the no-crew-data fallback). */
 export function spotterEyeM(sp: Spotter): number {
+  if (sp.vehicleEye) return sp.vehicleEye.eyeM;
   return sp.soldier ? eyeHeightM(sp.soldier.stance) : EYE_VEHICLE_M;
+}
+
+/** Is `targetPos` inside this eye's facing arc? (2*PI arcs are always true, cheaply.) */
+function withinEyeArc(eye: VehicleEye, from: Vec2, targetPos: Vec2): boolean {
+  if (eye.arcRad >= Math.PI * 2 - 1e-6) return true;
+  const toTarget = angleTo(from, targetPos);
+  return Math.abs(wrapAngle(toTarget - eye.facing)) <= eye.arcRad / 2;
 }
 
 /** Height-advantage spotting factor: +10% per 5 m the observer stands above the target, capped
@@ -92,14 +148,25 @@ export function collectSpotters(state: BattleState, side: Side, teamIds?: Readon
     if (v.side !== side) continue;
     if (v.state === 'knockedOut') continue;
     if (teamIds && !teamIds.has(v.teamId)) continue;
-    spotters.push({ pos: v.pos, soldier: null });
+    const eyes = vehicleEyes(state, v);
+    if (eyes.length > 0) {
+      for (const eye of eyes) spotters.push({ pos: eye.pos, soldier: null, vehicleEye: eye });
+    } else if (!VEHICLE_DEFS[v.defId]) {
+      // unrecognised defId (test fixtures): fall back to the old single blind-arc-less point spot
+      spotters.push({ pos: v.pos, soldier: null });
+    }
+    // a recognised def with no living crew eyes (every seat dead/empty) is truly blind: no spotter
   }
   return spotters;
 }
 
 /** Tile-keyed losTrace visibility cache — the same memo updateSpotting uses per side per tick.
  * The key carries the eye/target heights too, since terrain masking (a crest between) depends on
- * them: two observers in the same tile but different stances can genuinely differ. */
+ * them: two observers in the same tile but different stances can genuinely differ. Vehicle eyes
+ * (sim/vehicleVision.ts) reuse this same cache correctly without any key change: their heights
+ * (1.4-1.6 m hull crew, 2.0-2.7 m turret/casemate crew) fall into eyeClass's existing buckets, and
+ * their facing-arc restriction is checked before this cache is ever consulted (observerVisibility's
+ * arc gate), so it never needs to be part of the trace key — a blocked-by-arc eye just never asks. */
 export function makeLosVisibilityCache(state: BattleState): LosVisibilityFn {
   const losCache = new Map<number, number>();
   const W = state.map.width;
@@ -133,6 +200,11 @@ export function observerVisibility(
   state: BattleState, observer: Spotter, targetPos: Vec2,
   rangeM: number = SOLDIER_SPOT_RANGE_M, losFor?: LosVisibilityFn, targetM: number = EYE_STANDING_M,
 ): number {
+  const eye = observer.vehicleEye;
+  if (eye) {
+    if (!withinEyeArc(eye, observer.pos, targetPos)) return 0;
+    if (eye.rangeM < rangeM) rangeM = eye.rangeM;
+  }
   const rangeTiles = rangeM / TILE_M;
   if (distSqTiles(observer.pos, targetPos) > rangeTiles * rangeTiles) return 0;
   const eyeM = spotterEyeM(observer);
@@ -155,8 +227,8 @@ export function observerStandingSpotScore(
   if (visibility <= 0) return 0;
   const alwaysTiles = ALWAYS_SPOT_RANGE_M / TILE_M;
   if (distSqTiles(observer.pos, targetPos) <= alwaysTiles * alwaysTiles) return 1;
-  return visibility * (observer.soldier ? mindSpotFactor(observer.soldier, targetPos) : 1)
-    * heightSpotFactor(state, observer.pos, targetPos);
+  const eyeFactor = observer.soldier ? mindSpotFactor(observer.soldier, targetPos) : observer.vehicleEye?.factor ?? 1;
+  return visibility * eyeFactor * spotterPainFactor(state, observer) * heightSpotFactor(state, observer.pos, targetPos);
 }
 
 export function updateSpotting(state: BattleState, rng: Rng): void {
@@ -198,9 +270,10 @@ export function updateSpotting(state: BattleState, rng: Rng): void {
         if (visibility > 0.05) anyClearLOS = true;
         if (dsq <= alwaysSq && visibility > 0) alwaysSpotted = true;
 
-        const mindFactor = sp.soldier ? mindSpotFactor(sp.soldier, e.pos) : 1;
+        const mindFactor = sp.soldier ? mindSpotFactor(sp.soldier, e.pos) : sp.vehicleEye?.factor ?? 1;
         const p = visibility * visibilityStanceFactor(e.stance) * (isMoving(e.activity) ? 1.5 : 1) *
-          (isFiringRecently(e, state.time) ? 3 : 1) * mindFactor * heightSpotFactor(state, sp.pos, e.pos);
+          (isFiringRecently(e, state.time) ? 3 : 1) * mindFactor * spotterPainFactor(state, sp) *
+          heightSpotFactor(state, sp.pos, e.pos);
         if (p > bestP) { bestP = p; bestSpotter = sp.soldier; }
       }
 

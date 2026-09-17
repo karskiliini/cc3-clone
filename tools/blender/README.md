@@ -49,6 +49,10 @@ Sheets go to `ref/wf21/`. Backdrops: `ref/wf18/full_steppe_grass_z1.png`, `ref/w
 
 ## Soldier atlases (`soldiers_<german|soviet>_<summer|winter>_<1|2>`)
 
+* `crew.bailout` / `crew.mount` (6 frames, `progress: true`, `hullHeightM: 1.5`): the man is baked 1.5 m above
+  the ground on the hull frames (≈4 px up-screen at scale 1), no shadow on the hull frames, a growing ground
+  shadow on the three ground-side frames (`shadow_rows` in soldiers.py renders the entry twice and mixes rows).
+* New entries are appended at the END of `build_entries()` so existing `start` indices never move.
 * cell 36×36 px at scale 1 (72 at scale 2), anchor (18,19) (×2), 16 dirs, 96 columns.
 * The figure is drawn **1.3× life size** (`figureScale` in the JSON; head/helmet a further 1.15×) so a
   standing man with rifle reads at about 17 px like the old code-drawn sprites; ground scale stays
@@ -88,3 +92,12 @@ Render-time: 1 px dark rim around the figure (`OUTLINE_ALPHA`).
 * `soldiers_german_summer_2_frames_standing_*.png`, `soldiers_soviet_summer_2_frames_low_*.png`,
   `soldiers_german_summer_2_frames_crew_*.png` – every frame of each animation
 * `parts_<side>_<season>_2_strip_all_00.png`, `items_<1|2>_strip_all_00.png`
+
+## Grid anchors (fixed 2026-09-17)
+
+Blender 5.2 foreshortens ground-y by cos(12°) = 0.978 regardless of the pixel aspect, so objects placed
+with `ctx.cell_origin(col, row)` in grid rows away from the image centre missed their anchor by 2.2 % of
+the offset (±4 px over a 6-row grid at scale 2, i.e. a 1.6 px step between animation frames).
+`cell_origin(..., exact=True)` now compensates; soldiers.py and items.py use it and all their atlases
+were re-rendered. The default (`exact=False`) is unchanged for vehicles_common.py, which measures and
+applies its own `ground_y_factor`. Within a cell, ground-y is 0.978 × px_per_m (2 % short), by design now.

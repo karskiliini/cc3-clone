@@ -27,7 +27,48 @@
 import type { Season, Side, Vec2 } from '@/shared/types';
 import { createCanvas, ctx2d } from '@/render/pixelUtil';
 
-export type WeaponVariant = 'ready' | 'half' | 'packed';
+/** 'ready' / 'half' / 'packed' are the three legacy looks. Guns also have one look per step of
+ * their crew drill (spec 2026-09-17 §6): 'limbered', 'trailsClosed', 'trailLeftOpen',
+ * 'trailRightOpen', 'trailsOpen', 'emplaced', 'recoil', and — code-drawn only — `trail:<l>:<r>` with
+ * each leg swung out by l/4 and r/4 (0..4), so a leg is seen travelling with the man who swings it. */
+export type WeaponVariant =
+  | 'ready' | 'half' | 'packed'
+  | 'limbered' | 'trailsClosed' | 'trailLeftOpen' | 'trailRightOpen' | 'trailsOpen' | 'emplaced' | 'recoil'
+  | 'baseplate' | 'tube' | 'tripod'
+  | `trail:${number}:${number}`;
+
+/** The legacy look nearest to a drill-step look (for weapons that only have the three). */
+export function legacyVariant(v: WeaponVariant): 'ready' | 'half' | 'packed' {
+  if (v === 'ready' || v === 'half' || v === 'packed') return v;
+  if (v === 'limbered' || v === 'trailsClosed') return 'packed';
+  if (v === 'trailsOpen' || v === 'emplaced' || v === 'recoil') return 'ready';
+  return 'half';
+}
+
+/** Trail-swing variant for the code-drawn guns: fractions 0..1 quantised to quarters. */
+export function trailVariant(left: number, right: number): WeaponVariant {
+  const q = (f: number) => Math.max(0, Math.min(4, Math.round(f * 4)));
+  return `trail:${q(left)}:${q(right)}`;
+}
+
+interface GunLook { left: number; right: number; towEye: boolean; spades: boolean; dug: boolean; crates: boolean; recoil: number }
+function gunLook(v: WeaponVariant): GunLook {
+  switch (v) {
+    case 'ready': case 'emplaced': return { left: 1, right: 1, towEye: false, spades: true, dug: true, crates: true, recoil: 0 };
+    case 'recoil': return { left: 1, right: 1, towEye: false, spades: true, dug: true, crates: true, recoil: 3.2 };
+    case 'trailsOpen': return { left: 1, right: 1, towEye: false, spades: true, dug: false, crates: true, recoil: 0 };
+    case 'half': return { left: 0.45, right: 0.45, towEye: false, spades: true, dug: false, crates: true, recoil: 0 };
+    case 'trailLeftOpen': return { left: 1, right: 0, towEye: false, spades: true, dug: false, crates: false, recoil: 0 };
+    case 'trailRightOpen': return { left: 0, right: 1, towEye: false, spades: true, dug: false, crates: false, recoil: 0 };
+    case 'trailsClosed': return { left: 0, right: 0, towEye: false, spades: true, dug: false, crates: false, recoil: 0 };
+    case 'packed': case 'limbered': return { left: 0, right: 0, towEye: true, spades: false, dug: false, crates: false, recoil: 0 };
+    default: {
+      const m = /^trail:(\d):(\d)$/.exec(v);
+      const l = m ? Number(m[1]) / 4 : 0, r = m ? Number(m[2]) / 4 : 0;
+      return { left: l, right: r, towEye: false, spades: true, dug: false, crates: false, recoil: 0 };
+    }
+  }
+}
 /** Number of distinct rotations a weapon sprite is built for. */
 export const WEAPON_FACINGS = 16;
 
@@ -259,28 +300,30 @@ function maximOps(v: WeaponVariant, pal: WeaponPalette): Op[] {
 function atGunOps(spec: AtSpec, v: WeaponVariant, pal: WeaponPalette): Op[] {
   const ops: Op[] = [];
   const L = spec.trailLen;
-  // ammunition crates beside the right trail
-  if (v !== 'packed') {
+  const look = gunLook(v);
+  // ammunition crates beside the right trail (set down once the trails are out)
+  if (look.crates) {
     ops.push(...crateOps(spec.wheelX + 2.5, 7, 5, 3.6, pal, true));
     ops.push(...crateOps(spec.wheelX + 3.0, 11.4, 5, 3.6, pal, false));
   }
-  // split trails (closed for towing)
-  const a = v === 'ready' ? spec.spread : v === 'half' ? spec.spread * 0.45 : 0;
+  // split trails: each leg at its own angle (closed for towing, swung out by a crewman)
   for (const sx of [-1, 1]) {
+    const a = spec.spread * (sx < 0 ? look.left : look.right);
     const rx = sx * 1.4, ry = 1.5;
     const ex = rx + sx * Math.sin(a) * L, ey = ry + Math.cos(a) * L;
     ops.push(seg(rx, ry, ex, ey, spec.trailW, pal.gun, 2.2, { z1: 0.5 }));
     ops.push(seg(rx + sx * Math.sin(a) * L * 0.72, ry + Math.cos(a) * L * 0.72, ex, ey, spec.trailW * 0.45, mul(pal.gun, 0.8), 1, { min: 2 }));
-    if (v !== 'packed') {
-      // spade across the trail end
+    if (look.spades) {
+      // spade across the trail end; dug in = seated in a little heap of turned earth
       const px = Math.cos(a), py = -sx * Math.sin(a);
-      ops.push(seg(ex - px * 1.9, ey - py * 1.9, ex + px * 1.9, ey + py * 1.9, 1.3, pal.gunDark, 1));
+      if (look.dug) ops.push(circ(ex + sx * Math.sin(a) * 1.1, ey + Math.cos(a) * 1.1, 2.0, pal.season === 'winter' ? '#8d8a80' : '#4d402b', 0.4, { flat: true }));
+      ops.push(seg(ex - px * 1.9, ey - py * 1.9, ex + px * 1.9, ey + py * 1.9, 1.3, look.dug ? mul(pal.gunDark, 0.8) : pal.gunDark, 1));
       // carrying handle part-way along the trail
       const hx = rx + sx * Math.sin(a) * L * 0.55, hy = ry + Math.cos(a) * L * 0.55;
       ops.push(seg(hx - px * 1.5, hy - py * 1.5, hx + px * 1.5, hy + py * 1.5, 0.5, pal.black, 1.6, { min: 2 }));
     }
   }
-  if (v === 'packed') {
+  if (look.towEye) {
     ops.push(seg(0, L + 1.2, 0, L + 3.0, 0.9, pal.gunDark, 1.4));
     ops.push(circ(0, L + 3.0, 0.9, pal.black, 1.4, { ri: 0.4 }));
   }
@@ -295,11 +338,13 @@ function atGunOps(spec: AtSpec, v: WeaponVariant, pal: WeaponPalette): Op[] {
     ops.push(circ(cx, 0, 1.2, pal.gun, 5.5));
     ops.push(circ(cx, 0, 0.35, pal.black, 5.6, { min: 2 }));
   }
-  // cradle + recuperator, breech
+  // cradle + recuperator, breech (the barrel and breech slide back in the cradle on recoil)
+  const rc = look.recoil;
   ops.push(rect(-1.7, -6.5, 1.7, spec.breechY + 1, pal.gun, 8));
   ops.push(rect(-0.8, -6.5, 0.8, -0.5, lift(pal.gun, 0.12), 8.2, { min: 2 }));
-  ops.push(rect(-2.2, spec.breechY - 3.2, 2.2, spec.breechY + 1.6, mul(pal.steel, 1.15), 9));
-  ops.push(seg(2.2, spec.breechY - 0.5, 3.4, spec.breechY + 0.6, 0.6, pal.black, 9, { min: 2 }));
+  ops.push(rect(-2.2, spec.breechY - 3.2 + rc, 2.2, spec.breechY + 1.6 + rc, mul(pal.steel, 1.15), 9));
+  ops.push(seg(2.2, spec.breechY - 0.5 + rc, 3.4, spec.breechY + 0.6 + rc, 0.6, pal.black, 9, { min: 2 }));
+  if (rc > 0) ops.push(rect(-1.0, spec.breechY + 1.6 + rc, 1.0, spec.breechY + 2.4 + rc, BLACK, 8.8, { flat: true })); // open breech
   // shield
   const gc = pal.gun;
   switch (spec.shield) {
@@ -321,14 +366,15 @@ function atGunOps(spec: AtSpec, v: WeaponVariant, pal: WeaponPalette): Op[] {
       break;
   }
   // barrel + muzzle brake
-  ops.push(seg(0, -3, 0, -spec.barrelLen, spec.barrelW, mul(pal.gun, 0.92), 9));
+  const bl0 = spec.barrelLen - rc;
+  ops.push(seg(0, -3 + rc, 0, -bl0, spec.barrelW, mul(pal.gun, 0.92), 9));
   if (spec.brake) {
     const [bl, bw] = spec.brake;
-    ops.push(rect(-bw / 2, -spec.barrelLen - bl, bw / 2, -spec.barrelLen, pal.gunDark, 9));
-    ops.push(rect(-bw / 2, -spec.barrelLen - bl * 0.66, bw / 2, -spec.barrelLen - bl * 0.52, BLACK, 9.1, { min: 2, flat: true }));
-    ops.push(rect(-bw / 2, -spec.barrelLen - bl * 0.34, bw / 2, -spec.barrelLen - bl * 0.2, BLACK, 9.1, { min: 2, flat: true }));
+    ops.push(rect(-bw / 2, -bl0 - bl, bw / 2, -bl0, pal.gunDark, 9));
+    ops.push(rect(-bw / 2, -bl0 - bl * 0.66, bw / 2, -bl0 - bl * 0.52, BLACK, 9.1, { min: 2, flat: true }));
+    ops.push(rect(-bw / 2, -bl0 - bl * 0.34, bw / 2, -bl0 - bl * 0.2, BLACK, 9.1, { min: 2, flat: true }));
   } else {
-    ops.push(circ(0, -spec.barrelLen, spec.barrelW * 0.62, mul(pal.gun, 0.8), 9));
+    ops.push(circ(0, -bl0, spec.barrelW * 0.62, mul(pal.gun, 0.8), 9));
   }
   return ops;
 }
@@ -362,9 +408,9 @@ function geometryFor(weaponId: string, variant: WeaponVariant, pal: WeaponPalett
   const kind = artKindOf(weaponId);
   let ops: Op[] = [];
   switch (kind) {
-    case 'mortar': ops = mortarOps(weaponId, variant, pal); break;
-    case 'lafette': ops = lafetteOps(weaponId, variant, pal); break;
-    case 'maxim': ops = maximOps(variant, pal); break;
+    case 'mortar': ops = mortarOps(weaponId, legacyVariant(variant), pal); break;
+    case 'lafette': ops = lafetteOps(weaponId, legacyVariant(variant), pal); break;
+    case 'maxim': ops = maximOps(legacyVariant(variant), pal); break;
     case 'pak38': case 'pak40': case 'at45': case 'zis3': ops = atGunOps(AT_SPECS[kind], variant, pal); break;
     case 'ptrd': ops = ptrdOps(pal); break;
     default: ops = [];

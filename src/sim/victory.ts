@@ -174,7 +174,8 @@ export function stepVictory(state: BattleState, dt: number): void {
 
   for (const side of SIDES) {
     const teams = [...state.teams.values()].filter((t) => t.side === side);
-    if (teams.length > 0 && teams.every((t) => t.outOfAction)) ended = true;
+    // a crew hiding beside its abandoned vehicle does not keep a beaten side in the battle
+    if (teams.length > 0 && teams.every((t) => t.outOfAction || t.status === 'Abandoned' || t.status === 'Bailing out')) ended = true;
   }
 
   if (ended) {

@@ -13,6 +13,7 @@ import { hash2 } from '@/shared/rng';
 import { worldToScreen } from '@/engine/camera';
 import { getSmokePuff } from '@/render/sprites';
 import { tileAt } from '@/sim/map';
+import { isServiceable } from '@/sim/vehicleCrew';
 import type { Terrain } from '@/shared/types';
 
 function hex(n: number): number { return clamp(Math.round(n), 0, 255); }
@@ -409,7 +410,7 @@ function drawBurningVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: 
         const sy = p.y - rise * cam.zoom;
         drawPuff(ctx, sx, sy, diam, alpha, true);
       }
-    } else if (veh.state === 'knockedOut' || veh.state === 'abandoned') {
+    } else if (veh.state === 'knockedOut' || (veh.state === 'abandoned' && !isServiceable(veh))) {
       // knocked-out (not burning): a thin, slow wisp of smoke
       const phase = (state.time * 0.15 + hash2(veh.id, 1, 2)) % 1;
       const alpha = clamp(1 - phase, 0, 1) * 0.35;

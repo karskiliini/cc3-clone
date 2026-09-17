@@ -1,0 +1,69 @@
+{
+ "scale": 2,
+ "cell": {
+  "w": 128,
+  "h": 128
+ },
+ "anchor": {
+  "x": 64,
+  "y": 64
+ },
+ "columns": 32,
+ "dirs": 32,
+ "entries": {
+  "mortar81.setup": {
+   "start": 0,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "mortar81.half": {
+   "start": 32,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "mortar81.packed": {
+   "start": 64,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "mg34_hmg.setup": {
+   "start": 96,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "mg34_hmg.half": {
+   "start": 128,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "mg34_hmg.packed": {
+   "start": 160,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "pak38.setup": {
+   "start": 192,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "pak38.half": {
+   "start": 224,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "pak38.packed": {
+   "start": 256,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  }
+ }
+}

@@ -1,3 +1,5 @@
+import { crewMayReturn, crewOutsideWord } from './vehicleCrew';
+import { transportWord } from './transport';
 import type {
   Activity, BattleState, Health, Side, Soldier, Team, TeamMoraleWord, TeamStatusWord, Vec2,
 } from '@/shared/types';
@@ -205,6 +207,14 @@ function maybeAnnounceHesitating(state: BattleState, team: Team, track: MoraleTr
 function computeTeamStatus(state: BattleState, team: Team, track: MoraleTrack): { status: TeamStatusWord; outOfAction: boolean; morale: number } {
   const soldiers = team.soldierIds.map((id) => state.soldiers.get(id)).filter((s): s is Soldier => !!s);
   const vehicle = team.vehicleId != null ? state.vehicles.get(team.vehicleId) : undefined;
+  if (vehicle && vehicle.state === 'abandoned' && crewMayReturn(state, vehicle)) {
+    // a serviceable hull whose crew may yet go back (spec 2026-09-17 §10): still in the battle
+    // (selectable, so the player can order the crew back; for force morale and the end of the
+    // battle it counts as lost until the crew is on its way back)
+    const word = crewOutsideWord(state, vehicle) ?? 'Abandoned';
+    const up = soldiers.filter((s) => s.health !== 'dead' && s.health !== 'incapacitated');
+    return { status: word, outOfAction: false, morale: word === 'Remounting' ? up.reduce((a, s) => a + s.morale, 0) / Math.max(1, up.length) : 0 };
+  }
   if (vehicle && (vehicle.state === 'knockedOut' || vehicle.state === 'burning' || vehicle.state === 'abandoned')) {
     return { status: 'Knocked Out', outOfAction: true, morale: 0 };
   }
@@ -227,6 +237,10 @@ function computeTeamStatus(state: BattleState, team: Team, track: MoraleTrack): 
   if (majority((s) => s.activity === 'surrendered')) return { status: 'Surrendered', outOfAction, morale };
   if (majority((s) => s.activity === 'routed')) return { status: 'Routed', outOfAction, morale };
   if (morale < 25) return { status: 'Broken', outOfAction, morale };
+
+  // boarding, riding in or leaving a transport (sim/transport.ts)
+  const riding = transportWord(state, team);
+  if (riding) return { status: riding, outOfAction, morale };
 
   // Round5 critique #9: "Idle" used to cover arrived / order-refused / no-order alike, and the
   // player was never told an obedience roll had failed. Surface that mechanic explicitly.
@@ -259,9 +273,13 @@ function computeTeamStatus(state: BattleState, team: Team, track: MoraleTrack): 
 
   // crew-served weapon being assembled (sim/crewWeapon.ts) reads 'Setting up' unless the crew is
   // doing something more urgent than waiting on it
-  if (word === 'Waiting' || word === 'Defending' || word === 'Ambushing' || word === 'Firing') {
+  // (spec 2026-09-17 §6: the word follows the open task — 'Unlimbering', 'Spreading trails',
+  // 'Digging in', 'Loading', 'Aiming', 'Packing up'; a crew held at the gun while it packs is not
+  // 'Moving' yet)
+  const moveWord = word === 'Moving' || word === 'Moving Fast' || word === 'Sneaking';
+  if (word === 'Waiting' || word === 'Defending' || word === 'Ambushing' || word === 'Firing' || moveWord) {
     const crew = crewWeaponStatus(team);
-    if (crew) return { status: crew, outOfAction, morale };
+    if (crew && (!moveWord || crew === 'Packing up')) return { status: crew, outOfAction, morale };
   }
 
   // A Fire order with nobody actually firing means no one can see the target (round5 critique #9
@@ -337,7 +355,7 @@ function updateSideMorale(state: BattleState): void {
       weighted += t.morale * alive;
     }
     const base = totalWeight > 0 ? weighted / totalWeight : 0;
-    const oOACount = teams.filter((t) => t.outOfAction).length;
+    const oOACount = teams.filter((t) => t.outOfAction || t.status === 'Abandoned' || t.status === 'Bailing out').length;
     const fraction = teams.length > 0 ? oOACount / teams.length : 0;
     state.sides[side].morale = clamp(base - 10 * fraction, 0, 100);
   }

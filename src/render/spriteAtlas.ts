@@ -84,6 +84,10 @@ export function seasonKey(season: Season): 'summer' | 'winter' { return season =
 export function soldierAtlasName(side: Side, season: Season, scale: 1 | 2): string { return `soldiers_${side}_${seasonKey(season)}_${scale}`; }
 export function vehicleAtlasName(scale: 1 | 2): string { return `vehicles_${scale}`; }
 export function weaponAtlasName(scale: 1 | 2): string { return `weapons_${scale}`; }
+/** Kit on the ground (spec 2026-09-17 §9): entries `item.<id>`, 16 dirs, one frame each. */
+export function itemAtlasName(scale: 1 | 2): string { return `items_${scale}`; }
+/** Body parts (spec 2026-09-17 §8): entries `part.<kind><n>`, in the side's uniform. */
+export function partsAtlasName(side: Side, season: Season, scale: 1 | 2): string { return `parts_${side}_${seasonKey(season)}_${scale}`; }
 
 /** Atlases a battle needs: both scales of the soldiers of the sides present and the weapons.
  * Vehicle atlases are per type and are fetched when a vehicle of that type is first drawn. */
@@ -92,6 +96,8 @@ export function battleAtlasNames(sides: readonly Side[], season: Season): string
   for (const scale of [1, 2] as const) {
     for (const side of sides) out.push(soldierAtlasName(side, season, scale));
     out.push(weaponAtlasName(scale));
+    out.push(itemAtlasName(scale));
+    for (const side of sides) out.push(partsAtlasName(side, season, scale));
   }
   return out;
 }
@@ -184,7 +190,7 @@ export function requestBattleAtlases(sides: readonly Side[], season: Season, onP
   const upfront = names.filter((n) => !n.endsWith('_2'));
   wanted = upfront;
   for (const name of Array.from(slots.keys())) {
-    if (name.startsWith('soldiers_') && !names.includes(name)) slots.delete(name);
+    if ((name.startsWith('soldiers_') || name.startsWith('parts_')) && !names.includes(name)) slots.delete(name);
   }
   let done = 0;
   return Promise.all(upfront.map((n) => loadAtlas(n).then(() => { done++; onProgress?.(done / upfront.length); }))).then(() => undefined);
@@ -234,6 +240,10 @@ export function atlasForZoom(nameOf: (scale: 1 | 2) => string, zoom: number): At
 export function soldierAtlas(side: Side, season: Season, zoom: number): Atlas | null {
   return atlasForZoom((sc) => soldierAtlasName(side, season, sc), zoom);
 }
+export function itemAtlas(zoom: number): Atlas | null { return atlasForZoom(itemAtlasName, zoom); }
+export function partsAtlas(side: Side, season: Season, zoom: number): Atlas | null {
+  return atlasForZoom((sc) => partsAtlasName(side, season, sc), zoom);
+}
 
 /** Draw a soldier frame from the first key of `keys` the atlas carries (see
  * soldierAnim.entryKeyChain). Returns the key used, or null => draw the code-made fallback. */
@@ -254,13 +264,20 @@ export function drawSoldier(
 export function drawVehiclePart(
   ctx: CanvasRenderingContext2D, defId: string, part: 'hull' | 'turret', state: 'ok' | 'knockedOut',
   partRad: number, hullRad: number, x: number, y: number, zoom: number,
+  /** damage look: 'blown' (hull with an open turret ring / turret lying on the ground, anchored
+   * under its own centre) or 'trackL' / 'trackR' (hull with that track thrown); falls back to the
+   * plain ok / ko entry when the atlas lacks it */
+  variant?: 'blown' | 'trackL' | 'trackR',
 ): boolean {
   const atlas = vehicleAtlasFor(defId, zoom);
   if (!atlas) return false;
-  const key = `${defId}.${part}.${state === 'ok' ? 'ok' : 'ko'}`;
+  let key = `${defId}.${part}.${state === 'ok' ? 'ok' : 'ko'}`;
+  const vkey = variant ? `${defId}.${part}.${variant}` : null;
+  const useVariant = !!vkey && !!atlas.meta.entries[vkey];
+  if (useVariant) key = vkey!;
   if (!atlas.meta.entries[key]) return false;
   let px = x, py = y;
-  if (part === 'turret') {
+  if (part === 'turret' && !(useVariant && variant === 'blown')) {
     const pv = turretPivotM(atlas.meta, defId);
     const c = Math.cos(hullRad), s = Math.sin(hullRad), pxPerM = 10 * zoom;
     px += (pv.x * c - pv.y * s) * pxPerM;

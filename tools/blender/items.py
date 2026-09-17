@@ -96,11 +96,11 @@ def build(scale, only, samples):
             for d in range(DIRS):
                 o = bpy.data.objects.new(f"{iid}_{d}", me)
                 ctx.scene.collection.objects.link(o)
-                x, y = ctx.cell_origin(d, r)
+                x, y = ctx.cell_origin(d, r, exact=True)
                 o.matrix_world = T((x, y, 0)) @ Matrix.Rotation(C.dir_angle(d, DIRS), 4, "Z")
         cells = C.render_grid(ctx)
         for r, iid in enumerate(batch):
-            packer.add("item." + iid, [[SOL.add_outline(cells[r][d], SOL.OUTLINE_ALPHA * 0.8)] for d in range(DIRS)], fps=0, loop=False)
+            packer.add("item." + iid, [[SOL.grade(SOL.add_outline(cells[r][d], SOL.OUTLINE_ALPHA * 0.8), scale)] for d in range(DIRS)], fps=0, loop=False)
     base = os.path.join(OUT_DIR, f"items_{scale}")
     meta = packer.save(base, extra=dict(pxPerM=10 * scale, figureScale=FIG))
     if not only:

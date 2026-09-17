@@ -10,11 +10,20 @@ import { hasLOS, losTrace } from './los';
 import { gradeSpeedMul, GRADE_UPHILL_VEHICLE } from './movement';
 import { isPassable } from './path';
 import { addStress, addOrMergeBelief } from './mind';
-import { expectedPenetrationChance } from './ballistics';
+import { bestRoundAgainst } from './ballistics';
+import {
+  bailOut, crewEffects, damageSpeedMul, isImmobile, mainGunUsable, stepCrewSeats, stepVehicleDamage, trackPullRad, turretFrozen, traverseMul,
+} from './vehicleDamage';
+import { vehicleRounds } from './aimPoint';
 import { addMessage } from './messages';
 import { crushTile } from './structures';
+import { stepVehicleCrews } from './vehicleCrew';
+import { stepTransport, transportHolds } from './transport';
 
 const HEADING_ALIGN_RAD = 0.35;
+/** Laying the gun with the hull when the turret is stuck: this share of the hull's turn rate. */
+export const FROZEN_TURRET_HULL_LAY = 0.5;
+const frozenRel = new WeakMap<Vehicle, number>();
 const BURN_TO_KO_S = 30;
 const DEG30 = (30 * Math.PI) / 180;
 
@@ -197,8 +206,11 @@ function stepOneVehicleMind(state: BattleState, rng: Rng, dt: number, v: Vehicle
   const threats = gatherArmorThreats(state, v);
   let top: ArmorThreat | null = null;
   let topDanger = 0;
+  // danger = the BEST round the enemy gun can fire at that range (AP, or APCR once issued): a KV-1
+  // respects a PaK 38 at 200 m and shrugs at it at 600 m (requirements A4)
+  const year = state.config.year;
   for (const th of threats) {
-    const d = expectedPenetrationChance(th.weapon, th.distM, def.armor.front);
+    const d = bestRoundAgainst(th.weapon, th.distM, def.armor.front, year).chance;
     if (d > topDanger || !top) { topDanger = d; top = th; }
   }
   // Belief-only threat (spec §10c): an unseen AT shooter that just sent a round past us. Danger is
@@ -208,7 +220,7 @@ function stepOneVehicleMind(state: BattleState, rng: Rng, dt: number, v: Vehicle
     if (nm && state.time - nm.at <= NEAR_MISS_MEMORY_S) {
       const distM = dist(v.pos, nm.pos) * TILE_M;
       top = { pos: { ...nm.pos }, distM, weapon: nm.weapon, theirArmor: null };
-      topDanger = expectedPenetrationChance(nm.weapon, distM, def.armor.front);
+      topDanger = bestRoundAgainst(nm.weapon, distM, def.armor.front, year).chance;
     }
   }
   if (top && threats.length > 0) {
@@ -249,12 +261,15 @@ function stepOneVehicleMind(state: BattleState, rng: Rng, dt: number, v: Vehicle
   if (shouldFlee && top && top.theirArmor != null && def.mainWeaponId) {
     const ourWeapon = WEAPONS[def.mainWeaponId];
     if (ourWeapon) {
-      const ourTwoShot = 1 - (1 - expectedPenetrationChance(ourWeapon, top.distM, top.theirArmor)) ** 2;
+      const ours = vehicleRounds(state, v);
+      const ourTwoShot = mainGunUsable(v) ? 1 - (1 - bestRoundAgainst(ourWeapon, top.distM, top.theirArmor, year, ours).chance) ** 2 : 0;
       const theirTwoShot = 1 - (1 - topDanger) ** 2;
       // "only seek cover when our two-shot kill chance against it is lower than its chance against us"
       shouldFlee = ourTwoShot < theirTwoShot;
     }
   }
+  // a tank whose main gun is gone has no business in front of anything that can hurt it
+  if (top && def.mainWeaponId && !mainGunUsable(v) && topDanger > 0.02) shouldFlee = true;
   // panicked crews flee regardless (driver bails/reverses blind, spec §10.2).
   if (mind.state === 'panicked') shouldFlee = true;
 
@@ -280,27 +295,18 @@ function stepOneVehicleMind(state: BattleState, rng: Rng, dt: number, v: Vehicle
     return;
   }
 
-  if (v.state === 'immobilized') {
+  if (isImmobile(v)) {
     // crew bails: vehicle abandoned, crew become panicked infantry (spec §10.2).
-    v.state = 'abandoned';
-    if (team.side === state.config.playerSide) addMessage(state, `${team.name}\nCrew bailing out!`, 'bad');
-    for (const id of team.soldierIds) {
-      const s = state.soldiers.get(id);
-      if (!s || s.health === 'dead' || s.health === 'incapacitated') continue;
-      s.vehicleId = null;
-      s.pos = { ...v.pos };
-      s.activity = 'panicked';
-      s.mind.state = 'panicked';
-      s.path = [];
-    }
+    bailOut(state, v, team, 'abandoned', 'Crew bails out!', { cause: 'panic' });
     return;
   }
+  if (!crewEffects(state, v).canDrive) { track.target = null; return; } // nobody at the controls
 
   if (!track.target) {
     track.target = findVehicleCoverTile(state, v, top.pos);
   }
   if (track.target) {
-    driveReversing(state, dt, v, def.speedOffroadMs, def.turnRateRad, top.pos, track.target);
+    driveReversing(state, rng, dt, v, def.speedOffroadMs, def.turnRateRad, top.pos, track.target);
     if (dist(v.pos, track.target) < 0.5) track.target = null;
   }
 }
@@ -309,7 +315,7 @@ function clamp01to100(x: number): number { return x < 0 ? 0 : x > 100 ? 100 : x;
 
 /** Reverses the vehicle toward `dest` while keeping its hull within 30 deg of `threatPos` (never
  * exposing the flank to a live AT threat), at 60% of forward speed (spec §10). */
-function driveReversing(state: BattleState, dt: number, v: Vehicle, speedMs: number, turnRateRad: number, threatPos: Vec2, dest: Vec2): void {
+function driveReversing(state: BattleState, rng: Rng, dt: number, v: Vehicle, speedMs: number, turnRateRad: number, threatPos: Vec2, dest: Vec2): void {
   const desiredHull = angleTo(v.pos, threatPos);
   v.hullFacing = turnTowards(v.hullFacing, desiredHull, turnRateRad * dt);
 
@@ -320,14 +326,14 @@ function driveReversing(state: BattleState, dt: number, v: Vehicle, speedMs: num
   const hullFacesThreat = Math.abs(wrapAngle(v.hullFacing - desiredHull)) <= DEG30;
   if (!hullFacesThreat) { v.speed = 0; return; }
 
-  const revSpeed = speedMs * 0.6;
+  const revSpeed = speedMs * 0.6 * damageSpeedMul(v);
   v.speed = revSpeed;
   const distTiles = (revSpeed * dt) / TILE_M;
   const dir = vnorm(vsub(dest, v.pos));
   const remaining = dist(v.pos, dest);
   if (remaining <= distTiles) v.pos = { ...dest };
   else v.pos = vadd(v.pos, vscale(dir, distTiles));
-  void towardDest;
+  stepOverrun(state, rng, v, towardDest);
 }
 
 export function stepVehicleMinds(state: BattleState, rng: Rng, dt: number): void {
@@ -351,8 +357,11 @@ export function stepVehicleMinds(state: BattleState, rng: Rng, dt: number): void
 export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
   const map = state.map;
   stepVehicleMinds(state, rng, dt);
+  stepTransport(state, dt); // passengers boarding and leaving
+  stepVehicleCrews(state, rng, dt); // hatch queues, climbs, crews going back (spec 2026-09-17 §10)
 
   for (const v of state.vehicles.values()) {
+    stepVehicleDamage(state, rng, v); // a crew getting out of a burning vehicle
     if (v.state === 'burning') {
       v.burnTimer += dt;
       if (v.burnTimer >= BURN_TO_KO_S) v.state = 'knockedOut';
@@ -377,24 +386,38 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
 
     const track = reverseTracks.get(state)?.get(v.id);
     const isReversing = !!track?.target;
+    stepCrewSeats(state, v); // dead men's seats are taken over (driver first)
 
-    if (def.hasTurret) {
+    const frozen = def.hasTurret && turretFrozen(v);
+    if (frozen) {
+      // the turret no longer traverses: it goes where the hull goes, and a standing tank lays its
+      // gun by turning the hull (much slower)
+      const rel = wrapAngle(v.turretFacing - v.hullFacing);
+      if (targetPos && v.path.length === 0 && !isReversing && !isImmobile(v) && crewEffects(state, v).canDrive) {
+        v.hullFacing = turnTowards(v.hullFacing, wrapAngle(angleTo(v.pos, targetPos) - rel), def.turnRateRad * FROZEN_TURRET_HULL_LAY * dt);
+      }
+      frozenRel.set(v, rel);
+    } else if (def.hasTurret) {
       const turretTargetAngle = targetPos ? angleTo(v.pos, targetPos) : v.hullFacing;
-      v.turretFacing = turnTowards(v.turretFacing, turretTargetAngle, def.turnRateRad * 2 * dt);
+      v.turretFacing = turnTowards(v.turretFacing, turretTargetAngle, def.turnRateRad * 2 * traverseMul(v) * dt);
     } else {
       v.turretFacing = v.hullFacing;
     }
+    if (frozen) v.turretFacing = wrapAngle(v.hullFacing + frozenRel.get(v)!);
 
-    if (isReversing) continue; // handled by stepVehicleMinds' driveReversing this same tick
+    if (isReversing) { if (frozen) v.turretFacing = wrapAngle(v.hullFacing + frozenRel.get(v)!); continue; } // handled by stepVehicleMinds' driveReversing this same tick
 
-    if (v.path.length === 0 || v.state === 'immobilized') {
+    if (v.path.length === 0 || isImmobile(v) || !crewEffects(state, v).canDrive) {
       v.speed = 0;
       continue;
     }
+    // a transport stands still while anyone boards or leaves (it keeps its route)
+    if (transportHolds(state, v)) { v.speed = 0; continue; }
 
     const wp = v.path[0];
     const desired = angleTo(v.pos, wp);
     v.hullFacing = turnTowards(v.hullFacing, desired, def.turnRateRad * dt);
+    if (frozen) v.turretFacing = wrapAngle(v.hullFacing + frozenRel.get(v)!);
     const aligned = Math.abs(wrapAngle(desired - v.hullFacing)) <= HEADING_ALIGN_RAD;
 
     if (!aligned) {
@@ -409,8 +432,10 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     const baseSpeed = onRoad ? def.speedRoadMs : def.speedOffroadMs;
     // slope: tracks lose far more than legs do on a climb (GRADE_UPHILL_VEHICLE)
     const speedMs = (onRoad ? baseSpeed : baseSpeed * props.speedMul)
-      * gradeSpeedMul(map, v.pos, wp, GRADE_UPHILL_VEHICLE);
+      * gradeSpeedMul(map, v.pos, wp, GRADE_UPHILL_VEHICLE) * damageSpeedMul(v);
     v.speed = speedMs;
+    // one damaged track drags the hull to that side; the driver keeps correcting
+    v.hullFacing = wrapAngle(v.hullFacing + trackPullRad(v) * dt);
 
     const distTiles = (speedMs * dt) / TILE_M;
     const d = dist(v.pos, wp);
@@ -423,5 +448,117 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     }
 
     if (props.crushable) crushTile(map, tx, ty);
+    stepOverrun(state, rng, v, angleTo(v.pos, wp));
+  }
+}
+
+// ------------------------------------------------------------------ overrun (spec 2026-09-17 §7)
+/** A vehicle slower than this (m/s) runs nobody down. */
+export const OVERRUN_MIN_SPEED_MS = 1;
+/** Chance that a man who can react gets out of the way: green / regular / veteran. */
+export const OVERRUN_DODGE = { green: 0.7, regular: 0.85, veteran: 0.95 };
+export const OVERRUN_WITNESS_M = 15;
+const OVERRUN_DODGE_STRESS = 30;
+const OVERRUN_WITNESS_STRESS = 15;
+const OVERRUN_MSG_EVERY_S = 5;
+const overrunMsgAt = new WeakMap<BattleState, number>();
+
+/** Position of `p` in the hull frame of `v`, metres: x to the right, y ahead along `dirRad`. */
+function hullLocalM(v: Vehicle, dirRad: number, p: Vec2): { x: number; y: number } {
+  const dx = (p.x - v.pos.x) * TILE_M, dy = (p.y - v.pos.y) * TILE_M;
+  const fx = Math.sin(dirRad), fy = -Math.cos(dirRad);
+  return { x: dx * -fy + dy * fx, y: dx * fx + dy * fy };
+}
+
+export function overrunDodgeChance(s: Soldier): number {
+  return s.experience < 40 ? OVERRUN_DODGE.green : s.experience >= 70 ? OVERRUN_DODGE.veteran : OVERRUN_DODGE.regular;
+}
+
+/** Standing or crouched, unhurt and not pinned, stunned or cowering: he can throw himself aside. */
+export function canReactToOverrun(state: BattleState, s: Soldier): boolean {
+  if (s.health !== 'healthy' || s.stance === 'prone') return false;
+  if (s.stunnedUntil != null && state.time < s.stunnedUntil) return false;
+  if (s.activity === 'pinned' || s.activity === 'cowering' || s.activity === 'surrendered') return false;
+  return s.mind.state !== 'pinned' && s.mind.state !== 'cowering';
+}
+
+/** Nearest free spot beside the hull (the side he is already on first), tile coords, or null. */
+function dodgeSpot(state: BattleState, v: Vehicle, dirRad: number, s: Soldier, halfWidthM: number): Vec2 | null {
+  const local = hullLocalM(v, dirRad, s.pos);
+  const fx = Math.sin(dirRad), fy = -Math.cos(dirRad);
+  const rx = -fy, ry = fx; // hull right
+  const first = local.x >= 0 ? 1 : -1;
+  for (const side of [first, -first]) {
+    const lateralM = side * (halfWidthM + 1.0) - local.x;
+    const spot = { x: s.pos.x + (rx * lateralM) / TILE_M, y: s.pos.y + (ry * lateralM) / TILE_M };
+    const tx = Math.floor(spot.x), ty = Math.floor(spot.y);
+    if (inBounds(state.map, tx, ty) && isPassable(state.map, tx, ty, 'infantry')) return spot;
+  }
+  return null;
+}
+
+function runDown(state: BattleState, v: Vehicle, dirRad: number, s: Soldier): void {
+  const wasAlive = s.health !== 'dead';
+  const wasCounted = s.health === 'dead' || s.health === 'incapacitated';
+  s.health = 'dead';
+  s.activity = 'dead';
+  s.stance = 'prone';
+  s.path = [];
+  s.crewTask = undefined;
+  s.blast = undefined;
+  s.crushed = { dir: dirRad, time: state.time };
+  if (!wasAlive) return; // a body already lying there is only pressed into the ground
+  state.bloodDecals.push({ ...s.pos });
+  state.events.push({ kind: 'kill', pos: { ...s.pos }, side: v.side });
+  if (!wasCounted) {
+    state.sides[v.side].kills++;
+    state.sides[s.side].losses++;
+    const killerTeam = state.teams.get(v.teamId);
+    if (killerTeam) killerTeam.kills++;
+  }
+  // everyone of his side who sees it within 15 m (spec §7)
+  for (const o of state.soldiers.values()) {
+    if (o.side !== s.side || o.id === s.id || o.health === 'dead' || o.health === 'incapacitated' || o.vehicleId != null) continue;
+    if (dist(o.pos, s.pos) * TILE_M > OVERRUN_WITNESS_M || !hasLOS(state.map, o.pos, s.pos)) continue;
+    addStress(o.mind, OVERRUN_WITNESS_STRESS);
+  }
+  const last = overrunMsgAt.get(state) ?? -1e9;
+  if (state.time - last >= OVERRUN_MSG_EVERY_S) {
+    overrunMsgAt.set(state, state.time);
+    const team = state.teams.get(s.teamId);
+    if (s.side === state.config.playerSide) addMessage(state, `${team?.name ?? 'Report'}\n${s.rank}. ${s.name} was run down.`, 'bad');
+    else addMessage(state, `${state.teams.get(v.teamId)?.name ?? 'Report'}\nEnemy soldier run down.`, 'good');
+  }
+}
+
+/** A vehicle moving faster than 1 m/s whose hull passes over a man: friends always step aside
+ * (drivers avoid their own troops); an enemy who can react dodges with probability 0.85 (green
+ * 0.7, veteran 0.95) and takes a large stress spike; one who cannot, or who fails, is killed and
+ * left crushed in the vehicle's direction of travel. Seeded rng only. */
+export function stepOverrun(state: BattleState, rng: Rng, v: Vehicle, dirRad: number): void {
+  if (Math.abs(v.speed) <= OVERRUN_MIN_SPEED_MS) return;
+  const def = VEHICLE_DEFS[v.defId];
+  if (!def) return;
+  const halfW = def.widthM / 2, halfL = def.lengthM / 2;
+  const reach = (Math.hypot(halfW, halfL) + 0.5) / TILE_M;
+  for (const s of state.soldiers.values()) {
+    if (s.vehicleId != null) continue;
+    if (Math.abs(s.pos.x - v.pos.x) > reach || Math.abs(s.pos.y - v.pos.y) > reach) continue;
+    const local = hullLocalM(v, dirRad, s.pos);
+    if (Math.abs(local.x) > halfW || Math.abs(local.y) > halfL) continue;
+    if (s.health === 'dead') { if (!s.crushed) runDown(state, v, dirRad, s); continue; }
+    if (s.dodgeUntil != null && state.time < s.dodgeUntil) continue;
+    const friendly = s.side === v.side;
+    const spot = dodgeSpot(state, v, dirRad, s, halfW);
+    const dodges = !!spot && (friendly || (canReactToOverrun(state, s) && rng.chance(overrunDodgeChance(s))));
+    if (!dodges) {
+      if (friendly) continue; // nowhere to go: the driver does not drive over his own man
+      runDown(state, v, dirRad, s);
+      continue;
+    }
+    if (s.health === 'incapacitated') { s.pos = spot!; continue; } // dragged clear by his comrades
+    s.path = [spot!, ...s.path];
+    s.dodgeUntil = state.time + 1.2;
+    if (!friendly) addStress(s.mind, OVERRUN_DODGE_STRESS);
   }
 }

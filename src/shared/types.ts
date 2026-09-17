@@ -221,6 +221,82 @@ export interface WeaponDef {
   setupS?: number;
   /** crew-served weapons: seconds to pack up before the crew can move off */
   packS?: number;
+  /** guns: the ammunition load by round type for one `ammo` worth of rounds (AP / APCR / HE /
+   * smoke). `penetrationMm` stays the plain AP value and `ammo` the total. Absent = one round type. */
+  rounds?: { ap: number; apcr?: number; he: number; smoke?: number };
+  /** special armour-piercing round (APCR / PzGr 40, or a HEAT round with falloffPerKm 0):
+   * penetration at 100 m, loss per km of range as a fraction (1.2 = all of it gone at 833 m),
+   * first battle year it is issued. */
+  apcr?: { penetrationMm: number; falloffPerKm: number; from?: number };
+}
+
+/** Ammunition a gun can have loaded. */
+export type RoundType = 'ap' | 'apcr' | 'he' | 'smoke';
+export type RoundCounts = Record<RoundType, number>;
+
+/** Where a gunner lays on an armoured target (sim/aimPoint.ts). 'mass' = centre of visible mass. */
+export type AimPoint =
+  | 'mass' | 'turretRing' | 'lowerHull' | 'driverPlate' | 'gunMantlet' | 'runningGear'
+  | 'engineDeck' | 'sideHull' | 'rear';
+
+/** Hit zones of a vehicle (sim/vehicleDamage.ts). Turretless vehicles use the turret zones for
+ * their fighting compartment. */
+export type VehicleZone =
+  | 'turretFront' | 'turretSide' | 'turretRear' | 'mantlet' | 'cupola'
+  | 'hullFrontUpper' | 'hullFrontLower' | 'hullSide' | 'hullRear' | 'engineDeck'
+  | 'runningGearL' | 'runningGearR' | 'top';
+
+export type EquipState = 'ok' | 'damaged' | 'destroyed';
+export type VehicleSystem =
+  | 'mainGun' | 'coaxMg' | 'bowMg' | 'sight' | 'traverse' | 'engine' | 'transmission'
+  | 'trackL' | 'trackR' | 'radio' | 'fuelLeak';
+export type VehicleDamage = Record<VehicleSystem, EquipState>;
+export type CrewRole = 'commander' | 'gunner' | 'loader' | 'driver' | 'radioOp';
+
+/** What sits where inside a vehicle; every field optional, defaults by class and crew size
+ * (sim/vehicleDamage.ts `vehicleLayout`). */
+export interface VehicleLayoutDef {
+  /** front = German front drive (lower front plate covers the final drive), rear = Soviet */
+  transmission?: 'front' | 'rear';
+  /** fuel tanks along the hull sides (T-34, KV) */
+  sideFuel?: boolean;
+  /** the commander lays the gun himself (T-34/76, T-26, BT, T-70) */
+  twoManTurret?: boolean;
+  /** open fighting compartment: exposed to HE, mortars, grenades and small arms from above/behind */
+  openTop?: boolean;
+  bowMg?: boolean;
+  radio?: boolean;
+  /** where the crew gets in and out (spec 2026-09-17 §10); defaults by vehicle class in
+   * sim/vehicleDamage.ts `vehicleLayout` */
+  hatches?: VehicleHatchDef[];
+  /** where passengers board and leave a transport (the SdKfz 251's twin rear doors: one opening) */
+  doors?: VehicleHatchDef[];
+}
+/** A hatch (or the side/rear wall of an open vehicle), hull-local metres: x to the right, y ahead. */
+export interface VehicleHatchDef {
+  x: number;
+  y: number;
+  /** turret/cupola hatches serve the turret crew, hull hatches the driver and bow gunner; the
+   * sides and rear of an open vehicle serve everyone */
+  group: 'turret' | 'hull' | 'side' | 'rear';
+}
+/** A man climbing out of (or into) a vehicle through one hatch (spec 2026-09-17 §10). */
+export interface HatchClimb {
+  vehicleId: number;
+  /** index into the vehicle layout's `hatches` */
+  hatch: number;
+  kind: 'bailout' | 'mount';
+  /** tile coords at the start and the end of the climb (hatch on the hull <-> beside it) */
+  from: Vec2;
+  to: Vec2;
+  start: number;
+  until: number;
+  /** a panicked bail-out: faster, sloppier, ends in a run */
+  panicked: boolean;
+  /** a passenger using a transport's door (`hatch` then indexes the layout's `doors`; a panicked
+   * passenger goes over the side: `overSide` with `hatch` indexing `hatches`) */
+  passenger?: boolean;
+  overSide?: boolean;
 }
 
 // ----------------------------------------------------------------- soldiers
@@ -269,6 +345,8 @@ export interface SoldierMind {
 }
 
 export interface Soldier {
+  /** gun gunners: rounds left by type (sum = ammo + ammoReserve); sim/aimPoint.ts `soldierRounds` */
+  rounds?: RoundCounts;
   id: number;
   teamId: number;
   side: Side;
@@ -310,6 +388,76 @@ export interface Soldier {
   blast?: { from: Vec2; time: number; force: number; origin: Vec2 };
   /** Knocked down by a blast: cannot move, fire or throw until battle time reaches this. */
   stunnedUntil?: number;
+  /** Crew-served weapon task this man is assigned to right now (sim/crewWeapon.ts, spec
+   * 2026-09-17 §6); absent when he has none. `progress` 0..1 of the task; `walking` while he is
+   * still on his way to the station. Written by the sim each step, read by the HUD and renderer. */
+  crewTask?: { id: CrewTaskId; progress: number; walking: boolean };
+  /** Run down by a vehicle (spec 2026-09-17 §7): the corpse is drawn flattened along `dir`
+   * (radians, 0 = north, clockwise — the vehicle's direction of travel). */
+  crushed?: { dir: number; time: number };
+  /** Leaping out of a vehicle's way until this battle time (§7): he sprints along `path` whatever
+   * his state, and is not run down meanwhile. */
+  dodgeUntil?: number;
+  /** Torn apart by a severe blast (spec 2026-09-17 §8): the body is no longer drawn, its parts
+   * are in `state.debris`. */
+  dismembered?: boolean;
+  /** His kit has been turned into ground items (sim/items.ts `dropKit`); never dropped twice. */
+  kitDropped?: boolean;
+  /** Going for an item on the ground (sim/pickup.ts, spec 2026-09-17 §9): walking to it, then —
+   * once `until` is set — stooping over it until that battle time (`from` = when he stooped).
+   * `priority` is why he wants it (1 ammunition, 2 squad MG, 3 grenades / AT kit, 4 better weapon);
+   * `resume` is the path end and activity he goes back to afterwards. */
+  pickup?: { itemId: number; priority: number; startedAt: number; from?: number; until?: number; resume?: { dest: Vec2 | null; activity: Activity } };
+  /** Climbing out of or into a vehicle through a hatch (sim/vehicleCrew.ts, spec 2026-09-17 §10):
+   * he is outside the armour, standing, and can be hit. The renderer plays `crew.bailout` /
+   * `crew.mount` by progress between `from` and `to`. */
+  hatch?: HatchClimb;
+  /** Riding in a transport as a passenger (sim/transport.ts): `vehicleId` is the transport, but he
+   * is NOT one of its crew. */
+  seat?: 'passenger';
+  /** Just out of a vehicle in a panic (§10): he runs to `to` whatever his mind says, until then. */
+  bailRun?: { to: Vec2; until: number };
+}
+
+/** Kit lying on the ground (spec 2026-09-17 §9; sim/items.ts). `weapon`: `weaponId` with the
+ * `rounds` left in it; `ammo`: spare `rounds` for `weaponId` (usable by its cartridge family);
+ * `grenades`: `count` of them; `helmet` / `pack`: purely visual. `sprite` is the items-atlas key
+ * without the `item.` prefix. `from`/`thrownAt` describe the last blast flight for the renderer. */
+export type ItemKind = 'weapon' | 'ammo' | 'grenades' | 'helmet' | 'pack';
+export interface GroundItem {
+  id: number;
+  kind: ItemKind;
+  weaponId?: string;
+  rounds?: number;
+  count?: number;
+  side: Side;
+  pos: Vec2;
+  /** radians, 0 = north, clockwise: how it lies */
+  dir: number;
+  sprite: string;
+  /** squad whose man dropped it (the squad's own MG is taken over from further away) */
+  teamId?: number;
+  /** soldier currently going for it */
+  claimedBy?: number;
+  from?: Vec2;
+  thrownAt?: number;
+  force?: number;
+}
+
+/** A piece of a body broken up by a severe blast (spec 2026-09-17 §8; sim/debris.ts). */
+export type DebrisKind = 'torso' | 'head' | 'arm' | 'leg' | 'boot';
+export interface Debris {
+  kind: DebrisKind;
+  side: Side;
+  season: Season;
+  pos: Vec2;
+  /** radians, 0 = north, clockwise */
+  dir: number;
+  variant: number;
+  /** last flight, for the renderer: where it started, when, how hard */
+  from?: Vec2;
+  thrownAt?: number;
+  force?: number;
 }
 
 // ----------------------------------------------------------------- vehicles
@@ -330,6 +478,11 @@ export interface VehicleDef {
   hasTurret: boolean;
   crew: number;
   mainAmmo: number;
+  /** known weak plates an ace gunner aims for: effective thickness in mm by aim point */
+  weakSpots?: Partial<Record<AimPoint, number>>;
+  layout?: VehicleLayoutDef;
+  /** men it carries besides its crew (SdKfz 251: 10); absent = none */
+  passengers?: number;
 }
 
 export interface Vehicle {
@@ -352,6 +505,50 @@ export interface Vehicle {
   coaxFireTimer: number;
   burnTimer: number;
   hits: number;
+  // ---- ammunition types, aim points, locational damage (all optional, lazy defaults) ----
+  /** main-gun rounds left by type (sum = mainAmmo); sim/aimPoint.ts `vehicleRounds` */
+  rounds?: RoundCounts;
+  /** round in the breech of the main gun (already taken out of `rounds`/`mainAmmo`) */
+  loadedRound?: RoundType;
+  /** the gunner's current aim point on an armoured target, and the vehicle it was chosen for */
+  aimPoint?: AimPoint;
+  aimVehicleId?: number;
+  /** battle time until which the gunner holds fire for a better presentation */
+  aimHoldUntil?: number;
+  /** equipment states (sim/vehicleDamage.ts); absent = all ok */
+  damage?: VehicleDamage;
+  /** seat -> soldier id (null = empty); filled from the team's crew on first use */
+  seats?: Partial<Record<CrewRole, number | null>>;
+  /** a crewman changing seats: nobody works `role` until `until` */
+  seatSwap?: { role: CrewRole; soldierId: number; until: number };
+  /** catastrophic ammunition explosion: the turret is blown off */
+  turretBlown?: boolean;
+  /** battle time the crew must be out by (fire); set when a fire starts */
+  bailBy?: number;
+  // ---- leaving and re-entering (sim/vehicleCrew.ts, spec 2026-09-17 §10; all optional) ----
+  /** the crew is getting out, one man per hatch at a time */
+  exiting?: { panicked: boolean; fire: boolean; startedAt: number };
+  /** battle time each hatch is busy until (index = layout hatch) */
+  hatchBusyUntil?: number[];
+  /** what drove the crew out, as they believed it then (null: nothing they could place) */
+  bailThreat?: { pos: Vec2; time: number } | null;
+  /** the crew will not think of going back before this battle time */
+  crewShockUntil?: number;
+  /** the crew refuses to go back for the rest of the battle */
+  noReturn?: boolean;
+  /** the crew is on its way back in (own decision, or ordered by the player) */
+  remount?: { since: number; ordered: boolean };
+  /** the hull was already immobilised when it was abandoned */
+  wasImmobile?: boolean;
+  // ---- transport (sim/transport.ts) ----
+  /** men riding as passengers (not crew), in boarding order */
+  passengerIds?: number[];
+  /** battle time the passenger door is busy until (one man at a time) */
+  doorBusyUntil?: number;
+  /** the passengers are getting out (orderly: through the door; else over the sides too) */
+  unloading?: { panicked: boolean; startedAt: number; teamId?: number };
+  /** battle time it began waiting for men to board (it does not drive off meanwhile) */
+  waitingSince?: number;
 }
 
 // -------------------------------------------------------------------- teams
@@ -386,6 +583,10 @@ export interface Order {
   /** attack-unit orders: target centre when it was last spotted (order.target follows it) */
   lastKnownPos?: Vec2;
   issuedAt: number;           // battle seconds
+  /** Move/MoveFast onto a friendly transport with room: board it (sim/transport.ts) */
+  mountVehicleId?: number;
+  /** a transport's team: unload the passengers here and now */
+  dismount?: boolean;
   /** Move/MoveFast/Sneak only: additional waypoints after `target`, placed by
    * holding Shift while clicking (HUD-side chain; sim support may follow). */
   waypoints?: Vec2[];
@@ -398,11 +599,17 @@ export type TeamStatusWord =
   | 'Idle' | 'Moving' | 'Moving Fast' | 'Sneaking' | 'Firing' | 'Defending'
   | 'Ambushing' | 'Pinned' | 'Cowering' | 'Panicked' | 'Routed' | 'Broken'
   | 'Destroyed' | 'Surrendered' | 'Knocked Out' | 'Setting up' | 'Aiming' | 'Loading'
+  // crew-served weapons follow their open task (spec 2026-09-17 §6)
+  | 'Unlimbering' | 'Spreading trails' | 'Digging in' | 'Packing up'
   // Manual vocabulary this HUD was missing (round5 critique #9): a team with no active order or
   // that has finished one (arrived, nothing left to do) waits for orders; a team whose obedience
   // roll failed (sim/orders.ts canObey) is visibly hesitating rather than looking merely idle; a
   // team with a Fire order but no line of sight to its target can't see it.
-  | 'Waiting' | 'Hesitating' | "Can't See";
+  | 'Waiting' | 'Hesitating' | "Can't See"
+  // a serviceable vehicle whose crew is outside it (spec 2026-09-17 §10)
+  | 'Abandoned' | 'Bailing out' | 'Remounting'
+  // riding in a transport (sim/transport.ts)
+  | 'Mounting' | 'Mounted' | 'Dismounting';
 
 export interface TeamDef {
   id: string;                 // "ger_rifle_41"
@@ -440,6 +647,8 @@ export interface Team {
   kills: number;
   /** for AI */
   aiObjective: Vec2 | null;
+  /** the transport this team is boarding or riding in (sim/transport.ts) */
+  transportId?: number;
   /** crew-served weapon (mortar/HMG/AT gun) on the ground or carried; managed by sim/crewWeapon.ts */
   crewWeapon?: CrewWeaponState;
 }
@@ -471,7 +680,51 @@ export interface CrewWeaponState {
   firePhase?: FireMissionPhase;
   /** the current fire mission, if any */
   mission?: FireMission;
+  // ---- task state machine (spec 2026-09-17 §6); all optional so older literals stay valid and
+  // are migrated from `phase` on the first step.
+  /** what the crew is working towards: the weapon in action, or packed for a move */
+  goal?: 'deploy' | 'pack';
+  /** deploy tasks completed so far (e.g. ['unhook', 'spreadLeft']); all of them = in action */
+  done?: CrewTaskId[];
+  /** seconds of work already put into each unfinished task (kept when the worker falls) */
+  progress?: Partial<Record<CrewTaskId, number>>;
+  /** soldier id assigned to each open task */
+  workers?: Partial<Record<CrewTaskId, number>>;
+  /** tasks open this step, in order (the first names the team's status word) */
+  open?: CrewTaskId[];
+  /** a round is in the breech (guns; taken from the ammunition when it was loaded) */
+  chambered?: boolean;
+  /** which round that is (absent on weapons with one round type) */
+  chamberedType?: RoundType;
+  /** the weapon is laid on the mission's lay point */
+  laid?: boolean;
+  /** guns: battle time the recoil / run-out / case ejection ends */
+  recoilUntil?: number;
+  /** battle time an open task was last worked, and of the last 'no one to ...' message */
+  lastWorkedAt?: number;
+  lastHelpMsgAt?: number;
+  /** mortars: who set the baseplate down (the bipod is carried by another man) */
+  baseplateBy?: number;
 }
+
+/** Tasks of the crew-served weapon state machine (spec 2026-09-17 §6). */
+export type CrewTaskId =
+  // AT / infantry guns: into action, and packing up
+  | 'unhook' | 'spreadLeft' | 'spreadRight' | 'digLeft' | 'digRight'
+  | 'liftLeft' | 'liftRight' | 'closeLeft' | 'closeRight' | 'hook'
+  // mortars
+  | 'placeBaseplate' | 'mountTube' | 'setBipod' | 'liftBipod' | 'dismountTube' | 'liftBaseplate'
+  // heavy MGs
+  | 'placeTripod' | 'mountGun' | 'feedBelt' | 'dismountGun' | 'liftTripod'
+  // serving the weapon
+  | 'load' | 'lay' | 'fire' | 'dropRound' | 'unload';
+
+/** The weapon sprite state that goes with the task state (renderer; falls back to setup/half/packed). */
+export type CrewWeaponVisual =
+  | 'limbered' | 'trailsClosed' | 'trailLeftOpen' | 'trailRightOpen' | 'trailsOpen' | 'emplaced' | 'recoil'
+  // mortars: baseplate down / tube mounted; HMGs: tripod down
+  | 'baseplate' | 'tube' | 'tripod'
+  | 'packed' | 'half' | 'setup';
 
 export type FireMissionPhase = 'aiming' | 'loading' | 'ready';
 
@@ -488,6 +741,15 @@ export interface FireMission {
   loaded: boolean;
   /** battle seconds the mission was started */
   startedAt: number;
+  /** seconds of work the current lay needs (task duration before the crew's drill factor) */
+  layS?: number;
+  /** battle seconds combat last asked to fire on this mission */
+  lastRequestAt?: number;
+  /** round type this mission needs in the breech */
+  wantRound?: RoundType;
+  /** where the gunner lays on an armoured target, and which vehicle */
+  aimPoint?: AimPoint;
+  aimVehicleId?: number;
 }
 
 // ------------------------------------------------------------------- battle
@@ -576,6 +838,10 @@ export interface BattleState {
   /** Side that ended the battle by fleeing (sim/victory.ts flee()), if any — lets the debrief show
    * a surviving team as "Withdrawn" rather than "Intact" when its own side quit the field. */
   fledSide?: Side | null;
+  /** Kit on the ground (spec 2026-09-17 §9). Optional: created lazily by sim/items.ts. */
+  items?: GroundItem[];
+  /** Body parts (spec 2026-09-17 §8), capped, oldest removed. Optional: created lazily. */
+  debris?: Debris[];
 }
 
 // --------------------------------------------------------------- UI shared
