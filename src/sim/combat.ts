@@ -6,14 +6,15 @@ import { AMBUSH_TRIGGER_M, TILE_M, otherSide } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { clamp, dist, facingAngle, facingTo, angleTo, turnTowards, wrapAngle } from '@/shared/math';
 import { hitChance, penetrates, armorFacingFor, damageRoll } from './ballistics';
-import { tileAt, coverAt, setTile, idx } from './map';
+import { tileAt, coverAt, setTile, idx, inBounds } from './map';
+import { isPassable } from './path';
 import { hasLOS, eyeHeightM, EYE_VEHICLE_M } from './los';
 import { addSmoke } from './smoke';
 import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';
 import { addMessage } from './messages';
 import { coverFrom } from './cover';
-import { onIncomingFire, onExplosionNear, onOwnWound, onCasualtySeen, onGunnerHit, onFired, isFirstFireFrozen, addStress } from './mind';
+import { onIncomingFire, onExplosionNear, onOwnWound, onCasualtySeen, onGunnerHit, onFired, isFirstFireFrozen, addStress, onKnockedDown } from './mind';
 import { onVehicleHit, onVehicleNearMiss } from './vehicle';
 import { attackPhase } from './orders';
 import { fireMissionWait, onMissionRound } from './crewWeapon';
@@ -115,6 +116,7 @@ const AT_WEAPON_CLASSES = new Set(['atgun', 'atrocket', 'atrifle', 'tankgun']);
 
 function canSoldierFire(s: Soldier, state: BattleState): boolean {
   if (s.vehicleId != null) return false;
+  if (isStunned(s, state.time)) return false;
   if (s.health === 'dead' || s.health === 'incapacitated') return false;
   if (s.activity === 'surrendered' || s.activity === 'routed' || s.activity === 'panicked' || s.activity === 'cowering') return false;
   if (isFirstFireFrozen(state, s.id)) return false;
@@ -401,6 +403,64 @@ function reportEnemyKill(state: BattleState, killerTeam: Team | undefined): void
   m.set(key, { at: state.time, count: 1, msg: state.messages[state.messages.length - 1] });
 }
 
+// ------------------------------------------------------------------ blast knockback (§4)
+const BLAST_WALLS = new Set<Terrain>(['stonewall', 'buildingWood', 'buildingStone']);
+
+/** True while a blast knock-down keeps this man from moving, firing or throwing. */
+export function isStunned(s: Soldier, time: number): boolean {
+  return s.stunnedUntil != null && time < s.stunnedUntil;
+}
+
+/** Blast force on a man `dTiles` from a burst of `weapon`: falls off linearly to the edge of the
+ * HE radius and scales with the size of the explosive (grenade ~0.45, mortar ~1, heavy HE 1.5). */
+export function blastForce(weapon: WeaponDef, dTiles: number): number {
+  const radiusTiles = weapon.heRadiusM / TILE_M;
+  if (radiusTiles <= 0 || dTiles > radiusTiles) return 0;
+  return (1 - dTiles / radiusTiles) * clamp(weapon.heRadiusM / 6, 0.4, 1.5);
+}
+
+/** Spec 2026-09-17 §4, sim side: an HE burst throws a man 0.5-3 m straight away from it (scaled
+ * by force; never through a wall, a vehicle, water or off the map — it stops at the last passable
+ * point), records the `blast` for the renderer's ragdoll, and knocks a SURVIVOR inside the inner
+ * half of the radius down: prone, path dropped, unable to act for 1.5-4 s (longer when wounded or
+ * green) with a stress spike through the mind's own hook. Seeded Rng only. */
+export function applyBlastKnockback(state: BattleState, rng: Rng, s: Soldier, burst: Vec2, weapon: WeaponDef): void {
+  const radiusTiles = weapon.heRadiusM / TILE_M;
+  const d = dist(s.pos, burst);
+  const force = blastForce(weapon, d);
+  if (force <= 0.05) return;
+  const ang = d > 1e-3 ? Math.atan2(s.pos.y - burst.y, s.pos.x - burst.x) : rng.range(0, Math.PI * 2);
+  const throwM = clamp(0.5 + force * 2, 0.5, 3);
+  const origin = { x: s.pos.x, y: s.pos.y };
+  const ux = Math.cos(ang), uy = Math.sin(ang);
+  const steps = Math.ceil((throwM / TILE_M) / 0.2);
+  const otx = Math.floor(origin.x), oty = Math.floor(origin.y);
+  let p = origin;
+  for (let i = 1; i <= steps; i++) {
+    const t = Math.min(throwM / TILE_M, i * 0.2);
+    const q = { x: origin.x + ux * t, y: origin.y + uy * t };
+    const tx = Math.floor(q.x), ty = Math.floor(q.y);
+    if (!inBounds(state.map, tx, ty) || !isPassable(state.map, tx, ty, 'infantry')) break;
+    // walls stop a thrown body even though a man can climb them on his own feet
+    if ((tx !== otx || ty !== oty) && BLAST_WALLS.has(tileAt(state.map, tx, ty))) break;
+    let hitVehicle = false;
+    for (const v of state.vehicles.values()) if (dist(v.pos, q) < 1.2) { hitVehicle = true; break; }
+    if (hitVehicle) break;
+    p = q;
+  }
+  s.pos = { x: p.x, y: p.y };
+  s.blast = { from: { x: burst.x, y: burst.y }, time: state.time, force, origin };
+  if (s.health === 'dead' || s.health === 'incapacitated') return;
+  if (d > radiusTiles / 2) return;
+  let stun = rng.range(1.5, 3);
+  if (s.health === 'wounded') stun += 0.6;
+  if (s.experience < 35) stun += 0.5;
+  s.stunnedUntil = state.time + Math.min(4, stun);
+  s.stance = 'prone';
+  s.path = [];
+  onKnockedDown(s, force);
+}
+
 export function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: WeaponDef, shooterSide: Side, from?: Vec2): void {
   const map = state.map;
   const radiusTiles = weapon.heRadiusM / TILE_M;
@@ -422,6 +482,7 @@ export function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: W
         s.suppression = clamp(s.suppression + amount, 0, 100);
         addSuppressionStat(state, shooterSide, amount);
       }
+      applyBlastKnockback(state, rng, s, pos, weapon);
     }
   }
   for (const s of state.soldiers.values()) {
@@ -790,7 +851,7 @@ function stepGrenades(state: BattleState, rng: Rng, dt: number, track: CombatTra
   for (const s of state.soldiers.values()) {
     if (s.health === 'dead' || s.health === 'incapacitated') continue;
     if (s.activity === 'surrendered' || s.activity === 'routed' || s.activity === 'sneaking' || s.activity === 'ambushing') continue;
-    if (s.grenades <= 0) continue;
+    if (s.grenades <= 0 || isStunned(s, state.time)) continue;
     const timer = (track.grenadeTimer.get(s.id) ?? 0) - dt;
     if (timer > 0) { track.grenadeTimer.set(s.id, timer); continue; }
 

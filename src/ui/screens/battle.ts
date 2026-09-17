@@ -560,7 +560,7 @@ export class BattleScreen implements Screen {
     this.terrain.drawOverlays(ctx, cam, state);
     if (game.settings.showDepthMap) this.depthOverlay.draw(ctx, cam);
     else if (game.settings.showUnitVision ?? true) this.visionOverlay.draw(ctx, cam, state, this.selectedTeamIds);
-    drawUnits(ctx, cam, state, battle.playerSide(), this.selectedTeamIds, game.settings, this.showDead, this.hoveredOrderMarker);
+    drawUnits(ctx, cam, state, battle.playerSide(), this.selectedTeamIds, game.settings, this.showDead, this.hoveredOrderMarker, this.hoverTeamId);
     drawEffects(ctx, cam, state);
 
     const selTeam = this.selectedTeamId != null ? state.teams.get(this.selectedTeamId) ?? null : null;

@@ -62,6 +62,8 @@ interface Figure {
   px: number; py: number;
   /** Max distance of any painted unit from the pivot. */
   extent: number;
+  /** Height class for the baked SE cast shadow: 1 = lying, 2 = kneeling, 3 = upright (default). */
+  tall?: 1 | 2 | 3;
 }
 
 interface Sampler {
@@ -97,8 +99,11 @@ function sampleOp(op: Op, gx: number, gy: number, sm: Sampler): string | null {
       let nx = dl < dr ? -1 : 1, ny = 0;
       if (shadeY && Math.min(dt, db) < best) { best = Math.min(dt, db); nx = 0; ny = dt < db ? -1 : 1; }
       if (best >= sm.pix) return op.ch;
-      const l = lightOf(sm, nx, ny);
-      if (l > 0.3) return op.lit && sm.s >= 2 ? op.lit : op.ch;
+      let l = lightOf(sm, nx, ny);
+      // an edge running exactly along the light (NW-SE diagonals) faces it on neither side:
+      // break the tie toward the north-facing edge so a diagonal weapon keeps its highlight
+      if (Math.abs(l) < 0.3) l = -(nx * sm.sin + ny * sm.cos);
+      if (l > 0.3) return op.lit ?? op.ch;
       return op.edge;
     }
     case 'seg': {
@@ -128,7 +133,7 @@ function sampleOp(op: Op, gx: number, gy: number, sm: Sampler): string | null {
       let nx = dx < 0 ? -1 : 1, ny = 0, best = side;
       if (sm.s >= 2 && endD < best) { best = endD; nx = 0; ny = gy - op.y0 < op.y1 - gy ? -1 : 1; }
       if (best >= sm.pix) return op.ch;
-      if (lightOf(sm, nx, ny) > 0.3) return op.lit && sm.s >= 2 ? op.lit : op.ch;
+      if (lightOf(sm, nx, ny) > 0.3) return op.lit ?? op.ch;
       return op.edge;
     }
     case 'helmet': {
@@ -137,24 +142,34 @@ function sampleOp(op: Op, gx: number, gy: number, sm: Sampler): string | null {
       if (d > op.r) return null;
       // Rim: 1 unit at 1x; at 2x a finer 1-1.5 px rim (wider for the flared
       // German Stahlhelm skirt than the smooth Soviet SSh-40 dome).
-      const rimW = sm.s >= 2 ? (op.flare ? 0.8 : 0.55) : 1;
+      // Screen-space offset for world-fixed NW light.
+      const sx = dx * sm.cos - dy * sm.sin, sy = dx * sm.sin + dy * sm.cos;
+      if (sm.s < 2) {
+        // wf19 1x: no full dark rim (it turned the head into a dark blob). The dome is lit
+        // from the NW across its whole radius: a 1-2 px specular dot, a light band, the mid
+        // tone, and a dark crescent only on the SE rim.
+        const lit1 = (-(sx + sy) * SQRT1_2) / op.r;
+        const nd1 = d / op.r;
+        const v1 = 0.62 * lit1 + 0.38 * Math.sqrt(Math.max(0, 1 - nd1 * nd1));
+        // specular: the pixel(s) nearest a fixed spot NW of the crown. A 0.72 px disc always
+        // holds at least one pixel centre (and at most four), so every facing gets its dot.
+        const sp = op.r * 0.3;
+        if (Math.hypot(sx + sp, sy + sp) < 0.72) return 'P';
+        if (v1 > 0.26) return 'h';
+        if (v1 > -0.22) return 'H';
+        return nd1 > 0.7 ? 'O' : 'D';
+      }
+      const rimW = op.flare ? 0.8 : 0.55;
       if (d > op.r - rimW) return 'O';
       const inner = op.r - rimW;
       const nd = d / inner;
       const z = Math.sqrt(Math.max(0, 1 - nd * nd));
-      // Screen-space offset for world-fixed NW light.
-      const sx = dx * sm.cos - dy * sm.sin, sy = dx * sm.sin + dy * sm.cos;
       const lit = (-(sx + sy) * SQRT1_2) / inner;
       const v = 0.6 * lit + 0.4 * z;
-      if (sm.s >= 2) {
-        if (v > 0.66) return 'P';
-        if (v > 0.38) return 'h';
-        if (v > 0.02) return 'H';
-        return 'D';
-      }
-      if (v > 0.72) return 'P';
-      if (v > 0.34) return 'h';
-      return 'H';
+      if (v > 0.66) return 'P';
+      if (v > 0.38) return 'h';
+      if (v > 0.02) return 'H';
+      return 'D';
     }
   }
 }
@@ -167,6 +182,13 @@ const seg = (x0: number, y0: number, x1: number, y1: number, w: number, ch: stri
 const ell = (cx: number, cy: number, rx: number, ry: number, ch: string, extra: Partial<EllOp> = {}): EllOp =>
   ({ k: 'ell', cx, cy, rx, ry, ch, ...extra });
 
+/** wf19 1x weapon bar: 2 units wide, the half facing the NW light drawn in light steel and the
+ * other half near-black, so the weapon line (and with it the facing) reads at a glance on dark
+ * and bright ground alike. */
+function gun1x(x: number, y0: number, y1: number): RectOp {
+  return rect(x, y0, x + 2, y1, 'w', { edge: 'W', max: 1 });
+}
+
 /** A rifle carried pointing north with its muzzle at (x, yTop): chunky
  * 2-unit bar + stock at 1x; at 2x a slim lit barrel, wooden fore-stock,
  * receiver with bolt handle, shaped butt and a webbing sling. */
@@ -174,8 +196,8 @@ function rifleOps(x: number, yTop: number, len: number, hand: boolean): Op[] {
   const stockY = yTop + len;
   const ops: Op[] = [
     // 1x: 2-wide barrel + 2-unit wood stock + grip pixel.
-    rect(x, yTop, x + 2, stockY, 'W', { max: 1 }),
-    rect(x, stockY, x + 2, stockY + 2, 'K', { max: 1 }),
+    gun1x(x, yTop, stockY),
+    rect(x, stockY, x + 2, stockY + 2, 'K', { edge: 'J', max: 1 }),
   ];
   if (hand) ops.push(rect(x, stockY + 2, x + 1, stockY + 3, 'G', { max: 1 }));
   const cx = x + 1;
@@ -230,8 +252,8 @@ function beltKitOps(side: Side, x0: number, x1: number, shoulderY: number, waist
 function legOps(x: number, y0: number, len: number): Op[] {
   const y1 = y0 + len;
   return [
-    rect(x, y0, x + 2, y1 - 1, 'b', { max: 1 }),
-    rect(x, y1 - 1, x + 2, y1, 'k', { max: 1 }),
+    rect(x, y0, x + 2, y1 - 2, 'T', { edge: 'S', max: 1 }),
+    rect(x, y1 - 2, x + 2, y1, 'b', { max: 1 }),
     rect(x, y0, x + 2, y1 - 3.5, 'T', { edge: 'S', min: 2, round: 0.5 }),
     rect(x, y1 - 3.5, x + 2, y1, 'b', { edge: 'k', lit: 'B', min: 2, round: 0.75 }),
     rect(x + 0.5, y1 - 0.5, x + 1.5, y1, 'k', { min: 2 }),
@@ -242,9 +264,19 @@ function helmetOf(cx: number, cy: number, r: number, side: Side): HelmetOp {
   return { k: 'helmet', cx, cy, r, flare: side === 'german', ch: 'H' };
 }
 
+/** Walking legs. 2x keeps the long detailed legs; 1x (wf19) uses a shorter, clearer stride: the
+ * trailing leg shows 5.5 units behind the hips, the leading one only 3, swapping per frame, so
+ * a standing man is ~14 px from helmet to boot and visibly steps when he moves. */
+function strideLegs(frame: 0 | 1): Op[] {
+  return [
+    ...legOps(6, 12.5, frame === 0 ? 7 : 6).filter((o) => o.min === 2), ...legOps(10, 12.5, frame === 0 ? 6 : 7).filter((o) => o.min === 2),
+    ...legOps(6, 12.5, frame === 0 ? 5.5 : 3).filter((o) => o.max === 1), ...legOps(10, 12.5, frame === 0 ? 3 : 5.5).filter((o) => o.max === 1),
+  ];
+}
+
 function standingFigure(side: Side, frame: 0 | 1): Figure {
   const ops: Op[] = [];
-  ops.push(...legOps(6, 12.5, frame === 0 ? 7 : 6), ...legOps(10, 12.5, frame === 0 ? 6 : 7));
+  ops.push(...strideLegs(frame));
   // Torso mass under the helmet: shoulders wider than the hips.
   ops.push(rect(5.5, 8.5, 12.5, 13.5, 'U', { edge: 'S', lit: 'L', round: 1.5 }));
   ops.push(...beltKitOps(side, 5.5, 12.5, 9, 13.5));
@@ -260,10 +292,10 @@ function crouchingFigure(side: Side, frame: 0 | 1): Figure {
   const ops: Op[] = [];
   const wob = frame === 1 ? 1 : 0;
   // Tucked boot, nudged sideways for the settle-into-cover cycle.
-  ops.push(rect(7 + wob, 12, 9 + wob, 14, 'b', { max: 1 }), rect(7 + wob, 14, 9 + wob, 15, 'k', { max: 1 }));
+  ops.push(rect(7 + wob, 12, 9 + wob, 13.5, 'T', { max: 1 }), rect(7 + wob, 13.5, 9 + wob, 15, 'b', { max: 1 }));
   ops.push(rect(7 + wob, 12, 9 + wob, 15, 'b', { edge: 'k', lit: 'B', min: 2, round: 0.75 }));
   // Kneeling leg bent diagonally back.
-  ops.push(seg(10.3, 12, 13.3, 14.8, 1.9, 'b', { max: 1 }), rect(13.5, 14.5, 14.5, 15.5, 'k', { max: 1 }));
+  ops.push(seg(10.3, 12, 12.6, 14.1, 1.9, 'T', { max: 1 }), seg(12.9, 14.4, 13.8, 15.3, 1.7, 'b', { max: 1 }));
   ops.push(seg(10.3, 11.8, 12.3, 13.8, 2, 'T', { min: 2 }), seg(12.1, 13.6, 13.7, 15.1, 1.9, 'b', { min: 2 }), seg(13.4, 14.9, 13.9, 15.4, 1, 'k', { min: 2 }));
   ops.push(rect(5, 8, 12.5, 12.5, 'U', { edge: 'S', lit: 'L', round: 1.5 }));
   ops.push(...beltKitOps(side, 5, 12.5, 8.5, 12.5));
@@ -271,18 +303,21 @@ function crouchingFigure(side: Side, frame: 0 | 1): Figure {
   ops.push(seg(6.5, 9, 12.25, 4.5, 1.3, 'S', { min: 2 }), rect(12.75, 3.5, 13.75, 4.5, 'G', { min: 2 }));
   ops.push(...rifleOps(12.25, 2, 5, true));
   ops.push(helmetOf(9, 7, 4, side));
-  return { ops, px: 9, py: 9, extent: 9.5 };
+  return { ops, px: 9, py: 9, extent: 9.5, tall: 2 };
 }
 
 /** Shared prone/dead body: helmet at the north end, torso tapering from the
  * shoulders to the hips, two boots splayed at the south end. */
 function proneBody(side: Side): Op[] {
   const ops: Op[] = [];
-  ops.push(rect(3, 21, 5, 22, 'b', { max: 1 }), rect(3, 22, 5, 23, 'k', { max: 1 }));
-  ops.push(rect(7, 21, 9, 22, 'b', { max: 1 }), rect(7, 22, 9, 23, 'k', { max: 1 }));
+  // 1x (wf19): two separate trouser legs with a gap of ground between them, dark boots at the
+  // ends — the long body + boots is what says "prone" at a glance.
+  ops.push(rect(3.5, 18, 5.5, 21.5, 'T', { edge: 'S', max: 1 }), rect(7.5, 18, 9.5, 21.5, 'T', { edge: 'S', max: 1 }));
+  ops.push(rect(3, 21.5, 5, 23.5, 'b', { max: 1 }), rect(8, 21.5, 10, 23.5, 'b', { max: 1 }));
   ops.push(rect(2.75, 20, 5, 23, 'b', { edge: 'k', lit: 'B', min: 2, round: 0.75 }));
   ops.push(rect(7, 20, 9.25, 23, 'b', { edge: 'k', lit: 'B', min: 2, round: 0.75 }));
-  ops.push({ k: 'trap', cx: 6.5, y0: 13, y1: 21, hw0: 4.5, hw1: 3, ch: 'U', edge: 'S', lit: 'L' });
+  ops.push({ k: 'trap', cx: 6.5, y0: 13, y1: 21, hw0: 4.5, hw1: 3, ch: 'U', edge: 'S', lit: 'L', min: 2 });
+  ops.push({ k: 'trap', cx: 6.5, y0: 12.5, y1: 18.5, hw0: 4, hw1: 3, ch: 'U', edge: 'S', lit: 'L', max: 1 });
   ops.push(rect(3.5, 18.5, 9.5, 21, 'T', { min: 2 }), rect(6.25, 19, 6.75, 21, 'S', { min: 2 }));
   ops.push(...beltKitOps(side, 3.5, 9.5, 13, 18.5));
   return ops;
@@ -292,13 +327,13 @@ function proneFigure(side: Side): Figure {
   const ops = proneBody(side);
   // 1x: arm bumps beside the helmet, rifle 6 units beyond it.
   ops.push(rect(3, 10, 5, 12, 'U', { max: 1 }), rect(8, 10, 10, 12, 'U', { max: 1 }));
-  ops.push(rect(5, 0, 7, 6, 'W', { max: 1 }));
+  ops.push(gun1x(5, 0, 6.5));
   // 2x: both arms reaching forward to the rifle, hands on stock and grip.
   ops.push(seg(3.5, 13, 4.5, 7.5, 1.6, 'U', { min: 2 }), seg(9.5, 13, 7.5, 9, 1.6, 'U', { min: 2 }));
   ops.push(rect(4.5, 6.5, 5.5, 7.5, 'G', { min: 2 }), rect(6.75, 8.5, 7.75, 9.5, 'G', { min: 2 }));
   ops.push(...rifleOps(5.5, 0, 6, false).filter((o) => o.min === 2).map((o) => ({ ...o })));
   ops.push(helmetOf(6.5, 9.5, 3.5, side));
-  return { ops, px: 6, py: 12, extent: 12.2 };
+  return { ops, px: 6, py: 12, extent: 12.6, tall: 1 };
 }
 
 /** A corpse must read as unmistakably dead at 1x (round5 critique fix #4): flatter than a
@@ -325,10 +360,10 @@ function deadFigure(side: Side): Figure {
   ops.push(seg(3.5, 12.5, 1.5, 8, 1.6, 'U', { min: 2 }), seg(9.5, 12, 13, 7, 1.6, 'U', { min: 2 }));
   ops.push(rect(0.8, 6.8, 1.9, 7.9, 'G', { min: 2 }), rect(13, 5.8, 14, 6.9, 'G', { min: 2 }));
   // Weapon dropped clear of the body, off to one side at an angle — never pointed forward.
-  ops.push(rect(11, 15, 13, 21, 'W', { max: 1 }));
+  ops.push(rect(11, 15, 13, 21, 'w', { edge: 'W', max: 1 }));
   ops.push(seg(11.5, 21, 13.5, 14.5, 0.9, 'W', { min: 2 }), seg(11.6, 20.6, 13.2, 15.3, 0.35, 'w', { min: 2 }));
   ops.push(helmetOf(6.5, 9.5, 3.4, side));
-  return { ops, px: 6, py: 12, extent: 12.2 };
+  return { ops, px: 6, py: 12, extent: 12.6, tall: 1 };
 }
 
 /** Wounded but alive: crawls low, still gripping his weapon (spec §1 item 3). Similar silhouette
@@ -339,13 +374,13 @@ function deadFigure(side: Side): Figure {
 function woundedCrawlFigure(side: Side): Figure {
   const ops = proneBody(side);
   ops.push(rect(2, 11, 4, 13, 'U', { max: 1 }), rect(9, 9, 11, 11, 'U', { max: 1 }));
-  ops.push(rect(4, 1, 6, 6, 'W', { max: 1 }));
+  ops.push(gun1x(4, 1, 6.5));
   // Dragging arm reaches far forward-side; the other cradles the weapon in close.
   ops.push(seg(3, 13.5, 2, 8, 1.6, 'U', { min: 2 }), seg(9, 13, 8.3, 10, 1.6, 'U', { min: 2 }));
   ops.push(rect(1.5, 7.3, 2.5, 8.3, 'G', { min: 2 }), rect(7.8, 9.3, 8.8, 10.3, 'G', { min: 2 }));
   ops.push(...rifleOps(4.5, 3.5, 4.5, false).filter((o) => o.min === 2).map((o) => ({ ...o })));
   ops.push(helmetOf(6.5, 10.2, 3.5, side));
-  return { ops, px: 6, py: 12, extent: 12.2 };
+  return { ops, px: 6, py: 12, extent: 12.6, tall: 1 };
 }
 
 /** Pinned: flat on the ground, head down, holding still — no weapon presented, hands drawn in
@@ -359,7 +394,7 @@ function pinnedFigure(side: Side): Figure {
   ops.push(rect(5, 10.2, 6, 11.2, 'G', { min: 2 }), rect(7, 10.2, 8, 11.2, 'G', { min: 2 }));
   // Head tucked low: the helmet sits lower and closer to the shoulders than any other pose.
   ops.push(helmetOf(6.5, 11.5, 3.1, side));
-  return { ops, px: 6, py: 12, extent: 12.2 };
+  return { ops, px: 6, py: 12, extent: 12.6, tall: 1 };
 }
 
 /** Cowering: curled into the smallest possible ball, knees drawn to the chest, head buried
@@ -367,7 +402,7 @@ function pinnedFigure(side: Side): Figure {
  * shorter/rounder footprint than crouching so it reads instantly at 1x. */
 function cowerFigure(side: Side): Figure {
   const ops: Op[] = [];
-  ops.push(rect(7.5, 12, 10.5, 13.5, 'b', { max: 1 }), rect(7.5, 13.5, 10.5, 14.5, 'k', { max: 1 }));
+  ops.push(rect(7.5, 12, 10.5, 13, 'T', { max: 1 }), rect(7.5, 13, 10.5, 14.5, 'b', { max: 1 }));
   ops.push(rect(7.5, 12, 10.5, 14.5, 'b', { edge: 'k', lit: 'B', min: 2, round: 0.9 }));
   // A rounded huddled mass — no shoulder-vs-hip taper, the whole body pulled inward.
   ops.push(ell(9, 10, 4, 3.2, 'U', { edge: 'S', min: 2 }));
@@ -377,10 +412,10 @@ function cowerFigure(side: Side): Figure {
   ops.push(rect(5.5, 6.8, 8, 9.3, 'U', { max: 1 }), rect(10, 6.8, 12.5, 9.3, 'U', { max: 1 }));
   ops.push(seg(6.2, 10.2, 7.4, 7, 1.3, 'S', { min: 2 }), seg(11.8, 10.2, 10.6, 7, 1.3, 'U', { min: 2 }));
   // Weapon left lying flat on the ground beside him.
-  ops.push(rect(12, 12.5, 16.5, 13.4, 'W', { max: 1 }));
+  ops.push(rect(12, 12.2, 16.5, 14.2, 'w', { edge: 'W', edgeY: true, max: 1 }));
   ops.push(seg(12, 13, 16.5, 13, 0.7, 'W', { min: 2 }), seg(12.2, 13, 16.2, 13, 0.28, 'w', { min: 2 }));
   ops.push(helmetOf(9, 7.2, 2.9, side));
-  return { ops, px: 9, py: 10, extent: 9.5 };
+  return { ops, px: 9, py: 10, extent: 9.5, tall: 2 };
 }
 
 /** Panicked / broken: running crouched low with the weapon lowered/trailing and both arms
@@ -397,7 +432,7 @@ function panickedFigure(side: Side, frame: 0 | 1): Figure {
   ops.push(seg(6, 10, 2.5, 8.5, 1.4, 'S', { min: 2 }), seg(12, 9.5, 15.5, 8, 1.4, 'U', { min: 2 }));
   ops.push(rect(1.5, 7.5, 2.5, 8.5, 'G', { min: 2 }), rect(15, 7, 16, 8, 'G', { min: 2 }));
   // Weapon dragged low behind him by a sling, never raised.
-  ops.push(rect(-1, 14, 5, 16, 'W', { max: 1 }));
+  ops.push(rect(-1, 14, 5, 16, 'w', { edge: 'W', edgeY: true, max: 1 }));
   ops.push(seg(-1, 15, 5.5, 15.4, 0.7, 'W', { min: 2 }), seg(-0.8, 15, 5.2, 15.4, 0.28, 'w', { min: 2 }));
   ops.push(helmetOf(9, 7, 3.4, side));
   return { ops, px: 9, py: 10, extent: 11 };
@@ -409,9 +444,9 @@ function panickedFigure(side: Side, frame: 0 | 1): Figure {
 function waryFigure(side: Side, frame: 0 | 1): Figure {
   const ops: Op[] = [];
   const wob = frame === 1 ? 0.6 : 0;
-  ops.push(rect(6.5 + wob, 12.5, 8.5 + wob, 15, 'b', { max: 1 }), rect(6.5 + wob, 15, 8.5 + wob, 16, 'k', { max: 1 }));
+  ops.push(rect(6.5 + wob, 12.5, 8.5 + wob, 14.5, 'T', { max: 1 }), rect(6.5 + wob, 14.5, 8.5 + wob, 16, 'b', { max: 1 }));
   ops.push(rect(6.5 + wob, 12.5, 8.5 + wob, 16, 'b', { edge: 'k', lit: 'B', min: 2, round: 0.75 }));
-  ops.push(seg(10, 12.5, 12.6, 15.6, 2, 'b', { max: 1 }), rect(12.8, 15.3, 13.8, 16.3, 'k', { max: 1 }));
+  ops.push(seg(10, 12.5, 12, 14.9, 2, 'T', { max: 1 }), seg(12.3, 15.2, 13.1, 16.1, 1.7, 'b', { max: 1 }));
   ops.push(seg(10, 12.2, 11.8, 14.4, 2, 'T', { min: 2 }), seg(11.7, 14.2, 13, 15.9, 1.9, 'b', { min: 2 }), seg(12.7, 15.6, 13.3, 16.1, 1, 'k', { min: 2 }));
   // Lower, tighter torso than the calm crouch — hunkered down watching the threat direction.
   ops.push(rect(5, 7.8, 12, 12.6, 'U', { edge: 'S', lit: 'L', round: 1.2 }));
@@ -421,7 +456,7 @@ function waryFigure(side: Side, frame: 0 | 1): Figure {
   ops.push(seg(6, 8.6, 11.6, 3.6, 1.4, 'S', { min: 2 }), rect(12, 2.8, 13, 3.8, 'G', { min: 2 }));
   ops.push(...rifleOps(11.6, -0.5, 8, true));
   ops.push(helmetOf(8.5, 6.5, 3.7, side));
-  return { ops, px: 8.5, py: 9, extent: 10 };
+  return { ops, px: 8.5, py: 9, extent: 10, tall: 2 };
 }
 
 /** Berserk: upright, leaning hard into a charge, weapon presented aggressively out front
@@ -459,29 +494,39 @@ function surrenderedFigure(side: Side): Figure {
 }
 
 // ------------------------------------------------------------- palette ----
-const BOOT = '#1a1712';
+const BOOT = '#241f18';
 const WEAPON = '#141412';
 const WEAPON_HI = '#4c4c48';
+/** 1x weapon highlight: light steel, clearly brighter than any ground tone. */
+const WEAPON_HI_1X = '#b4b6ac';
 const STOCK = '#6e4a2a';
 const SKIN = '#c9a37c';
 const LEATHER = '#241c14';
 const BUCKLE = '#8a8a7c';
-const OUTLINE_COLOR = 'rgba(26,27,22,0.88)';
-const HALO_COLOR = 'rgba(8,8,6,0.4)';
+/** wf19: the dark outline is now a thin directional edge, strong only on the side away from the
+ * NW light ('X'); the lit side ('x') is a faint dark hairline for enemies and a thin warm edge
+ * light for the player's own men (replaces the old gold halo ring). */
+const OUTLINE_COLOR = 'rgba(18,18,14,0.86)';
+const OUTLINE_LIT_COLOR = 'rgba(18,18,14,0.42)';
+/** Baked SE contact / cast shadow: 'z' the crisp core next to the body, 'q' the soft tip. */
+const SHADOW_CORE: Record<'summer' | 'winter', string> = { summer: 'rgba(8,10,6,0.55)', winter: 'rgba(36,44,70,0.5)' };
+const SHADOW_TIP: Record<'summer' | 'winter', string> = { summer: 'rgba(8,10,6,0.28)', winter: 'rgba(36,44,70,0.26)' };
 /** wf5: the player's own soldiers get a faint pale-gold rim outside the dark
  * outline (period-feel "your men" cue, not an RTS selection glow). Slightly
  * deeper and stronger on snow, where pale gold alone would vanish. */
 const FRIENDLY_RIM: Record<'summer' | 'winter', string> = {
-  summer: 'rgba(236,212,122,0.35)',
-  winter: 'rgba(200,160,40,0.5)',
+  summer: 'rgba(255,232,160,0.62)',
+  winter: 'rgba(196,150,40,0.7)',
 };
 
 interface UniformPalette { u: string; s: string; helmetMid: string; helmetLight: string; kit: string; sling: string }
 // wf5 side readability: German field grey with a cool blue-grey cast and a
 // darker helmet; Soviet warm khaki / olive-brown with a lighter, more olive
 // helmet. The two now differ in hue (blue-grey vs brown) AND helmet value.
-const GERMAN_SUMMER: UniformPalette = { u: '#5d686c', s: '#465055', helmetMid: '#454b4e', helmetLight: '#5c6366', kit: '#7a7458', sling: '#3a3a2e' };
-const SOVIET_SUMMER: UniformPalette = { u: '#8f7a4b', s: '#6c5734', helmetMid: '#7b7e48', helmetLight: '#969a5e', kit: '#8c8458', sling: '#5a4a2a' };
+// wf19: both uniforms lifted well clear of the ground's value range (the old ones sat at the
+// same luminance as summer grass and read as dark blobs); hue still separates the sides.
+const GERMAN_SUMMER: UniformPalette = { u: '#85938f', s: '#5b6a6b', helmetMid: '#5a6468', helmetLight: '#7d898c', kit: '#8a8466', sling: '#3a3a2e' };
+const SOVIET_SUMMER: UniformPalette = { u: '#c0a468', s: '#8f7442', helmetMid: '#777c46', helmetLight: '#969c5c', kit: '#9c9464', sling: '#5a4a2a' };
 const WINTER_SMOCK = { u: '#cacbc4', s: '#a8aaa2' };
 const WINTER_SE_SHADE = '#aeb0aa';
 
@@ -518,34 +563,36 @@ function paletteFor(side: Side, season: Season): UniformPalette {
   return base;
 }
 
-function colorsFor(side: Side, season: Season, dead: boolean, outline: SoldierOutline): Record<string, string> {
+function colorsFor(side: Side, season: Season, dead: boolean, outline: SoldierOutline, scale = 1): Record<string, string> {
   const pal = paletteFor(side, season);
   const winter = season === 'winter';
   const base: Record<string, string> = {
     U: pal.u,
-    L: lightenHex(pal.u, 0.18),
+    L: lightenHex(pal.u, 0.3),
     S: darkenHex(pal.s, 0.72),
     V: WINTER_SE_SHADE,
     T: winter ? darkenHex(WINTER_SMOCK.s, 0.92) : darkenHex(pal.s, 0.85),
     H: pal.helmetMid,
     h: lightenHex(pal.helmetLight, 0.22),
     D: darkenHex(pal.helmetMid, 0.78),
-    W: WEAPON, w: WEAPON_HI, K: STOCK, J: darkenHex(STOCK, 0.62), Q: winter ? '#6e6a5c' : pal.sling,
+    W: WEAPON, w: scale >= 2 ? WEAPON_HI : WEAPON_HI_1X, K: STOCK, J: darkenHex(STOCK, 0.62), Q: winter ? '#6e6a5c' : pal.sling,
     G: SKIN,
     b: BOOT, B: '#3a342a', k: darkenHex(BOOT, 0.55),
     E: winter ? '#6a665a' : LEATHER, e: winter ? '#b8b6a8' : pal.kit, Z: BUCKLE,
     R: 'rgba(96,24,16,0.72)',
   };
   base.O = darkenHex(base.H, 0.6);
-  base.P = lightenHex(base.h, 0.55);
+  base.P = lightenHex(base.h, scale >= 2 ? 0.55 : 0.72);
   if (dead) {
     const fix = (c: string) => (c.startsWith('#') ? darkenHex(desaturateHex(c, 0.45), 0.58) : c);
     for (const k of Object.keys(base)) base[k] = fix(base[k]);
   }
   const friendly = outline === 'friendly' && !dead;
+  const sk = winter ? 'winter' : 'summer';
   base.X = OUTLINE_COLOR;
-  base.Y = friendly ? FRIENDLY_RIM[winter ? 'winter' : 'summer'] : HALO_COLOR;
-  base.y = friendly ? FRIENDLY_RIM[winter ? 'winter' : 'summer'].replace(/[\d.]+\)$/, (m) => `${(parseFloat(m) * 0.55).toFixed(2)})`) : 'rgba(8,8,6,0.16)';
+  base.x = friendly ? FRIENDLY_RIM[sk] : OUTLINE_LIT_COLOR;
+  base.z = SHADOW_CORE[sk];
+  base.q = SHADOW_TIP[sk];
   return base;
 }
 
@@ -588,7 +635,7 @@ const STILL_POSES = new Set<SoldierPose>(['dead', 'prone', 'pinned', 'cowering',
 /** Rasterise a figure at `scale` and `facing` into an N x N character grid
  * (row-major, '' = empty) with the pivot exactly at the canvas centre. */
 function rasterise(fig: Figure, facing: Facing8, scale: number, winter: boolean): { n: number; cells: string[] } {
-  const rings = 2;
+  const rings = 1 + (fig.tall ?? 3); // outline + the baked SE shadow
   const half = Math.ceil(fig.extent + 1) * scale + rings * scale;
   const n = half * 2;
   const ang = (facing * Math.PI) / 4;
@@ -620,27 +667,36 @@ function rasterise(fig: Figure, facing: Facing8, scale: number, winter: boolean)
   return { n, cells };
 }
 
-/** Grow the dark outline ring and the halo/rim rings on the raster, in
- * output pixels: 1x = outline + 1 halo ring; 2x = outline + 2 halo rings
- * (the outer one softer), so the rings carry the same screen weight. */
-function growRings(n: number, cells: string[], scale: number): void {
-  const grow = (from: (c: string) => boolean, ch: string, diag: boolean) => {
-    const add: number[] = [];
-    for (let y = 0; y < n; y++) {
-      for (let x = 0; x < n; x++) {
-        const i = y * n + x;
-        if (cells[i] !== '') continue;
-        const at = (xx: number, yy: number) => xx >= 0 && yy >= 0 && xx < n && yy < n && from(cells[yy * n + xx]);
-        if (at(x - 1, y) || at(x + 1, y) || at(x, y - 1) || at(x, y + 1)
-          || (diag && (at(x - 1, y - 1) || at(x + 1, y - 1) || at(x - 1, y + 1) || at(x + 1, y + 1)))) add.push(i);
+/** wf19: grow (a) a 1-output-pixel outline that is dark on the side away from the NW light
+ * ('X') and a faint hairline / warm friendly edge light on the lit side ('x'), and (b) the baked
+ * contact shadow: the silhouette cast to the SE, `tall` steps long (in 1x px), its first half a
+ * crisp dark core ('z'), the rest a soft tip ('q'). Replaces the old full dark ring + halo rings
+ * that turned 1x soldiers into dark blobs. */
+function growRings(n: number, cells: string[], scale: number, tall: number): void {
+  const solid = (xx: number, yy: number) => xx >= 0 && yy >= 0 && xx < n && yy < n && cells[yy * n + xx] !== '';
+  const ring: [number, string][] = [];
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      if (cells[y * n + x] !== '') continue;
+      const w = solid(x - 1, y), e = solid(x + 1, y), no = solid(x, y - 1), so = solid(x, y + 1);
+      if (!(w || e || no || so)) continue;
+      // body only to the east / south of this pixel => it sits on the lit NW edge
+      ring.push([y * n + x, (e || so) && !w && !no ? 'x' : 'X']);
+    }
+  }
+  for (const [i, ch] of ring) cells[i] = ch;
+  const steps = tall * scale;
+  const core = Math.max(1, Math.ceil(steps / 2));
+  const shadow: [number, string][] = [];
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      if (cells[y * n + x] !== '') continue;
+      for (let k = 1; k <= steps; k++) {
+        if (solid(x - k, y - k)) { shadow.push([y * n + x, k <= core ? 'z' : 'q']); break; }
       }
     }
-    for (const i of add) cells[i] = ch;
-  };
-  const any = (c: string) => c !== '';
-  grow(any, 'X', false);
-  grow(any, 'Y', scale >= 2);
-  if (scale >= 2) grow(any, 'y', false);
+  }
+  for (const [i, ch] of shadow) cells[i] = ch;
 }
 
 function paint(n: number, cells: string[], colors: Record<string, string>): HTMLCanvasElement {
@@ -671,8 +727,18 @@ export function buildSoldierSprite(
   const s = scale >= 2 ? 2 : 1;
   const fig = figureFor(side, stance, STILL_POSES.has(stance) ? 0 : frame);
   const { n, cells } = rasterise(fig, facing, s, season === 'winter');
-  growRings(n, cells, s);
-  return paint(n, cells, colorsFor(side, season, stance === 'dead', stance === 'dead' ? 'enemy' : outline));
+  growRings(n, cells, s, fig.tall ?? 3);
+  return paint(n, cells, colorsFor(side, season, stance === 'dead', stance === 'dead' ? 'enemy' : outline, s));
+}
+
+/** The character grid behind a soldier sprite (row-major, '' = empty; 'X'/'x' outline, 'z'/'q'
+ * baked shadow, 'P' helmet specular, 'w'/'W' weapon, ...). Pure — for tests and tools. */
+export function soldierCells(side: Side, stance: SoldierPose, facing: Facing8, frame: 0 | 1 = 0, scale = 1, winter = false): { n: number; cells: string[] } {
+  const s = scale >= 2 ? 2 : 1;
+  const fig = figureFor(side, stance, STILL_POSES.has(stance) ? 0 : frame);
+  const out = rasterise(fig, facing, s, winter);
+  growRings(out.n, out.cells, s, fig.tall ?? 3);
+  return out;
 }
 
 // ============================================================================
@@ -699,9 +765,9 @@ export const CREW_POSES: CrewPose[] = ['gunnerKneel', 'loaderRound', 'loaderShel
 function kneelBodyOps(side: Side, frame: 0 | 1): Op[] {
   const ops: Op[] = [];
   const wob = frame === 1 ? 0.5 : 0;
-  ops.push(rect(7 + wob, 12, 9 + wob, 14, 'b', { max: 1 }), rect(7 + wob, 14, 9 + wob, 15, 'k', { max: 1 }));
+  ops.push(rect(7 + wob, 12, 9 + wob, 13.5, 'T', { max: 1 }), rect(7 + wob, 13.5, 9 + wob, 15, 'b', { max: 1 }));
   ops.push(rect(7 + wob, 12, 9 + wob, 15, 'b', { edge: 'k', lit: 'B', min: 2, round: 0.75 }));
-  ops.push(seg(10.3, 12, 13.3, 14.8, 1.9, 'b', { max: 1 }), rect(13.5, 14.5, 14.5, 15.5, 'k', { max: 1 }));
+  ops.push(seg(10.3, 12, 12.6, 14.1, 1.9, 'T', { max: 1 }), seg(12.9, 14.4, 13.8, 15.3, 1.7, 'b', { max: 1 }));
   ops.push(seg(10.3, 11.8, 12.3, 13.8, 2, 'T', { min: 2 }), seg(12.1, 13.6, 13.7, 15.1, 1.9, 'b', { min: 2 }), seg(13.4, 14.9, 13.9, 15.4, 1, 'k', { min: 2 }));
   ops.push(rect(5, 8, 12.5, 12.5, 'U', { edge: 'S', lit: 'L', round: 1.5 }));
   ops.push(...beltKitOps(side, 5, 12.5, 8.5, 12.5));
@@ -711,7 +777,7 @@ function kneelBodyOps(side: Side, frame: 0 | 1): Op[] {
 /** Standing / walking body without arms or weapon (legs swap with the walk frame). */
 function walkBodyOps(side: Side, frame: 0 | 1): Op[] {
   const ops: Op[] = [];
-  ops.push(...legOps(6, 12.5, frame === 0 ? 7 : 6), ...legOps(10, 12.5, frame === 0 ? 6 : 7));
+  ops.push(...strideLegs(frame));
   ops.push(rect(5.5, 8.5, 12.5, 13.5, 'U', { edge: 'S', lit: 'L', round: 1.5 }));
   ops.push(...beltKitOps(side, 5.5, 12.5, 9, 13.5));
   return ops;
@@ -736,7 +802,7 @@ function crewFigure(side: Side, pose: CrewPose, frame: 0 | 1): Figure {
       ops.push(helmetOf(9, 7, 4, side));
       // hands reach out past the helmet onto the sight / traverse wheel
       ops.push(rect(4.9, frame ? 0.9 : 1.5, 5.9, frame ? 1.9 : 2.5, 'G'), rect(12.1, frame ? 1.9 : 1.3, 13.1, frame ? 2.9 : 2.3, 'G'));
-      return { ops, px: 9, py: 9, extent: 9.5 };
+      return { ops, px: 9, py: 9, extent: 9.5, tall: 2 };
     }
     case 'loaderRound': {
       const ops = kneelBodyOps(side, 0);
@@ -748,7 +814,7 @@ function crewFigure(side: Side, pose: CrewPose, frame: 0 | 1): Figure {
       ops.push(rect(8.6, by - 2.5, 9.4, by - 1.7, 'N'));
       ops.push(rect(8.1, by + 1.7, 9.9, by + 2.4, 'k'));
       ops.push(rect(6.1, by + 1.7, 7.1, by + 2.7, 'G'), rect(10.9, by + 1.7, 11.9, by + 2.7, 'G'));
-      return { ops, px: 9, py: 9, extent: 10.5 };
+      return { ops, px: 9, py: 9, extent: 10.5, tall: 2 };
     }
     case 'loaderShell': {
       const ops = kneelBodyOps(side, 0);
@@ -760,7 +826,7 @@ function crewFigure(side: Side, pose: CrewPose, frame: 0 | 1): Figure {
       ops.push(rect(8.3, sy - 3, 9.7, sy - 1, 'W'));
       ops.push(rect(8.7, sy - 3.7, 9.3, sy - 3, 'W', { min: 2 }));
       ops.push(rect(5.9, sy + 0.7, 6.9, sy + 1.7, 'G'), rect(11.1, sy + 0.7, 12.1, sy + 1.7, 'G'));
-      return { ops, px: 9, py: 9, extent: 10.5 };
+      return { ops, px: 9, py: 9, extent: 10.5, tall: 2 };
     }
     case 'mgProne': {
       const ops = proneBody(side);
@@ -768,7 +834,7 @@ function crewFigure(side: Side, pose: CrewPose, frame: 0 | 1): Figure {
       ops.push(seg(3.5, 13, 5, 7.5, 1.6, 'U', { min: 2 }), seg(9.5, 13, 8, 7.5, 1.6, 'U', { min: 2 }));
       ops.push(rect(4.5, 6.5, 5.5, 7.5, 'G', { min: 2 }), rect(7.5, 6.5, 8.5, 7.5, 'G', { min: 2 }));
       ops.push(helmetOf(6.5, 10, 3.5, side));
-      return { ops, px: 6, py: 12, extent: 12.2 };
+      return { ops, px: 6, py: 12, extent: 12.6, tall: 1 };
     }
     case 'carryTube': {
       const ops = walkBodyOps(side, frame);
@@ -833,8 +899,8 @@ export function getCrewPoseSprite(
   if (hit) { crewPoseCache.delete(key); crewPoseCache.set(key, hit); return hit; }
   const fig = crewFigure(side, pose, frame);
   const { n, cells } = rasterise(fig, facing, s, winter);
-  growRings(n, cells, s);
-  const colors = { ...colorsFor(side, season, false, outline), M: '#56594a', N: '#b39a52', n: '#7c6a34' };
+  growRings(n, cells, s, fig.tall ?? 3);
+  const colors = { ...colorsFor(side, season, false, outline, s), M: '#56594a', N: '#b39a52', n: '#7c6a34' };
   const c = paint(n, cells, colors);
   crewPoseCache.set(key, c);
   if (crewPoseCache.size > CREW_POSE_CACHE_CAP) crewPoseCache.delete(crewPoseCache.keys().next().value as string);

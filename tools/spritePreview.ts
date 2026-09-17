@@ -12,7 +12,7 @@ import {
   getWeaponSprite,
 } from '@/render/sprites';
 import { getCrewPoseSprite, CREW_POSES, type SoldierPose } from '@/render/soldierArt';
-import { drawSuppressionStipple, poseForSoldier } from '@/render/unitRender';
+import { drawSuppressionStipple, poseForSoldier, drawVehicleSprite } from '@/render/unitRender';
 import type { Soldier, MentalState, Activity } from '@/shared/types';
 import { weaponTowLengthM } from '@/render/weaponArt';
 import { CREW_LAYOUT, crewServedClass } from '@/sim/crewWeapon';
@@ -34,7 +34,7 @@ function section(title: string): HTMLElement {
   return row;
 }
 
-function cell(row: HTMLElement, label: string, src: HTMLCanvasElement, scale = SCALE): void {
+function cell(row: HTMLElement, label: string, src: HTMLCanvasElement, scale = SCALE): HTMLCanvasElement {
   const c = document.createElement('div');
   c.className = 'cell';
   const canvas = document.createElement('canvas');
@@ -48,6 +48,7 @@ function cell(row: HTMLElement, label: string, src: HTMLCanvasElement, scale = S
   c.appendChild(canvas);
   c.appendChild(span);
   row.appendChild(c);
+  return canvas;
 }
 
 /** Show a sprite at 1x (true in-game size) AND 3x (for eyeballing detail),
@@ -72,6 +73,79 @@ function cellPair(row: HTMLElement, label: string, src: HTMLCanvasElement): void
   span.textContent = `${label} (1x/3x)`;
   c.appendChild(span);
   row.appendChild(c);
+}
+
+// ------------------------------------------------- wf19: legibility boards --
+// Every soldier pose / crew weapon / vehicle at true 1x and 2x size on two ground backdrops: the
+// current (dark) summer ground tone and one 20% brighter (the terrain repaint), plus snow. Each
+// board is shown at 1:1 and magnified 3x. Board canvases carry ids (wf19-*) so a capture script
+// can read their exact pixels with toDataURL().
+const WF19_GROUNDS: [string, [number, number, number]][] = [
+  ['dark', [101, 102, 45]], ['bright', [121, 122, 54]], ['snow', [212, 216, 218]],
+];
+function groundBackdrop(w: number, h: number, rgb: [number, number, number]): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d')!;
+  const img = ctx.createImageData(w, h);
+  let seed = 1234567;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const blotch = Math.sin(x * 0.045) * Math.cos(y * 0.06) * 0.06;
+      const k = 1 + (rnd() - 0.5) * 0.22 + blotch;
+      const o = (y * w + x) * 4;
+      img.data[o] = rgb[0] * k; img.data[o + 1] = rgb[1] * k; img.data[o + 2] = rgb[2] * k; img.data[o + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+function board(row: HTMLElement, id: string, label: string, cv: HTMLCanvasElement): void {
+  cell(row, `${label} 1:1`, cv, 1).id = id;
+  cell(row, `${label} x3`, cv, 3);
+}
+const WF19_POSES: SoldierPose[] = ['standing', 'crouching', 'prone', 'wary', 'cowering', 'pinned', 'panicked', 'berserk', 'surrendered', 'woundedCrawl', 'dead'];
+for (const scale of [1, 2] as const) {
+  for (const [gname, rgb] of WF19_GROUNDS) {
+    const season: Season = gname === 'snow' ? 'winter' : 'summer';
+    const row = section(`wf19 legibility — soldiers at ${scale}x on ${gname} ground (rows: German friendly, Soviet enemy; columns: pose x facings 0,1,2,3,5,6)`);
+    const step = 26 * scale;
+    const facs: Facing8[] = [0, 1, 2, 3, 5, 6];
+    const cv = groundBackdrop(step * facs.length * 4, step * 6, rgb);
+    const ctx = cv.getContext('2d')!;
+    const drawSet = (poses: SoldierPose[], y0: number) => {
+      poses.forEach((pose, pi) => {
+        const colX = (pi % 4) * facs.length * step;
+        const rowY = y0 + Math.floor(pi / 4) * step;
+        facs.forEach((f, fi) => {
+          for (const [side, outline, dy] of [['german', 'friendly', 0], ['soviet', 'enemy', step]] as [Side, 'friendly' | 'enemy', number][]) {
+            const sp = getSoldierSprite(side, season, pose, f, (fi % 2) as 0 | 1, pose === 'dead' ? 'enemy' : outline, scale);
+            ctx.drawImage(sp, Math.round(colX + fi * step + step / 2 - sp.width / 2), Math.round(rowY * 2 + dy + step / 2 - sp.height / 2));
+          }
+        });
+      });
+    };
+    drawSet(WF19_POSES, 0);
+    board(row, `wf19-soldiers-${scale}x-${gname}`, `${gname}`, cv);
+  }
+}
+for (const scale of [1, 2] as const) {
+  for (const [gname, rgb] of WF19_GROUNDS.slice(0, 2)) {
+    const row = section(`wf19 legibility — vehicles at ${scale}x on ${gname} ground, facings N / NE / E / S`);
+    const ids = ['pz3j', 'pz4f1', 'tiger', 'panther', 'stug3g', 'sdkfz251', 't34_76', 'kv1', 'su76'];
+    const step = 92 * scale;
+    const cv = groundBackdrop(step * ids.length, step * 4, rgb);
+    const ctx = cv.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    ids.forEach((id, i) => {
+      [0, Math.PI / 4, Math.PI / 2, Math.PI].forEach((rad, r) => {
+        const cx = i * step + step / 2, cy = r * step + step / 2;
+        drawVehicleSprite(ctx, id, 'ok', cx, cy, rad, rad + (r === 2 ? 0.6 : 0), scale, scale);
+      });
+    });
+    board(row, `wf19-vehicles-${scale}x-${gname}`, `${gname}`, cv);
+  }
 }
 
 // --------------------------------------------------------------- soldiers --
@@ -114,13 +188,13 @@ function cellPair1x4x(row: HTMLElement, label: string, src: HTMLCanvasElement): 
   ];
   const clsOf = (id: string): 'mortar' | 'hmg' | 'atgun' | null => crewServedClass(id);
   /** A small scene: weapon + crew, drawn at true size for `scale` (1 = zoom 1, 2 = zoom 2). */
-  const scene = (weaponId: string, side: Side, season: Season, facing8: number, packed: boolean, scale: 1 | 2, fire = false): HTMLCanvasElement => {
+  const scene = (weaponId: string, side: Side, season: Season, facing8: number, packed: boolean, scale: 1 | 2, fire = false, bg?: string): HTMLCanvasElement => {
     const W = 90 * scale;
     const c = document.createElement('canvas');
     c.width = W; c.height = W;
     const ctx = c.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
-    ctx.fillStyle = season === 'winter' ? '#d4d6d2' : '#6f7a45';
+    ctx.fillStyle = bg ?? (season === 'winter' ? '#d4d6d2' : '#6f7a45');
     ctx.fillRect(0, 0, W, W);
     const rad = (facing8 * Math.PI) / 4;
     const pxPerM = 10 * scale;
@@ -160,6 +234,21 @@ function cellPair1x4x(row: HTMLElement, label: string, src: HTMLCanvasElement): 
     blit(getSoldierSprite(side, season, 'crouching', f8, 0, 'friendly', scale), at(L.assistant));
     return c;
   };
+  // wf19: every crew weapon set up (facings 1 and 6) and packed, at 1x, on the dark and the 20%
+  // brighter ground tone.
+  for (const [gname, rgb] of WF19_GROUNDS.slice(0, 2)) {
+    const row = section(`wf19 legibility — crew weapons at 1x on ${gname} ground`);
+    const cv = document.createElement('canvas');
+    cv.width = 90 * CREW_WEAPONS.length; cv.height = 270;
+    const bctx = cv.getContext('2d')!;
+    const bg = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+    CREW_WEAPONS.forEach(([weaponId, side], i) => {
+      bctx.drawImage(scene(weaponId, side, 'summer', 1, false, 1, false, bg), i * 90, 0);
+      bctx.drawImage(scene(weaponId, side, 'summer', 6, false, 1, true, bg), i * 90, 90);
+      bctx.drawImage(scene(weaponId, side, 'summer', 3, true, 1, false, bg), i * 90, 180);
+    });
+    board(row, `wf19-weapons-1x-${gname}`, gname, cv);
+  }
   const addCanvas = (row: HTMLElement, label: string, cv: HTMLCanvasElement, zoom = 1) => cell(row, label, cv, zoom);
   for (const [weaponId, side] of CREW_WEAPONS) {
     const row1 = section(`Crew-served weapon — ${weaponId} (${side}) — 1x (zoom 1), 8 facings: set up / packed`);

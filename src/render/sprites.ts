@@ -7,7 +7,7 @@ import type { Side, Season, Stance, Facing8, CursorKind } from '@/shared/types';
 import { TILE_PX, TILE_M } from '@/shared/types';
 import { hash2 } from '@/shared/rng';
 import { createCanvas, ctx2d } from '@/render/pixelUtil';
-import { buildVehicleHull, buildVehicleTurret } from '@/render/vehicleArt';
+import { buildVehiclePart, composeVehicleFrame, VEHICLE_FACINGS, type VehiclePartArt } from '@/render/vehicleArt';
 import { buildSoldierSprite, type SoldierOutline, type SoldierPose } from '@/render/soldierArt';
 import { buildTeamIcon } from '@/render/teamIconArt';
 import { buildWeaponSprite, WEAPON_FACINGS, type WeaponVariant } from '@/render/weaponArt';
@@ -66,11 +66,10 @@ class LruCache {
 const SOLDIER_CACHE_CAP = 1400;
 const VEHICLE_CACHE_CAP = 160;
 const soldierCaches: Record<UnitSpriteScale, LruCache> = { 1: new LruCache(SOLDIER_CACHE_CAP), 2: new LruCache(SOLDIER_CACHE_CAP) };
-const vehicleCaches: Record<UnitSpriteScale, LruCache> = { 1: new LruCache(VEHICLE_CACHE_CAP), 2: new LruCache(VEHICLE_CACHE_CAP) };
 
 /** Current unit-sprite cache sizes (for the preview page / perf checks). */
 export function unitSpriteCacheStats(): Record<string, number> {
-  return { soldier1: soldierCaches[1].size, soldier2: soldierCaches[2].size, vehicle1: vehicleCaches[1].size, vehicle2: vehicleCaches[2].size };
+  return { soldier1: soldierCaches[1].size, soldier2: soldierCaches[2].size, vehicle1: vehicleArtCaches[1].size, vehicle2: vehicleArtCaches[2].size };
 }
 
 /** Oriented soldier sprite, square, centred on the soldier. Authored at
@@ -133,14 +132,36 @@ function getDims(defId: string): { lengthM: number; widthM: number } {
  * per 1x px (draw at `width * zoom / scale`). Knocked-out/burning variants
  * share the 'knockedOut' art at every scale. */
 export function getVehicleSprite(defId: string, part: 'hull' | 'turret', state: 'ok' | 'knockedOut', scale: number = 1): HTMLCanvasElement {
+  return getVehicleArt(defId, part, state, scale).body;
+}
+
+/** wf19: the part plus its soft cast-shadow sprite and the four directional light overlays that
+ * unitRender blends by the hull's rotation (so the sun stays NW whatever the vehicle's facing). */
+const vehicleArtCaches: Record<UnitSpriteScale, Map<string, VehiclePartArt>> = { 1: new Map(), 2: new Map() };
+export function getVehicleArt(defId: string, part: 'hull' | 'turret', state: 'ok' | 'knockedOut', scale: number = 1): VehiclePartArt {
   const sc = unitSpriteScale(scale);
   const key = `${defId}|${part}|${state}`;
-  return vehicleCaches[sc].get(key, () => {
+  const cache = vehicleArtCaches[sc];
+  let art = cache.get(key);
+  if (!art) {
     const { lengthM, widthM } = getDims(defId);
-    return part === 'hull'
-      ? buildVehicleHull(defId, lengthM, widthM, state, sc)
-      : buildVehicleTurret(defId, lengthM, widthM, state, sc);
-  });
+    art = buildVehiclePart(defId, part, lengthM, widthM, state, sc);
+    cache.set(key, art);
+    // 17 vehicles x 2 parts x 2 states = 68 entries at most: bounded by the roster, no LRU needed
+    if (cache.size > VEHICLE_CACHE_CAP) cache.delete(cache.keys().next().value as string);
+  }
+  return art;
+}
+
+/** Pre-lit, pre-shadowed frame of a vehicle part rotated to `rad` (quantised to VEHICLE_FACINGS
+ * steps), pivot at the canvas centre: blit unrotated at `width * zoom / scale`. Bounded LRU per
+ * scale (a battle touches a few vehicle types x 64 steps x 2 parts). */
+const vehicleFrameCaches: Record<UnitSpriteScale, LruCache> = { 1: new LruCache(640), 2: new LruCache(320) };
+export function getVehicleFrame(defId: string, part: 'hull' | 'turret', state: 'ok' | 'knockedOut', rad: number, scale: number = 1): HTMLCanvasElement {
+  const sc = unitSpriteScale(scale);
+  const step = ((Math.round((rad / (Math.PI * 2)) * VEHICLE_FACINGS) % VEHICLE_FACINGS) + VEHICLE_FACINGS) % VEHICLE_FACINGS;
+  return vehicleFrameCaches[sc].get(`${defId}|${part}|${state}|${step}`, () =>
+    composeVehicleFrame(getVehicleArt(defId, part, state, sc), step, sc, part === 'turret' ? 0.75 : 1));
 }
 
 // ============================================================================

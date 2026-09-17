@@ -9,7 +9,7 @@ import { VIEW_W, VIEW_H } from '@/shared/types';
 import { facingAngle } from '@/shared/math';
 import { worldToScreen } from '@/engine/camera';
 import { PALETTE, SIDE_COLOR } from '@/render/palette';
-import { getSoldierSprite, getVehicleSprite, getFlagSprite, unitSpriteScale } from '@/render/sprites';
+import { getSoldierSprite, getVehicleFrame, getFlagSprite, unitSpriteScale } from '@/render/sprites';
 import { drawText, textWidth } from '@/render/pixelfont';
 import { VEHICLE_DEFS } from '@/data/units';
 import { teamBarColor } from '@/ui/hud/hudChrome';
@@ -21,24 +21,145 @@ import { CREW_LAYOUT, crewServedClass, crewWeaponView, weaponFramePoint } from '
 import { FLASH_LIFE, TILE_M } from '@/shared/types';
 import type { CrewWeaponState, Vec2 } from '@/shared/types';
 import { dist, facingFromAngle } from '@/shared/math';
+import {
+  drawSoldier as drawAtlasSoldier, drawVehiclePart, drawWeapon as drawAtlasWeapon, requestBattleAtlases,
+  soldierAtlas, vehicleAtlasHas, type Atlas,
+} from '@/render/spriteAtlas';
+import {
+  frameFor, moodFor, pickAnimation, postureFor, transitionPosture, trembleOffset, entryKeyChain,
+  type AnimAction, type Posture,
+} from '@/render/soldierAnim';
+import { drawRagdollFlight, drawRagdollLanded, landedFacing8, ragdollBeginFrame, ragdollPhase } from '@/render/ragdoll';
 
-/** One morale bar per friendly team (manual: "Team information bars only
- * visible at normal zoom level"): a solid 30x4 bar centred above the team,
- * coloured by teamBarColor so it matches the HUD team-grid bar. */
-function drawTeamBars(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side): void {
+// ------------------------------------------------------------ pre-rendered atlases (spec §5) ---
+/** Battles whose atlases have been requested (loading is async; until an atlas is ready — or when
+ * it does not exist — every unit falls back to its code-drawn sprite). */
+const atlasRequested = new WeakSet<object>();
+function ensureAtlases(state: BattleState): void {
+  if (atlasRequested.has(state) || typeof fetch === 'undefined' || typeof Image === 'undefined') return;
+  atlasRequested.add(state);
+  const sides = new Set<Side>();
+  for (const t of state.teams.values()) sides.add(t.side);
+  void requestBattleAtlases(Array.from(sides), state.map.def.season);
+}
+
+/** Render-side memory per soldier: measured ground speed (for gait cadence) and the last posture
+ * with its change time (for stand <-> prone transitions). Never read by the sim. */
+interface AnimTrack { x: number; y: number; t: number; speed: number; posture: Posture; since: number }
+const animTracks = new Map<number, AnimTrack>();
+let animTrackTime = -1;
+function animTrackFor(s: Soldier, time: number): AnimTrack {
+  if (time < animTrackTime - 0.5) animTracks.clear(); // a new battle
+  animTrackTime = time;
+  let tr = animTracks.get(s.id);
+  const posture = postureFor(s, time);
+  if (!tr) { tr = { x: s.pos.x, y: s.pos.y, t: time, speed: 0, posture, since: time - 10 }; animTracks.set(s.id, tr); return tr; }
+  const dt = time - tr.t;
+  if (dt >= 0.1) {
+    const v = (Math.hypot(s.pos.x - tr.x, s.pos.y - tr.y) * TILE_M) / dt;
+    tr.speed = v > 12 ? tr.speed : tr.speed * 0.5 + v * 0.5; // ignore teleports (knockback, deploy)
+    tr.x = s.pos.x; tr.y = s.pos.y; tr.t = time;
+  }
+  if (posture !== tr.posture) {
+    // keep the old posture visible in `transitionPosture` by remembering it in `prev`
+    (tr as AnimTrack & { prev?: Posture }).prev = tr.posture;
+    tr.posture = posture; tr.since = time;
+  }
+  return tr;
+}
+
+/** Crew role poses -> atlas entry keys (serving loops), most specific first. */
+const CREW_KEYS: Record<CrewPose, string[]> = {
+  gunnerKneel: ['crew.gunner', 'kneeling.aim', 'kneeling.idle'],
+  loaderRound: ['crew.loader.mortar', 'crew.loader', 'kneeling.reload', 'kneeling.idle'],
+  loaderShell: ['crew.loader.gun', 'crew.loader', 'kneeling.reload', 'kneeling.idle'],
+  mgProne: ['crew.mg', 'prone.aim@lmg', 'prone.aim', 'prone.idle'],
+  carryTube: ['crew.carry.tube', 'crew.carry', 'standing.walk'],
+  carryPlate: ['crew.carry.plate', 'crew.carry', 'standing.walk'],
+  carryMg: ['crew.carry.mg', 'crew.carry', 'standing.walk@lmg', 'standing.walk'],
+  carryTripod: ['crew.carry.tripod', 'crew.carry', 'standing.walk'],
+  haul: ['crew.haul', 'standing.walk'],
+};
+
+/** Draw one living soldier from his side's atlas. False => no atlas / no usable entry. */
+function drawSoldierFromAtlas(
+  ctx: CanvasRenderingContext2D, atlas: Atlas, state: BattleState, s: Soldier, p: { x: number; y: number }, zoom: number,
+  crew: { pose: CrewPose | null; facing: Facing8 } | undefined,
+): boolean {
+  const time = state.time;
+  const tr = animTrackFor(s, time);
+  const prev = (tr as AnimTrack & { prev?: Posture }).prev ?? tr.posture;
+  const posture = transitionPosture(prev, tr.posture, time - tr.since);
+  const target = s.targetSoldierId != null ? state.soldiers.get(s.targetSoldierId)?.pos : s.targetVehicleId != null ? state.vehicles.get(s.targetVehicleId)?.pos : null;
+  const pick = pickAnimation(s, time, target, posture);
+  let keys = pick.keys;
+  let heading = pick.heading;
+  let action: AnimAction = pick.action;
+  if (crew?.pose) {
+    const mood = moodFor(s);
+    keys = mood === 'calm' ? CREW_KEYS[crew.pose] : [...CREW_KEYS[crew.pose].map((k) => `${k}.${mood}`), ...CREW_KEYS[crew.pose]];
+    heading = (crew.facing * Math.PI) / 4;
+    action = crew.pose.startsWith('carry') || crew.pose === 'haul' ? 'walk' : 'idle';
+  } else if (crew) {
+    heading = (crew.facing * Math.PI) / 4;
+    keys = entryKeyChain('crouched', 'idle', pick.mood, pick.weapon);
+  }
+  const j = trembleOffset(s, time, pick.mood);
+  return drawAtlasSoldier(ctx, atlas, keys, heading, (entry) => frameFor(s, time, action, entry, tr.speed, pick.mood), p.x + j.x, p.y + j.y, zoom) != null;
+}
+
+
+/** wf19 team status bar: a slim 2 px morale-colour line with a dark hairline border, as wide as
+ * the unit it belongs to, floating just above it. Only the SELECTED teams carry one (full
+ * strength) plus the team under the pointer (dimmer) — the old always-on 30x4 saturated slabs
+ * over every team were far heavier than the original's small, unobtrusive bars. Normal zoom only
+ * (manual: "Team information bars only visible at normal zoom level"). */
+function drawTeamBars(
+  ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side,
+  selectedTeamIds: readonly number[], hoverTeamId: number | null,
+): void {
   if (cam.zoom !== 1) return;
-  for (const team of state.teams.values()) {
-    if (team.side !== playerSide) continue;
+  const ids = hoverTeamId != null && !selectedTeamIds.includes(hoverTeamId) ? [...selectedTeamIds, hoverTeamId] : selectedTeamIds;
+  for (const id of ids) {
+    const team = state.teams.get(id);
+    if (!team || team.side !== playerSide) continue;
     if (team.status === 'Destroyed' || team.status === 'Knocked Out') continue;
-    const alive = team.soldierIds.some((id) => {
-      const s = state.soldiers.get(id);
-      return s != null && s.health !== 'dead';
-    });
-    if (!alive) continue;
-    if (!visible(team.pos, cam)) continue;
-    const p = worldToScreen(cam, team.pos);
+    let x0 = Infinity, x1 = -Infinity, top = Infinity;
+    const veh = team.vehicleId != null ? state.vehicles.get(team.vehicleId) : undefined;
+    if (veh) {
+      const def = VEHICLE_DEFS[veh.defId];
+      const p = worldToScreen(cam, veh.pos);
+      const halfW = (def ? def.widthM : 3) * 5, halfL = (def ? def.lengthM : 6) * 5;
+      // screen half-extents of the rotated hull box
+      const c = Math.abs(Math.cos(veh.hullFacing)), sn = Math.abs(Math.sin(veh.hullFacing));
+      const ex = halfW * c + halfL * sn, ey = halfW * sn + halfL * c;
+      x0 = p.x - ex * 0.8; x1 = p.x + ex * 0.8; top = p.y - ey;
+    } else {
+      for (const sid of team.soldierIds) {
+        const so = state.soldiers.get(sid);
+        if (!so || so.health === 'dead') continue;
+        const p = worldToScreen(cam, so.pos);
+        if (p.x < x0) x0 = p.x;
+        if (p.x > x1) x1 = p.x;
+        if (p.y < top) top = p.y;
+      }
+      if (top === Infinity) continue;
+      x0 -= 5; x1 += 5; top -= 9;
+    }
+    const cx = (x0 + x1) / 2;
+    const w = Math.round(Math.max(14, Math.min(44, x1 - x0)));
+    const bx = Math.round(cx - w / 2), by = Math.round(top - 6);
+    if (bx > VIEW_W + 8 || bx + w < -8 || by > VIEW_H + 8 || by < -8) continue;
+    const hover = !selectedTeamIds.includes(id);
+    ctx.globalAlpha = hover ? 0.5 : 0.95;
+    ctx.fillStyle = 'rgba(10,10,8,0.9)';
+    ctx.fillRect(bx - 1, by - 1, w + 2, 4);
     ctx.fillStyle = teamBarColor(team);
-    ctx.fillRect(Math.round(p.x - 15), Math.round(p.y - 16), 30, 4);
+    ctx.fillRect(bx, by, w, 2);
+    // a lighter top pixel row: reads as a fine enamel line rather than a flat slab
+    ctx.fillStyle = 'rgba(255,255,255,0.28)';
+    ctx.fillRect(bx, by, w, 1);
+    ctx.globalAlpha = 1;
   }
 }
 
@@ -60,33 +181,8 @@ function spriteDrawSize(sprite: HTMLCanvasElement, zoom: number, scale = 1): { d
   return { dw, dh };
 }
 
-function rotateAndDraw(ctx: CanvasRenderingContext2D, sprite: HTMLCanvasElement, cx: number, cy: number, rad: number, zoom: number, scale = 1): void {
-  ctx.save();
-  ctx.imageSmoothingEnabled = false;
-  ctx.translate(cx, cy);
-  ctx.rotate(rad);
-  const { dw, dh } = spriteDrawSize(sprite, zoom, scale);
-  ctx.drawImage(sprite, -dw / 2, -dh / 2, dw, dh);
-  ctx.restore();
-}
-
 function frameOf(soldier: Soldier): 0 | 1 {
   return (Math.floor(soldier.animFrame) % 2 === 0 ? 0 : 1);
-}
-
-/** Small soft contact shadow peeking out SE from a standing/crouching
- * soldier's feet. Sized from the body (not the padded sprite canvas) so it
- * never surrounds the figure; corpses and prone figures get none. The
- * dw/dh parameters are kept for call-site compatibility. */
-function drawSoldierShadow(ctx: CanvasRenderingContext2D, p: { x: number; y: number }, _dw: number, _dh: number, zoom: number): void {
-  const rw = 3.5 * zoom;
-  const rh = 2 * zoom;
-  ctx.save();
-  ctx.fillStyle = 'rgba(0,0,0,0.2)';
-  ctx.beginPath();
-  ctx.ellipse(p.x + 1 * zoom, p.y + 1.5 * zoom, rw, rh, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
 }
 
 function visible(s: { x: number; y: number }, cam: Camera): boolean {
@@ -109,9 +205,47 @@ function drawCorpses(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     if (!isEnemyVisible(state, playerSide, s.side, s.id, false)) continue;
     const p = worldToScreen(cam, s.pos);
     if (!visible(s.pos, cam)) continue;
-    const sprite = getSoldierSprite(s.side, season, 'dead', s.facing, 0, 'enemy', scale);
+    // thrown by a blast: the flight is drawn with the living (drawSoldiers, above the vehicles);
+    // afterwards the corpse keeps the pose it landed in
+    let corpseFacing = s.facing;
+    if (s.blast) {
+      const rp = ragdollPhase(s, state.time);
+      if (rp.phase === 'flight') continue;
+      if (drawRagdollLanded(ctx, cam, s, season)) continue;
+      corpseFacing = landedFacing8(s);
+    } else {
+      const atlas = soldierAtlas(s.side, season, cam.zoom);
+      if (atlas && drawAtlasSoldier(ctx, atlas, [`corpse${s.id % 8}`, `corpse${s.id % 4}`, 'corpse0', 'prone.hit'], (s.facing * Math.PI) / 4, (e) => e.frames - 1, p.x, p.y, cam.zoom)) continue;
+    }
+    const sprite = getSoldierSprite(s.side, season, 'dead', corpseFacing, 0, 'enemy', scale);
     const { dw, dh } = spriteDrawSize(sprite, cam.zoom, scale);
     ctx.drawImage(sprite, Math.round(p.x - dw / 2), Math.round(p.y - dh / 2), dw, dh);
+  }
+}
+
+/** One whole vehicle at screen (cx,cy): soft ground shadow thrown to the screen SE (length by
+ * vehicle height), hull lit from the NW whatever its facing, the turret's short shadow on the
+ * deck, lit turret — two unrotated blits of pre-rendered frames (sprites.ts getVehicleFrame).
+ * Exported for the sprite preview so it cannot drift from the battle view. */
+export function drawVehicleSprite(
+  ctx: CanvasRenderingContext2D, defId: string, state: 'ok' | 'knockedOut', cx: number, cy: number,
+  hullRad: number, turretRad: number, zoom: number, scale: number,
+): void {
+  const vdef = VEHICLE_DEFS[defId];
+  if (vehicleAtlasHas(defId, state, !!vdef?.hasTurret, zoom)) {
+    // pre-rendered (Blender) frames: 64 directions, light and shadow baked per direction
+    drawVehiclePart(ctx, defId, 'hull', state, hullRad, hullRad, cx, cy, zoom);
+    if (vdef?.hasTurret) drawVehiclePart(ctx, defId, 'turret', state, turretRad, hullRad, cx, cy, zoom);
+    return;
+  }
+  const hull = getVehicleFrame(defId, 'hull', state, hullRad, scale);
+  const hs = spriteDrawSize(hull, zoom, scale);
+  ctx.drawImage(hull, Math.round(cx - hs.dw / 2), Math.round(cy - hs.dh / 2), hs.dw, hs.dh);
+  const def = VEHICLE_DEFS[defId];
+  if (def && def.hasTurret) {
+    const turret = getVehicleFrame(defId, 'turret', state, turretRad, scale);
+    const ts = spriteDrawSize(turret, zoom, scale);
+    ctx.drawImage(turret, Math.round(cx - ts.dw / 2), Math.round(cy - ts.dh / 2), ts.dw, ts.dh);
   }
 }
 
@@ -121,15 +255,8 @@ function drawVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
     if (!isEnemyVisible(state, playerSide, veh.side, veh.id, true)) continue;
     if (!visible(veh.pos, cam)) continue;
     const koLike = veh.state === 'knockedOut' || veh.state === 'burning' || veh.state === 'abandoned';
-    const spriteState = koLike ? 'knockedOut' : 'ok';
     const p = worldToScreen(cam, veh.pos);
-    const hull = getVehicleSprite(veh.defId, 'hull', spriteState, scale);
-    rotateAndDraw(ctx, hull, p.x, p.y, veh.hullFacing, cam.zoom, scale);
-    const def = VEHICLE_DEFS[veh.defId];
-    if (def && def.hasTurret) {
-      const turret = getVehicleSprite(veh.defId, 'turret', spriteState, scale);
-      rotateAndDraw(ctx, turret, p.x, p.y, veh.turretFacing, cam.zoom, scale);
-    }
+    drawVehicleSprite(ctx, veh.defId, koLike ? 'knockedOut' : 'ok', p.x, p.y, veh.hullFacing, veh.turretFacing, cam.zoom, scale);
   }
 }
 
@@ -333,8 +460,10 @@ function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, state: Batt
       const k = since < 0.06 ? since / 0.06 : 1 - (since - 0.06) / 0.39;
       p = { x: p.x - dir.x * 2 * cam.zoom * k, y: p.y - dir.y * 2 * cam.zoom * k };
     }
-    const { dw, dh } = spriteDrawSize(sprite, cam.zoom, scale);
-    ctx.drawImage(sprite, Math.round(p.x - dw / 2), Math.round(p.y - dh / 2), dw, dh);
+    if (!drawAtlasWeapon(ctx, cw.weaponId, crewVariant(cw), rot, p.x, p.y, cam.zoom)) {
+      const { dw, dh } = spriteDrawSize(sprite, cam.zoom, scale);
+      ctx.drawImage(sprite, Math.round(p.x - dw / 2), Math.round(p.y - dh / 2), dw, dh);
+    }
     if (cls === 'mortar' && since >= 0 && since < 0.8) {
       // muzzle puff drifting off the tube
       const m = worldToScreen(cam, muzzle);
@@ -360,6 +489,7 @@ function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, state: Batt
       if (!visible(pivot, cam)) continue;
       const sprite = getWeaponSprite('ptrd', 'ready', rad, s.side, season, scale);
       const p = worldToScreen(cam, pivot);
+      if (drawAtlasWeapon(ctx, 'ptrd', 'ready', rad, p.x, p.y, cam.zoom)) continue;
       const { dw, dh } = spriteDrawSize(sprite, cam.zoom, scale);
       ctx.drawImage(sprite, Math.round(p.x - dw / 2), Math.round(p.y - dh / 2), dw, dh);
     }
@@ -426,21 +556,39 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
   const scale = unitSpriteScale(cam.zoom);
   const crewDraws = crewSoldierDraws(state);
   for (const s of state.soldiers.values()) {
-    if (s.health === 'dead') continue;
     if (s.vehicleId != null) continue;
+    // blast ragdolls (spec §4): the flight — of the dead too — is drawn here, above the vehicles
+    const rag = s.blast ? ragdollPhase(s, state.time) : null;
+    if (s.health === 'dead' && rag?.phase !== 'flight') continue;
     if (!isEnemyVisible(state, playerSide, s.side, s.id, false)) continue;
     if (!visible(s.pos, cam)) continue;
+    if (rag?.phase === 'flight' && rag.sample) { drawRagdollFlight(ctx, cam, s, rag.sample, season); continue; }
+    if (rag?.phase === 'landed') {
+      // a stunned survivor lies in the pose he landed in until he can push himself up
+      if (!drawRagdollLanded(ctx, cam, s, season)) {
+        const lp = worldToScreen(cam, s.pos);
+        const sp = getSoldierSprite(s.side, season, 'pinned', landedFacing8(s), 0, s.side === playerSide ? 'friendly' : 'enemy', scale);
+        const sz = spriteDrawSize(sp, cam.zoom, scale);
+        ctx.drawImage(sp, Math.round(lp.x - sz.dw / 2), Math.round(lp.y - sz.dh / 2), sz.dw, sz.dh);
+      }
+      continue;
+    }
     const crewDraw = s.health === 'incapacitated' ? undefined : crewDraws.get(s.id);
     const p = worldToScreen(cam, crewDraw ? crewDraw.pos : s.pos);
     const selected = selectedTeamIds.includes(s.teamId);
     if (selected) drawSelectionRing(ctx, p);
+    const atlas = soldierAtlas(s.side, season, cam.zoom);
+    if (atlas && drawSoldierFromAtlas(ctx, atlas, state, s, p, cam.zoom, crewDraw)) {
+      drawSuppressionStipple(ctx, p, s, 9 * cam.zoom);
+      if (selected) drawFacingTick(ctx, p, s.facing);
+      continue;
+    }
     const stance: SoldierPose = crewDraw?.pose === 'mgProne' ? 'prone' : crewDraw?.stance ?? poseForSoldier(s);
     const outline = s.side === playerSide ? 'friendly' : 'enemy';
     const sprite = crewDraw?.pose
       ? getCrewPoseSprite(s.side, season, crewDraw.pose, crewDraw.facing, crewDraw.frame, outline, scale)
       : getSoldierSprite(s.side, season, stance, crewDraw ? crewDraw.facing : s.facing, frameOf(s), outline, scale);
     const { dw, dh } = spriteDrawSize(sprite, cam.zoom, scale);
-    if (stance !== 'prone' && stance !== 'pinned' && stance !== 'dead' && stance !== 'woundedCrawl') drawSoldierShadow(ctx, p, dw, dh, cam.zoom);
     ctx.drawImage(sprite, Math.round(p.x - dw / 2), Math.round(p.y - dh / 2), dw, dh);
     drawSuppressionStipple(ctx, p, s, Math.max(dw, dh) * 0.6);
     // 2px facing tick in front of the soldier, only for the selected team.
@@ -528,6 +676,7 @@ export function drawUnits(
   playerSide: Side, selectedTeamIds: readonly number[], settings: GameSettings,
   showDead = true,
   orderHover: { teamId: number } | null = null,
+  hoverTeamId: number | null = null,
 ): void {
   ctx.save();
   ctx.beginPath();
@@ -535,11 +684,13 @@ export function drawUnits(
   ctx.clip();
   ctx.imageSmoothingEnabled = false;
 
+  ensureAtlases(state);
+  ragdollBeginFrame(state.time);
   drawCorpses(ctx, cam, state, playerSide, showDead);
   drawVehicles(ctx, cam, state, playerSide);
   drawCrewWeapons(ctx, cam, state, playerSide);
   drawSoldiers(ctx, cam, state, playerSide, selectedTeamIds);
-  drawTeamBars(ctx, cam, state, playerSide);
+  drawTeamBars(ctx, cam, state, playerSide, selectedTeamIds, hoverTeamId);
   drawFlags(ctx, cam, state);
   drawTeamLabels(ctx, cam, state, settings);
 

@@ -84,8 +84,9 @@ function lift(hex: string, k: number): string { const [r, g, b] = hexRgb(hex); r
 
 function paletteFor(weaponId: string, side: Side, season: Season): WeaponPalette {
   // German 1941-42 dark grey, German 1943+ guns dark yellow, Soviet olive green.
-  let gun = side === 'soviet' ? '#56613f' : weaponId === 'pak40' ? '#8c7f4f' : '#5b605b';
-  const steel = side === 'soviet' ? '#353a2c' : '#33362f';
+  // wf19: paint lifted a step so guns separate from the (now brighter) ground like the vehicles do
+  let gun = side === 'soviet' ? '#66724a' : weaponId === 'pak40' ? '#a08f5a' : '#6d746f';
+  const steel = side === 'soviet' ? '#3b4032' : '#393c36';
   let ammo = side === 'soviet' ? '#4f5738' : '#4a4f40';
   if (season === 'winter') { gun = '#cdd0c6'; ammo = '#b4b7ad'; }
   return { gun, gunDark: mul(gun, 0.72), steel, black: BLACK, tyre: TYRE, ammo, wood: WOOD, brass: BRASS, bomb: '#585b47', season };
@@ -536,7 +537,9 @@ export function buildWeaponSprite(
     const key = hex + t;
     let v = colorCache.get(key);
     if (!v) {
-      v = parseRgb(t === 2 ? lift(hex, 0.2) : t === 0 ? mul(hex, 0.66) : hex);
+      // wf19: a wider lit/shade swing — the lit edge of a dark barrel must flash light so the
+      // weapon's line (its facing) reads at 1x; shaded faces go deeper for volume.
+      v = parseRgb(t === 2 ? lift(hex, 0.38) : t === 0 ? mul(hex, 0.58) : hex);
       colorCache.set(key, v);
     }
     return v;
@@ -552,13 +555,17 @@ export function buildWeaponSprite(
         continue;
       }
       // thin dark outline ring hugging the silhouette
-      if (isBody(x - 1, y) || isBody(x + 1, y) || isBody(x, y - 1) || isBody(x, y + 1)) {
-        put(i, 20, 20, 16, shadow[i] ? 190 : 150);
+      // (wf19: directional like the soldiers' — a hairline on the lit NW side, a crisp dark
+      // contact edge on the SE side, so the piece sits on the ground instead of being boxed in)
+      const w = isBody(x - 1, y), e = isBody(x + 1, y), no = isBody(x, y - 1), so = isBody(x, y + 1);
+      if (w || e || no || so) {
+        const litSide = (e || so) && !w && !no;
+        put(i, 16, 16, 12, litSide ? 84 : 214);
         continue;
       }
       if (shadow[i]) {
         const edge = !(x > 0 && shadow[i - 1]) || !(x < n - 1 && shadow[i + 1]) || !(y > 0 && shadow[i - n]) || !(y < n - 1 && shadow[i + n]);
-        put(i, 0, 0, 0, edge ? 40 : 72);
+        put(i, 6, 8, 12, edge ? 64 : 122);
       }
     }
   }

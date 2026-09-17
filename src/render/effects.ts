@@ -4,7 +4,7 @@
 // smoke-puff sprites. Sized boldly (per direct comparison against
 // ref/ref_cc3_1482..1485.png) so effects read clearly even at 1x zoom.
 // ============================================================================
-import type { Camera, BattleState } from '@/shared/types';
+import type { Camera, BattleState, Vec2 } from '@/shared/types';
 import {
   VIEW_W, VIEW_H, FLASH_LIFE, TRACER_LIFE, EXPLOSION_LIFE_HE, EXPLOSION_LIFE_SMALL, EXPLOSION_LIFE_SMOKE,
 } from '@/shared/types';
@@ -12,6 +12,8 @@ import { clamp } from '@/shared/math';
 import { hash2 } from '@/shared/rng';
 import { worldToScreen } from '@/engine/camera';
 import { getSmokePuff } from '@/render/sprites';
+import { tileAt } from '@/sim/map';
+import type { Terrain } from '@/shared/types';
 
 function hex(n: number): number { return clamp(Math.round(n), 0, 255); }
 
@@ -47,8 +49,10 @@ function getDarkSmokePuff(size: number): HTMLCanvasElement {
   const g = c.getContext('2d')!;
   const r = size / 2;
   const grad = g.createRadialGradient(r, r, 0, r, r, r);
-  grad.addColorStop(0, 'rgba(55,50,45,0.9)');
-  grad.addColorStop(0.6, 'rgba(50,46,40,0.5)');
+  // wf19: a darker, denser core so burning-wreck and shell smoke keep their weight on the
+  // brighter ground
+  grad.addColorStop(0, 'rgba(30,27,24,0.94)');
+  grad.addColorStop(0.6, 'rgba(42,38,34,0.55)');
   grad.addColorStop(1, 'rgba(40,38,35,0)');
   g.fillStyle = grad;
   g.beginPath();
@@ -66,6 +70,25 @@ function drawPuff(ctx: CanvasRenderingContext2D, x: number, y: number, diameterP
   ctx.globalAlpha = alpha;
   ctx.drawImage(sprite, Math.round(x - diameterPx / 2), Math.round(y - diameterPx / 2), diameterPx, diameterPx);
   ctx.restore();
+}
+
+/** wf19 additive-looking hot core: a small white centre plus an additive ('lighter') warm bloom
+ * around it. On dark ground the bloom glows; on bright ground / snow, where an additive pass
+ * alone would vanish, the opaque white centre and the dark rim under it keep the flash legible. */
+function hotCore(ctx: CanvasRenderingContext2D, x: number, y: number, coreR: number, bloomR: number, alpha: number): void {
+  if (alpha <= 0) return;
+  const prev = ctx.globalCompositeOperation;
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = alpha * 0.55;
+  ctx.fillStyle = '#ff8a30';
+  ctx.beginPath(); ctx.arc(x, y, bloomR, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = alpha * 0.7;
+  ctx.fillStyle = '#ffc860';
+  ctx.beginPath(); ctx.arc(x, y, (coreR + bloomR) / 2, 0, Math.PI * 2); ctx.fill();
+  ctx.globalCompositeOperation = prev;
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath(); ctx.arc(x, y, Math.max(1, coreR * 0.6), 0, Math.PI * 2); ctx.fill();
 }
 
 // ------------------------------------------------------------------- flashes
@@ -114,6 +137,7 @@ function drawFlashes(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
       ctx.beginPath();
       ctx.arc(sx, sy, coreD / 2, 0, Math.PI * 2);
       ctx.fill();
+      hotCore(ctx, sx, sy, coreD / 2, haloD * 0.9, alpha);
       ctx.restore();
     } else {
       // infantry: 10px star
@@ -137,6 +161,7 @@ function drawFlashes(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
       ctx.beginPath();
       ctx.arc(sx, sy, coreD / 2, 0, Math.PI * 2);
       ctx.fill();
+      hotCore(ctx, sx, sy, coreD / 2, haloD * 0.8, alpha);
       ctx.restore();
     }
 
@@ -179,6 +204,14 @@ function drawTracers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     else if (t.kind === 'shell') { color = '#ffb060'; width = 3; coreColor = '#fff6d0'; }
     ctx.save();
     ctx.lineCap = 'round';
+    // wf19: a thin dark under-stroke so the streak keeps its edge on bright grass and snow
+    ctx.strokeStyle = 'rgba(40,18,4,0.4)';
+    ctx.lineWidth = width + 1.5;
+    ctx.globalAlpha = fadeOut;
+    ctx.beginPath();
+    ctx.moveTo(hbx, hby);
+    ctx.lineTo(hx, hy);
+    ctx.stroke();
     ctx.strokeStyle = color;
     ctx.lineWidth = width; // screen-space width — not scaled with zoom
     // fading tail (behind the bright head)
@@ -254,6 +287,7 @@ function drawExplosions(ctx: CanvasRenderingContext2D, cam: Camera, state: Battl
         for (let i = 0; i < nDark; i++) blob(idx++, '#6a2a14', 0.45, 0.6, 0.35);
         for (let i = 0; i < nOrange; i++) blob(idx++, '#d86a2c', 0.35, 0.5, 0.35);
         for (let i = 0; i < nYellow; i++) blob(idx++, '#ffd070', 0.15, 0.25, 0.25);
+        if (frac < 0.3) hotCore(ctx, p.x, p.y, r * 0.16, r * 0.55, fireAlpha * 0.9);
 
         // 6-8 short dark debris streaks
         const n = 6 + Math.floor(hash2(kx, ky, 53) * 3);
@@ -287,7 +321,7 @@ function drawExplosions(ctx: CanvasRenderingContext2D, cam: Camera, state: Battl
             const jitterY = (hash2(Math.floor(e.pos.y * 4), i, 9) - 0.5) * smokeR * 0.5 - sf * 10 * cam.zoom;
             drawPuff(ctx, p.x + jitter, p.y + jitterY, smokeR * (0.8 + i * 0.12), smokeAlpha * (1 - i * 0.08));
             // grey-brown tint: a darker puff under the first two light ones
-            if (i < 2) drawPuff(ctx, p.x + jitter, p.y + jitterY, smokeR * 0.7, smokeAlpha * 0.35, true);
+            if (i < 3) drawPuff(ctx, p.x + jitter, p.y + jitterY, smokeR * 0.7, smokeAlpha * 0.5, true);
           }
         }
       }
@@ -297,7 +331,8 @@ function drawExplosions(ctx: CanvasRenderingContext2D, cam: Camera, state: Battl
       if (frac >= 1) continue;
       const alpha = clamp(1 - frac, 0, 1) * 0.8;
       const d = (3 + frac * 3) * 2 * cam.zoom; // ~6px diameter
-      fillCircle(ctx, p.x, p.y, d / 2, '#a89a82', alpha);
+      fillCircle(ctx, p.x, p.y, d / 2 + 1, '#4a3f30', alpha * 0.45);
+      fillCircle(ctx, p.x, p.y, d / 2, '#c2b394', alpha);
     } else if (e.kind === 'smoke') {
       // smoke round: an initial white burst, then several overlapping puffs
       // building an 80px cloud over the ~2s life.
@@ -387,6 +422,121 @@ function drawBurningVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: 
   }
 }
 
+// ------------------------------------------------------------- movement dust
+const NO_DUST = new Set<Terrain>(['water', 'bridge', 'pavedroad', 'floor', 'buildingWood', 'buildingStone', 'mud', 'woods']);
+
+/** wf19: small dust kicks under running soldiers' feet and a dust trail behind moving vehicles
+ * on dry ground; in winter (snow everywhere, roads included) a fainter white snow spray instead.
+ * Stateless — puffs are a pure function of sim time and the unit id, so there is no particle
+ * list to age — and only computed for units that are actually moving and on screen. */
+function drawMovementDust(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
+  if (cam.zoom <= 0.5) return;
+  const winter = state.map.def.season === 'winter';
+  const color = winter ? '#f2f5f8' : '#c4b48c';
+  const base = winter ? 0.3 : 0.42;
+  const z = cam.zoom;
+  const viewer = state.config.playerSide;
+  const dusty = (x: number, y: number): boolean => {
+    const t = tileAt(state.map, Math.floor(x), Math.floor(y));
+    if (NO_DUST.has(t)) return false;
+    return winter || t !== 'snow';
+  };
+  ctx.save();
+  ctx.fillStyle = color;
+  for (const s of state.soldiers.values()) {
+    if (s.path.length === 0 || s.vehicleId != null || s.health !== 'healthy' && s.health !== 'wounded') continue;
+    if (s.activity !== 'movingFast' && s.activity !== 'panicked' && s.activity !== 'routed' && s.activity !== 'berserk') continue;
+    if (s.side !== viewer && !state.spotted[viewer].has(s.id)) continue;
+    const p = worldToScreen(cam, s.pos);
+    if (p.x < -8 || p.y < -8 || p.x > VIEW_W + 8 || p.y > VIEW_H + 8) continue;
+    if (!dusty(s.pos.x, s.pos.y)) continue;
+    const a = (s.facing * Math.PI) / 4;
+    const bx = -Math.sin(a), by = Math.cos(a); // behind him
+    for (let i = 0; i < 2; i++) {
+      const phase = (state.time * 2.4 + i * 0.5 + (s.id % 7) * 0.143) % 1;
+      const r = (0.8 + phase * 1.8) * z;
+      const d = (5 + phase * 5) * z;
+      const side = (i === 0 ? -1 : 1) * 1.5 * z;
+      ctx.globalAlpha = base * (1 - phase);
+      ctx.beginPath();
+      ctx.arc(p.x + bx * d - by * side, p.y + by * d + bx * side, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+  for (const v of state.vehicles.values()) {
+    if (v.state !== 'ok' || v.speed <= 0.3 || v.path.length === 0) continue;
+    if (v.side !== viewer && !state.spottedVehicles[viewer].has(v.id)) continue;
+    const p = worldToScreen(cam, v.pos);
+    if (p.x < -60 || p.y < -60 || p.x > VIEW_W + 60 || p.y > VIEW_H + 60) continue;
+    if (!dusty(v.pos.x, v.pos.y)) continue;
+    const bx = -Math.sin(v.hullFacing), by = Math.cos(v.hullFacing);
+    const k = clamp(v.speed / 6, 0.35, 1);
+    for (let i = 0; i < 8; i++) {
+      const phase = (state.time * 0.9 + i / 8) % 1;
+      const track = (i % 2 === 0 ? -1 : 1) * 11 * z;
+      const back = (26 + phase * 34) * z;
+      const jit = (hash2(v.id, i, 5) - 0.5) * 6 * z;
+      drawDustPuff(ctx, p.x + bx * back - by * (track + jit), p.y + by * back + bx * (track + jit) - phase * 5 * z, (9 + phase * 16) * z, base * 0.9 * k * (1 - phase) * Math.min(1, phase * 6), winter);
+    }
+  }
+}
+
+const dustPuffCache = new Map<string, HTMLCanvasElement>();
+function drawDustPuff(ctx: CanvasRenderingContext2D, x: number, y: number, d: number, alpha: number, winter: boolean): void {
+  if (alpha <= 0.01) return;
+  const size = Math.max(4, Math.round(d / 4) * 4); // quantised: a handful of cached sizes
+  const key = `${winter ? 'w' : 's'}${size}`;
+  let c = dustPuffCache.get(key);
+  if (!c) {
+    c = document.createElement('canvas');
+    c.width = size; c.height = size;
+    const g = c.getContext('2d')!;
+    const r = size / 2;
+    const grad = g.createRadialGradient(r, r, 0, r, r, r);
+    const rgb = winter ? '240,244,248' : '190,172,130';
+    grad.addColorStop(0, `rgba(${rgb},0.85)`);
+    grad.addColorStop(0.55, `rgba(${rgb},0.4)`);
+    grad.addColorStop(1, `rgba(${rgb},0)`);
+    g.fillStyle = grad;
+    g.beginPath(); g.arc(r, r, r, 0, Math.PI * 2); g.fill();
+    dustPuffCache.set(key, c);
+  }
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(c, x - d / 2, y - d / 2, d, d);
+  ctx.globalAlpha = 1;
+}
+
+// ------------------------------------------------------------ ragdoll landing dust (§4)
+interface LandingDust { x: number; y: number; t0: number; force: number }
+const landings: LandingDust[] = [];
+const LANDING_LIFE = 0.8;
+
+/** A thrown body has just hit the ground at `pos` (tiles): a ring of dust, or snow spray in winter. */
+export function spawnLandingDust(pos: Vec2, time: number, force = 1): void {
+  if (landings.length > 40) landings.shift();
+  landings.push({ x: pos.x, y: pos.y, t0: time, force: Math.max(0.4, Math.min(1.5, force)) });
+}
+
+function drawLandingDust(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
+  if (landings.length === 0) return;
+  const winter = state.map.def.season === 'winter';
+  for (let i = landings.length - 1; i >= 0; i--) {
+    const L = landings[i];
+    const age = state.time - L.t0;
+    if (age < 0 || age > LANDING_LIFE) { landings.splice(i, 1); continue; }
+    const f = age / LANDING_LIFE;
+    const p = worldToScreen(cam, L);
+    if (p.x < -40 || p.y < -40 || p.x > VIEW_W + 40 || p.y > VIEW_H + 40) continue;
+    const z = cam.zoom;
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * Math.PI * 2 + hash2(Math.floor(L.x * 8), Math.floor(L.y * 8), k) * 0.9;
+      const r = (3 + f * 9 * L.force) * z;
+      drawDustPuff(ctx, p.x + Math.cos(a) * r, p.y + Math.sin(a) * r * 0.7 - f * 3 * z, (6 + f * 10) * z * (0.7 + 0.3 * L.force), (winter ? 0.5 : 0.6) * (1 - f), winter);
+    }
+  }
+}
+
 export function drawEffects(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
   ctx.save();
   ctx.beginPath();
@@ -394,6 +544,8 @@ export function drawEffects(ctx: CanvasRenderingContext2D, cam: Camera, state: B
   ctx.clip();
   ctx.imageSmoothingEnabled = false;
 
+  drawMovementDust(ctx, cam, state);
+  drawLandingDust(ctx, cam, state);
   drawBurningVehicles(ctx, cam, state);
   drawExplosions(ctx, cam, state);
   drawTracers(ctx, cam, state);

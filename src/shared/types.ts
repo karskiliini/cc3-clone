@@ -304,6 +304,12 @@ export interface Soldier {
   cover: number;
   kills: number;
   mind: SoldierMind;
+  /** Last HE burst that threw this man (spec 2026-09-17 §4): where it burst, when, how hard
+   * (0..1.5), and where he stood before the knockback (`origin`) so the renderer can fly a ragdoll
+   * from there to his current `pos`. Written by the sim, read only by the renderer. */
+  blast?: { from: Vec2; time: number; force: number; origin: Vec2 };
+  /** Knocked down by a blast: cannot move, fire or throw until battle time reaches this. */
+  stunnedUntil?: number;
 }
 
 // ----------------------------------------------------------------- vehicles

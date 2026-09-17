@@ -428,6 +428,11 @@ export function onCasualtySeen(state: BattleState, rng: Rng, soldier: Soldier, v
 }
 
 /** The soldier was hit himself (spec §2 "Own wound"). */
+/** Thrown off his feet by a blast (spec 2026-09-17 §4): a stress spike scaled by the blast force. */
+export function onKnockedDown(soldier: Soldier, force: number): void {
+  addStress(soldier.mind, 12 + 14 * Math.min(1.5, force));
+}
+
 export function onOwnWound(soldier: Soldier): void {
   addStress(soldier.mind, 25);
 }

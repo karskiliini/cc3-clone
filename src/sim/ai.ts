@@ -6,6 +6,7 @@ import type { Rng } from '@/shared/rng';
 import { angleTo, dist } from '@/shared/math';
 import { inBounds, coverAt, concealmentAt, groundAtTile } from './map';
 import { isPassable } from './path';
+import { spaceOutVehicles } from './spawn';
 import { hasLOS } from './los';
 import { VEHICLE_DEFS } from '@/data/units';
 import { WEAPONS } from '@/data/weapons';
@@ -340,6 +341,9 @@ export function aiDeploy(state: BattleState, side: Side, rng: Rng, battle: AIBat
       battle.deployTeam?.(team.id, best);
     }
   }
+  // vehicles are scored only by road proximity above, so several used to land on top of each
+  // other: spread them out (hull length + 4 m, staggered) and face them at the enemy
+  spaceOutVehicles(state, side);
 }
 
 // ------------------------------------------------------------------ step ai

@@ -263,7 +263,8 @@ const MUD_DARK = '#141210';
 const JERRYCAN = '#3a4a30';
 const JERRYCAN_LIGHT = '#526a41';
 
-function colorMapFor(pal: VehPalette): Record<string, string> {
+function colorMapFor(palIn: VehPalette, lift = 0): Record<string, string> {
+  const pal: VehPalette = lift ? { ...palIn, hullMid: shade(palIn.hullMid, lift), hullLight: shade(palIn.hullLight, lift), hullDark: shade(palIn.hullDark, lift) } : palIn;
   // Round-3: an extra-bright "hot" specular tone, 25% brighter again than
   // the standard hull highlight — used for the barrel's top-edge highlight
   // line and the NW-quarter hot-spot on the hull glacis / turret roof, so
@@ -272,7 +273,10 @@ function colorMapFor(pal: VehPalette): Record<string, string> {
   const hot = shade(pal.hullLight, 0.25);
   return {
     o: shade(pal.hullDark, -0.45), t: TRACK_DARK, T: TRACK_LIGHT, w: WHEEL_RIM, W: pal.hullLight,
-    h: pal.hullMid, H: pal.hullLight, d: pal.hullDark, g: GRILLE, x: HATCH,
+    // wf19: the big NW-lit / SE-shadowed swing is no longer baked (it rotated with the hull and
+    // lit south-facing tanks from the SE); plates keep only a slight painterly variation and the
+    // directional light is added at draw time from the VehiclePartArt light overlays.
+    h: pal.hullMid, H: shade(pal.hullMid, 0.1), d: shade(pal.hullMid, -0.1), g: GRILLE, x: HATCH,
     // Barrel reads as a lit cylinder: bright top edge, mid body, dark underside.
     B: hot, b: pal.hullMid, n: pal.hullDark, k: shade(pal.hullDark, -0.3),
     m: MARK_WHITE, c: MARK_BLACK, r: MARK_RED,
@@ -852,27 +856,116 @@ function paletteOf(spec: VehSpec): VehPalette {
 // --------------------------------------------------------- canvas compose -
 const HULL_PAD = 6; // padding reserved for the SE cast shadow, both axes
 
-function gridToCanvas(g: Grid, colorMap: Record<string, string>, shadowDx: number, shadowDy: number, s = 1): HTMLCanvasElement {
+/** Two-pass box blur of an alpha mask (Float32, 0..1), radius r px. */
+function blurMask(src: Float32Array, w: number, h: number, r: number): Float32Array {
+  if (r <= 0) return src;
+  const tmp = new Float32Array(w * h), out = new Float32Array(w * h);
+  const win = r * 2 + 1;
+  for (let y = 0; y < h; y++) {
+    let acc = 0;
+    for (let x = -r; x < w; x++) {
+      if (x + r < w) acc += src[y * w + x + r];
+      if (x - r - 1 >= 0) acc -= src[y * w + x - r - 1];
+      if (x >= 0) tmp[y * w + x] = acc / win;
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let acc = 0;
+    for (let y = -r; y < h; y++) {
+      if (y + r < h) acc += tmp[(y + r) * w + x];
+      if (y - r - 1 >= 0) acc -= tmp[(y - r - 1) * w + x];
+      if (y >= 0) out[y * w + x] = acc / win;
+    }
+  }
+  return out;
+}
+
+/** Padded (HULL_PAD) silhouette mask of a grid. */
+function silhouette(g: Grid, pad: number): { m: Float32Array; cw: number; ch: number } {
+  const w = g[0].length, h = g.length;
+  const cw = w + pad * 2, ch = h + pad * 2;
+  const m = new Float32Array(cw * ch);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (g[y][x] !== '.') m[(y + pad) * cw + x + pad] = 1;
+  return { m, cw, ch };
+}
+
+function maskToCanvas(m: Float32Array, cw: number, ch: number, rgb: [number, number, number], alpha: number): HTMLCanvasElement {
+  const c = createCanvas(cw, ch);
+  const ctx = ctx2d(c);
+  const img = ctx.createImageData(cw, ch);
+  for (let i = 0; i < m.length; i++) {
+    if (m[i] <= 0.004) continue;
+    const o = i * 4;
+    img.data[o] = rgb[0]; img.data[o + 1] = rgb[1]; img.data[o + 2] = rgb[2];
+    img.data[o + 3] = Math.min(255, Math.round(m[i] * alpha * 255));
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+
+const TRACK_CHARS = new Set(['t', 'T', 'w', 'u']);
+
+function hash2i(x: number, y: number, seed: number): number {
+  let h = (x * 374761393 + y * 668265263 + seed * 2246822519) | 0;
+  h = (h ^ (h >>> 13)) * 1274126177;
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+/** wf19 weathering, painted only over the vehicle's own pixels: pale dust on the running gear
+ * and the lower hull ends (heavier toward the rear, where the tracks throw it), and dark exhaust
+ * stains streaking back over the rear deck. */
+function applyWeathering(ctx: CanvasRenderingContext2D, g: Grid, s: number, seed: number, exhaust: boolean): void {
+  const w = g[0].length, h = g.length;
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+  for (let y = 0; y < h; y++) {
+    const rear = y / h;
+    for (let x = 0; x < w; x++) {
+      const chr = g[y][x];
+      if (chr === '.') continue;
+      const n = hash2i(Math.floor(x / s), Math.floor(y / s), seed);
+      let a = 0;
+      if (TRACK_CHARS.has(chr)) a = 0.03 + 0.1 * rear * rear + (n > 0.72 ? 0.12 : 0);
+      else if (exhaust && (rear > 0.9 || rear < 0.05)) a = 0.12 + (n > 0.6 ? 0.1 : 0);
+      else if (n > 0.93) a = 0.1;
+      if (a <= 0) continue;
+      ctx.fillStyle = `rgba(168,150,108,${a.toFixed(3)})`;
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+  if (exhaust) {
+    for (const fx of [0.3, 0.7]) {
+      const cx = w * fx, cy = h * 0.87;
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, w * 0.2);
+      grad.addColorStop(0, 'rgba(10,9,8,0.72)');
+      grad.addColorStop(0.5, 'rgba(10,9,8,0.34)');
+      grad.addColorStop(1, 'rgba(10,9,8,0)');
+      ctx.fillStyle = grad;
+      ctx.save();
+      ctx.translate(cx, cy); ctx.scale(1, 1.7); ctx.translate(-cx, -cy);
+      ctx.beginPath(); ctx.arc(cx, cy, w * 0.2, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
+interface ComposeOpts { ao?: boolean; weatherSeed?: number; exhaust?: boolean }
+
+function gridToCanvas(g: Grid, colorMap: Record<string, string>, s = 1, opts: ComposeOpts = {}): HTMLCanvasElement {
   const w = g[0].length, h = g.length;
   const pad = HULL_PAD * s;
   const cw = w + pad * 2, ch = h + pad * 2;
   const c = createCanvas(cw, ch);
   const ctx = ctx2d(c);
-  // Soft SE cast shadow: the hull's own silhouette, shifted and dimmed.
-  // Round-3: strengthened from 0.4 alpha to 0.45 to match the reference's
-  // stronger cast shadow.
-  ctx.save();
-  ctx.globalAlpha = 0.45;
-  ctx.translate(pad + shadowDx, pad + shadowDy);
-  ctx.fillStyle = 'rgb(70,45,80)';
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (g[y][x] === '.') continue;
-      ctx.fillRect(x, y, 1, 1);
-    }
+  if (opts.ao) {
+    // Ambient-occlusion ring: a tight dark blur of the silhouette under the hull, so the vehicle
+    // sits IN the ground instead of floating on it. (The offset cast shadow is a separate
+    // sprite drawn in screen space — see buildVehiclePart.)
+    const sil = silhouette(g, pad);
+    ctx.drawImage(maskToCanvas(blurMask(sil.m, cw, ch, s + 1), cw, ch, [10, 10, 8], 0.85), 0, 0);
   }
-  ctx.restore();
-  // Hull/turret art on top.
+  ctx.save();
   ctx.translate(pad, pad);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -882,9 +975,124 @@ function gridToCanvas(g: Grid, colorMap: Record<string, string>, shadowDx: numbe
       ctx.fillRect(x, y, 1, 1);
     }
   }
-  // Soft painterly sheen on top of the 3-tone banding (see shadeRect).
-  applyGradientWash(ctx, 0, 0, w, h);
+  if (opts.weatherSeed != null) applyWeathering(ctx, g, s, opts.weatherSeed, !!opts.exhaust);
+  ctx.restore();
   return c;
+}
+
+/** One directional light overlay for a grid: white (lit) / black (shaded) alpha pixels for light
+ * arriving from local direction (lx,ly) (unit axis vector pointing TOWARD the light):
+ *  - a soft cross-hull ramp (lit half brighter, far half darker) => the top plates read as a volume;
+ *  - a bright bevel on the silhouette / deck edge facing the light, a dark one on the far edge;
+ *  - the raised deck's shadow falling on the running gear on the far side.
+ * unitRender blends the two overlays facing the world NW light by the hull's current rotation. */
+function lightOverlay(g: Grid, s: number, lx: number, ly: number, strength: number): HTMLCanvasElement {
+  const w = g[0].length, h = g.length;
+  const pad = HULL_PAD * s;
+  const c = createCanvas(w + pad * 2, h + pad * 2);
+  const ctx = ctx2d(c);
+  const img = ctx.createImageData(c.width, c.height);
+  const bevel = 2 * s;
+  const at = (x: number, y: number) => (x < 0 || y < 0 || x >= w || y >= h ? '.' : g[y][x]);
+  const level = (chr: string) => (chr === '.' ? 0 : TRACK_CHARS.has(chr) ? 1 : 2);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const chr = g[y][x];
+      if (chr === '.') continue;
+      const lv = level(chr);
+      // ramp: -1 (far side) .. 1 (lit side)
+      const t = lx * (((x + 0.5) / w) * 2 - 1) + ly * (((y + 0.5) / h) * 2 - 1);
+      let v = t * (t > 0 ? 0.2 : 0.26);
+      for (let k = 1; k <= bevel; k++) {
+        const f = 1 - (k - 1) / bevel;
+        const toward = level(at(x + lx * k, y + ly * k));
+        const away = level(at(x - lx * k, y - ly * k));
+        if (toward < lv) { v += 0.46 * f; break; }
+        if (away > lv) { v -= 0.42 * f; break; }     // running gear in the shadow of the raised deck
+        if (away < lv) { v -= 0.4 * f; break; }
+      }
+      v *= strength;
+      const o = ((y + pad) * c.width + x + pad) * 4;
+      const col = v > 0 ? 255 : 0;
+      img.data[o] = col; img.data[o + 1] = col; img.data[o + 2] = v > 0 ? 244 : 8;
+      img.data[o + 3] = Math.min(255, Math.round(Math.abs(v) * 255));
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+
+/** Everything unitRender needs to draw one vehicle part as a lit volume on the ground. */
+export interface VehiclePartArt {
+  /** The part itself (hull: with its ambient-occlusion ring baked under it), pivot at centre. */
+  body: HTMLCanvasElement;
+  /** Soft silhouette shadow, same size/pivot as `body`: drawn rotated like the body but
+   * translated `shadowOffset` px (1x) to the screen SE. */
+  shadow: HTMLCanvasElement;
+  /** Shadow throw in 1x px along each screen axis (scaled to the vehicle's height). */
+  shadowOffset: number;
+  /** Light overlays for light arriving from the part's local west / east / north / south. */
+  light: { w: HTMLCanvasElement; e: HTMLCanvasElement; n: HTMLCanvasElement; s: HTMLCanvasElement };
+}
+
+/** Number of pre-rendered rotations per vehicle part (5.6 degree steps). */
+export const VEHICLE_FACINGS = 64;
+
+/** wf19: one ready-to-blit frame of a part at rotation step `step` (of VEHICLE_FACINGS): the soft
+ * cast shadow thrown to the SCREEN south-east, the body rotated to the step's angle, and the two
+ * light overlays that face the screen-NW light at that angle, weighted by how squarely they face
+ * it. Square canvas, pivot at the exact centre, `scale` px per 1x px. Pre-rendering the frames
+ * (cached by sprites.ts) makes a lit, shadowed vehicle cost one unrotated blit per part — cheaper
+ * than the two rotated blits the flat sprites used to cost. */
+export function composeVehicleFrame(art: VehiclePartArt, step: number, scale: number, shadowAlpha = 1): HTMLCanvasElement {
+  const sc = scale >= 2 ? 2 : 1;
+  const rad = (step / VEHICLE_FACINGS) * Math.PI * 2;
+  const bw = art.body.width, bh = art.body.height;
+  const off = art.shadowOffset * sc;
+  const half = Math.ceil(Math.hypot(bw, bh) / 2 + off) + 1;
+  const c = createCanvas(half * 2, half * 2);
+  const ctx = ctx2d(c);
+  if (off > 0) {
+    ctx.save();
+    ctx.globalAlpha = shadowAlpha;
+    ctx.translate(half + off, half + off);
+    ctx.rotate(rad);
+    ctx.drawImage(art.shadow, -bw / 2, -bh / 2);
+    ctx.restore();
+  }
+  const cs = Math.cos(rad), sn = Math.sin(rad);
+  // unit vector toward the light (screen NW) expressed in the part's local frame
+  const lx = (-cs - sn) * Math.SQRT1_2, ly = (sn - cs) * Math.SQRT1_2;
+  ctx.save();
+  ctx.translate(half, half);
+  ctx.rotate(rad);
+  ctx.drawImage(art.body, -bw / 2, -bh / 2);
+  const ax = Math.abs(lx), ay = Math.abs(ly);
+  if (ax > 0.02) { ctx.globalAlpha = ax; ctx.drawImage(lx < 0 ? art.light.w : art.light.e, -bw / 2, -bh / 2); }
+  if (ay > 0.02) { ctx.globalAlpha = ay; ctx.drawImage(ly < 0 ? art.light.n : art.light.s, -bw / 2, -bh / 2); }
+  ctx.restore();
+  return c;
+}
+
+/** Approximate overall heights (m): drives the length of the cast shadow. */
+const HEIGHT_M: Record<string, number> = {
+  pz3j: 2.5, pz4f1: 2.68, pz4gh: 2.68, stug3g: 2.16, panther: 2.99, tiger: 3.0, sdkfz251: 1.75, marder3: 2.48,
+  t26: 2.24, bt7: 2.42, t34_76: 2.45, t34_85: 2.7, kv1: 2.71, is2: 2.73, t70: 2.04, su76: 2.1, su85: 2.45,
+};
+/** Height of the hull deck alone (what the hull's own shadow is cast from) and turret above it. */
+export function vehicleHeightM(defId: string): number { return HEIGHT_M[defId] ?? 2.5; }
+
+function partExtras(g: Grid, s: number, shadowOffset: number, lightStrength: number): Omit<VehiclePartArt, 'body'> {
+  const pad = HULL_PAD * s;
+  const sil = silhouette(g, pad);
+  const shadow = maskToCanvas(blurMask(sil.m, sil.cw, sil.ch, 2 * s), sil.cw, sil.ch, [6, 8, 14], 0.7);
+  return {
+    shadow, shadowOffset,
+    light: {
+      w: lightOverlay(g, s, -1, 0, lightStrength), e: lightOverlay(g, s, 1, 0, lightStrength),
+      n: lightOverlay(g, s, 0, -1, lightStrength), s: lightOverlay(g, s, 0, 1, lightStrength),
+    },
+  };
 }
 
 /** Scorch + dent + ember pass shared by hull and turret knocked-out states.
@@ -937,6 +1145,33 @@ const HULL_CANON: Record<HullFamily, { w: number; h: number }> = {
 };
 
 export function buildVehicleHull(defId: string, lengthM: number, widthM: number, state: 'ok' | 'knockedOut', scale = 1): HTMLCanvasElement {
+  return hullPart(defId, lengthM, widthM, state, scale).canvas;
+}
+
+/** Hull or turret with its shadow sprite and light overlays (see VehiclePartArt). */
+export function buildVehiclePart(defId: string, part: 'hull' | 'turret', lengthM: number, widthM: number, state: 'ok' | 'knockedOut', scale = 1): VehiclePartArt {
+  const sc = scale >= 2 ? 2 : 1;
+  const built = part === 'hull' ? hullPart(defId, lengthM, widthM, state, sc) : turretPart(defId, lengthM, widthM, state, sc);
+  if (!built.grid) {
+    const e = createCanvas(1, 1);
+    return { body: built.canvas, shadow: e, shadowOffset: 0, light: { w: e, e, n: e, s: e } };
+  }
+  const hM = vehicleHeightM(defId);
+  const hasTurret = specOf(defId).turret !== 'none';
+  // hull: thrown from the deck height (tanks ~60% of overall height); turret: only its own rise
+  // above the deck, so its shadow lies short on the hull top and the barrel's on the ground.
+  const offset = part === 'hull' ? (hasTurret ? hM * 0.7 : hM * 0.9) * 3 : hM * 0.3 * 3;
+  const strength = state === 'knockedOut' ? 0.55 : 1;
+  return { body: built.canvas, ...partExtras(built.grid, sc, offset, strength) };
+}
+
+function hashStr(str: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+
+function hullPart(defId: string, lengthM: number, widthM: number, state: 'ok' | 'knockedOut', scale = 1): { canvas: HTMLCanvasElement; grid: Grid | null } {
   const spec = specOf(defId);
   const pal = paletteOf(spec);
   const sc = scale >= 2 ? 2 : 1;
@@ -997,9 +1232,9 @@ export function buildVehicleHull(defId: string, lengthM: number, widthM: number,
   const colorMap = colorMapFor(pal);
   // Round-3: SE cast shadow offset pushed from (+3,+4) to (+4,+6) alongside
   // the alpha bump in gridToCanvas, per the critique's stronger-shadow ask.
-  let canvas = gridToCanvas(grid, colorMap, 4 * sc, 6 * sc, sc);
+  let canvas = gridToCanvas(grid, colorMap, sc, { ao: true, weatherSeed: hashStr(defId) % 9973, exhaust: true });
   if (state === 'knockedOut') canvas = applyKnockedOut(canvas, grid[0].length, gh, sc);
-  return canvas;
+  return { canvas, grid };
 }
 
 // ----------------------------------------------------------- turret build -
@@ -1007,8 +1242,12 @@ const TURRET_CANON_BODY_H = 22;
 const TURRET_CANON_W = 22;
 
 export function buildVehicleTurret(defId: string, lengthM: number, widthM: number, state: 'ok' | 'knockedOut', scale = 1): HTMLCanvasElement {
+  return turretPart(defId, lengthM, widthM, state, scale).canvas;
+}
+
+function turretPart(defId: string, lengthM: number, widthM: number, state: 'ok' | 'knockedOut', scale = 1): { canvas: HTMLCanvasElement; grid: Grid | null } {
   const spec = specOf(defId);
-  if (spec.turret === 'none') return createCanvas(1, 1);
+  if (spec.turret === 'none') return { canvas: createCanvas(1, 1), grid: null };
   const sc = scale >= 2 ? 2 : 1;
   const pal = paletteOf(spec);
   const hullW = Math.max(6, Math.round(widthM * VEH_PX_PER_M));
@@ -1081,8 +1320,9 @@ export function buildVehicleTurret(defId: string, lengthM: number, widthM: numbe
     grid = padded;
   }
 
-  const colorMap = colorMapFor(pal);
-  let canvas = gridToCanvas(grid, colorMap, 0, 0, sc);
+  // wf19: the turret roof sits higher and catches more light than the hull deck => a touch lighter.
+  const colorMap = colorMapFor(pal, 0.09);
+  let canvas = gridToCanvas(grid, colorMap, sc, { weatherSeed: (hashStr(defId) % 9973) + 17 });
   if (state === 'knockedOut') {
     const w2 = grid[0].length;
     canvas = darken(canvas, 0.42);
@@ -1093,5 +1333,5 @@ export function buildVehicleTurret(defId: string, lengthM: number, widthM: numbe
     paintScorchAndDent(octx, w2 * 0.5, topPad + bodyCy, w2 * 0.42, (bodyH + bustleHpx) * 0.4, sc);
     octx.restore();
   }
-  return canvas;
+  return { canvas, grid };
 }

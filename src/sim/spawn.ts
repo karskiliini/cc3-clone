@@ -1,4 +1,5 @@
 import type { BattleState, GameMap, Team, TeamDef, Side, Vec2, Soldier, Vehicle } from '@/shared/types';
+import { TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { angleTo, vadd } from '@/shared/math';
 import { WEAPONS } from '@/data/weapons';
@@ -216,6 +217,94 @@ export function layoutTeamPositions(map: GameMap, anchor: Vec2, offsets: Vec2[])
   return out;
 }
 
+// ------------------------------------------------------------ vehicle deployment spacing ---
+/** Clear ground kept between two deployed hulls, on top of the longer hull's length (metres). */
+export const VEHICLE_DEPLOY_GAP_M = 4;
+
+/** Minimum centre-to-centre distance (tiles) between two deployed vehicles: the longer hull's
+ * length + VEHICLE_DEPLOY_GAP_M, so the hulls can never overlap whatever their facings. */
+export function vehicleDeploySpacing(defA: string, defB: string): number {
+  const la = VEHICLE_DEFS[defA]?.lengthM ?? 6, lb = VEHICLE_DEFS[defB]?.lengthM ?? 6;
+  return (Math.max(la, lb) + VEHICLE_DEPLOY_GAP_M) / TILE_M;
+}
+
+/** Nearest spot to `want` for a `defId` vehicle that is vehicle-passable, inside `side`'s deploy
+ * zone and at least `vehicleDeploySpacing` from every vehicle in `others`. Among near-equal
+ * candidates it prefers a STAGGERED one (echeloned fore/aft of its neighbours along the heading
+ * towards the enemy) over one exactly abreast. Deterministic — no rng — so it never perturbs the
+ * battle's random stream. Returns `want` unchanged when it is already fine (or nothing better
+ * exists within the search radius). */
+export function findVehicleDeploySpot(state: BattleState, side: Side, defId: string, want: Vec2, others: readonly Vehicle[]): Vec2 {
+  const map = state.map;
+  const zone = map.def.deployZones[side];
+  // only hold the search to the deploy zone when the wanted spot is itself inside it
+  const zoned = want.x >= zone.x && want.x < zone.x + zone.w && want.y >= zone.y && want.y < zone.y + zone.h;
+  const clear = (p: Vec2): boolean => others.every((o) => Math.hypot(o.pos.x - p.x, o.pos.y - p.y) >= vehicleDeploySpacing(defId, o.defId));
+  const okTile = (x: number, y: number): boolean =>
+    x >= 0 && y >= 0 && x < map.width && y < map.height
+    && (!zoned || (x + 0.5 >= zone.x && x + 0.5 < zone.x + zone.w && y + 0.5 >= zone.y && y + 0.5 < zone.y + zone.h))
+    && isPassable(map, x, y, 'vehicle');
+  if (clear(want)) return want;
+  const heading = formationBaseHeading(map, side);
+  const fx = Math.sin(heading), fy = -Math.cos(heading);
+  const tx = Math.floor(want.x), ty = Math.floor(want.y);
+  let best: Vec2 | null = null;
+  let bestScore = Infinity;
+  for (let r = 1; r <= 24; r++) {
+    if (best && r > bestScore + 2) break;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const x = tx + dx, y = ty + dy;
+        if (!okTile(x, y)) continue;
+        const p = { x: x + 0.5, y: y + 0.5 };
+        if (!clear(p)) continue;
+        let score = Math.hypot(p.x - want.x, p.y - want.y);
+        // staggered beats abreast / nose-to-tail: penalise lining up with a near neighbour
+        for (const o of others) {
+          const ox = p.x - o.pos.x, oy = p.y - o.pos.y;
+          if (Math.hypot(ox, oy) > vehicleDeploySpacing(defId, o.defId) * 1.8) continue;
+          const along = Math.abs(ox * fx + oy * fy), across = Math.abs(-ox * fy + oy * fx);
+          if (along < 1.5 || across < 1.5) score += 2;
+        }
+        if (score < bestScore) { bestScore = score; best = p; }
+      }
+    }
+  }
+  return best ?? want;
+}
+
+/** Move one deployed vehicle team (hull, team anchor and mounted crew) to `pos`. */
+function placeVehicleTeam(state: BattleState, veh: Vehicle, pos: Vec2): void {
+  veh.pos = { x: pos.x, y: pos.y };
+  const team = state.teams.get(veh.teamId);
+  if (!team) return;
+  team.pos = { x: pos.x, y: pos.y };
+  for (const sid of team.soldierIds) {
+    const so = state.soldiers.get(sid);
+    if (so && so.vehicleId === veh.id) so.pos = { x: pos.x, y: pos.y };
+  }
+}
+
+/** Auto-deployment pass for `side`'s vehicles (run after aiDeploy / the deploy screen's Auto):
+ * any vehicle closer than hull length + 4 m to one already settled is moved to the nearest free,
+ * vehicle-passable, staggered spot in the deploy zone, and every vehicle is turned to face the
+ * enemy. Deterministic and rng-free. */
+export function spaceOutVehicles(state: BattleState, side: Side): void {
+  if (state.phase !== 'deploy') return;
+  const heading = formationBaseHeading(state.map, side);
+  const settled: Vehicle[] = [];
+  for (const v of state.vehicles.values()) if (v.side !== side) settled.push(v);
+  for (const v of state.vehicles.values()) {
+    if (v.side !== side) continue;
+    const spot = findVehicleDeploySpot(state, side, v.defId, v.pos, settled);
+    if (spot.x !== v.pos.x || spot.y !== v.pos.y) placeVehicleTeam(state, v, spot);
+    v.hullFacing = heading;
+    v.turretFacing = heading;
+    settled.push(v);
+  }
+}
+
 /** Create a Team (and its soldiers, and its Vehicle if the def specifies one) at `pos`. */
 export function spawnTeam(state: BattleState, def: TeamDef, side: Side, pos: Vec2, rng: Rng): Team {
   const teamId = state.nextId++;
@@ -244,8 +333,10 @@ export function spawnTeam(state: BattleState, def: TeamDef, side: Side, pos: Vec
   let vehicle: Vehicle | null = null;
   if (def.vehicleDefId) {
     const vdef = VEHICLE_DEFS[def.vehicleDefId];
-    const centre = { x: state.map.width / 2, y: state.map.height / 2 };
-    const facing = angleTo(pos, centre);
+    // never on top of a vehicle already on the map, and facing the enemy's side of it
+    pos = findVehicleDeploySpot(state, side, def.vehicleDefId, pos, Array.from(state.vehicles.values()));
+    team.pos = { x: pos.x, y: pos.y };
+    const facing = formationBaseHeading(state.map, side);
     vehicle = {
       id: state.nextId++,
       teamId,

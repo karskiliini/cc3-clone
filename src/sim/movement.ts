@@ -58,6 +58,8 @@ export function stepMovement(state: BattleState, rng: Rng, dt: number): void {
     }
 
     s.cover = coverAt(state.map, s.pos);
+    // knocked down by a blast (spec 2026-09-17 §4): lies where he landed until the stun ends
+    if (s.stunnedUntil != null && state.time < s.stunnedUntil) { s.animFrame = 0; continue; }
 
     // First-fire shock (spec §11): frozen soldiers do not move at all.
     if (isFirstFireFrozen(state, s.id)) continue;
