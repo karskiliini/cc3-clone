@@ -9,3 +9,4 @@ tools/uiScreens_shots/
 test-results/
 .scratch/
 !public/sprites/*.png
+__pycache__/

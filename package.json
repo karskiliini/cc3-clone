@@ -8,7 +8,13 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "sprites:vehicles": "blender -b -P tools/blender/vehicles.py --",
+    "sprites:weapons": "blender -b -P tools/blender/weapons.py --",
+    "sprites:soldiers": "blender -b -P tools/blender/soldiers.py -- --jobs 4",
+    "sprites:items": "blender -b -P tools/blender/items.py --",
+    "sprites:sheets": "python3 tools/blender/contact_sheet.py",
+    "sprites": "npm run sprites:soldiers && npm run sprites:items && npm run sprites:vehicles && npm run sprites:weapons"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

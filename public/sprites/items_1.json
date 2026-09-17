@@ -1,0 +1,280 @@
+{
+ "scale": 1,
+ "cell": {
+  "w": 28,
+  "h": 28
+ },
+ "anchor": {
+  "x": 14,
+  "y": 14
+ },
+ "columns": 16,
+ "dirs": 16,
+ "entries": {
+  "item.kar98k": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.mosin": {
+   "start": 16,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.svt40": {
+   "start": 32,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.kar98k_scoped": {
+   "start": 48,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.mosin_scoped": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.mp40": {
+   "start": 80,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.ppsh41": {
+   "start": 96,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.mg34": {
+   "start": 112,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.dp28": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.pistol": {
+   "start": 144,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.grenade_stick": {
+   "start": 160,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.grenade_egg": {
+   "start": 176,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.panzerfaust": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.panzerschreck": {
+   "start": 208,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.ptrd": {
+   "start": 224,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.satchel": {
+   "start": 240,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.ammo_pouch": {
+   "start": 256,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.ammo_box": {
+   "start": 272,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.belt_box": {
+   "start": 288,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.mortar_bomb": {
+   "start": 304,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.helmet_german": {
+   "start": 320,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.helmet_soviet": {
+   "start": 336,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.backpack": {
+   "start": 352,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.backpack_soviet": {
+   "start": 368,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.bread_bag": {
+   "start": 384,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.greatcoat_roll": {
+   "start": 400,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.entrenching_tool": {
+   "start": 416,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.canteen": {
+   "start": 432,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.canteen_soviet": {
+   "start": 448,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.binoculars": {
+   "start": 464,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.map_case": {
+   "start": 480,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "item.mg42": {
+   "start": 112,
+   "frames": 1,
+   "fps": 0,
+   "loop": false,
+   "alias": "item.mg34"
+  },
+  "item.pistol_p38": {
+   "start": 144,
+   "frames": 1,
+   "fps": 0,
+   "loop": false,
+   "alias": "item.pistol"
+  },
+  "item.pistol_tt": {
+   "start": 144,
+   "frames": 1,
+   "fps": 0,
+   "loop": false,
+   "alias": "item.pistol"
+  },
+  "item.grenade": {
+   "start": 160,
+   "frames": 1,
+   "fps": 0,
+   "loop": false,
+   "alias": "item.grenade_stick"
+  },
+  "item.grenade_german": {
+   "start": 160,
+   "frames": 1,
+   "fps": 0,
+   "loop": false,
+   "alias": "item.grenade_stick"
+  },
+  "item.grenade_soviet": {
+   "start": 176,
+   "frames": 1,
+   "fps": 0,
+   "loop": false,
+   "alias": "item.grenade_egg"
+  },
+  "item.rolled_greatcoat": {
+   "start": 400,
+   "frames": 1,
+   "fps": 0,
+   "loop": false,
+   "alias": "item.greatcoat_roll"
+  },
+  "item.helmet": {
+   "start": 320,
+   "frames": 1,
+   "fps": 0,
+   "loop": false,
+   "alias": "item.helmet_german"
+  },
+  "item.at_rifle": {
+   "start": 224,
+   "frames": 1,
+   "fps": 0,
+   "loop": false,
+   "alias": "item.ptrd"
+  },
+  "item.semi_auto_rifle": {
+   "start": 32,
+   "frames": 1,
+   "fps": 0,
+   "loop": false,
+   "alias": "item.svt40"
+  },
+  "item.mg_belt_box": {
+   "start": 288,
+   "frames": 1,
+   "fps": 0,
+   "loop": false,
+   "alias": "item.belt_box"
+  }
+ },
+ "pxPerM": 10,
+ "figureScale": 1.3
+}

@@ -1,0 +1,154 @@
+{
+ "scale": 1,
+ "cell": {
+  "w": 18,
+  "h": 18
+ },
+ "anchor": {
+  "x": 9,
+  "y": 9
+ },
+ "columns": 48,
+ "dirs": 16,
+ "entries": {
+  "part.torso0": {
+   "start": 0,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "part.torso1": {
+   "start": 16,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "part.torso2": {
+   "start": 32,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "part.head0": {
+   "start": 48,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "helmet": true
+  },
+  "part.head1": {
+   "start": 64,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "helmet": true
+  },
+  "part.head2": {
+   "start": 80,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "helmet": false
+  },
+  "part.arm0": {
+   "start": 96,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "part.arm1": {
+   "start": 112,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "part.arm2": {
+   "start": 128,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "part.leg0": {
+   "start": 144,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "part.leg1": {
+   "start": 160,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "part.leg2": {
+   "start": 176,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "part.boot0": {
+   "start": 192,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "part.boot1": {
+   "start": 208,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "part.boot2": {
+   "start": 224,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "part.torso": {
+   "start": 0,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "alias": "part.torso0"
+  },
+  "part.head": {
+   "start": 48,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "helmet": true,
+   "alias": "part.head0"
+  },
+  "part.arm": {
+   "start": 96,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "alias": "part.arm0"
+  },
+  "part.leg": {
+   "start": 144,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "alias": "part.leg0"
+  },
+  "part.boot": {
+   "start": 192,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "alias": "part.boot0"
+  }
+ },
+ "side": "soviet",
+ "season": "summer",
+ "pxPerM": 10,
+ "figureScale": 1.3,
+ "tiltDeg": 12.0,
+ "weapons": [
+  "rifle",
+  "smg",
+  "lmg"
+ ]
+}

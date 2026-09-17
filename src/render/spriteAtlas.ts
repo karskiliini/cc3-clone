@@ -157,12 +157,16 @@ export function loadAtlas(name: string): Promise<Atlas | null> {
  * Idempotent; resolves when every atlas is ready or known missing. `onProgress` gets 0..1. */
 export function requestBattleAtlases(sides: readonly Side[], season: Season, onProgress?: (p: number) => void): Promise<void> {
   const names = battleAtlasNames(sides, season);
-  wanted = names;
+  // Only the scale-1 set is fetched up front. The scale-2 images are several times larger (a
+  // soldier atlas decodes to ~170 MB) and are fetched by `atlasForZoom` the first time the player
+  // zooms in; until they arrive the scale-1 frames are drawn enlarged.
+  const upfront = names.filter((n) => !n.endsWith('_2'));
+  wanted = upfront;
   for (const name of Array.from(slots.keys())) {
     if (name.startsWith('soldiers_') && !names.includes(name)) slots.delete(name);
   }
   let done = 0;
-  return Promise.all(names.map((n) => loadAtlas(n).then(() => { done++; onProgress?.(done / names.length); }))).then(() => undefined);
+  return Promise.all(upfront.map((n) => loadAtlas(n).then(() => { done++; onProgress?.(done / upfront.length); }))).then(() => undefined);
 }
 
 /** 0..1 over the atlases of the last requestBattleAtlases (1 when nothing was requested). A missing
@@ -195,8 +199,19 @@ export function drawAtlasFrame(ctx: CanvasRenderingContext2D, atlas: Atlas | nul
   return true;
 }
 
+/** The atlas to draw from at this zoom: the matching scale when it is ready; otherwise the other
+ * scale (frames are resized by zoom / scale), while the wanted one is fetched in the background. */
+export function atlasForZoom(nameOf: (scale: 1 | 2) => string, zoom: number): Atlas | null {
+  const scale = atlasScaleForZoom(zoom);
+  const name = nameOf(scale);
+  const hit = getAtlas(name);
+  if (hit) return hit;
+  if (!slots.has(name)) void loadAtlas(name);
+  return getAtlas(nameOf(scale === 2 ? 1 : 2));
+}
+
 export function soldierAtlas(side: Side, season: Season, zoom: number): Atlas | null {
-  return getAtlas(soldierAtlasName(side, season, atlasScaleForZoom(zoom)));
+  return atlasForZoom((sc) => soldierAtlasName(side, season, sc), zoom);
 }
 
 /** Draw a soldier frame from the first key of `keys` the atlas carries (see
@@ -219,7 +234,7 @@ export function drawVehiclePart(
   ctx: CanvasRenderingContext2D, defId: string, part: 'hull' | 'turret', state: 'ok' | 'knockedOut',
   partRad: number, hullRad: number, x: number, y: number, zoom: number,
 ): boolean {
-  const atlas = getAtlas(vehicleAtlasName(atlasScaleForZoom(zoom)));
+  const atlas = atlasForZoom(vehicleAtlasName, zoom);
   if (!atlas) return false;
   const key = `${defId}.${part}.${state === 'ok' ? 'ok' : 'ko'}`;
   if (!atlas.meta.entries[key]) return false;
@@ -238,7 +253,7 @@ export function drawVehiclePart(
 /** True when the vehicles atlas can draw every part this vehicle needs (so hull and turret never
  * mix atlas and code-made art). */
 export function vehicleAtlasHas(defId: string, state: 'ok' | 'knockedOut', hasTurret: boolean, zoom: number): boolean {
-  const atlas = getAtlas(vehicleAtlasName(atlasScaleForZoom(zoom)));
+  const atlas = atlasForZoom(vehicleAtlasName, zoom);
   if (!atlas || !atlas.image) return false;
   const st = state === 'ok' ? 'ok' : 'ko';
   return !!atlas.meta.entries[`${defId}.hull.${st}`] && (!hasTurret || !!atlas.meta.entries[`${defId}.turret.${st}`]);
@@ -247,11 +262,28 @@ export function vehicleAtlasHas(defId: string, state: 'ok' | 'knockedOut', hasTu
 export function drawWeapon(
   ctx: CanvasRenderingContext2D, weaponId: string, variant: 'ready' | 'half' | 'packed', rad: number, x: number, y: number, zoom: number,
 ): boolean {
-  const atlas = getAtlas(weaponAtlasName(atlasScaleForZoom(zoom)));
+  const atlas = atlasForZoom(weaponAtlasName, zoom);
   if (!atlas) return false;
   const key = `${weaponId}.${variant === 'ready' ? 'setup' : variant}`;
   if (!atlas.meta.entries[key]) return false;
   const dirs = atlas.meta.dirs;
   const dir = ((Math.round((rad / (Math.PI * 2)) * dirs) % dirs) + dirs) % dirs;
   return drawAtlasFrame(ctx, atlas, key, dir, 0, x, y, zoom);
+}
+
+/** Draw a crew-served weapon in the first of `states` its atlas carries (drill-step looks such as
+ * 'trailLeftOpen' or 'recoil' first, then the legacy 'setup' / 'half' / 'packed'). Returns the state
+ * drawn, or null when the atlas has none of them (caller draws the code sprite). */
+export function drawWeaponState(
+  ctx: CanvasRenderingContext2D, weaponId: string, states: readonly string[], rad: number, x: number, y: number, zoom: number,
+): string | null {
+  const atlas = atlasForZoom(weaponAtlasName, zoom);
+  if (!atlas) return null;
+  const dirs = atlas.meta.dirs;
+  const dir = ((Math.round((rad / (Math.PI * 2)) * dirs) % dirs) + dirs) % dirs;
+  for (const st of states) {
+    const key = `${weaponId}.${st}`;
+    if (atlas.meta.entries[key] && drawAtlasFrame(ctx, atlas, key, dir, 0, x, y, zoom)) return st;
+  }
+  return null;
 }
