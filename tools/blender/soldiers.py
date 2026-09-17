@@ -71,6 +71,9 @@ PALETTES = {
 import kit as K  # noqa: E402
 from kit import MeshB, Rx, Ry, Rz, T, S  # noqa: E402
 
+for _pal in PALETTES.values():      # side-neutral scorched vehicle debris
+    _pal.update(burnt=("#33302c", 0.75), rust=("#6e4429", 0.85), bare=("#8d9094", 0.35), rubber=("#1e1e1e", 0.9))
+
 # ------------------------------------------------------------------------------------------
 # the figure (dimensions in metres before FIG scaling)
 # ------------------------------------------------------------------------------------------
@@ -81,6 +84,93 @@ NECK = Vector((0, 0.0, 0.46))
 L_UARM, L_FARM = 0.29, 0.27
 L_THIGH, L_SHIN = 0.44, 0.43
 ANKLE = 0.08
+
+
+DEBRIS = ("plate0", "plate1", "plate2", "wheel0", "wheel1", "wheel2", "hatch0", "hatch1", "hatch2")
+
+
+def build_debris_meshes():
+    """Vehicle wreck debris for the parts atlas, TRUE scale (vehicles are not enlarged like the men):
+    built in metres and shrunk by 1/FIG because the rig root scales everything by FIG."""
+    M = {}
+    k = 1.0 / FIG
+
+    def fin(b):
+        M[b.name] = b.finish(scale=k)
+
+    b = MeshB("plate0")                 # torn plate, one end bent up
+    b.box("burnt", (0.80, 0.55, 0.045), (-0.10, 0, 0.04), rot=(0, 4, 0), bevel=0.01)
+    b.box("burnt", (0.36, 0.50, 0.045), (0.40, 0.02, 0.13), rot=(0, -32, 8), bevel=0.01)
+    b.box("bare", (0.80, 0.035, 0.05), (-0.10, 0.275, 0.042), rot=(0, 4, 0), bevel=0.004)
+    b.box("rust", (0.05, 0.50, 0.05), (-0.50, 0, 0.07), rot=(0, 4, 10), bevel=0.004)
+    fin(b)
+    b = MeshB("plate1")                 # small jagged fragment
+    b.box("burnt", (0.52, 0.40, 0.04), (0, 0, 0.04), rot=(6, 0, 20), bevel=0.01)
+    b.box("burnt", (0.24, 0.22, 0.04), (0.26, 0.20, 0.10), rot=(-30, -25, 50), bevel=0.01)
+    b.box("rust", (0.50, 0.04, 0.045), (-0.06, -0.18, 0.045), rot=(6, 0, 20), bevel=0.004)
+    b.box("bare", (0.04, 0.30, 0.045), (-0.24, 0.02, 0.05), rot=(6, 0, 20), bevel=0.004)
+    fin(b)
+    b = MeshB("plate2")                 # long twisted strip (track guard / side skirt)
+    for i_, (x, tw, zz) in enumerate(((-0.40, -14, 0.05), (0.0, 6, 0.07), (0.38, 30, 0.13))):
+        b.box("burnt", (0.42, 0.32, 0.035), (x, 0.02 * i_, zz), rot=(tw, -6 * i_, 4 * i_), bevel=0.008)
+    b.box("bare", (1.10, 0.03, 0.04), (0, 0.17, 0.08), rot=(8, -5, 3), bevel=0.004)
+    b.box("rust", (0.30, 0.10, 0.04), (-0.35, -0.08, 0.075), rot=(-14, 0, 0), bevel=0.004)
+    fin(b)
+
+    b = MeshB("wheel0")                 # road wheel with rubber tyre
+    b.xf = T((0, 0, 0.08)) @ Rx(9)
+    b.tube("rubber", 0.34, 0.34, (0, 0, -0.06), (0, 0, 0.06), segs=18)
+    b.tube("burnt", 0.26, 0.25, (0, 0, -0.065), (0, 0, 0.075), segs=16)
+    b.tube("bare", 0.09, 0.07, (0, 0, 0.07), (0, 0, 0.12), segs=10)
+    for i_ in range(6):
+        a_ = i_ * math.pi / 3
+        b.ball("rubber", (0.035, 0.035, 0.02), (0.17 * math.cos(a_), 0.17 * math.sin(a_), 0.078), segs=6, rings=4)
+    fin(b)
+    b = MeshB("wheel1")                 # bare steel road wheel, tyre burnt off
+    b.xf = T((0, 0, 0.07)) @ Rx(-7) @ Ry(5)
+    b.tube("rust", 0.33, 0.33, (0, 0, -0.05), (0, 0, 0.05), segs=18)
+    b.torus("bare", 0.33, 0.025, (0, 0, 0.05), seg=18, sides=6)
+    b.tube("burnt", 0.24, 0.22, (0, 0, 0.04), (0, 0, 0.07), segs=16)
+    b.tube("bare", 0.08, 0.06, (0, 0, 0.06), (0, 0, 0.11), segs=10)
+    fin(b)
+    b = MeshB("wheel2")                 # drive sprocket
+    b.xf = T((0, 0, 0.07)) @ Rx(6)
+    b.tube("burnt", 0.30, 0.30, (0, 0, -0.05), (0, 0, 0.05), segs=18)
+    for i_ in range(14):
+        a_ = i_ * 2 * math.pi / 14
+        b.box("bare", (0.10, 0.06, 0.10), (0.33 * math.cos(a_), 0.33 * math.sin(a_), 0), rot=(0, 0, math.degrees(a_)), bevel=0.01)
+    b.tube("rust", 0.16, 0.13, (0, 0, 0.05), (0, 0, 0.10), segs=12)
+    b.tube("bare", 0.06, 0.05, (0, 0, 0.10), (0, 0, 0.14), segs=8)
+    fin(b)
+
+    b = MeshB("hatch0")                 # round cupola hatch
+    b.xf = T((0, 0, 0.05)) @ Rx(8) @ Ry(-5)
+    b.tube("burnt", 0.31, 0.31, (0, 0, -0.025), (0, 0, 0.025), segs=18)
+    b.ball("burnt", (0.27, 0.27, 0.06), (0, 0, 0.025), segs=16, rings=6)
+    b.torus("bare", 0.31, 0.018, (0, 0, 0.025), seg=18, sides=5)
+    b.box("rust", (0.16, 0.10, 0.06), (0, -0.33, 0.0), bevel=0.01)
+    b.box("bare", (0.14, 0.03, 0.04), (0, 0.10, 0.09), bevel=0.006)
+    fin(b)
+    b = MeshB("hatch1")                 # rectangular hull hatch
+    b.xf = T((0, 0, 0.05)) @ Rx(-6) @ Ry(7)
+    b.box("burnt", (0.72, 0.50, 0.05), (0, 0, 0), bevel=0.03)
+    b.box("burnt", (0.60, 0.38, 0.02), (0, 0, 0.035), bevel=0.01)
+    b.box("rust", (0.22, 0.14, 0.022), (-0.15, 0.08, 0.036), rot=(0, 0, 20), bevel=0.01)
+    b.box("bare", (0.72, 0.03, 0.055), (0, 0.25, 0.0), bevel=0.004)
+    b.box("bare", (0.16, 0.03, 0.04), (0.12, -0.08, 0.06), bevel=0.006)
+    for x in (-0.22, 0.22):
+        b.box("burnt", (0.08, 0.10, 0.06), (x, -0.28, 0.0), bevel=0.01)
+    fin(b)
+    b = MeshB("hatch2")                 # engine deck grille piece
+    b.xf = T((0, 0, 0.05)) @ Rx(5) @ Ry(-9)
+    for y in (-0.24, 0.24):
+        b.box("burnt", (0.84, 0.05, 0.06), (0, y, 0), bevel=0.008)
+    for x in (-0.40, 0.40):
+        b.box("burnt", (0.05, 0.50, 0.06), (x, 0, 0), bevel=0.008)
+    for i_ in range(7):
+        b.box("bare" if i_ == 2 else "rust" if i_ % 3 == 0 else "burnt", (0.035, 0.46, 0.05), (-0.30 + i_ * 0.10, 0, 0.0), rot=(0, 35, 0), bevel=0.004)
+    fin(b)
+    return M
 
 
 def build_meshes(side):
@@ -178,6 +268,7 @@ def build_meshes(side):
                             math.cos(2 * math.pi * i / 16) * 0.12 * (1 + 0.25 * math.sin(2 * 2 * math.pi * i / 16)), 0.005)) for i in range(16)]
     b.bm.faces.new(ring).material_index = b._mi("tread")
     M["blot"] = b.finish()
+    M.update(build_debris_meshes())
     return M
 
 
@@ -190,8 +281,8 @@ WEAPON_POINTS = {"grip": (0, -0.02, -0.045), "butt_top": (0, -0.28, 0.03), "bolt
 
 PART_NAMES = ["pelvis", "chest", "head", "uarmL", "uarmR", "farmL", "farmR", "handL", "handR",
               "thighL", "thighR", "shinL", "shinR", "footL", "footR", "rifle", "smg", "lmg",
-              "bomb", "shell", "tube", "plate", "mgun", "tripod", "box", "stain", "blot", "headbare"]
-PROPS = ("bomb", "shell", "tube", "plate", "mgun", "tripod", "box", "stain", "blot", "headbare")
+              "bomb", "shell", "tube", "plate", "mgun", "tripod", "box", "stain", "blot", "headbare"] + list(DEBRIS)
+PROPS = ("bomb", "shell", "tube", "plate", "mgun", "tripod", "box", "stain", "blot", "headbare") + DEBRIS
 
 
 class Rig:
@@ -1216,12 +1307,26 @@ def a_part(kind, n):
     return f
 
 
+def a_debris(name, n):
+    def f(t, w):
+        p = sprawl(weapon=None)
+        p["only"] = [name]
+        p["props"] = {name: ("root", (0, 0, 0), (0, 0, (15, -40, 70)[n])),
+                      "blot": ("root", (0.05, -0.04, 0), (0, 0, n * 50))}     # scorch mark under it
+        return p
+    return f
+
+
 def build_part_entries():
     E = {}
     for kind in PART_SETS:
         for n in range(3):
             E[f"part.{kind}{n}"] = dict(fn=a_part(kind, n), frames=1, fps=1, loop=False, weapons=("rifle",), shadow=True,
                                         sample="loop", extra=dict(helmet=(kind == "head" and n < 2)) if kind == "head" else {})
+    for kind in ("plate", "wheel", "hatch"):       # appended: vehicle debris (true scale, side-neutral)
+        for n in range(3):
+            E[f"part.{kind}{n}"] = dict(fn=a_debris(f"{kind}{n}", n), frames=1, fps=1, loop=False, weapons=("rifle",),
+                                        shadow=True, sample="loop", extra=dict(debris=True))
     return E
 
 
@@ -1733,7 +1838,7 @@ def render_atlas(side, season, scale, only, force, pack_only, samples, kind="sol
         meta = packer.save(base, extra=dict(side=side, season=season, pxPerM=10 * scale, figureScale=FIG,
                                             tiltDeg=C.TILT_DEG, weapons=["rifle", "smg", "lmg"]))
         if parts:
-            ALIASES_ = {f"part.{k_}": f"part.{k_}0" for k_ in PART_SETS}
+            ALIASES_ = {f"part.{k_}": f"part.{k_}0" for k_ in list(PART_SETS) + ["plate", "wheel", "hatch"]}
         else:
             ALIASES_ = ALIASES
         for k in list(meta["entries"]):       # entries that never show a weapon also answer to @none

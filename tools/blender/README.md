@@ -66,6 +66,9 @@ Sheets go to `ref/wf21/`. Backdrops: `ref/wf18/full_steppe_grass_z1.png`, `ref/w
 * Ragdoll flights carry no shadow and almost no baked height (the game adds the arc and the shadow).
 
 ## Parts atlases (`parts_<side>_<season>_<1|2>`): cell 18 px (36), anchor centre, `part.<kind><0..2>`.
+Body parts: torso, head, arm, leg, boot (1.3× like the men). Vehicle debris (appended, TRUE scale, same pixels in every
+palette, `debris: true`): plate0..2 (torn armour), wheel0..2 (tyred road wheel, bare road wheel, sprocket),
+hatch0..2 (round cupola hatch, rectangular hatch, engine grille). `part.<kind>` aliases variant 0.
 ## Items atlas (`items_<1|2>`): cell 28 px (56), anchor centre, `item.<id>`, direction 0 = long axis north.
 
 ## Render timings (Apple M5 Pro, Cycles CPU, 8 samples × 2× supersampling)

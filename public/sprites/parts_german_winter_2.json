@@ -104,6 +104,69 @@
    "fps": 1,
    "loop": false
   },
+  "part.plate0": {
+   "start": 240,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "debris": true
+  },
+  "part.plate1": {
+   "start": 256,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "debris": true
+  },
+  "part.plate2": {
+   "start": 272,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "debris": true
+  },
+  "part.wheel0": {
+   "start": 288,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "debris": true
+  },
+  "part.wheel1": {
+   "start": 304,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "debris": true
+  },
+  "part.wheel2": {
+   "start": 320,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "debris": true
+  },
+  "part.hatch0": {
+   "start": 336,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "debris": true
+  },
+  "part.hatch1": {
+   "start": 352,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "debris": true
+  },
+  "part.hatch2": {
+   "start": 368,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "debris": true
+  },
   "part.torso": {
    "start": 0,
    "frames": 1,
@@ -139,6 +202,30 @@
    "fps": 1,
    "loop": false,
    "alias": "part.boot0"
+  },
+  "part.plate": {
+   "start": 240,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "debris": true,
+   "alias": "part.plate0"
+  },
+  "part.wheel": {
+   "start": 288,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "debris": true,
+   "alias": "part.wheel0"
+  },
+  "part.hatch": {
+   "start": 336,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "debris": true,
+   "alias": "part.hatch0"
   }
  },
  "side": "german",
