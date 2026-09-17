@@ -419,7 +419,7 @@ export function blastForce(weapon: WeaponDef, dTiles: number): number {
   return (1 - dTiles / radiusTiles) * clamp(weapon.heRadiusM / 6, 0.4, 1.5);
 }
 
-/** Spec 2026-09-17 §4, sim side: an HE burst throws a man 0.5-3 m straight away from it (scaled
+/** Spec 2026-09-17 §4, sim side: an HE burst throws a man 0.5-15 m straight away from it (scaled
  * by force; never through a wall, a vehicle, water or off the map — it stops at the last passable
  * point), records the `blast` for the renderer's ragdoll, and knocks a SURVIVOR inside the inner
  * half of the radius down: prone, path dropped, unable to act for 1.5-4 s (longer when wounded or
@@ -430,7 +430,9 @@ export function applyBlastKnockback(state: BattleState, rng: Rng, s: Soldier, bu
   const force = blastForce(weapon, d);
   if (force <= 0.05) return;
   const ang = d > 1e-3 ? Math.atan2(s.pos.y - burst.y, s.pos.x - burst.x) : rng.range(0, Math.PI * 2);
-  const throwM = clamp(0.5 + force * 2, 0.5, 3);
+  // User request: a big enough, close enough blast throws a man up to 15 m. Quadratic in force, so
+  // a grenade at arm's length gives about 3 m, a mortar bomb about 7 m, a 122 mm shell the full 15 m.
+  const throwM = clamp(0.5 + force * force * 6.5, 0.5, 15);
   const origin = { x: s.pos.x, y: s.pos.y };
   const ux = Math.cos(ang), uy = Math.sin(ang);
   const steps = Math.ceil((throwM / TILE_M) / 0.2);

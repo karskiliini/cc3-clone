@@ -207,8 +207,15 @@ function separateSoldiers(state: BattleState): void {
         const d = dist(a.pos, b.pos);
         if (d < 0.3) {
           const dir = d > 1e-4 ? vnorm(vsub(b.pos, a.pos)) : { x: 1, y: 0 };
-          a.pos = clampToMap(state, vsub(a.pos, vscale(dir, 0.05)));
-          b.pos = clampToMap(state, vadd(b.pos, vscale(dir, 0.05)));
+          // A man lying stunned after a blast is not slid along the ground by his neighbours:
+          // only the man who can move steps aside (both steps, so the pair still separates).
+          const aDown = a.stunnedUntil != null && state.time < a.stunnedUntil;
+          const bDown = b.stunnedUntil != null && state.time < b.stunnedUntil;
+          if (aDown && bDown) continue;
+          const aStep = aDown ? 0 : bDown ? 0.1 : 0.05;
+          const bStep = bDown ? 0 : aDown ? 0.1 : 0.05;
+          if (aStep) a.pos = clampToMap(state, vsub(a.pos, vscale(dir, aStep)));
+          if (bStep) b.pos = clampToMap(state, vadd(b.pos, vscale(dir, bStep)));
         }
       }
     }

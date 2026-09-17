@@ -87,6 +87,7 @@ function addSpotter(state: BattleState, pos: Vec2): Soldier {
 }
 
 /** Steps the crew-weapon and combat systems; returns HE impact points and their times. */
+const HOME = new WeakMap<Soldier, Vec2>();
 function run(state: BattleState, rng: Rng, seconds: number): { pos: Vec2; t: number }[] {
   const out: { pos: Vec2; t: number }[] = [];
   const steps = Math.round(seconds / SIM_DT);
@@ -98,8 +99,15 @@ function run(state: BattleState, rng: Rng, seconds: number): { pos: Vec2; t: num
     state.explosions.length = 0;
     state.tracers.length = 0;
     state.events.length = 0;
-    // keep the test observers steady: no one panics or runs from falling shells
-    for (const s of state.soldiers.values()) { s.suppression = 0; s.mind.stress = 0; s.activity = 'defending'; s.health = 'healthy'; }
+    // keep the test observers steady: no one panics, runs from falling shells, or is thrown or
+    // stunned by a blast (knockback would drift the spotted enemy out of the target area and
+    // change the observation tier, which is real behaviour but not what these tests measure)
+    for (const s of state.soldiers.values()) {
+      s.suppression = 0; s.mind.stress = 0; s.activity = 'defending'; s.health = 'healthy';
+      let home = HOME.get(s);
+      if (!home) { home = { x: s.pos.x, y: s.pos.y }; HOME.set(s, home); }
+      if (s.blast) { s.pos = { x: home.x, y: home.y }; s.blast = undefined; s.stunnedUntil = undefined; }
+    }
   }
   return out;
 }

@@ -247,9 +247,9 @@ export const RAGDOLL_FLIGHT_VARIANTS = 6;
 export const RAGDOLL_LANDED_VARIANTS = 8;
 export const RAGDOLL_MAX_ACTIVE = 12;
 
-/** Flight time: 0.5 s for a nudge up to 1.1 s for a heavy shell at arm's length. */
+/** Flight time: 0.5 s for a nudge up to 1.9 s for a heavy shell at arm's length (15 m throw). */
 export function ragdollDuration(force: number): number {
-  return Math.max(0.5, Math.min(1.1, 0.5 + 0.45 * force));
+  return Math.max(0.5, Math.min(1.9, 0.5 + 0.62 * force * force));
 }
 
 export interface RagdollSample {

@@ -161,10 +161,10 @@ describe('facing', () => {
 describe('ragdoll flight (pure half)', () => {
   const blast = { from: { x: 10, y: 10 }, time: 100, force: 1, origin: { x: 10.5, y: 10 } };
   const pos = { x: 11.5, y: 10 };
-  it('flies from the pre-blast position and lands exactly on the sim position within 0.5-1.1 s', () => {
-    expect(ragdollDuration(0.1)).toBeCloseTo(0.545, 3);
+  it('flies from the pre-blast position and lands exactly on the sim position within 0.5-1.9 s', () => {
+    expect(ragdollDuration(0.1)).toBeCloseTo(0.5062, 3);
     expect(ragdollDuration(0)).toBe(0.5);
-    expect(ragdollDuration(5)).toBe(1.1);
+    expect(ragdollDuration(5)).toBe(1.9);
     const start = ragdollSample(blast, pos, 100);
     expect(start.x).toBeCloseTo(10.5, 9);
     expect(start.heightM).toBeCloseTo(0, 9);

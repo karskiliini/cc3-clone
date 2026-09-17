@@ -52,7 +52,7 @@ describe('blast knockback', () => {
     expect(blastForce(mortar, mortar.heRadiusM / TILE_M + 0.1)).toBe(0);
   });
 
-  it('throws a man 0.5-3 m straight away from the burst, further for a closer / bigger burst, and records the blast', () => {
+  it('throws a man 0.5-15 m straight away from the burst, further for a closer / bigger burst, and records the blast', () => {
     const throwOf = (w: WeaponDef, dTiles: number) => {
       const state = makeState();
       const s = makeSoldier({ pos: { x: 10.5 + dTiles, y: 10.5 } });
@@ -66,7 +66,7 @@ describe('blast knockback', () => {
       return (s.pos.x - (10.5 + dTiles)) * TILE_M;
     };
     const near = throwOf(mortar, 0.5), far = throwOf(mortar, 2.5), small = throwOf(grenade, 0.5);
-    for (const m of [near, far, small]) { expect(m).toBeGreaterThanOrEqual(0.5 - 1e-6); expect(m).toBeLessThanOrEqual(3 + 1e-6); }
+    for (const m of [near, far, small]) { expect(m).toBeGreaterThanOrEqual(0.5 - 1e-6); expect(m).toBeLessThanOrEqual(15 + 1e-6); }
     expect(near).toBeGreaterThan(far);
     expect(near).toBeGreaterThan(small);
   });
