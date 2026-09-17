@@ -431,8 +431,8 @@ export function applyBlastKnockback(state: BattleState, rng: Rng, s: Soldier, bu
   if (force <= 0.05) return;
   const ang = d > 1e-3 ? Math.atan2(s.pos.y - burst.y, s.pos.x - burst.x) : rng.range(0, Math.PI * 2);
   // User request: a big enough, close enough blast throws a man up to 15 m. Quadratic in force, so
-  // a grenade at arm's length gives about 3 m, a mortar bomb about 7 m, a 122 mm shell the full 15 m.
-  const throwM = clamp(0.5 + force * force * 6.5, 0.5, 15);
+  // a grenade at arm's length gives about 5 m, a mortar bomb about 10 m, a heavy shell the full 15 m.
+  const throwM = clamp(1 + force * force * 9.5, 1, 15);
   const origin = { x: s.pos.x, y: s.pos.y };
   const ux = Math.cos(ang), uy = Math.sin(ang);
   const steps = Math.ceil((throwM / TILE_M) / 0.2);

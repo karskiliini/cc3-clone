@@ -52,7 +52,7 @@ describe('blast knockback', () => {
     expect(blastForce(mortar, mortar.heRadiusM / TILE_M + 0.1)).toBe(0);
   });
 
-  it('throws a man 0.5-15 m straight away from the burst, further for a closer / bigger burst, and records the blast', () => {
+  it('throws a man 1-15 m straight away from the burst, further for a closer / bigger burst, and records the blast', () => {
     const throwOf = (w: WeaponDef, dTiles: number) => {
       const state = makeState();
       const s = makeSoldier({ pos: { x: 10.5 + dTiles, y: 10.5 } });
@@ -66,7 +66,7 @@ describe('blast knockback', () => {
       return (s.pos.x - (10.5 + dTiles)) * TILE_M;
     };
     const near = throwOf(mortar, 0.5), far = throwOf(mortar, 2.5), small = throwOf(grenade, 0.5);
-    for (const m of [near, far, small]) { expect(m).toBeGreaterThanOrEqual(0.5 - 1e-6); expect(m).toBeLessThanOrEqual(15 + 1e-6); }
+    for (const m of [near, far, small]) { expect(m).toBeGreaterThanOrEqual(1 - 1e-6); expect(m).toBeLessThanOrEqual(15 + 1e-6); }
     expect(near).toBeGreaterThan(far);
     expect(near).toBeGreaterThan(small);
   });
@@ -90,7 +90,8 @@ describe('blast knockback', () => {
   it('knocks down survivors in the inner half of the radius only; a stunned man cannot move, fire or throw', () => {
     const state = makeState();
     const inner = makeSoldier({ id: 1, pos: { x: 11, y: 10.5 }, path: [{ x: 20, y: 10 }], activity: 'moving' });
-    const outer = makeSoldier({ id: 2, pos: { x: 12.8, y: 10.5 } });
+    // no grenades for the bystanders: a grenade thrown at the nearby enemy would (rightly) throw the stunned man again
+    const outer = makeSoldier({ id: 2, grenades: 0, pos: { x: 12.8, y: 10.5 } });
     state.soldiers.set(1, inner); state.soldiers.set(2, outer);
     const stress0 = inner.mind.stress;
     applyHESplash(state, new Rng(5), { x: 10.5, y: 10.5 }, mortar, 'german'); // lethality 0: both survive
@@ -105,7 +106,8 @@ describe('blast knockback', () => {
     expect(isStunned(inner, state.time)).toBe(true);
 
     // give him a path and an enemy in plain view: while stunned he neither moves nor fires
-    const enemy = makeSoldier({ id: 3, side: 'german', weaponId: 'kar98k', pos: { x: 16, y: 10.5 } });
+    // no grenades: a grenade landing on the stunned man would (rightly) throw him again
+    const enemy = makeSoldier({ id: 3, side: 'german', weaponId: 'kar98k', grenades: 0, pos: { x: 16, y: 10.5 } });
     state.soldiers.set(3, enemy);
     state.spotted.soviet.add(3);
     inner.path = [{ x: 20, y: 10.5 }];
