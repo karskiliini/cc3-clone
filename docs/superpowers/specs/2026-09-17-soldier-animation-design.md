@@ -308,3 +308,40 @@ harness stays in range (guns and mortars get slower to bring into action, so tun
 - Tests: ammunition pickup when low and compatible; MG takeover by the nearest able man; no pickup
   while pinned or under fire; grenades topped up to the cap; the replaced weapon becomes an item;
   captured weapon has only found rounds; items move with blasts.
+
+## 10. Leaving and re-entering vehicles (user request)
+
+**Dismounting is seen, not instant.** Crew and passengers leave one man at a time through the
+vehicle's hatches (turret crew through turret and cupola hatches, driver and bow gunner through
+hull hatches, halftrack passengers over the rear or sides, open-topped SPG crews over the side away
+from the threat). Each man plays `crew.bailout` (climb out of the hatch, drop down the side, land
+crouched) over about 1.5 to 2.5 s, starting at the hatch position on the hull and ending beside
+it; a panicked bail-out is faster and sloppier and ends in a run, an orderly dismount ends
+kneeling by the vehicle. While climbing out a man is exposed (standing, no cover from the hull)
+and can be hit; a wounded man takes longer; an incapacitated man stays inside unless a comrade
+drags him (not modelled: he stays). A burning vehicle forces everyone out at once, as fast as the
+hatches allow (at most one man per hatch at a time). Mounting is the reverse (`crew.mount`).
+
+**An abandoned vehicle stays a usable object.** A vehicle whose crew bailed out while it was still
+serviceable (not burning, not blown up) is `abandoned` and keeps its damage state and ammunition.
+Its own crew, now infantry beside it, will go back on their own when ALL of these hold:
+- every surviving crewman's mental state has recovered to calm or alert (not shaken, panicked,
+  cowering, routed), which takes longer for green crews and much longer after a heavy hit;
+- no enemy armour or AT weapon they know of has a line of fire to the vehicle right now, or the
+  threat that drove them out is believed gone (the belief model decides, not the truth);
+- the vehicle is within reach and not on fire, and at least one useful system still works
+  (it can move, or fire its gun, or fire an MG).
+Veterans go back sooner and under more risk; recruits may refuse for the rest of the battle after
+a penetrating hit that killed a comrade. The player can also order them back with a Move order
+onto their own vehicle (the cursor shows a mount hint); men who are not calm enough refuse with a
+message ("<team>\nCrew will not go back yet."). Crews never man another team's vehicle.
+
+**They use whatever still works.** Re-manned, the seats are refilled by priority (driver if it can
+move, gunner if the gun works, then loader, commander duties, bow MG), so a short crew in a tank
+with a dead engine fights it as a pillbox, a tank with a wrecked gun but a working engine is
+driven to safety or used for its MGs, and an immobilised tank keeps firing. With nothing useful
+left they do not re-enter. All locational damage and crew-role rules of the damage model apply.
+
+**Feedback.** Messages: "Crew bails out!", "Crew returns to the <vehicle>.", "Crew will not go
+back yet."; the team box shows the abandoned vehicle's state; the vehicle sprite shows open
+hatches while empty (`hull.ok` with hatch overlay if available, else unchanged).
