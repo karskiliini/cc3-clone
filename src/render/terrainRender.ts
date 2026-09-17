@@ -25,7 +25,7 @@
 import type { Camera, GameMap, BattleState, MapVectorFeature, Terrain, Season, Vec2 } from '@/shared/types';
 import { TILE_M, TILE_PX, VIEW_W, VIEW_H } from '@/shared/types';
 import { hash2 } from '@/shared/rng';
-import { fbm, fbm64, fbm14, heightField, fbmClump, angleField } from '@/render/noise';
+import { fbm, fbm64, fbm14, heightField, valueNoise, acquireMarkLayers, stampTufts, stampScuffs, stampTussocks, type MarkLayers, type TuftStyle } from '@/render/noise';
 import { idx, tileAt, inBounds } from '@/sim/map';
 import { TERRAIN_COLORS } from '@/render/palette';
 import { getTreeSprite, getTreeShadowSprite, getSmokePuff, TREE_SPRITE_WORLD_PX, TREE_VARIANTS, type TreeShape } from '@/render/sprites';
@@ -112,16 +112,16 @@ const SUMMER_ROAD_RAMP = ['#78591c', '#8d6a24', '#a27c2e', '#b48c3c', '#c49d50',
 /** stamped gravel highlight / wet rut, sampled from ref_cc3_1479's dirt road */
 const ROAD_GRAVEL: RGB = { r: 205, g: 165, b: 108 };
 const ROAD_WET_RUT: RGB = { r: 106, g: 78, b: 36 };
-const SUMMER_CROPS_RAMP = ['#6e5210', '#8a6a16', '#a27e1e', '#b89226', '#c8a230'];
+const SUMMER_CROPS_RAMP = ['#86660f', '#9e7b16', '#b48e1e', '#c8a128', '#d8b234'];
 // grey-brown debris, not the pinkish-brown palette.ts default (that read as a paint spatter,
 // especially over snow) — used for all seasons since rubble is rubble regardless.
 const RUBBLE_RAMP = ['#6e675c', '#7a7266', '#847c70', '#8a8276'];
 // Summer grass patch ramps (same dark->light positions as the grass ramp so the fine/clump
 // texture carries straight across a patch edge): warm ochre dry-grass and darker brown earth.
-const SUMMER_OCHRE_PATCH: RGB[] = [[84, 68, 24], [102, 84, 32], [120, 100, 42], [138, 116, 54], [154, 132, 68]].map(([r, g, b]) => ({ r, g, b }));
+const SUMMER_OCHRE_PATCH: RGB[] = [[112, 98, 40], [130, 114, 48], [148, 130, 58], [164, 146, 70], [180, 162, 86]].map(([r, g, b]) => ({ r, g, b }));
 const SPECKLE_BROWN: RGB = { r: 94, g: 66, b: 34 }; // ~#6a4a24 warm dirt
 const SPECKLE_OCHRE: RGB = { r: 140, g: 114, b: 54 }; // ~#9a7a38 dry grass
-const SUMMER_BROWN_PATCH: RGB[] = [[62, 50, 28], [76, 62, 34], [90, 74, 42], [104, 88, 52], [118, 102, 64]].map(([r, g, b]) => ({ r, g, b }));
+const SUMMER_BROWN_PATCH: RGB[] = [[88, 76, 40], [102, 88, 46], [116, 100, 54], [130, 114, 64], [144, 128, 76]].map(([r, g, b]) => ({ r, g, b }));
 
 const LOCAL_RAMPS: Partial<Record<Season, Partial<Record<Terrain, string[]>>>> = {
   summer: {
@@ -134,8 +134,11 @@ const LOCAL_RAMPS: Partial<Record<Season, Partial<Record<Terrain, string[]>>>> =
     // is a dry BROWN-OLIVE (R above G), ours had become a yellow-green (R below G). Every stop
     // gains red and loses a little green, which lands the rendered mean back on the reference's
     // hue while the olive base and the speckle layers below are untouched.
-    grass: ['#4a4419', '#5b5420', '#706128', '#7f6c2e', '#918039'],
-    tallgrass: ['#62652a', '#767834', '#8a893e', '#9a984a'],
+    // wf18: sunlit late-summer meadow — a mid olive-green (G a touch above R), ~18% brighter than
+    // the round-5 brown-olive. The warmth now comes from stamped straw tufts, dry patches and
+    // bare-earth scuffs (see the mark layers in paintGroundAndFeatures), not from the base tone.
+    grass: ['#4a501a', '#5a611f', '#6a6f24', '#7d7c2a', '#939036'],
+    tallgrass: ['#4c5823', '#5c6829', '#6e7831', '#80883b'],
     crops: SUMMER_CROPS_RAMP,
     mud: MUD_RAMP,
     dirtroad: SUMMER_ROAD_RAMP,
@@ -145,7 +148,8 @@ const LOCAL_RAMPS: Partial<Record<Season, Partial<Record<Terrain, string[]>>>> =
   },
   autumn: {
     open: ['#8a7a48', '#93844f', '#847338', '#9c8c52', '#b8a850'],
-    grass: ['#6b6a32', '#847f3c', '#9a9348', '#ada55a', '#c0b862'],
+    // wf18: straw and rust — dry tan-olive base; rust/straw tufts come from the mark layer
+    grass: ['#625a2c', '#766a34', '#8a7a3c', '#9e8c48', '#b4a25a'],
     tallgrass: ['#847a34', '#948a3e', '#726a2a', '#a4993f'],
     crops: CROPS_RAMP,
     mud: MUD_RAMP,
@@ -258,18 +262,12 @@ function groundColorFbm(t: Terrain, season: Season, X: number, Y: number, seed: 
   const f14 = fbm14(X, Y, seed + th);
   const g = hash2(X, Y, seed + 31);
   if (t === 'grass' || t === 'open') {
-    // dense 2-5px stipple rather than a smooth 60px cloud wash (ref_cc3_1479 grass lumSD ~18-20):
-    // weaker large-scale term, stronger medium term, plus a ~3px fbm band. Summer drops the
-    // brightening bias and raises the per-pixel fine term for more luminance contrast.
+    // wf18: TONE ONLY. Two fbm bands (64 px + 14 px) place the pixel on the ramp; the per-pixel
+    // hash term and the 3 px band that used to live here were the "TV static" — all texture at
+    // the 3-7 px scale now comes from the stamped mark layers in paintGroundAndFeatures.
     const summer = season === 'summer';
-    const bias = summer ? 0 : 0.08;
-    // round-4 #1: summer fine (per-pixel) and ~3px band amplitudes cut ~40% (0.40->0.24,
-    // 0.6->0.36) — they read as a dithered checkerboard at 1:1.
-    const fine = summer ? 0.24 : 0.18;
-    // 1 octave: the 2nd (1.5px) octave duplicated the per-pixel `g` term; dropping it pays for
-    // the summer patch layer below within the bake budget.
-    const f3 = fbm(X / 3, Y / 3, 1, seed + th + 77);
-    const tt = clamp01(0.5 + bias + 0.45 * (f64 - 0.5) + 0.6 * (f14 - 0.5) + (summer ? 0.36 : 0.35) * (f3 - 0.5) + fine * (g - 0.5));
+    const bias = summer ? 0.02 : 0.08;
+    const tt = clamp01(0.5 + bias + 0.55 * (f64 - 0.5) + 0.5 * (f14 - 0.5));
     if (summer && t === 'grass' && ramp.length === 5) {
       // large (~100-200px) ochre and brown patches from low-frequency noise, ref_cc3_1479's warm
       // dry-grass/earth blotches over mid-green grass (instead of yellowing the whole field).
@@ -278,7 +276,7 @@ function groundColorFbm(t: Terrain, season: Season, X: number, Y: number, seed: 
       const po = fbm(X / 160, Y / 160, 1, seed + 6101) + 0.35 * (f64 - 0.5) + 0.2 * (f14 - 0.5);
       const wo = smooth01(po, 0.53, 0.74);
       const pb = fbm(X / 100, Y / 100, 1, seed + 6203) + 0.3 * (f64 - 0.5) + 0.25 * (f14 - 0.5);
-      const wb = smooth01(pb, 0.6, 0.82) * 0.6;
+      const wb = smooth01(pb, 0.6, 0.82) * 0.45;
       // all three ramps have 5 stops at the same tt: blend inline with one allocation (hot path)
       const u = tt * 4;
       let i = Math.floor(u);
@@ -287,7 +285,7 @@ function groundColorFbm(t: Terrain, season: Season, X: number, Y: number, seed: 
       const g0 = ramp[i], g1 = ramp[i + 1];
       let r = g0.r + (g1.r - g0.r) * fr, gg = g0.g + (g1.g - g0.g) * fr, bb = g0.b + (g1.b - g0.b) * fr;
       if (wo > 0.001) {
-        const o0 = SUMMER_OCHRE_PATCH[i], o1 = SUMMER_OCHRE_PATCH[i + 1], k = wo * 0.85;
+        const o0 = SUMMER_OCHRE_PATCH[i], o1 = SUMMER_OCHRE_PATCH[i + 1], k = wo * 0.7;
         r += (o0.r + (o1.r - o0.r) * fr - r) * k;
         gg += (o0.g + (o1.g - o0.g) * fr - gg) * k;
         bb += (o0.b + (o1.b - o0.b) * fr - bb) * k;
@@ -302,7 +300,12 @@ function groundColorFbm(t: Terrain, season: Season, X: number, Y: number, seed: 
     }
     return rampLerp(ramp, tt);
   }
-  const tt = clamp01(0.5 + 0.9 * (f64 - 0.5) + 0.5 * (f14 - 0.5) + 0.18 * (g - 0.5));
+  // roads keep their per-pixel gravel grain; every soft surface is tone-only (structure comes
+  // from rows / strokes / drifts painted on top)
+  const gAmt = t === 'dirtroad' || t === 'pavedroad' || t === 'rubble' ? 0.18 : 0.04;
+  // crops / tall grass: a gentler tone swing, so a field is a field and not a yellow cloud
+  const big = t === 'crops' || t === 'tallgrass' ? 0.5 : 0.9;
+  const tt = clamp01(0.5 + (big < 0.9 ? 0.08 : 0) + big * (f64 - 0.5) + 0.5 * (f14 - 0.5) + gAmt * (g - 0.5));
   return rampLerp(ramp, tt);
 }
 
@@ -366,38 +369,6 @@ function reliefFactor(X: number, Y: number, seed: number): number {
   }
   if (cache) cache.set(key, f);
   return f;
-}
-
-/** Sparse short directional "grass tuft" strokes for the brush-clump ground pass (fix #2c): each
- * ~10px cell has a ~22% chance of hosting one 3-7px stroke, oriented by the slowly-varying
- * `angleField` so neighbouring tufts lean together like brushed grass rather than scattering
- * randomly. Returns a +-0.1 shade delta for pixels within ~0.7px of the stroke, else 0. Anchors
- * are kept 2px inset from the cell edge so a stroke never needs to be evaluated from a
- * neighbouring cell — one hash lookup per pixel, no neighbour scan. */
-const tuftMemo = { cx: NaN, cy: NaN, seed: NaN, ax0: 0, ay0: 0, ex: 0, ey: 0 };
-function tuftShade(wpx: number, wpy: number, seed: number, chance = 0.22, amt = 0.1): number {
-  const cellSize = 10;
-  const ccx = Math.floor(wpx / cellSize), ccy = Math.floor(wpy / cellSize);
-  if (hash2(ccx, ccy, seed + 4601) > chance) return 0;
-  // Stroke geometry depends only on the cell, and the bake loop walks pixels row by row, so
-  // memoise the last cell's stroke (identical output; skips angleField's fbm on ~90% of calls).
-  if (ccx !== tuftMemo.cx || ccy !== tuftMemo.cy || seed !== tuftMemo.seed) {
-    const ax = ccx * cellSize + 2 + hash2(ccx, ccy, seed + 4602) * (cellSize - 4);
-    const ay = ccy * cellSize + 2 + hash2(ccx, ccy, seed + 4603) * (cellSize - 4);
-    const len = 3 + hash2(ccx, ccy, seed + 4604) * 4;
-    const ang = angleField(ax, ay, seed);
-    const dx = Math.cos(ang) * len * 0.5, dy = Math.sin(ang) * len * 0.5;
-    tuftMemo.cx = ccx; tuftMemo.cy = ccy; tuftMemo.seed = seed;
-    tuftMemo.ax0 = ax - dx; tuftMemo.ay0 = ay - dy; tuftMemo.ex = dx * 2; tuftMemo.ey = dy * 2;
-  }
-  const { ax0, ay0, ex, ey } = tuftMemo;
-  const len2 = ex * ex + ey * ey;
-  let t = len2 > 1e-6 ? ((wpx - ax0) * ex + (wpy - ay0) * ey) / len2 : 0;
-  t = t < 0 ? 0 : t > 1 ? 1 : t;
-  const cx2 = ax0 + t * ex, cy2 = ay0 + t * ey;
-  const ddx = wpx - cx2, ddy = wpy - cy2;
-  if (ddx * ddx + ddy * ddy > 0.49) return 0;
-  return hash2(ccx, ccy, seed + 4605) > 0.45 ? amt : -amt;
 }
 
 function setPixel(data: Uint8ClampedArray, w: number, x: number, y: number, c: RGB): void {
@@ -636,6 +607,50 @@ const SNOW_TRAMPLED: RGB = { r: 186, g: 186, b: 184 };
 const SNOW_RUT: RGB = { r: 110, g: 94, b: 76 };
 const DEAD_GRASS: RGB = { r: 146, g: 122, b: 82 };
 const BARE_EARTH: RGB = { r: 84, g: 68, b: 52 };
+const SNOW_HOLLOW_BLUE: RGB = { r: 150, g: 160, b: 186 };
+const TUSSOCK_DARK: RGB = { r: 70, g: 54, b: 38 };
+const TUSSOCK_STRAW: RGB = { r: 176, g: 150, b: 98 };
+// ---- wf18 structured ground marks (summer/autumn)
+const TINT_STRAW: RGB = { r: 206, g: 184, b: 86 };
+const TINT_COOL_GREEN: RGB = { r: 54, g: 88, b: 26 };
+const TINT_RUST: RGB = { r: 176, g: 112, b: 52 };
+const TINT_AUTUMN_COOL: RGB = { r: 96, g: 98, b: 48 };
+const SCUFF_EARTH: RGB = { r: 156, g: 118, b: 54 };
+const SCUFF_EARTH_DARK: RGB = { r: 92, g: 66, b: 28 };
+/** how far (in coverage units) the lobing noise pushes the tall-grass outline in and out */
+const TALL_LOBE_AMP = 0.7;
+const TALL_SEED_HEAD: RGB = { r: 214, g: 200, b: 130 };
+const TALL_SEED_AUTUMN: RGB = { r: 200, g: 160, b: 96 };
+const TALL_DEEP_GREEN: RGB = { r: 52, g: 78, b: 34 };
+const MUD_POOL: RGB = { r: 40, g: 31, b: 19 };
+const MUD_POOL_ICE: RGB = { r: 150, g: 164, b: 176 };
+const MUD_SHEEN: RGB = { r: 160, g: 152, b: 132 };
+/** crop row pitch, world px */
+const CROP_PITCH = 3.6;
+const CROP_STRAW_LIGHT: RGB = { r: 236, g: 206, b: 112 };
+const CROP_STUBBLE: RGB = { r: 184, g: 164, b: 100 };
+const CROP_TRACK_EARTH: RGB = { r: 112, g: 88, b: 44 };
+const GRASS_TUFTS = (seed: number): TuftStyle => ({
+  cell: 3.4, seed: seed + 9201, minLen: 1.5, maxLen: 3.9, minAspect: 0.35, maxAspect: 0.75, crisp: 2.4,
+  amp: 0.2, flat: 0.5, lightFrac: 0.5, warmFrac: 0.22, coolFrac: 0.22, tint: 0.34,
+  angleJitter: 0.6, seedHead: 0, windScale: 150, windBase: -0.9, windSwing: 0.9,
+});
+const GRASS_CLUMPS = (seed: number): TuftStyle => ({
+  cell: 8, seed: seed + 9251, minLen: 3, maxLen: 5.5, minAspect: 0.55, maxAspect: 1, crisp: 1.3,
+  amp: 0.14, flat: 0.7, lightFrac: 0.5, warmFrac: 0.3, coolFrac: 0.25, tint: 0.18,
+  angleJitter: 1.2, seedHead: 0, windScale: 150, windBase: -0.9, windSwing: 0.9,
+});
+/** the finest structured grain: 2-3 px blade-shadow nicks, mostly dark */
+const GRASS_NICKS = (seed: number): TuftStyle => ({
+  cell: 3.6, seed: seed + 9281, minLen: 0.9, maxLen: 1.7, minAspect: 0.45, maxAspect: 0.8, crisp: 3,
+  amp: 0.2, flat: 0.85, lightFrac: 0.3, warmFrac: 0.1, coolFrac: 0.3, tint: 0.3,
+  angleJitter: 0.8, seedHead: 0, windScale: 150, windBase: -0.9, windSwing: 0.9,
+});
+const TALL_BLADES = (seed: number): TuftStyle => ({
+  cell: 3.6, seed: seed + 9501, minLen: 3.2, maxLen: 6.5, minAspect: 0.12, maxAspect: 0.2, crisp: 1,
+  amp: 0.3, flat: 0.75, lightFrac: 0.5, warmFrac: 0.3, coolFrac: 0.25, tint: 0.28,
+  angleJitter: 0.3, seedHead: 0.55, windScale: 260, windBase: -1.0, windSwing: 0.55,
+});
 
 /** Bilinear sample of a coverage grid at fractional GRID coords (index g <-> tile x0-1+g
  * centre), clamped to the grid — used for offset (lee-shadow) lookups. */
@@ -669,21 +684,28 @@ function paintGroundAndFeatures(
   // snow drift height + its NW-facing slope, and two ridge-noise fields whose |v-0.5| iso-bands
   // become meandering trampled paths / paired vehicle ruts near buildings and roads.
   const winterPass = season === 'winter';
-  const LAT = 4;
+  const LAT = 2;
   const latN = Math.ceil((tilesW * TILE_PX) / LAT) + 2;
   const wx0px = x0 * TILE_PX, wy0px = y0 * TILE_PX;
   let latDrift: Float32Array | null = null, latLit: Float32Array | null = null;
   if (winterPass) {
+    // Snow relief = broad dunes (85-150 px) + fine wind-combed ridges (sastrugi, ~16 px across and
+    // ~70 px along, lying across a WNW wind). Height is evaluated once per lattice node with a
+    // 2-node apron to the NW; the NW-lit slope is then a plain lattice difference (4 px baseline).
+    const AP = 2, hN = latN + AP;
+    const hgt = new Float32Array(hN * hN);
     latDrift = new Float32Array(latN * latN); latLit = new Float32Array(latN * latN);
-    const driftAt = (X: number, Y: number) => fbm((X * 0.8 + Y * 0.3) / 150, Y / 85, 2, seed + 7301);
-    for (let j = 0; j < latN; j++) {
-      for (let i = 0; i < latN; i++) {
-        const X = wx0px + i * LAT, Y = wy0px + j * LAT;
-        const d = driftAt(X, Y);
-        const o = j * latN + i;
-        latDrift[o] = d;
-        latLit[o] = d - driftAt(X - 6, Y - 6);
+    for (let j = 0; j < hN; j++) {
+      for (let i = 0; i < hN; i++) {
+        const X = wx0px + (i - AP) * LAT, Y = wy0px + (j - AP) * LAT;
+        const big = fbm((X * 0.8 + Y * 0.3) / 150, Y / 85, 2, seed + 7301);
+        const fine = fbm((X * 0.92 + Y * 0.4) / 70, (Y * 0.92 - X * 0.4) / 16, 2, seed + 7311);
+        hgt[j * hN + i] = big + 0.34 * (fine - 0.5);
+        if (i >= AP && j >= AP) latDrift[(j - AP) * latN + (i - AP)] = big;
       }
+    }
+    for (let j = 0; j < latN; j++) {
+      for (let i = 0; i < latN; i++) latLit[j * latN + i] = hgt[(j + AP) * hN + i + AP] - hgt[j * hN + i];
     }
   }
   const latSample = (arr: Float32Array, wpx: number, wpy: number): number => {
@@ -700,6 +722,63 @@ function paintGroundAndFeatures(
     const cy = ty < 0 ? 0 : ty >= mapH ? mapH - 1 : ty;
     return groundUnder[cy * mapW + cx];
   };
+
+  // ------------------------------------------------------------------ stamped mark layers
+  // (see noise.ts): the 3-7 px structure of the ground. Densities are sampled once per MARK at
+  // its anchor from low-frequency fields and the chunk's coverage grids, never per pixel.
+  const gridAtWorld = (grid: Grid, X: number, Y: number): number =>
+    grid.any ? sampleGridF(grid, X / TILE_PX - x0 + 0.5, Y / TILE_PX - y0 + 0.5) : 0;
+  const roadAt = (X: number, Y: number): number => {
+    const d = dirtVec ? sampleVecArea(dirtVec, X, Y, seed + 3201).cov : gridAtWorld(dirtGrid, X, Y);
+    const pv = pavedVec ? sampleVecArea(pavedVec, X, Y, seed + 3101).cov : gridAtWorld(pavedGrid, X, Y);
+    return d > pv ? d : pv;
+  };
+  const lushAt = (X: number, Y: number): number =>
+    smooth01(valueNoise(X / 46, Y / 46, seed + 9301) * 0.65 + valueNoise(X / 19, Y / 19, seed + 9302) * 0.35, 0.3, 0.68);
+  const ground = acquireMarkLayers(bufW, 0);
+  let tall: MarkLayers | null = null;
+  if (!winterPass) {
+    // grass clumps: soft 3-7 px dabs, NW-lit with a darker SE base crescent, leaning with the
+    // wind field; lusher and barer areas from a mid-frequency mask; thinned on bare 'open'
+    // ground and worn away toward roads (the shoulder fringe).
+    stampTufts(ground, wx0px, wy0px, zoom, GRASS_TUFTS(seed), (X, Y) => {
+      let d = 0.5 + 0.45 * lushAt(X, Y);
+      if (openGrid.any) d *= 1 - 0.6 * smooth01(gridAtWorld(openGrid, X, Y), 0.3, 0.7);
+      const r = roadAt(X, Y);
+      if (r > 0.01) d *= 1 - clamp01(r * 1.5) * 0.85;
+      return d;
+    });
+    // a sparser layer of broader, fainter clumps (5-10 px) under them: gentle value variation
+    // at the scale between the dabs and the 14 px tone band
+    stampTufts(ground, wx0px, wy0px, zoom, GRASS_CLUMPS(seed), (X, Y) => 0.35 + 0.5 * lushAt(X + 31, Y - 17));
+    stampTufts(ground, wx0px, wy0px, zoom, GRASS_NICKS(seed), (X, Y) => 0.25 + 0.4 * lushAt(X, Y));
+    // sparse bare-earth scuffs / dry patches, commoner where the sward is thin and beside roads
+    stampScuffs(ground, wx0px, wy0px, zoom, { cell: 30, seed: seed + 9401, minR: 1.8, maxR: 4.2, blobs: 6, spread: 6 }, (X, Y) => {
+      const r = roadAt(X, Y);
+      return 0.16 + 0.5 * (1 - lushAt(X, Y)) + (r > 0.02 && r < 0.6 ? 0.3 : 0);
+    });
+    if (tallgrassGrid.any) {
+      tall = acquireMarkLayers(bufW, 1);
+      stampTufts(tall, wx0px, wy0px, zoom, TALL_BLADES(seed), (X, Y) => {
+        const c = gridAtWorld(tallgrassGrid, X, Y) + (fbm(X / 22, Y / 22, 2, seed + 9510) - 0.5) * TALL_LOBE_AMP;
+        return c > 0.47 ? 0.92 : c > 0.40 ? 0.35 : 0;
+      });
+    }
+  } else {
+    // winter: dead-grass tussocks poking through, clustered, denser wherever the snow lies thin
+    // (road shoulders, under trees, along hedges/walls, trampled ground); plus exposed-earth
+    // patches in the same places.
+    const thinAt = (X: number, Y: number): number => {
+      const tr = trampleGrid.any ? smooth01(gridAtWorld(trampleGrid, X, Y), 0.1, 0.4) : 0;
+      return Math.max(0.4, clamp01(gridAtWorld(dirtyGrid, X, Y)) * 0.85, gridAtWorld(woodsGrid, X, Y) * 0.6, gridAtWorld(leeGrid, X, Y) * 1.2, tr * 0.7);
+    };
+    stampTussocks(ground, wx0px, wy0px, zoom, { cell: 8, seed: seed + 9601 }, (X, Y) => {
+      const th = thinAt(X, Y);
+      return (0.03 + 0.8 * smooth01(valueNoise(X / 44, Y / 44, seed + 9602), 0.52, 0.8)) * (th / 0.4);
+    });
+    tall = acquireMarkLayers(bufW, 1); // E plane only: exposed-earth patches
+    stampScuffs(tall, wx0px, wy0px, zoom, { cell: 26, seed: seed + 9611, minR: 2.5, maxR: 6.5, blobs: 5, spread: 8 }, (X, Y) => 0.02 + 0.32 * smooth01(valueNoise(X / 44, Y / 44, seed + 9602), 0.62, 0.86) + (thinAt(X, Y) - 0.4) * 1.1);
+  }
 
   for (let ty = 0; ty < tilesH; ty++) {
     const wy = y0 + ty;
@@ -720,9 +799,9 @@ function paintGroundAndFeatures(
           // unconditionally in that case anyway). Roads/rivers prefer the smooth vector
           // distance field when the map declares one (see MapDef.vectors); tile-grid coverage
           // is the fallback (and always used for crops/rubble, which aren't vectorized).
-          const covCrop = sampleGrid(cropsGrid, tx, px, ty, py, wpx, wpy, seed + 3001, 0.08, bpt);
-          const covMud = sampleGrid(mudGrid, tx, px, ty, py, wpx, wpy, seed + 3011, 0.05, bpt);
-          const covTallgrass = sampleGrid(tallgrassGrid, tx, px, ty, py, wpx, wpy, seed + 3021, 0.05, bpt);
+          const covCrop = sampleGrid(cropsGrid, tx, px, ty, py, wpx, wpy, seed + 3001, winterPass ? 0.08 : 0, bpt);
+          const covMud = sampleGrid(mudGrid, tx, px, ty, py, wpx, wpy, seed + 3011, 0, bpt);
+          const covTallgrass = sampleGrid(tallgrassGrid, tx, px, ty, py, wpx, wpy, seed + 3021, 0, bpt);
           const pavedRes = pavedVec ? sampleVecArea(pavedVec, wpx, wpy, seed + 3101) : null;
           const covPaved = pavedRes ? pavedRes.cov : sampleGrid(pavedGrid, tx, px, ty, py, wpx, wpy, seed + 3101, 0.08, bpt);
           const dirtRes = dirtVec ? sampleVecArea(dirtVec, wpx, wpy, seed + 3201) : null;
@@ -799,18 +878,54 @@ function paintGroundAndFeatures(
           // real pixel band at the patch edge, but a binary switch still meets 100%-base-colour
           // against 100%-feature-colour in a single pixel right at the threshold, which is
           // exactly the hard "seam" the round-3 critique caught (fix #1/#2).
-          const tgBlend = smooth01(covTallgrass, 0.32, 0.68);
+          // wf18 tall grass: an irregular LOBED outline (coherent 22 px noise pushes the blurred
+          // coverage in and out before a narrow threshold) filled with dense long wind-leaning
+          // blades and pale seed heads from the `tall` mark layer; blades rooted near the edge
+          // overhang it, so the boundary is a fringe of strokes, never a disc.
+          const mi = (ty * bpt + py) * bufW + tx * bpt + px;
+          let tgBlend = 0;
+          if (covTallgrass > 0.12) {
+            const lobed = winterPass ? covTallgrass : covTallgrass + (fbm(wpx / 22, wpy / 22, 2, seed + 9510) - 0.5) * TALL_LOBE_AMP;
+            tgBlend = winterPass ? smooth01(lobed, 0.32, 0.68) : smooth01(lobed, 0.44, 0.52);
+          }
           if (tgBlend > 0.003) {
             let tg = groundColorFbm('tallgrass', season, wpx, wpy, seed);
-            if (covTallgrass < 0.62) tg = shade(tg, -0.08); // feathered inner edge, slightly duller
-            if (season === 'summer') tg = shade(tg, (hash2(wpx, wpy, seed + 9121) - 0.5) * 0.3 + (hash2(Math.floor(wpx / 2), Math.floor(wpy / 3), seed + 9122) - 0.5) * 0.16); // stalk stipple
+            if (tgBlend < 0.999) tg = shade(tg, -0.12); // dark foot of the standing grass at its rim
             color = lerpRGB(color, tg, tgBlend);
             if (tgBlend > 0.5) groundT = 'tallgrass';
+          }
+          if (tall && !winterPass) {
+            const bL = tall.L[mi];
+            if (bL !== 0) {
+              color = shade(color, bL < -0.32 ? -0.32 : bL > 0.4 ? 0.4 : bL);
+              const bT = tall.T[mi];
+              if (bT > 0.01) color = lerpRGB(color, season === 'autumn' ? TALL_SEED_AUTUMN : TALL_SEED_HEAD, bT > 0.7 ? 0.7 : bT);
+              else if (bT < -0.01) color = lerpRGB(color, TALL_DEEP_GREEN, bT < -0.5 ? 0.5 : -bT);
+            }
           }
           const mudBlend = smooth01(covMud, 0.32, 0.68);
           if (mudBlend > 0.003) {
             let mc = groundColorFbm('mud', season, wpx, wpy, seed);
             if (covMud < 0.62) mc = shade(mc, -0.1);
+            {
+              // wf18 churned mud: long sub-parallel wheel ruts (iso-bands of a stretched noise:
+              // a dark trench with a raised pale lip on its NW side), and standing water in the
+              // low spots — dark pools with a cold sky-sheen highlight along their NW shore.
+              const ua = (wpx * 0.94 + wpy * 0.34), va = (wpy * 0.94 - wpx * 0.34);
+              const rv = fbm(ua / 150, va / 16, 2, seed + 4701) - 0.5;
+              const ar = rv < 0 ? -rv : rv;
+              if (ar < 0.012) mc = shade(mc, -0.3);
+              else if (ar < 0.03) mc = shade(mc, rv > 0 ? 0.16 : -0.08);
+              else mc = shade(mc, (valueNoise(ua / 6, va / 3, seed + 4702) - 0.5) * 0.22); // clods
+              const wet = valueNoise(wpx / 17, wpy / 13, seed + 4703) * 0.7 + valueNoise(wpx / 6, wpy / 6, seed + 4704) * 0.3;
+              if (wet > 0.7) {
+                const pool = smooth01(wet, 0.7, 0.74);
+                mc = lerpRGB(mc, season === 'winter' ? MUD_POOL_ICE : MUD_POOL, pool * 0.9);
+                const wetNW = valueNoise((wpx - 2.5) / 17, (wpy - 2.5) / 13, seed + 4703) * 0.7 + valueNoise((wpx - 2.5) / 6, (wpy - 2.5) / 6, seed + 4704) * 0.3;
+                const rim = clamp01((wet - wetNW) * 16 - 0.35) * (pool < 0.95 ? 1 : 0.25);
+                if (rim > 0.05) mc = lerpRGB(mc, MUD_SHEEN, rim * 0.7);
+              } else if (wet > 0.55) mc = shade(mc, -(wet - 0.55) * 1.4); // damp, darker toward the pool
+            }
             color = lerpRGB(color, mc, mudBlend);
             if (mudBlend > 0.5) groundT = 'mud';
           }
@@ -820,7 +935,7 @@ function paintGroundAndFeatures(
           // value and a narrow blend band, instead of a 20px soft feather (ref wheat has a crisp
           // lobed outline with a dark rim). Winter keeps the soft blend (fields ~= snow anyway).
           const cropEdge = season === 'winter' || covCrop <= 0.15 || covCrop >= 0.85
-            ? covCrop : covCrop + (fbm(wpx / 7, wpy / 7, 2, seed + 4250) - 0.5) * 0.35;
+            ? covCrop : covCrop + (fbm(wpx / 7, wpy / 7, 2, seed + 4250) - 0.5) * 0.3 + (valueNoise(wpx / 2.2, wpy / 2.2, seed + 4251) - 0.5) * 0.1;
           const cropBlend = season === 'winter' ? smooth01(covCrop, 0.32, 0.68) : smooth01(cropEdge, 0.44, 0.52);
           if (cropBlend > 0.003) {
             // Row axis: ONE base angle for the whole MAP (see fieldBaseAngleDeg — hashed from
@@ -836,7 +951,7 @@ function paintGroundAndFeatures(
             // then 3px-spaced rows — kept very faint: the reference wheat shows dense stipple, not
             // a visible barcode of rows.
             const wobSeed = seed + (fid >= 0 ? fid * 131 : 0) + 7701;
-            const wobble = (fbm(wpx / 60, wpy / 60, 1, wobSeed) - 0.5) * 4;
+            const wobble = (fbm(wpx / 60, wpy / 60, 1, wobSeed) - 0.5) * 7;
             const perp = -wpx * sinT + wpy * cosT + wobble;
             const rowPhase = ((Math.floor(perp / 3) % 2) + 2) % 2; // guard against negative perp
             let color2: RGB;
@@ -850,11 +965,49 @@ function paintGroundAndFeatures(
               if (stub < 0.04) color2 = lerpRGB(color2, { r: 138, g: 120, b: 92 }, 0.3 + stub * 5);
               if (covCrop < 0.65) color2 = shade(color2, -0.04);
             } else {
+              // wf18: a drilled field. Parallel rows at CROP_PITCH px: a light straw ridge (lit on
+              // its NW flank) and a darker furrow, gently wavy (the `wobble` above), broken along
+              // the row into short dabs by a row-stretched noise so no row is a ruled line; the
+              // odd tramline (paired wheel tracks along the rows) and rarer cross track cutting
+              // through; a mown stubble margin inside a crisp, ragged boundary.
               const cropBase = groundColorFbm('crops', season, wpx, wpy, seed);
-              // single-pixel stipple only (the old 2px-block term read as a checkerboard, 4px blocks at zoom 2)
-              color2 = shade(cropBase, (hash2(wpx, wpy, seed + 4243) - 0.5) * 0.26);
-              color2 = shade(color2, rowPhase === 0 ? 0.03 : -0.03);
-              if (cropEdge < 0.58) color2 = shade(color2, -0.22); // thin dark headland rim
+              const rowf = perp / CROP_PITCH;
+              const ri = Math.floor(rowf), ph = rowf - ri;
+              const along = wpx * cosT + wpy * sinT;
+              const tri = 1 - Math.abs(2 * ph - 1);                       // 0 furrow .. 1 ridge top
+              const dab = valueNoise(along / 5.5 + ri * 17.3, ri * 0.61, wobSeed + 5);
+              const flank = (0.5 - ph) * (cosT - sinT >= 0 ? 1 : -1);     // + on the NW-facing flank
+              let rowShade = (tri - 0.5) * 0.3 + flank * 0.16 + (dab - 0.5) * 0.3 + 0.02;
+              color2 = cropBase;
+              // tramlines: paired wheel tracks every ~90 px across the rows, in ~60% of the slots
+              const slot = Math.floor(perp / 92), pm = perp - slot * 92;
+              let track = 0;
+              if (hash2(slot, fid, seed + 4261) < 0.6) {
+                const o = 20 + hash2(slot, fid, seed + 4262) * 40;
+                const d1 = Math.abs(pm - o), d2 = Math.abs(pm - o - 9);
+                track = clamp01(1.9 - (d1 < d2 ? d1 : d2));
+              }
+              // a cart track across the rows now and then (meanders with the same wobble field)
+              const aw = along + wobble * 5;
+              const slotA = Math.floor(aw / 310), am = aw - slotA * 310;
+              if (hash2(slotA, fid, seed + 4263) < 0.4) {
+                const o = 60 + hash2(slotA, fid, seed + 4264) * 180;
+                const d1 = Math.abs(am - o), d2 = Math.abs(am - o - 9);
+                track = Math.max(track, clamp01(1.9 - (d1 < d2 ? d1 : d2)));
+              }
+              if (track > 0) {
+                track *= 0.55 + 0.45 * dab;
+                color2 = lerpRGB(color2, CROP_TRACK_EARTH, track * 0.8);
+                rowShade *= 1 - track * 0.7;
+              }
+              color2 = shade(color2, rowShade);
+              if (rowShade > 0.1) color2 = lerpRGB(color2, CROP_STRAW_LIGHT, (rowShade - 0.1) * 1.4);
+              // mown margin: short pale stubble with only a ghost of the rows, then the dark
+              // standing edge of the crop just inside it
+              if (cropEdge < 0.61) {
+                const stub = lerpRGB(color, CROP_STUBBLE, 0.72);
+                color2 = shade(stub, (tri - 0.5) * 0.1 + (dab - 0.5) * 0.12);
+              } else if (cropEdge < 0.645) color2 = shade(color2, -0.26);
             }
             color = lerpRGB(color, color2, cropBlend);
           }
@@ -1029,39 +1182,40 @@ function paintGroundAndFeatures(
           const plainGround = (groundT === 'grass' || groundT === 'open' || groundT === 'snow')
             && covCrop <= 0.5 && covMud <= 0.5 && covTallgrass <= 0.5
             && covPaved <= 0.5 && covDirt <= 0.5 && covWater <= 0.5 && covRubble <= 0.5;
-          if (plainGround) {
-            // (b) mid-frequency 'clump' layer: fbm at 6-10px wavelength, posterised into 4 tonal
-            // steps then blended 60% with the raw (continuous) value so the clump edges stay soft
-            // rather than razor-stepped — this is what produces visible dab-like patches.
-            const clump = clamp01(fbmClump(wpx, wpy, seed));
-            const posterized = Math.round(clump * 3) / 3;
-            const soft = lerp(clump, posterized, 0.6);
-            const isSnowGround = groundT === 'snow';
-            color = shade(color, (soft - 0.5) * (isSnowGround ? 0.36 : 0.40));
-            // (c) sparse directional strokes 3-7px long ("grass tufts"), following a slowly
-            // varying angle field. Grass/open get denser, stronger tufts plus sparse dark-brown
-            // earth flecks (ref grass stipple); snow keeps the subtler original values.
-            // Round-5 fix #7/#15: tuft density and amplitude raised (0.40/0.16 -> 0.48/0.24) so the
-            // 5-15 px scale the eye actually reads as "grass" carries real contrast.
-            const tuft = isSnowGround ? tuftShade(wpx, wpy, seed, 0.3, 0.13) : tuftShade(wpx, wpy, seed, 0.48, 0.24);
-            if (tuft !== 0) color = shade(color, tuft);
-            if (season !== 'summer' && !isSnowGround && hash2(wpx, wpy, seed + 9100) < 0.06) color = lerpRGB(color, { r: 92, g: 70, b: 38 }, 0.35);
-            if (season === 'summer' && !isSnowGround) {
-              // Single-pixel only (no 2px term: that read as a checkerboard). ref_cc3_1479 grass is
-              // olive with dense per-pixel warm dirt/dry-grass speckle, so: a 1px luminance stipple,
-              // plus ~8-12% of pixels pushed to warm brown or dry ochre and darker 1px flecks, with
-              // density clumped by the mid-frequency `clump` field (dirt showing through grass).
-              const hs = hash2(wpx, wpy, seed + 9111);
-              color = shade(color, (hs - 0.5) * 0.60);
-              const dirt = fbm(wpx / 12, wpy / 12, 1, seed + 9130) * 0.65 + clump * 0.35;
-              const dens = 0.02 + 0.26 * smooth01(dirt, 0.42, 0.74);
-              const hp = hash2(wpx, wpy, seed + 9120);
-              if (hp < dens) {
-                const warm = hash2(wpx, wpy, seed + 9121) < 0.55 ? SPECKLE_BROWN : SPECKLE_OCHRE;
-                color = lerpRGB(color, warm, 0.45 + 0.35 * (hp / dens));
-              } else if (hp < dens * 1.5) {
-                color = shade(color, -0.44 - 0.24 * hs); // dark 1px fleck
+          const rf = reliefFactor(wpx, wpy, seed);
+          // hillshading drives the marks too: on a sunlit slope the lit tops of the clumps flare
+          // and the base crescents fade, on a shaded slope the reverse — so a slope reads as
+          // textured ground turning toward/away from the sun, not as a flat gradient over it.
+          const rk = (rf - 1) / RELIEF_AMP;
+          if (plainGround && !winterPass) {
+            let mL = ground.L[mi];
+            if (mL !== 0) {
+              mL *= mL > 0 ? 1 + 0.7 * rk : 1 - 0.7 * rk;
+              color = shade(color, mL < -0.3 ? -0.3 : mL > 0.34 ? 0.34 : mL);
+            }
+            const mT = ground.T[mi];
+            if (mT > 0.01) color = lerpRGB(color, season === 'autumn' ? TINT_RUST : TINT_STRAW, mT > 0.55 ? 0.55 : mT);
+            else if (mT < -0.01) color = lerpRGB(color, season === 'autumn' ? TINT_AUTUMN_COOL : TINT_COOL_GREEN, mT < -0.5 ? 0.5 : -mT);
+            // bare-earth scuff: ragged because the clump layer breaks its soft edge up
+            const mE = ground.E[mi];
+            if (mE > 0.02) {
+              const ea = smooth01(mE * (0.45 + 0.9 * valueNoise(wpx / 2.2, wpy / 2.2, seed + 9421)) + mL * 1.2, 0.3, 0.6);
+              if (ea > 0.01) {
+                let ec = lerpRGB(SCUFF_EARTH_DARK, SCUFF_EARTH, clamp01(0.55 + mL * 2.5));
+                // a few pebbles and dark clods inside the scuff only (2 px cells, so they hold
+                // together as marks rather than dissolving into grain)
+                const sh = hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 9420);
+                if (sh < 0.07) ec = shade(ec, -0.3); else if (sh > 0.94) ec = lerpRGB(ec, ROAD_GRAVEL, 0.6);
+                color = lerpRGB(color, ec, ea * 0.85);
               }
+            }
+            // road shoulder: a few loose stones thrown onto the worn fringe
+            const prox = covDirt > covPaved ? covDirt : covPaved;
+            if (prox > 0.04 && prox <= 0.5) {
+              const sx2 = Math.floor(wpx / 2), sy2 = Math.floor(wpy / 2);
+              const sh = hash2(sx2, sy2, seed + 9430);
+              if (sh < 0.035 * (0.4 + prox * 2)) color = lerpRGB(color, ROAD_GRAVEL, 0.7);
+              else if (hash2(sx2 - 1, sy2 - 1, seed + 9430) < 0.035 * (0.4 + prox * 2)) color = shade(color, -0.22); // its shadow
             }
           }
 
@@ -1072,9 +1226,11 @@ function paintGroundAndFeatures(
             const covWoods = sampleGrid(woodsGrid, tx, px, ty, py, wpx, wpy, seed + 3701, 0.05, bpt);
             const fb = smooth01(covWoods, 0.3, 0.72);
             if (fb > 0.003 && !winterPass) {
-              const mott = hash2(Math.floor(wpx / 3), Math.floor(wpy / 3), seed + 7402) * 0.55 + hash2(wpx, wpy, seed + 7403) * 0.45;
-              let fl = lerpRGB(FOREST_FLOOR_DARK, FOREST_FLOOR_MID, mott);
-              const lh = hash2(wpx, wpy, seed + 7401);
+              // dappled floor: soft 4-9 px light/shade mottling (coherent noise, not per-pixel
+              // hash) with leaf litter in 2 px flecks
+              const mott = valueNoise(wpx / 4.5, wpy / 4.5, seed + 7402) * 0.6 + valueNoise(wpx / 9, wpy / 9, seed + 7404) * 0.4;
+              let fl = lerpRGB(FOREST_FLOOR_DARK, FOREST_FLOOR_MID, smooth01(mott, 0.25, 0.75));
+              const lh = hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 7401) * 1.6;
               if (lh < 0.09) fl = lerpRGB(fl, LITTER_BROWN, 0.75);
               else if (lh < 0.14) fl = lerpRGB(fl, LITTER_OLIVE, 0.7);
               else if (lh < 0.22) fl = shade(fl, -0.35);
@@ -1093,11 +1249,12 @@ function paintGroundAndFeatures(
             const dl = latSample(latLit, wpx, wpy);
             // blue-grey drift hollows, bright sunlit crests, cooler lee slopes
             const trough = 1 - smooth01(dv, 0.3, 0.62);
-            color = lerpRGB(color, SNOW_DRIFT_SHADOW, trough * 0.32);
-            const crest = clamp01(dl * 16);
-            const lee = clamp01(-dl * 16);
-            if (crest > 0) color = lerpRGB(color, SNOW_CREST, crest * 0.6);
-            if (lee > 0) color = lerpRGB(color, SNOW_DRIFT_SHADOW, lee * 0.3);
+            color = lerpRGB(color, SNOW_DRIFT_SHADOW, trough * 0.34);
+            // wind ridges: sunlit NW flanks go to crest white, SE lee flanks to soft blue shadow
+            const crest = clamp01(dl * 11);
+            const lee = clamp01(-dl * 11);
+            if (crest > 0) color = lerpRGB(color, SNOW_CREST, crest * 0.75);
+            if (lee > 0) color = lerpRGB(color, SNOW_HOLLOW_BLUE, lee * 0.55);
 
             // soft blue shadow on the lee (SE) side of hedges/walls/fences/buildings
             if (leeGrid.any) {
@@ -1117,53 +1274,29 @@ function paintGroundAndFeatures(
 
             // exposed dark earth / dead-grass streaks where snow lies thin: road shoulders, under
             // trees, along hedges and walls, trampled ground and wind-scoured crests
-            const covDirtyT = dirtyGrid.any ? sampleGrid(dirtyGrid, tx, px, ty, py, wpx, wpy, seed + 3602, 0.03, bpt) : 0;
-            const covLeeHere = leeGrid.any ? sampleGrid(leeGrid, tx, px, ty, py, wpx, wpy, seed + 3702, 0.03, bpt) : 0;
-            const covW = woodsGrid.any ? sampleGrid(woodsGrid, tx, px, ty, py, wpx, wpy, seed + 3703, 0.03, bpt) : 0;
-            // Round-5 fix #7: ref_cc3_1482 sells snow with DIRT — exposed earth along every track
-            // and bank, brown dead grass poking through everywhere, not only beside a hedge. The
-            // `thin` field is roughly tripled (a real floor over open snow, and every source
-            // weighted up), and the threshold now spends the whole field instead of 42% of it.
-            const thin = Math.max(
-              0.40,                                  // open snowfield: never bare paper
-              clamp01(covDirtyT) * 0.85,
-              covW * 0.6, covLeeHere * 1.2, tramp * 0.7, crest * 0.2,
-            );
-            {
-              // Three scales, weighted toward the isotropic CLUMP octave: the reference's dead
-              // vegetation sits in round tussocks a few pixels across scattered evenly over the
-              // field, not in the wind-combed horizontal bands a single anisotropic fbm gives.
-              const clumpS = clamp01(fbmClump(wpx, wpy, seed + 7360));
-              const en = clumpS * 0.50
-                + fbm(wpx / 13, wpy / 13, 1, seed + 7351) * 0.28
-                + hash2(wpx, wpy, seed + 7352) * 0.22;
-              const thr = 1 - thin * 0.92;
-              if (en > thr) {
-                const amt = clamp01((en - thr) * 5.5);
-                const ec = lerpRGB(BARE_EARTH, DEAD_GRASS, smooth01(fbm(wpx / 2.5, wpy / 7, 1, seed + 7353), 0.42, 0.58));
-                color = lerpRGB(color, ec, amt * 0.92);
-                // twigs: the darkest pixels inside a tussock, which is where most of the
-                // reference's per-pixel contrast actually lives
-                if (amt > 0.45 && hash2(wpx, wpy, seed + 7356) < 0.3) color = shade(color, -0.4);
+            // exposed earth where the snow lies thin (stamped patches, ragged against the ridges)
+            const pE = tall ? tall.E[mi] : 0;
+            if (pE > 0.02) {
+              const ea = smooth01(pE * (0.1 + 1.5 * valueNoise(wpx / 1.3 + wpy * 0.25, wpy / 3.5, seed + 7357)) + dl * 3, 0.36, 0.5);
+              if (ea > 0.01) {
+                let ec = lerpRGB(TUSSOCK_DARK, TUSSOCK_STRAW, smooth01(valueNoise(wpx / 1.1 + wpy * 0.25, wpy / 4.5, seed + 7353), 0.3, 0.7));
+                if (hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 7356) < 0.12) ec = shade(ec, -0.35);
+                color = lerpRGB(color, ec, ea * 0.85);
               }
-              // scattered grit, hard little drift shadows and wind-polished highlights, so open
-              // snow still has grain where no stubble showed through
-              const gh = hash2(Math.floor(wpx / 2), Math.floor(wpy / 2), seed + 7355);
-              if (gh < 0.06) color = lerpRGB(color, SNOW_RUT, 0.25 + 4 * gh);
-              else if (gh < 0.17) color = lerpRGB(color, SNOW_DRIFT_SHADOW, 0.3);
-              else if (gh > 0.9) color = lerpRGB(color, SNOW_CREST, 0.36);
             }
+            // dead-grass tussocks: blue shadow smear first, then the stalks over it
+            const tS = ground.L[mi];
+            if (tS < -0.01) color = lerpRGB(color, SNOW_LEE_SHADOW, tS < -0.6 ? 0.6 : -tS);
+            const tE = ground.E[mi];
+            if (tE > 0.01) color = lerpRGB(color, lerpRGB(TUSSOCK_DARK, TUSSOCK_STRAW, ground.T[mi]), tE);
+            void tramp;
           }
 
           // -------------------------------------------------------- relief + grain + brush
-          const rf = reliefFactor(wpx, wpy, seed);
           color = shade(color, rf - 1);
-          // (a) low-amplitude per-pixel grain, +-3 RGB (was +-6 — the round-3 critique's "digital
-          // speckle" complaint was largely this term dominating at full amplitude).
-          const grain = (hash2(wpx, wpy, seed + 9001) - 0.5) * 6;
+          // low-amplitude per-pixel grain only: +-2.5 levels. Everything coarser is structure.
+          const grain = (hash2(wpx, wpy, seed + 9001) - 0.5) * 5;
           color = { r: clamp255(color.r + grain), g: clamp255(color.g + grain), b: clamp255(color.b + grain) };
-          const brush = 0.97 + 0.06 * hash2(Math.floor(wpx / 2), Math.floor(wpy / 3), seed + 9002);
-          color = { r: clamp255(color.r * brush), g: clamp255(color.g * brush), b: clamp255(color.b * brush) };
 
           setPixel(data, bufW, tx * bpt + px, ty * bpt + py, color);
         }
@@ -1301,23 +1434,9 @@ function paintBridge(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy
 // ---------------------------------------------- ground texture (tufts/pebbles)
 function paintGroundTexture(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number, season: Season, seed: number): void {
   const t = tileAt(map, wx, wy);
-  if (season !== 'winter' && (t === 'grass' || t === 'tallgrass')) {
-    const n = t === 'tallgrass' ? 4 : 2;
-    for (let i = 0; i < n; i++) {
-      if (hash2(wx * 7 + i, wy * 7 + i, seed + 7001) > 0.55) continue; // sparsify to ~6% of area overall
-      const sx = ox + hash2(wx * 11 + i, wy * 11 + i, seed + 7002) * TILE_PX;
-      const sy = oy + hash2(wx * 13 + i, wy * 13 + i, seed + 7003) * TILE_PX;
-      const len = 2 + hash2(wx * 17 + i, wy * 17 + i, seed + 7004) * 3;
-      const ang = -Math.PI / 2 + (hash2(wx * 19 + i, wy * 19 + i, seed + 7005) - 0.5) * (Math.PI / 3);
-      const lighter = hash2(wx * 23 + i, wy * 23 + i, seed + 7006) > 0.4;
-      ctx.strokeStyle = lighter ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.lineTo(sx + Math.cos(ang) * len, sy + Math.sin(ang) * len);
-      ctx.stroke();
-    }
-  } else if (season !== 'winter' && t === 'open') {
+  // (grass / tall grass: the old sparse 1px white/black strokes are gone — wf18's stamped mark
+  // layers in paintGroundAndFeatures carry that structure now, and the strokes read as rain over them)
+  if (season !== 'winter' && t === 'open') {
     if (hash2(wx, wy, seed + 7101) < 0.3) {
       const sx = ox + hash2(wx * 29, wy * 29, seed + 7102) * TILE_PX;
       const sy = oy + hash2(wx * 31, wy * 31, seed + 7103) * TILE_PX;
@@ -1354,59 +1473,109 @@ function drawBand(ctx: CanvasRenderingContext2D, ox: number, oy: number, width: 
 
 function paintStonewall(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number): void {
   const stubs = linearStubs(map, wx, wy, (t) => t === 'stonewall');
-  // shadow on S/E side of the band
-  ctx.globalAlpha = 0.28;
-  drawBand(ctx, ox + 1, oy + 1, 4, stubs, '#101008');
+  // soft cast shadow to the SE, a mid-grey shadow-side body, and a light top face pushed NW
+  ctx.globalAlpha = 0.3;
+  drawBand(ctx, ox + 2.5, oy + 2.5, 6, stubs, '#0c0c06');
   ctx.globalAlpha = 1;
-  drawBand(ctx, ox, oy, 4, stubs, '#9a9a92');
-  // joints every 3px along the run + a 1px darker shadow edge
-  ctx.fillStyle = '#5a5a52';
+  drawBand(ctx, ox, oy, 6, stubs, WALL_BODY);
+  drawBand(ctx, ox - 0.8, oy - 0.8, 3.6, stubs, WALL_TOP);
+  // joints every 4px along the run
+  ctx.fillStyle = WALL_JOINT;
   const c = TILE_PX / 2;
-  if (stubs.r || stubs.l) { for (let x = 0; x < TILE_PX; x += 3) ctx.fillRect(ox + x, oy + c - 2, 1, 4); }
-  else { for (let y = 0; y < TILE_PX; y += 3) ctx.fillRect(ox + c - 2, oy + y, 4, 1); }
+  if (stubs.r || stubs.l || !stubs.any) { for (let x = 1; x < TILE_PX; x += 4) ctx.fillRect(ox + x, oy + c - 2.6, 1, 3.6); }
+  else { for (let y = 1; y < TILE_PX; y += 4) ctx.fillRect(ox + c - 2.6, oy + y, 3.6, 1); }
 }
+const WALL_BODY = '#77756a';
+const WALL_TOP = '#c4c0b2';
+const WALL_JOINT = 'rgba(70,68,60,0.7)';
 
-/** Winter hedges are leafless brown scrub lines with snow flecks (ref winter scrub), not green. */
-const HEDGE_WINTER = { core: '#5c4632', shadow: 'rgba(20,14,8,0.45)', lobe: '#8a7256', snow: '#e8ecf0' };
-/** Summer hedges: dark natural olive-green (hue ~75deg), not the old blue-leaning teal-green. */
-const HEDGE_SUMMER = { core: '#343a24', shadow: 'rgba(12,12,4,0.45)', lobe: '#5a6238', bump: '#4c5432' };
+// ---- hedges: a chain of overlapping rounded bush lumps, 8-12 px across, each lit from the NW
+// (dark core, mid lobe pushed up-left, small highlight), over a soft shadow cast to the SE.
+interface HedgePal { shadow: string; core: string; lobe: string[]; hi: string }
+const HEDGE_PAL: Record<Season, HedgePal> = {
+  summer: { shadow: 'rgba(8,10,2,0.27)', core: '#27301a', lobe: ['#45562a', '#4d5c2c', '#3f5228'], hi: '#7c8c42' },
+  autumn: { shadow: 'rgba(10,8,2,0.27)', core: '#33290f', lobe: ['#6e5a24', '#7c5a20', '#5c5426'], hi: '#ae8a34' },
+  winter: { shadow: 'rgba(46,60,98,0.26)', core: '#3c2e20', lobe: ['#6a543c', '#745e46', '#5e4a36'], hi: '#e9edf1' },
+};
+interface HedgeLump { x: number; y: number; r: number; v: number }
 
-function paintHedge(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number, seed: number, season: Season): void {
-  const winter = season === 'winter';
-  const stubs = linearStubs(map, wx, wy, (t) => t === 'hedge');
-  if (winter) {
-    ctx.globalAlpha = 1;
-    drawBand(ctx, ox + 1, oy + 1, 6, stubs, HEDGE_WINTER.shadow);
-  } else {
-    ctx.globalAlpha = 0.25;
-    drawBand(ctx, ox + 1, oy + 1, 6, stubs, '#0e1006');
-    ctx.globalAlpha = 1;
+function drawHedgeLumps(ctx: CanvasRenderingContext2D, lumps: HedgeLump[], season: Season): void {
+  if (!lumps.length) return;
+  const pal = HEDGE_PAL[season];
+  const TAU = Math.PI * 2;
+  ctx.fillStyle = pal.shadow;
+  for (const l of lumps) { ctx.beginPath(); ctx.ellipse(l.x + l.r * 0.75, l.y + l.r * 0.8, l.r * 1.12, l.r * 0.95, 0.6, 0, TAU); ctx.fill(); }
+  ctx.fillStyle = pal.core;
+  for (const l of lumps) { ctx.beginPath(); ctx.arc(l.x, l.y, l.r, 0, TAU); ctx.fill(); }
+  for (const l of lumps) {
+    ctx.fillStyle = pal.lobe[Math.floor(l.v * pal.lobe.length) % pal.lobe.length];
+    ctx.beginPath(); ctx.arc(l.x - l.r * 0.2, l.y - l.r * 0.22, l.r * 0.76, 0, TAU); ctx.fill();
   }
-  drawBand(ctx, ox, oy, 6, stubs, winter ? HEDGE_WINTER.core : HEDGE_SUMMER.core);
-  // lighter bumpy top pixels
-  const c = TILE_PX / 2;
-  for (let i = 0; i < TILE_PX; i += 2) {
-    const bump = hash2(wx * 4 + i, wy * 4 + i, seed + 71) > 0.5 ? 1 : 0;
-    ctx.fillStyle = winter ? HEDGE_WINTER.lobe : HEDGE_SUMMER.bump;
-    if (stubs.r || stubs.l) ctx.fillRect(ox + i, oy + c - 3 + bump, 2, 1);
-    else ctx.fillRect(ox + c - 3 + bump, oy + i, 1, 2);
-    if (winter && hash2(wx * 5 + i, wy * 5 + i, seed + 72) > 0.6) {
-      ctx.fillStyle = HEDGE_WINTER.snow;
-      if (stubs.r || stubs.l) ctx.fillRect(ox + i, oy + c - 4 + bump, 1, 1);
-      else ctx.fillRect(ox + c - 4 + bump, oy + i, 1, 1);
+  // leaf clusters: dark dapples low on the SE side, bright dabs high on the NW side
+  ctx.fillStyle = pal.core;
+  ctx.globalAlpha = 0.7;
+  for (const l of lumps) {
+    const a0 = l.v * 5;
+    for (let i = 0; i < 3; i++) {
+      const a = a0 + i * 2.1, d = l.r * (0.25 + 0.2 * i);
+      ctx.beginPath(); ctx.arc(l.x + Math.cos(a) * d + l.r * 0.15, l.y + Math.sin(a) * d + l.r * 0.2, l.r * 0.2, 0, TAU); ctx.fill();
     }
   }
+  ctx.fillStyle = pal.hi;
+  ctx.globalAlpha = season === 'winter' ? 0.9 : 0.8;
+  for (const l of lumps) {
+    ctx.beginPath(); ctx.ellipse(l.x - l.r * 0.4, l.y - l.r * 0.42, l.r * 0.42, l.r * 0.3, -0.7, 0, TAU); ctx.fill();
+    const a = l.v * 9;
+    ctx.beginPath(); ctx.arc(l.x + Math.cos(a) * l.r * 0.3 - l.r * 0.1, l.y - l.r * 0.15 + Math.sin(a) * l.r * 0.3, l.r * 0.17, 0, TAU); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+/** Lump size for the k-th station along a hedge: mostly 4-6 px radius, with the odd thin spot
+ * (a worn gap the ground shows through) every few dozen stations. */
+function hedgeLumpRadius(k: number, hseed: number): number {
+  const gap = hash2(Math.floor(k / 2), 7, hseed + 883) < 0.07;
+  return gap ? 2.2 : 3.7 + hash2(k, 3, hseed + 881) * 2.6;
+}
+
+function paintHedge(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number, seed: number, season: Season): void {
+  const stubs = linearStubs(map, wx, wy, (t) => t === 'hedge');
+  const c = TILE_PX / 2;
+  const lumps: HedgeLump[] = [];
+  const add = (lx: number, ly: number, k: number): void => {
+    const hs = seed + wx * 131 + wy * 17;
+    lumps.push({
+      x: ox + lx + (hash2(k, 1, hs) - 0.5) * 2.4, y: oy + ly + (hash2(k, 2, hs) - 0.5) * 2.4,
+      r: hedgeLumpRadius(k + wx * 5 + wy * 3, seed), v: hash2(k, 4, hs),
+    });
+  };
+  add(c, c, 0);
+  const horiz = stubs.r || stubs.l || !stubs.any;
+  if (stubs.r || !stubs.any) { add(c + 5, c, 1); add(c + 9.5, c, 2); }
+  if (stubs.l || !stubs.any) { add(c - 5, c, 3); add(c - 9.5, c, 4); }
+  if (stubs.d) { add(c, c + 5, 5); add(c, c + 9.5, 6); }
+  if (stubs.u) { add(c, c - 5, 7); add(c, c - 9.5, 8); }
+  void horiz;
+  drawHedgeLumps(ctx, lumps, season);
 }
 
 function paintFence(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy: number, ox: number, oy: number): void {
   const stubs = linearStubs(map, wx, wy, (t) => t === 'fence');
-  drawBand(ctx, ox, oy, 2, stubs, '#5a4326');
-  // posts every 2 tiles
-  if ((wx + wy) % 2 === 0) {
-    const c = TILE_PX / 2;
-    ctx.fillStyle = '#3a2c18';
-    ctx.fillRect(ox + c - 1, oy + c - 1, 3, 3);
-  }
+  ctx.globalAlpha = 0.3;
+  drawBand(ctx, ox + 1.5, oy + 2, 1.5, stubs, '#0a0a04'); // thin cast shadow
+  ctx.globalAlpha = 1;
+  drawBand(ctx, ox, oy, 1.6, stubs, FENCE_RAIL);
+  if ((wx + wy) % 2 === 0) paintFencePost(ctx, ox + TILE_PX / 2, oy + TILE_PX / 2);
+}
+const FENCE_RAIL = '#8c7048';
+function paintFencePost(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  ctx.fillStyle = 'rgba(8,8,2,0.35)';
+  ctx.beginPath(); ctx.moveTo(x, y - 1); ctx.lineTo(x + 5.5, y + 3.5); ctx.lineTo(x + 4.5, y + 5); ctx.lineTo(x - 1, y + 1); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#3a2c18';
+  ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+  ctx.fillStyle = '#b09060';
+  ctx.fillRect(x - 1.5, y - 1.5, 2, 1);
+  ctx.fillRect(x - 1.5, y - 1.5, 1, 2);
 }
 
 // ---------------------------------------------------------------- buildings
@@ -1667,6 +1836,17 @@ function paintBuildingShadow(ctx: CanvasRenderingContext2D, map: GameMap, bb: Bu
   // summer grass as well as on snow — in ref_cc3_1484 the cast shadow is the single strongest cue
   // that a building has height. Length scales with the building's own height (buildingHeightPx).
   const dx = hgt * 1.25, dy = hgt * 1.05;
+  // ambient occlusion: the ground darkens softly all round the foot of the walls (three nested
+  // strokes of the footprint outline — the roof later covers their inner halves), a touch
+  // heavier than the open-ground tone so a house sits IN the grass instead of floating on it.
+  {
+    const foot = occupancyClipPath(fp, bb, x0, y0);
+    ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = snowy ? 'rgba(46,58,92,0.10)' : 'rgba(10,10,4,0.10)';
+    for (const w of [16, 10, 5]) { ctx.lineWidth = w; ctx.stroke(foot); }
+    ctx.restore();
+  }
   ctx.fillStyle = snowy ? 'rgba(52,66,104,0.24)' : 'rgba(10,10,6,0.2)';
   ctx.fill(sweep(dx + 4, dy + 4), 'nonzero');   // penumbra
   ctx.fillStyle = snowy ? 'rgba(46,60,98,0.56)' : 'rgba(8,8,4,0.5)';
@@ -2135,23 +2315,28 @@ function drawCrown(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: 
   ctx.globalAlpha = 1;
 }
 
-/** Soft cast shadow for one crown: summer/autumn a SE-offset soft oval; winter a long cold
- * blue-grey streak running down-left across the snow (ref_cc3_1482). */
-function drawCrownShadow(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number, season: Season, zoom: number): void {
+/** Soft cast shadow for one crown, thrown to the SE by the one NW sun every season shares
+ * (buildings, hedges, walls and hillshading all use it): summer/autumn a soft oval; winter a
+ * long cold blue-grey streak across the snow (low sun — wf18 turned it from SW to SE so it
+ * agrees with the building shadows next to it). `contact` adds a tight dark pool right under
+ * the crown — the ambient-occlusion cue that the tree stands ON the ground. */
+function drawCrownShadow(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number, season: Season, zoom: number, contact = false): void {
   const R = CROWN_R * size;
   if (season === 'winter') {
     const spr = getTreeShadowSprite(zoom, 'blue');
     const s = TREE_SPRITE_WORLD_PX * size * 0.75;
     ctx.save();
-    ctx.translate(cx - s * 0.55, cy + s * 0.35);
-    ctx.rotate(-0.6);
+    ctx.translate(cx + s * 0.55, cy + s * 0.4);
+    ctx.rotate(0.62);
     ctx.globalAlpha = 0.5;
     ctx.drawImage(spr, -s * 1.05, -s * 0.24, s * 2.1, s * 0.48);
     ctx.restore();
+    if (contact) { ctx.globalAlpha = 0.3; ctx.drawImage(spr, cx - R * 0.55 + 1, cy - R * 0.45 + 1.5, R * 1.1, R * 0.9); ctx.globalAlpha = 1; }
   } else {
     const spr = getTreeShadowSprite(zoom, 'dark');
     ctx.globalAlpha = season === 'summer' ? 0.72 : 0.6;
     ctx.drawImage(spr, cx + R * 0.45 - R * 1.2, cy + R * 0.6 - R * 1.0, R * 2.4, R * 2.0);
+    if (contact) { ctx.globalAlpha = 0.45; ctx.drawImage(spr, cx - R * 1.12 + 1, cy - R * 1.08 + 1.5, R * 2.24, R * 2.16); }
     ctx.globalAlpha = 1;
   }
 }
@@ -2414,13 +2599,13 @@ function paintTrees(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy:
       paintScrubTree(ctx, cx, cy, seed + 123, 12 + hScale * 10);
     } else {
       const size = 0.65 + hScale * 0.45;
-      drawCrownShadow(ctx, cx, cy, size, season, zoom);
+      drawCrownShadow(ctx, cx, cy, size, season, zoom, true);
       drawCrown(ctx, cx, cy, size, shapeRoll < 0.85 ? 'bare' : 'conifer', variant, season, zoom, 1);
     }
   } else {
     const size = season === 'summer' ? 1.0 + 0.6 * hScale : 0.85 + hScale * 0.45;
     const shape: TreeShape = shapeRoll < 0.5 ? 'round' : shapeRoll < 0.85 ? 'lobed' : 'elongated';
-    drawCrownShadow(ctx, cx, cy, size, season, zoom);
+    drawCrownShadow(ctx, cx, cy, size, season, zoom, true);
     drawCrown(ctx, cx, cy, size, shape, variant, season, zoom, 0.94);
   }
   ctx.imageSmoothingEnabled = false;
@@ -2447,7 +2632,7 @@ function paintDetail(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy
 // ------------------------------------------------- smooth vector line features (hedge/fence/
 // stonewall/trench): a single stroked path with round joins per feature, instead of the
 // per-tile axis-aligned band, so diagonal runs don't stair-step.
-function strokePolylineWorld(ctx: CanvasRenderingContext2D, points: Vec2[], x0: number, y0: number, widthPx: number, color: string): void {
+function strokePolylineWorld(ctx: CanvasRenderingContext2D, points: Vec2[], x0: number, y0: number, widthPx: number, color: string, dx = 0, dy = 0): void {
   if (points.length < 2 || widthPx <= 0) return;
   ctx.save();
   ctx.lineJoin = 'round';
@@ -2455,8 +2640,8 @@ function strokePolylineWorld(ctx: CanvasRenderingContext2D, points: Vec2[], x0: 
   ctx.strokeStyle = color;
   ctx.lineWidth = widthPx;
   ctx.beginPath();
-  ctx.moveTo((points[0].x - x0) * TILE_PX, (points[0].y - y0) * TILE_PX);
-  for (let i = 1; i < points.length; i++) ctx.lineTo((points[i].x - x0) * TILE_PX, (points[i].y - y0) * TILE_PX);
+  ctx.moveTo((points[0].x - x0) * TILE_PX + dx, (points[0].y - y0) * TILE_PX + dy);
+  for (let i = 1; i < points.length; i++) ctx.lineTo((points[i].x - x0) * TILE_PX + dx, (points[i].y - y0) * TILE_PX + dy);
   ctx.stroke();
   ctx.restore();
 }
@@ -2481,64 +2666,66 @@ function walkPolylineWorld(points: Vec2[], spacingPx: number, cb: (wx: number, w
   }
 }
 
-function paintLineVector(ctx: CanvasRenderingContext2D, v: MapVectorFeature, x0: number, y0: number, seed: number, season: Season): void {
+function paintLineVector(ctx: CanvasRenderingContext2D, v: MapVectorFeature, x0: number, y0: number, seed: number, season: Season, zoom = 1): void {
   const pts = v.points;
   if (pts.length < 2) return;
+  const bx = x0 * TILE_PX, by = y0 * TILE_PX;
+  const lo = -20, hi = CHUNK_PX + 20;
   if (v.terrain === 'hedge') {
-    // a slim (6px) bumpy line, not a flat wide bar: a plain core stroke, a 1px shadow line
-    // offset to the SE, and lobed lighter blobs every ~6px on the NW side for a leafy silhouette.
-    // Winter: leafless brown scrub with snow flecks instead of summer green.
-    const winter = season === 'winter';
-    strokePolylineWorld(ctx, pts, x0, y0, 6, winter ? HEDGE_WINTER.core : HEDGE_SUMMER.core);
-    ctx.strokeStyle = winter ? HEDGE_WINTER.shadow : HEDGE_SUMMER.shadow;
-    ctx.lineWidth = 1;
-    walkPolylineWorld(pts, 4, (wx, wy, ux, uy) => {
-      const lx = wx - x0 * TILE_PX, ly = wy - y0 * TILE_PX;
-      let px_ = -uy, py_ = ux;
-      if (px_ + py_ < 0) { px_ = -px_; py_ = -py_; } // SE-ish perpendicular
-      ctx.beginPath();
-      ctx.moveTo(lx, ly);
-      ctx.lineTo(lx + px_ * 3.5, ly + py_ * 3.5);
-      ctx.stroke();
-    });
+    // Stations are walked from the START of the polyline at a fixed spacing and hashed by their
+    // index, so every chunk the hedge crosses reproduces the identical chain of lumps.
+    const hseed = seed + Math.round(pts[0].x * 31 + pts[0].y * 57);
+    const lumps: HedgeLump[] = [];
+    const trees: { x: number; y: number; k: number }[] = [];
+    let k = 0;
     walkPolylineWorld(pts, 6, (wx, wy, ux, uy) => {
-      let px_ = -uy, py_ = ux;
-      if (px_ + py_ > 0) { px_ = -px_; py_ = -py_; } // NW-ish perpendicular
-      const lx = wx - x0 * TILE_PX + px_ * 2.2, ly = wy - y0 * TILE_PX + py_ * 2.2;
-      const r = 1.6 + hash2(Math.round(wx), Math.round(wy), seed + 881) * 1.2;
-      ctx.fillStyle = winter ? HEDGE_WINTER.lobe : HEDGE_SUMMER.lobe;
-      ctx.beginPath();
-      ctx.ellipse(lx, ly, r, r * 0.7, 0, 0, Math.PI * 2);
-      ctx.fill();
-      if (winter) {
-        ctx.fillStyle = HEDGE_WINTER.snow;
-        ctx.fillRect(Math.round(lx - r * 0.6), Math.round(ly - r * 0.6), 1, 1);
-      }
+      const kk = k++;
+      const lx = wx - bx, ly = wy - by;
+      if (lx < lo || ly < lo || lx > hi || ly > hi) return;
+      const off = (hash2(kk, 1, hseed) - 0.5) * 3.6;
+      lumps.push({ x: lx - uy * off, y: ly + ux * off, r: hedgeLumpRadius(kk, hseed), v: hash2(kk, 4, hseed) });
+      // a small hedgerow tree every ~30 stations or so
+      if (hash2(kk, 5, hseed) < 0.04) trees.push({ x: lx, y: ly, k: kk });
     });
+    drawHedgeLumps(ctx, lumps, season);
+    for (const t of trees) {
+      const size = 0.62 + hash2(t.k, 6, hseed) * 0.22;
+      if (season === 'winter') paintScrubTree(ctx, t.x, t.y, hseed + t.k, 11 + size * 6);
+      else {
+        ctx.imageSmoothingEnabled = true;
+        drawCrownShadow(ctx, t.x, t.y, size, season, zoom, true);
+        drawCrown(ctx, t.x, t.y, size, hash2(t.k, 8, hseed) < 0.6 ? 'round' : 'lobed', Math.floor(hash2(t.k, 7, hseed) * TREE_VARIANTS), season, zoom, 0.96);
+        ctx.imageSmoothingEnabled = false;
+      }
+    }
   } else if (v.terrain === 'stonewall') {
-    strokePolylineWorld(ctx, pts, x0, y0, 6, 'rgba(16,16,8,0.3)');
-    strokePolylineWorld(ctx, pts, x0, y0, 5, '#9a9a92');
-    ctx.strokeStyle = '#5a5a52';
+    // light-topped wall with a shadow side: soft cast shadow SE, mid-grey body, pale top face
+    // pushed toward the sun, mortar joints across the top, the odd darker stone
+    strokePolylineWorld(ctx, pts, x0, y0, 7, 'rgba(10,10,4,0.16)', 3, 3);
+    strokePolylineWorld(ctx, pts, x0, y0, 5.5, 'rgba(10,10,4,0.26)', 2, 2);
+    strokePolylineWorld(ctx, pts, x0, y0, 6, WALL_BODY);
+    strokePolylineWorld(ctx, pts, x0, y0, 3.6, season === 'winter' ? '#e6e9ee' : WALL_TOP, -0.9, -0.9);
     ctx.lineWidth = 1;
-    walkPolylineWorld(pts, 3, (wx, wy, ux, uy) => {
-      const lx = wx - x0 * TILE_PX, ly = wy - y0 * TILE_PX;
-      const px_ = -uy * 2.5, py_ = ux * 2.5;
-      ctx.beginPath();
-      ctx.moveTo(lx - px_, ly - py_);
-      ctx.lineTo(lx + px_, ly + py_);
-      ctx.stroke();
+    let k = 0;
+    walkPolylineWorld(pts, 4, (wx, wy, ux, uy) => {
+      const kk = k++;
+      const lx = wx - bx - 0.9, ly = wy - by - 0.9;
+      if (lx < lo || ly < lo || lx > hi || ly > hi) return;
+      const px_ = -uy * 1.8, py_ = ux * 1.8;
+      ctx.strokeStyle = WALL_JOINT;
+      ctx.beginPath(); ctx.moveTo(lx - px_, ly - py_); ctx.lineTo(lx + px_, ly + py_); ctx.stroke();
+      if (hash2(kk, 2, seed + 893) < 0.22) { ctx.fillStyle = 'rgba(90,86,76,0.5)'; ctx.fillRect(lx + ux * 0.8 - 1, ly + uy * 0.8 - 1, 2.4, 2.4); }
     });
   } else if (v.terrain === 'fence') {
-    strokePolylineWorld(ctx, pts, x0, y0, 2, '#5a4326');
-    ctx.fillStyle = '#3a2c18';
-    walkPolylineWorld(pts, TILE_PX * 2, (wx, wy) => {
-      const lx = wx - x0 * TILE_PX, ly = wy - y0 * TILE_PX;
-      ctx.fillRect(lx - 1, ly - 1, 3, 3);
+    strokePolylineWorld(ctx, pts, x0, y0, 1.5, 'rgba(10,10,4,0.3)', 1.5, 2); // rail shadow on the ground
+    strokePolylineWorld(ctx, pts, x0, y0, 1.6, season === 'winter' ? '#6e5a40' : FENCE_RAIL);
+    walkPolylineWorld(pts, 12, (wx, wy) => {
+      const lx = wx - bx, ly = wy - by;
+      if (lx < lo || ly < lo || lx > hi || ly > hi) return;
+      paintFencePost(ctx, lx, ly);
     });
   } else if (v.terrain === 'trench') {
     // drawn as a shaded, crenellated earthwork by craterArt.paintTrenches (see bakeChunk)
-  } else {
-    void seed;
   }
 }
 
@@ -3101,7 +3288,7 @@ export class TerrainRenderer {
       }
       for (const v of map.def.vectors) {
         if (v.kind !== 'line') continue;
-        paintLineVector(ctx, v, x0, y0, this.seed, season);
+        paintLineVector(ctx, v, x0, y0, this.seed, season, zoom);
       }
       if (broken.length) ctx.restore();
     }

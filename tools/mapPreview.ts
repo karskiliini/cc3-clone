@@ -35,6 +35,8 @@ const flatGround = qs.get('flat') === '1';
 // ?bake=N times N cold chunk bakes (private bakeChunk, cache bypassed) and reports the mean in
 // document.body.dataset.bakeMs / .bakeChunks, for the elevation performance budget.
 const bakeRuns = qs.has('bake') ? Math.max(1, Number(qs.get('bake'))) : 0;
+// ?bakeZoom=2 times those bakes at that zoom level instead of 1.
+const bakeZoom = qs.has('bakeZoom') && [0.5, 1, 2].includes(Number(qs.get('bakeZoom'))) ? Number(qs.get('bakeZoom')) : 1;
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -64,9 +66,9 @@ function renderMap(root: HTMLElement, mapId: string): void {
     const bake = (renderer as unknown as { bakeChunk(cx: number, cy: number, zoom: number): unknown }).bakeChunk.bind(renderer);
     const CH = 16; // CHUNK_TILES in terrainRender.ts
     const cols = Math.max(1, Math.ceil(map.width / CH)), rows = Math.max(1, Math.ceil(map.height / CH));
-    bake(0, 0, 1); // warm up (fonts, sprite atlases, JIT)
+    bake(0, 0, bakeZoom); // warm up (fonts, sprite atlases, JIT)
     const t0 = performance.now();
-    for (let i = 0; i < bakeRuns; i++) bake((i * 7) % cols, (i * 5) % rows, 1);
+    for (let i = 0; i < bakeRuns; i++) bake((i * 7) % cols, (i * 5) % rows, bakeZoom);
     const ms = (performance.now() - t0) / bakeRuns;
     const prev = Number(document.body.dataset.bakeMs ?? 0), n = Number(document.body.dataset.bakeN ?? 0);
     document.body.dataset.bakeMs = (prev + ms).toFixed(3);
