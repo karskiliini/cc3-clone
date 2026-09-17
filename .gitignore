@@ -8,3 +8,4 @@ tools/uiScreens_shots/
 *.png
 test-results/
 .scratch/
+!public/sprites/*.png
