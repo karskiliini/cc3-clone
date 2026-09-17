@@ -26,6 +26,10 @@ order first (hotkey, order bar, or right-click menu), then click the target.
   Order endpoints stay marked on the map; hover one to see its line to the team, click it to select that team.
 - Scroll: two-finger scroll / mouse wheel pans; pinch or Ctrl+wheel zooms around the pointer;
   middle-drag or Space+drag pans; screen edges and arrows/WASD scroll too.
+- Fire order over an enemy: when the pointer is on a spotted enemy team that one of the selected teams can
+  actually shoot at, the cursor becomes a large aiming cross and the enemy's visible men (or hull) are
+  bracketed. Against armour the cross shows the chance of the best available gun against the plate it
+  would hit from there: **black** will not penetrate, **yellow** might, **green** is likely to; red is for men.
 - Hold **Alt** while placing a Fire order: line of sight (bright green clear, dark green obscured, red blocked).
 - Unit vision: while teams are selected the map shows what they can see of an enemy standing in the open —
   untouched where he would be spotted for sure, a dark-green tint where only obscured (concealment, distance,

@@ -579,7 +579,7 @@ export interface BattleState {
 }
 
 // --------------------------------------------------------------- UI shared
-export type CursorKind = 'arrow' | 'crosshair' | 'hand' | 'no' | 'move' | 'wait';
+export type CursorKind = 'arrow' | 'crosshair' | 'hand' | 'no' | 'move' | 'wait' | 'target' | 'targetNone' | 'targetMaybe' | 'targetLikely';
 
 export interface InputState {
   mouse: Vec2;                // logical 800x600 coords

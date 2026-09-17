@@ -17,7 +17,7 @@ import { pickOrderMarker } from '@/render/orderMarkers';
 import { cycleTeamKey, handleDepthMapKey, offsetOrderPoints } from './viewKeys';
 import { hitRect } from '@/ui/hud/hudChrome';
 import { drawLOSLine } from '@/ui/losTool';
-import { eyeHeightM, EYE_VEHICLE_M } from '@/sim/los';
+import { drawTargetHighlight, targetableEnemyAt, teamObserver, type TargetHover } from '@/ui/targetHover';
 import { TeamGrid } from '@/ui/hud/teamGrid';
 import { CombatMessages } from '@/ui/hud/combatMessages';
 import { BottomStrip } from '@/ui/hud/bottomStrip';
@@ -97,6 +97,8 @@ export class BattleScreen implements Screen {
   private selectedTeamId: number | null = null;
   private selectedTeamIds: number[] = [];
   private pendingOrder: OrderType | null = null;
+  /** Fire order pending and the pointer is over an enemy team that can be targeted right now. */
+  private targetHover: TargetHover | null = null;
   private pendingWaypoints: Vec2[] = [];
   private paused = false;
   /** Real seconds elapsed since the battle ended, driving the debrief transition below — must be
@@ -440,6 +442,13 @@ export class BattleScreen implements Screen {
       ? (pickFriendlyTeamScreen(state, cam, input.mouse, battle.playerSide())?.id ?? null)
       : null;
 
+    // Fire pending over a targetable enemy: big aiming cross + the enemy team's men highlighted.
+    this.targetHover = null;
+    if (this.pendingOrder === 'fire' && !this.overHud(input.mouse) && !this.commandMenu.isOpen) {
+      const sel = this.selectedTeamIds.map((id) => state.teams.get(id)).filter((t): t is Team => !!t);
+      if (sel.length > 0) this.targetHover = targetableEnemyAt(state, battle.playerSide(), sel, screenToWorld(cam, input.mouse));
+    }
+
     if (this.showMinimap) this.minimap.update(input, cam, state.map.width, state.map.height);
 
     this.combatMessages.update(input, state);
@@ -595,21 +604,14 @@ export class BattleScreen implements Screen {
         const t = state.teams.get(id);
         if (!t || t.outOfAction) continue;
         const primary = id === selTeam.id;
-        let from = t.pos;
-        let eyeM = EYE_VEHICLE_M;
-        if (t.vehicleId == null) {
-          const leader = state.soldiers.get(t.leaderId);
-          const obs = leader && leader.health !== 'dead' ? leader : t.soldierIds.map((sid) => state.soldiers.get(sid)).find((x) => x && x.health !== 'dead');
-          if (!obs) continue;
-          from = obs.pos;
-          eyeM = eyeHeightM(obs.stance);
-        } else {
-          const veh = state.vehicles.get(t.vehicleId);
-          if (veh) from = veh.pos;
-        }
+        const obs = teamObserver(state, t);
+        if (!obs) continue;
+        const { from, eyeM } = obs;
         drawLOSLine(ctx, cam, state.map, from, to, { state, team: t }, { eyeM }, { label: primary, alpha: primary ? 1 : 0.6 });
       }
     }
+
+    if (this.targetHover) drawTargetHighlight(ctx, cam, state, battle.playerSide(), this.targetHover, performance.now() / 1000);
 
     // hover ring: a subtle highlight under the friendly team the pointer is over
     if (this.hoverTeamId != null && this.hoverTeamId !== this.selectedTeamId) {
@@ -664,6 +666,10 @@ export class BattleScreen implements Screen {
   }
 
   cursor(): CursorKind {
+    if (this.targetHover) {
+      const pen = this.targetHover.pen;
+      return pen === 'likely' ? 'targetLikely' : pen === 'maybe' ? 'targetMaybe' : pen === 'none' ? 'targetNone' : 'target';
+    }
     if (this.pendingOrder) return 'crosshair';
     if (this.modernPanDrag.active) return 'hand';
     if (this.rightDrag.active && !this.rightDrag.menuOpenedOnPress && this.rightDrag.moved >= RIGHT_GESTURE_PX) return 'hand';

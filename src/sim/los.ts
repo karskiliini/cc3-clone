@@ -1,4 +1,4 @@
-import type { GameMap, Stance, Vec2 } from '@/shared/types';
+import type { GameMap, Stance, Terrain, Vec2 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import { TERRAIN_PROPS } from './terrain';
 import { idx, inBounds } from './map';
@@ -44,6 +44,13 @@ export function losDistanceFactor(distM: number): number {
   const beyond = 0.2 + (0.2 - 0.5) * ((distM - 400) / 200);
   return Math.max(0, beyond);
 }
+
+/** Height (m) of ground-level growth and clutter that conceals only a sight line passing below
+ * its top. Terrain not listed (scattered trees, floors, smoke) conceals at any line height. */
+export const LOW_GROWTH_HEIGHT_M: Partial<Record<Terrain, number>> = {
+  grass: 0.3, tallgrass: 1.0, crops: 1.2, hedge: 2.0, fence: 1.2, rubble: 0.9,
+  snow: 0.15, mud: 0.15, crater: 0, trench: 0,
+};
 
 function bresenhamTiles(x0: number, y0: number, x1: number, y1: number): Vec2[] {
   const pts: Vec2[] = [];
@@ -143,7 +150,25 @@ export function losTrace(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeight
         return { clear: false, blockedAt: { x: t.x + 0.5, y: t.y + 0.5 }, visibility: 0 };
       }
     } else {
-      accumulated += tp.concealment + (map.smoke[i2] ?? 0) * 1.5;
+      // Low growth only hides what the sight line actually passes through: a standing man or a
+      // tank commander looks over a field of tall grass, while the line down to a prone man dips
+      // into it near him. Holes (craters, trenches) hide their occupants, never the ground beyond.
+      const vegM = LOW_GROWTH_HEIGHT_M[terrain];
+      let conceal = tp.concealment;
+      if (vegM !== undefined) {
+        const eyeM = heights?.eyeM ?? EYE_STANDING_M;
+        const tgtM = heights?.targetM ?? EYE_STANDING_M;
+        let lineAboveGroundM: number;
+        if (ground && invLen2 > 0) {
+          const f = ((t.x - fx) * ax + (t.y - fy) * ay) * invLen2;
+          lineAboveGroundM = eyeZ + dz * f - ground[i2];
+        } else {
+          const n = tiles.length - 1;
+          lineAboveGroundM = eyeM + (tgtM - eyeM) * (n > 0 ? i / n : 0);
+        }
+        if (lineAboveGroundM >= vegM) conceal = 0;
+      }
+      accumulated += conceal + (map.smoke[i2] ?? 0) * 1.5;
       if (accumulated >= 1.0) {
         return { clear: false, blockedAt: { x: t.x + 0.5, y: t.y + 0.5 }, visibility: 0 };
       }

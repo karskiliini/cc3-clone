@@ -41,12 +41,16 @@ describe('aiming line profile', () => {
 
   it('marks ground seen through concealment as obscured before it is blocked', () => {
     const map = buildMap(makeDef((t, w, h) => {
-      const p = new MapPainter(t, w, h, 1); p.fill('open'); p.rect(20, 0, 12, 30, 'tallgrass');
+      const p = new MapPainter(t, w, h, 1); p.fill('open'); p.rect(35, 0, 25, 30, 'tallgrass');
     }));
-    const segs = aimLineProfile(map, { x: 5.5, y: 10.5 }, { x: 55.5, y: 10.5 });
+    // Down to a prone man the sight line dips into the metre-high grass on its last stretch.
+    const segs = aimLineProfile(map, { x: 5.5, y: 10.5 }, { x: 55.5, y: 10.5 }, { eyeM: 1.7, targetM: 0.4 });
     const classes = segs.map((s) => s.cls);
     expect(classes[0]).toBe('clear');
     expect(classes).toContain('obscured');
+    // A standing man looking at a standing man sees straight over the same grass.
+    const over = aimLineProfile(map, { x: 5.5, y: 10.5 }, { x: 55.5, y: 10.5 }, { eyeM: 1.7, targetM: 1.7 });
+    expect(over.every((s) => s.cls === 'clear')).toBe(true);
     // runs are contiguous and cover the whole line
     expect(segs[0].t0).toBe(0);
     expect(segs[segs.length - 1].t1).toBe(1);

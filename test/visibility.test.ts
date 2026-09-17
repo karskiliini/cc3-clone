@@ -110,7 +110,9 @@ describe('spotting outcomes are unchanged by the observerVisibility refactor', (
 });
 
 // Recorded from the pre-refactor spotting.ts (inline range checks + losTrace cache).
-const GOLDEN: string[] = ['b87af327', '3f996815', '6e7e59b1', 'f3ac84a4'];
+// Regenerated 2026-09-17: low growth (grass, crops, hedges, fences, rubble) now conceals only a
+// sight line that passes below its top, so standing men and tank commanders see over tall grass.
+const GOLDEN: string[] = ['c98c42f5', '77c5fb91', '14b9794c', '4ba53a7b'];
 
 describe('observerVisibility', () => {
   const openMap = () => buildMap(makeDef((tiles) => tiles.fill('open'), 200, 20));
