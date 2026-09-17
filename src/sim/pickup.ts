@@ -25,6 +25,7 @@ import { WEAPONS } from '@/data/weapons';
 import { tileAt } from './map';
 import { findPath, isPassable } from './path';
 import { addMessage } from './messages';
+import { isDazed } from './daze';
 import { UNARMED, addItem, ammoSprite, cartridgeFamily, dropSpareAmmo, dropWeapon, fullLoad, removeItem } from './items';
 
 export const GRENADE_CAP = 3;
@@ -62,7 +63,7 @@ function isStunned(s: Soldier, time: number): boolean { return s.stunnedUntil !=
 /** Able to go for an item at all (spec: not pinned, cowering, panicked or stunned). */
 export function ableToLoot(state: BattleState, s: Soldier): boolean {
   if (s.health === 'dead' || s.health === 'incapacitated' || s.vehicleId != null) return false;
-  if (isStunned(s, state.time) || s.dodgeUntil != null || s.crewTask) return false;
+  if (isStunned(s, state.time) || isDazed(s, state.time) || s.dodgeUntil != null || s.crewTask) return false;
   if (NO_LOOT_STATES.has(s.mind.state) || NO_LOOT_ACTIVITIES.has(s.activity)) return false;
   return true;
 }

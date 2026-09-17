@@ -213,6 +213,23 @@ trench/crater (omni) over a single wall; a soldier never leaves the 6-tile radiu
   has no turret (StuG/SU); otherwise only the turret rotates, so the side is never shown to threat #2:
   when two threats are on different bearings, keep the hull toward the most dangerous one.
 
+### 10.1a Time to first shot and real turn rates (gun timing, 2026-09-17)
+
+Threat ranking and the flee decision weigh WHEN each gun can fire, not only what it can do
+(`sim/gunTiming.ts` `timeToFirstShotS`: what is left of the load, the commander's call, the traverse
+at the vehicle's historical rate — hull and turret together when the hull helps, the hull alone for
+a casemate outside its gun arc — and the fine lay). The most urgent threat is the one with the
+highest chance of hurting us within `DUEL_HORIZON_S` (20 s); the crew seeks cover when its own kill
+chance over the rounds it can fire in that window (at most two) is lower than the enemy's. With
+both guns laid this is the old two-shot comparison; a tank caught with its slow turret the wrong
+way loses the duel on paper and backs off. Standing vehicles decide between turning the HULL and
+only the turret from the real rates (`wantsHullTurn`): a casemate turns its hull whenever the
+target is outside its gun arc; a turreted tank turns its hull as well when the turret alone would
+need more than 5 s (a Tiger with a flank threat starts its hull at once, a T-34 swings the turret).
+The main gun's target choice (`combat.ts pickVehicleTarget`) ranks enemy vehicles by our time to
+first shot on them plus half of theirs on us, keeping the target already laid on unless another is
+clearly more urgent.
+
 ### 10.2 Small-calibre hits and crew nerves (user clarification)
 
 > Many hits on a tank, even from lower-calibre ammunition, may alarm and even panic an inexperienced

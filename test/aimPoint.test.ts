@@ -134,17 +134,19 @@ describe('cost of precision', () => {
   });
 
   it('measured: a veteran aiming at the tracks hits the vehicle less often than a recruit-style mass shot', () => {
+    // gun timing: a veteran crew now also LOADS faster (x0.85 against a recruit's x1.3), so hits are
+    // compared per round fired, not per minute
     const hits = (experience: number): number => {
-      let n = 0;
+      let n = 0, shots = 0;
       for (let seed = 1; seed <= 12; seed++) {
         const state = makeState(1942);
         const g = addGun(state, 'pak38', FROM, 3, { experience, ammo: 20, ammoReserve: 0, rounds: { ...NO_APCR, ap: 14 } });
         const t = kvAt(state, 300);
         state.spottedVehicles.german.add(t.v.id);
-        run(state, new Rng(seed), 60, () => { for (const tr of state.tracers) if (tr.hit) n++; });
+        run(state, new Rng(seed), 60, () => { for (const tr of state.tracers) { shots++; if (tr.hit) n++; } });
         void g;
       }
-      return n;
+      return n / Math.max(1, shots);
     };
     // same accuracy term for both would need the same experience; compare the aimed total against
     // the closed form instead: the veteran (better shot) must not hit MORE than x1.25 the recruit

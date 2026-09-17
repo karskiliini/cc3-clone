@@ -12,6 +12,7 @@ import { findPath } from './path';
 import { isPassable } from './path';
 import { inBounds } from './map';
 import { addMessage } from './messages';
+import { isDazed } from './daze';
 
 const SEEK_INTERVAL_S = 2;
 
@@ -94,6 +95,7 @@ function maybeAnnounceLookingForCover(state: BattleState, team: Team): void {
 
 function seekForSoldier(state: BattleState, rng: Rng, s: Soldier): void {
   if (s.health === 'dead' || s.health === 'incapacitated' || s.vehicleId != null) return;
+  if (isDazed(s, state.time)) return; // his crawl for cover is daze.ts's alone
   const mind = s.mind;
   if (mind.state === 'broken' || mind.state === 'berserk') return;
 
@@ -162,6 +164,15 @@ function seekForSoldier(state: BattleState, rng: Rng, s: Soldier): void {
       s.path = [found.tile, ...s.path];
     }
   }
+}
+
+/** Best cover tile within `radius` tiles of the soldier against his own threat set, with the score
+ * of where he is now (`current`) — the scoring automatic cover seeking uses. Read-only. */
+export function bestCoverNear(state: BattleState, s: Soldier, radius: number): { tile: Vec2; score: number; current: number } | null {
+  const team = state.teams.get(s.teamId);
+  const threats = buildThreatSet(state, s, team);
+  const found = bestCoverTile(state, s, team, s.pos, radius, threats);
+  return found ? { tile: found.tile, score: found.score, current: coverScore(state.map, s.pos, threats) } : null;
 }
 
 /** Run automatic directional cover seeking for every living soldier (spec §9). AT guns and MGs use

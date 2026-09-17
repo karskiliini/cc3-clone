@@ -176,7 +176,9 @@ describe('vehicle crew mind: cover-seeking (spec §10)', () => {
     state.spottedVehicles.german.add(enemy.id);
 
     const rng = new Rng(1);
-    for (let i = 0; i < 10; i++) stepVehicleMinds(state, rng, 0.5);
+    // historical hull rate: the Pz IV pivots at 18 deg/s, so bringing its front round to a threat
+    // dead astern takes 10 s before it can back away (was under 5 s at the old 43 deg/s)
+    for (let i = 0; i < 30; i++) stepVehicleMinds(state, rng, 0.5);
 
     expect(cmdr.mind.threatLevel).toBeGreaterThan(0);
     // PzKw IV F1 (front 50mm) vs KV-1's 76mm ZiS-5 (pen 70 @300m => ~49mm) is a losing exchange for

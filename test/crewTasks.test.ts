@@ -7,7 +7,7 @@ import { dist } from '@/shared/math';
 import { stepCombat } from '@/sim/combat';
 import {
   stepCrewWeapons, crewWeaponStatus, crewWeaponVisual, crewTaskWord, taskStation, fireMissionWait, isInAction,
-  AT_STATION_TILES, TASK_S, CREW_LAYOUT, weaponFramePoint, crewDrillFactor,
+  AT_STATION_TILES, TASK_S, CREW_LAYOUT, weaponFramePoint, crewDrillFactor, loadTimeS,
 } from '@/sim/crewWeapon';
 import { createMind } from '@/sim/mind';
 
@@ -279,13 +279,16 @@ describe('crew tasks: the firing chain', () => {
     let shotAt = -1;
     const n = Math.round(14 / SIM_DT);
     for (let i = 0; i < n && shotAt < 0; i++) {
-      const before = { ch: !!cw.chambered, laid: !!cw.laid };
+      const before = { ammo: gunner.ammo, laid: !!cw.laid };
       fight(state, rng, SIM_DT, (t) => { shotAt = t; ammoAtFirstShot = gunner.ammo; });
-      if (!before.ch && cw.chambered) { order.push('load'); expect(gunner.ammo).toBe(19); }
+      // the round leaves the ammunition when it is loaded (the shot may follow in the same step)
+      if (before.ammo === 20 && gunner.ammo === 19) order.push('load');
       if (!before.laid && cw.laid) order.push('lay');
     }
-    expect(shotAt).toBeGreaterThan(TASK_S.load + 1.5 - 0.3);
-    expect(order).toEqual(['load', 'lay']);
+    // gun timing: LOADING (7.5 cm: 6.5 s x0.9 for an open gun) and LAYING (fine lay 4 s at 90 m) now
+    // run side by side, so the shorter lay finishes first and the shot waits for the loader
+    expect(shotAt).toBeGreaterThan(loadTimeS('pak40', gunner.experience) - 0.3);
+    expect(order).toEqual(['lay', 'load']);
     expect(ammoAtFirstShot).toBe(19); // firing did not take a second round
     expect(cw.chambered).toBe(false);
     expect(crewWeaponVisual(state, cw)).toBe('recoil');
@@ -295,8 +298,8 @@ describe('crew tasks: the firing chain', () => {
     const { state, team, men } = gunSetup('pak40', 'atgun', 2, 'ready');
     const cw = team.crewWeapon!;
     const gunner = men[0];
-    // loaded and laid on a point
-    step(state, 6);
+    // loaded and laid on a point (gun timing: a 7.5 cm round takes ~5.9 s to load, was 3.5 s)
+    step(state, 9);
     expect(cw.chambered).toBe(true);
     const aim = { x: 50, y: 5 };
     expect(fireMissionWait(state, team, gunner, { aim, targetTeamId: 7 })).toBeGreaterThan(1);

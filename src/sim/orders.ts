@@ -12,6 +12,7 @@ import { isFirstFireFrozen, isLeaderless } from './mind';
 import { angleTo } from '@/shared/math';
 import { formationBaseHeading, rotateOffset } from './spawn';
 import { settleTile } from './coverSeek';
+import { isDazed } from './daze';
 import { onCrewOrder } from './crewWeapon';
 import { RADIO_OUT_ORDER_DELAY_S, radioOut } from './vehicleDamage';
 
@@ -35,7 +36,9 @@ function canObey(state: BattleState, rng: Rng, s: Soldier, team: Team, target: V
   const issuedAt = team.order?.issuedAt ?? 0;
   // Any refusal by a living soldier leaves the order pending; mind.ts retries it once hesitation
   // has run out (and the order has not been replaced), so a failed roll is never permanent.
-  if (INCAPABLE_ACTIVITIES.has(s.activity) || isFirstFireFrozen(state, s.id) || s.mind.hesitation > 0) {
+  // A man dazed by a blast (sim/daze.ts) takes no order either; it stays pending the same way and
+  // he picks it up when his head clears.
+  if (INCAPABLE_ACTIVITIES.has(s.activity) || isFirstFireFrozen(state, s.id) || s.mind.hesitation > 0 || isDazed(s, state.time)) {
     s.mind.pendingOrderAt = issuedAt;
     return false;
   }

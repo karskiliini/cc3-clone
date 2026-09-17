@@ -14,6 +14,7 @@ import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';
 import { addMessage } from './messages';
 import { applyOrderToSoldier, orderRoutePoints, routeVia } from './orders';
+import { DAZE_VETERAN_EXP, isDazed } from './daze';
 
 // ---------------------------------------------------------------- motivation
 /** Motivation seed from experience (proxy for conscript/regular/elite quality bands) + leadership. */
@@ -58,6 +59,9 @@ export function createMind(motivation: number, time = 0, trait?: Trait): Soldier
   };
 }
 
+/** Stress a dazed man does not drop below (sim/daze.ts): the spike his recovery starts from. */
+const DAZE_STRESS_FLOOR = 40;
+const DAZE_STRESS_FLOOR_VETERAN = 20;
 const SEVERITY: MentalState[] = ['calm', 'alert', 'wary', 'shaken', 'pinned', 'cowering', 'panicked', 'broken'];
 function severityIdx(s: MentalState): number { const i = SEVERITY.indexOf(s); return i < 0 ? 99 : i; }
 
@@ -639,6 +643,7 @@ function maybeRally(state: BattleState, s: Soldier, team: Team | undefined, trac
   const leader = state.soldiers.get(team.leaderId);
   if (!leader || leader.id === s.id) return;
   if (leader.health === 'dead' || leader.health === 'incapacitated') return;
+  if (isDazed(leader, state.time)) return; // a dazed leader rallies nobody (sim/daze.ts)
   if (leader.experience < 50) return;
   if (dist(leader.pos, s.pos) * TILE_M > 10) return;
   const last = track.lastRallyAt.get(team.id) ?? -Infinity;
@@ -661,7 +666,8 @@ function syncActivityForState(state: BattleState, s: Soldier, team: Team | undef
 
   if (isSevere) {
     s.activity = SEVERE_ACTIVITY[mind.state]!;
-    if (mind.state === 'panicked' || mind.state === 'cowering' || mind.state === 'pinned') s.path = [];
+    // (a dazed man's path is his crawl for cover, sim/daze.ts — left alone)
+    if ((mind.state === 'panicked' || mind.state === 'cowering' || mind.state === 'pinned') && !isDazed(s, state.time)) s.path = [];
     if (mind.state === 'pinned' || mind.state === 'cowering') s.stance = 'prone';
   } else if (wasSevere) {
     resumeFromOrder(state, s, team);
@@ -747,6 +753,14 @@ function stepOneMind(state: BattleState, rng: Rng, dt: number, s: Soldier, track
     } else if (s.experience >= 60 && severityIdx(mind.state) > severityIdx('pinned')) {
       mind.state = 'pinned';
     }
+  }
+
+  // ---- dazed by a blast (sim/daze.ts): the shock is held while his head rings, so it is there as a
+  // spike when the daze ends and decays normally from then; anyone short of a veteran comes out
+  // of it at least 'shaken'.
+  if (isDazed(s, state.time)) {
+    mind.stress = Math.max(mind.stress, s.experience >= DAZE_VETERAN_EXP ? DAZE_STRESS_FLOOR_VETERAN : DAZE_STRESS_FLOOR);
+    if (s.experience < DAZE_VETERAN_EXP && severityIdx(mind.state) < severityIdx('shaken')) mind.state = 'shaken';
   }
 
   if (mind.state !== prevState) mind.stateSince = state.time;

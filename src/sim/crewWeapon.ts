@@ -39,9 +39,11 @@ import { inBounds, tileAt } from './map';
 import { TERRAIN_PROPS } from './terrain';
 import { addMessage } from './messages';
 import { VEHICLE_DEFS } from '@/data/units';
+import { LOAD_ATGUN_MUL, LAY_MOVING_TARGET_MUL, bracketLost, bracketMul, fineLayBaseS, followUpLayS, laySkillMul, loadSkillMul, weaponLoadS } from './gunTiming';
 import { AIM_HOLD_MAX_S, SKILL_ACE, aimLayMul, chooseAimPoint, chooseRound, gunnerSkill, noteOutOf, soldierRounds } from './aimPoint';
 import { expectedArmorMm } from './vehicleDamage';
 import { formationBaseHeading, rotateOffset } from './spawn';
+import { isDazed, recoveryFactor } from './daze';
 
 export type CrewServedClass = 'mortar' | 'hmg' | 'atgun';
 const CREW_SERVED = new Set<WeaponClass>(['mortar', 'hmg', 'atgun']);
@@ -238,6 +240,7 @@ function isFleeing(s: Soldier): boolean {
 export function isAbleCrewman(state: BattleState, s: Soldier | undefined): s is Soldier {
   if (!isActive(s) || isFleeing(s)) return false;
   if (s.stunnedUntil != null && state.time < s.stunnedUntil) return false;
+  if (isDazed(s, state.time)) return false; // dazed by a blast (sim/daze.ts): another man takes his task
   if (s.dodgeUntil != null && state.time < s.dodgeUntil) return false; // leaping clear of a vehicle
   if (s.activity === 'pinned' || s.activity === 'cowering') return false;
   const m = s.mind.state;
@@ -402,7 +405,12 @@ function computeOpenTasks(state: BattleState, cw: CrewWeaponState, cls: CrewServ
   const m = cw.mission;
   if (cls === 'atgun') {
     if (cw.recoilUntil != null && state.time < cw.recoilUntil) return [];
-    if (!cw.chambered) return ammoToLoad(gunner) ? ['load'] : [];
+    // LOADING and LAYING run side by side: the layer corrects his lay while the round goes in
+    if (!cw.chambered) {
+      const out: CrewTaskId[] = ammoToLoad(gunner) ? ['load'] : [];
+      if (m && !cw.laid && requestedWithin(state, m, 1.5)) out.push('lay');
+      return out;
+    }
     // the wrong round for this target is in the breech: out with it (the gunner lays meanwhile)
     if (wrongRoundChambered(state, cw, gunner) && requestedWithin(state, m, 1.5)) return cw.laid ? ['unload'] : ['unload', 'lay'];
     if (m && !cw.laid && requestedWithin(state, m, 1.5)) return ['lay'];
@@ -741,7 +749,8 @@ function stepTasks(state: BattleState, team: Team, cw: CrewWeaponState, cls: Cre
     if (!w) continue;
     const station = taskStation(cw, cls, task);
     const there = dist(w.pos, station) <= AT_STATION_TILES || walkTo(state, w, station, dt);
-    const total = taskDurationS(cw, task, w, gunner);
+    // a man still recovering from a daze works slowly (sim/daze.ts: x0.7 fading back to 1)
+    const total = taskDurationS(cw, task, w, gunner) / recoveryFactor(w, state.time);
     if (there) {
       worked = true;
       if (w.stance === 'standing') w.stance = 'crouching';
@@ -801,6 +810,11 @@ function isInActionNow(cw: CrewWeaponState, cls: CrewServedClass): boolean {
 
 /** Seconds this worker needs for the whole task. */
 function taskDurationS(cw: CrewWeaponState, task: CrewTaskId, worker: Soldier, gunner: Soldier): number {
+  // guns: loading by calibre and the fine lay follow sim/gunTiming.ts (their own skill tables)
+  if (crewServedClass(cw.weaponId) === 'atgun') {
+    if (task === 'load') return Math.max(0.05, gunLoadBaseS(cw.weaponId) * loadSkillMul(worker.experience));
+    if (task === 'lay') return Math.max(0.05, (cw.mission?.layS ?? TASK_S.lay) * laySkillMul(worker.experience));
+  }
   let base = task === 'lay' ? cw.mission?.layS ?? TASK_S.lay : TASK_S[task];
   if (task === 'feedBelt' && worker.id === gunner.id) base *= SELF_FEED_FACTOR;
   return Math.max(0.05, base * crewDrillFactor(worker.experience));
@@ -1084,34 +1098,46 @@ export const MISSION_NEW_AIM_M = 15;
 export const MISSION_RELAY_M = 10;
 /** Mortar lay time at zero / at maximum range (seconds, average crew). */
 export const MORTAR_LAY_S: [number, number] = [6, 10];
-/** AT gun traverse-and-lay: this much for no traverse, up to the max for a half-turn. */
-export const ATGUN_LAY_S: [number, number] = [1.5, 4];
+/** AT gun: seconds of swinging the piece by its trail and handwheel, none for no traverse up to
+ * this for a half-turn; the FINE LAY on top follows sim/gunTiming.ts (4 s up to 200 m, +1 s per
+ * further 200 m, moving target x1.5, the layer's skill, the aim point). */
+export const ATGUN_TRAVERSE_S = 2.5;
+/** Open gun: the calibre's loading time x0.9 for a regular crew (sim/gunTiming.ts). */
+export function gunLoadBaseS(weaponId: string): number {
+  const w = WEAPONS[weaponId];
+  return w ? weaponLoadS(w) * LOAD_ATGUN_MUL : TASK_S.load;
+}
 export const HMG_LAY_S = 2;
 /** Load time per round. HMGs are belt fed: no separate load per burst. */
 export const LOAD_S: Record<CrewServedClass, number> = { mortar: TASK_S.dropRound, hmg: 0, atgun: TASK_S.load };
+/** Drill factor of the man doing it: guns use the loading / laying tables of sim/gunTiming.ts. */
+function loadDrill(cls: CrewServedClass, experience: number): number { return cls === 'atgun' ? loadSkillMul(experience) : crewDrillFactor(experience); }
+function layDrill(cls: CrewServedClass, experience: number): number { return cls === 'atgun' ? laySkillMul(experience) : crewDrillFactor(experience); }
+function loadBaseS(cls: CrewServedClass, weaponId: string): number { return cls === 'atgun' ? gunLoadBaseS(weaponId) : LOAD_S[cls]; }
 /** Re-lay correction on a moving tracked target (seconds, average crew). */
 export const RELAY_S = 1.5;
 
-function layBaseS(weaponId: string, distM: number, traverseRad: number): number {
+function layBaseS(weaponId: string, distM: number, traverseRad: number, targetMoving = false): number {
   const cls = crewServedClass(weaponId);
   if (!cls) return 0;
   if (cls === 'mortar') {
     const range = WEAPONS[weaponId]?.rangeM ?? 1000;
     return MORTAR_LAY_S[0] + (MORTAR_LAY_S[1] - MORTAR_LAY_S[0]) * clamp(distM / range, 0, 1);
   }
-  if (cls === 'atgun') return ATGUN_LAY_S[0] + (ATGUN_LAY_S[1] - ATGUN_LAY_S[0]) * clamp(Math.abs(traverseRad) / Math.PI, 0, 1);
+  if (cls === 'atgun') return fineLayBaseS(distM) * (targetMoving ? LAY_MOVING_TARGET_MUL : 1) + ATGUN_TRAVERSE_S * clamp(Math.abs(traverseRad) / Math.PI, 0, 1);
   return HMG_LAY_S;
 }
 
 /** Lay (aim) time for a new mission. `distM` is the range to the aim point, `traverseRad` the angle
  * the weapon must turn from its current facing. */
-export function layTimeS(weaponId: string, experience: number, distM: number, traverseRad: number): number {
-  return layBaseS(weaponId, distM, traverseRad) * crewDrillFactor(experience);
+export function layTimeS(weaponId: string, experience: number, distM: number, traverseRad: number, targetMoving = false): number {
+  const cls = crewServedClass(weaponId);
+  return cls ? layBaseS(weaponId, distM, traverseRad, targetMoving) * layDrill(cls, experience) : 0;
 }
 
 export function loadTimeS(weaponId: string, experience: number): number {
   const cls = crewServedClass(weaponId);
-  return cls ? LOAD_S[cls] * crewDrillFactor(experience) : 0;
+  return cls ? loadBaseS(cls, weaponId) * loadDrill(cls, experience) : 0;
 }
 
 /** Crews that are not in a state to work the gun abort the mission. */
@@ -1129,19 +1155,28 @@ export interface FireRequest {
   /** guns: what is being fired at, for the round type and the aim point (absent = soft target) */
   targetVehicle?: Vehicle | null;
   smoke?: boolean;
+  /** the target is on the move (guns: fine lay x1.5) */
+  targetMoving?: boolean;
 }
 
 /** Seconds (estimate) until the weapon can fire on its mission; 0 = it may fire now. */
 function missionRemaining(state: BattleState, cw: CrewWeaponState, cls: CrewServedClass, gunner: Soldier): number {
   const f = crewDrillFactor(gunner.experience);
+  const fLoad = loadDrill(cls, gunner.experience);
   let t = 0;
   if (cw.recoilUntil != null && state.time < cw.recoilUntil) t += cw.recoilUntil - state.time;
-  if (cls !== 'hmg' && !cw.chambered) t += Math.max(0, LOAD_S[cls] - (cw.progress?.[cls === 'mortar' ? 'dropRound' : 'load'] ?? 0)) * f;
-  else if (cls === 'atgun' && wrongRoundChambered(state, cw, gunner)) t += (Math.max(0, TASK_S.unload - (cw.progress?.unload ?? 0)) + LOAD_S.atgun) * f;
+  // progress runs 0..TASK_S[task] whatever the real duration: scale what is left
+  const loadTask = cls === 'mortar' ? 'dropRound' : 'load';
+  let loadLeft = 0;
+  if (cls !== 'hmg' && !cw.chambered) loadLeft = loadBaseS(cls, cw.weaponId) * (1 - clamp((cw.progress?.[loadTask] ?? 0) / TASK_S[loadTask], 0, 1)) * fLoad;
+  else if (cls === 'atgun' && wrongRoundChambered(state, cw, gunner)) loadLeft = Math.max(0, TASK_S.unload - (cw.progress?.unload ?? 0)) * f + loadBaseS(cls, cw.weaponId) * fLoad;
+  let layLeft = 0;
   if (!cw.laid) {
-    const total = (cw.mission?.layS ?? TASK_S.lay) * f;
-    t += total * (1 - clamp((cw.progress?.lay ?? 0) / TASK_S.lay, 0, 1));
+    const total = (cw.mission?.layS ?? TASK_S.lay) * layDrill(cls, gunner.experience);
+    layLeft = total * (1 - clamp((cw.progress?.lay ?? 0) / TASK_S.lay, 0, 1));
   }
+  // a gun is loaded and laid side by side; a mortar bomb is dropped once the lay is done
+  t += cls === 'atgun' ? Math.max(loadLeft, layLeft) : loadLeft + layLeft;
   if (t <= 0 && cls !== 'mortar') {
     // loaded and laid: the gunner must be at the sight to fire
     const seat = weaponFramePoint(cw.pos, cw.facing, CREW_LAYOUT[cls].gunner);
@@ -1168,9 +1203,10 @@ export function fireMissionWait(state: BattleState, team: Team | undefined, gunn
   if (!m || (!sameTrack && movedM > MISSION_NEW_AIM_M)) {
     const distM = dist(gunner.pos, req.aim) * TILE_M;
     const traverse = wrapAngle(angleTo(cw.pos, req.aim) - cw.facing);
-    const layS = layBaseS(cw.weaponId, distM, traverse) + (req.extraFirstRoundDelayS ?? 0) / crewDrillFactor(gunner.experience);
+    const moving = req.targetMoving ?? (!!req.targetVehicle && Math.abs(req.targetVehicle.speed) > 0.1);
+    const layS = layBaseS(cw.weaponId, distM, traverse, moving) + (req.extraFirstRoundDelayS ?? 0) / layDrill(cls, gunner.experience);
     const mission: FireMission = {
-      layAim: { x: req.aim.x, y: req.aim.y }, targetTeamId: req.targetTeamId, timer: layS * crewDrillFactor(gunner.experience),
+      layAim: { x: req.aim.x, y: req.aim.y }, targetTeamId: req.targetTeamId, timer: layS * layDrill(cls, gunner.experience),
       rounds: 0, loaded: !!cw.chambered, startedAt: state.time, layS, lastRequestAt: state.time,
     };
     cw.mission = mission;
@@ -1215,6 +1251,7 @@ function layOnTarget(state: BattleState, cw: CrewWeaponState, gunner: Soldier, r
     const choice = chooseAimPoint(w, have, gunnerSkill(gunner), cw.pos, tv, state.config.year);
     const before = aimLayMul(m.aimPoint ?? 'mass');
     m.aimPoint = choice.aimPoint;
+    if (m.aimVehicleId !== tv.id) { m.misses = 0; m.bracketFrom = undefined; m.bracketAt = undefined; }
     m.aimVehicleId = tv.id;
     if (!cw.laid) m.layS = ((m.layS ?? TASK_S.lay) / before) * aimLayMul(choice.aimPoint);
     hold = choice.hold;
@@ -1248,8 +1285,37 @@ export function onMissionRound(state: BattleState, team: Team | undefined, gunne
   if (!cls) return;
   if (cw.mission) { cw.mission.rounds++; cw.mission.loaded = false; }
   if (cls !== 'hmg') { cw.chambered = false; cw.chamberedType = undefined; }
-  if (cls === 'atgun') cw.recoilUntil = state.time + RECOIL_S;
+  if (cls === 'atgun') {
+    cw.recoilUntil = state.time + RECOIL_S;
+    // FOLLOW-UP: the piece has jumped; the next round on this target needs a correction of
+    // 1.5-2.5 s (by the layer's skill), made while the loader rams the next round
+    if (cw.mission) {
+      cw.laid = false;
+      cw.mission.layS = followUpLayS(gunner.experience) / laySkillMul(gunner.experience);
+      delete cw.progress?.lay;
+    }
+  }
   gunner.crewTask = { id: 'fire', progress: 0, walking: false };
+}
+
+/** Bracketing (sim/gunTiming.ts): hit-chance multiplier of this gun's next round at `vehicle`: +15%
+ * per observed miss on the same target, up to +30%, lost when either party has moved ~10 m. */
+export function missionBracketMul(team: Team | undefined, from: Vec2, vehicle: Vehicle): number {
+  const m = team?.crewWeapon?.mission;
+  if (!m || m.aimVehicleId !== vehicle.id) return 1;
+  if (bracketLost(m, from, vehicle.pos)) { m.misses = 0; m.bracketFrom = undefined; m.bracketAt = undefined; }
+  return bracketMul(m.misses);
+}
+
+/** The crew watched its round at `vehicle` fall: a miss is corrected for the next one. */
+export function onMissionShotAtVehicle(team: Team | undefined, hit: boolean, from: Vec2, vehicle: Vehicle): void {
+  const m = team?.crewWeapon?.mission;
+  if (!m || hit) return;
+  if (m.aimVehicleId == null) m.aimVehicleId = vehicle.id;
+  if (m.aimVehicleId !== vehicle.id) return;
+  m.misses = Math.min(2, (m.misses ?? 0) + 1);
+  m.bracketFrom ??= { ...from };
+  m.bracketAt ??= { ...vehicle.pos };
 }
 
 /** Guns and HMGs take their ammunition through the crew's tasks (`load` / `feedBelt`), so combat's

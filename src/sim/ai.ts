@@ -297,7 +297,7 @@ const carriedTeams = new WeakMap<BattleState, Set<number>>();
 const DISMOUNT_SHORT_M = 110;   // set down this far short of the objective ...
 const DISMOUNT_ENEMY_M = 150;   // ... or as soon as known enemy is this close
 const PICKUP_RANGE_M = 70;
-const WORTH_RIDING_M = 260;
+const WORTH_RIDING_M = 220;
 
 function knownAtGunSees(state: BattleState, side: Side, p: Vec2): boolean {
   for (const id of state.spotted[side]) {
@@ -338,7 +338,8 @@ function stepTransportAI(
       for (const s of riders) carried!.add(s.teamId);
       battle.issueOrder(team.id, { type: 'defend', target: objective, issuedAt: state.time, dismount: true });
     };
-    if (enemyM <= DISMOUNT_ENEMY_M || toObjM <= DISMOUNT_SHORT_M + 10 || knownAtGunSees(state, side, vehicle.pos)) { setDown(); return true; }
+    const suspectM = state.map.victoryLocations.reduce((m, vl) => (vl.owner !== side ? Math.min(m, dist(vehicle.pos, { x: vl.x, y: vl.y }) * TILE_M) : m), Infinity);
+    if (enemyM <= DISMOUNT_ENEMY_M || toObjM <= DISMOUNT_SHORT_M + 10 || suspectM <= 90 || knownAtGunSees(state, side, vehicle.pos)) { setDown(); return true; }
     // a covered point short of the objective, pulled back while a known gun looks at it
     const ang = angleTo(objective, vehicle.pos);
     let point: Vec2 = objective;
@@ -360,15 +361,19 @@ function stepTransportAI(
     tryIssueOrder(state, battle, track, team, { type: 'defend', target: enemyZoneCentre, issuedAt: state.time });
     return true;
   }
-  // empty: pick up a squad that still has a long way to go
-  if (enemyM > 250 && roomLeft(state, vehicle) > 0) {
+  // empty: pick up a squad that still has a long way to go — never where the enemy is known or
+  // suspected (an objective we do not hold) to be close
+  const suspectClose = state.map.victoryLocations.some((vl) => vl.owner !== side && dist(vehicle.pos, { x: vl.x, y: vl.y }) * TILE_M < 180);
+  if (enemyM > 250 && !suspectClose && roomLeft(state, vehicle) > 0) {
     let pick: Team | null = null, bd = Infinity;
     for (const t of attackerTeams) {
       if (carried.has(t.id) || t.transportId != null || !canTeamMount(t) || t.crewWeapon) continue;
       if (t.status === 'Pinned' || t.status === 'Cowering' || t.status === 'Broken' || t.status === 'Panicked' || t.status === 'Routed') continue;
       const d = dist(t.pos, vehicle.pos) * TILE_M;
       const toGo = t.aiObjective ? dist(t.pos, t.aiObjective) * TILE_M : 0;
-      if (d > PICKUP_RANGE_M || toGo < WORTH_RIDING_M || d >= bd) continue;
+      // worth it only with a real ride ahead of the pick-up point itself
+      const rideM = t.aiObjective ? dist(vehicle.pos, t.aiObjective) * TILE_M - DISMOUNT_SHORT_M : 0;
+      if (d > PICKUP_RANGE_M || toGo < WORTH_RIDING_M || rideM < 100 || d >= bd) continue;
       pick = t; bd = d;
     }
     if (pick) {

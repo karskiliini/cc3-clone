@@ -279,12 +279,18 @@ describe('indirect fire: mortars', () => {
 
 describe('fire-mission preparation (crew-served direct fire)', () => {
   it('AT gun lay grows with traverse; HMG lays in about 2 s; green crews are slower than veterans', () => {
-    expect(layTimeS('pak40', 50, 300, 0)).toBeCloseTo(1.5, 5);
-    expect(layTimeS('pak40', 50, 300, Math.PI)).toBeCloseTo(4, 5);
+    // gun timing: the AT gun's FINE LAY is 4 s up to 200 m, +1 s per further 200 m (300 m: 4.5 s),
+    // x1.5 on a moving target; swinging the piece adds up to 2.5 s for a half-turn (was 1.5..4 s in all)
+    expect(layTimeS('pak40', 50, 300, 0)).toBeCloseTo(4.5, 5);
+    expect(layTimeS('pak40', 50, 300, Math.PI)).toBeCloseTo(7, 5);
+    expect(layTimeS('pak40', 50, 300, 0, true)).toBeCloseTo(6.75, 5);
+    expect(layTimeS('pak40', 25, 300, 0)).toBeGreaterThan(layTimeS('pak40', 75, 300, 0));
     expect(layTimeS('mg42_hmg', 50, 300, 1)).toBeCloseTo(2, 5);
     expect(layTimeS('mortar81', 20, 500, 0)).toBeGreaterThan(layTimeS('mortar81', 90, 500, 0));
-    expect(loadTimeS('pak40', 50)).toBeGreaterThanOrEqual(3);
-    expect(loadTimeS('pak40', 50)).toBeLessThanOrEqual(4);
+    // gun timing: loading by calibre (7.5 cm: 6.5 s, x0.9 for an open gun), recruit x1.35, veteran x0.85
+    expect(loadTimeS('pak40', 50)).toBeCloseTo(5.85, 5);
+    expect(loadTimeS('pak40', 25)).toBeCloseTo(5.85 * 1.35, 5);
+    expect(loadTimeS('pak40', 75)).toBeCloseTo(5.85 * 0.85, 5);
   });
 
   it('switching aim point more than 15 m starts a new lay; a moving tracked target only a short re-lay', () => {

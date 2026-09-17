@@ -6,6 +6,7 @@ import { losTrace, eyeHeightM, EYE_STANDING_M, EYE_VEHICLE_M } from './los';
 import { groundAtTile } from './map';
 import { angleTo, facingAngle, wrapAngle, dist } from '@/shared/math';
 import { onSpotted } from './mind';
+import { dazeVisionFactor } from './daze';
 import { VEHICLE_DEFS } from '@/data/units';
 import { vehicleEyes, type VehicleEye } from './vehicleVision';
 
@@ -90,7 +91,8 @@ export function painVisionFactor(soldier: Soldier, time: number): number {
  * eye — the crewman whose eye it is); 1 for the no-crew-data fallback spotter. */
 function spotterPainFactor(state: BattleState, sp: Spotter): number {
   const s = sp.soldier ?? (sp.vehicleEye ? state.soldiers.get(sp.vehicleEye.soldierId) : undefined);
-  return s ? painVisionFactor(s, state.time) : 1;
+  // a man dazed by a blast sees very little (sim/daze.ts)
+  return s ? painVisionFactor(s, state.time) * dazeVisionFactor(s, state.time) : 1;
 }
 
 /** An eye on the battlefield: a dismounted soldier (with his mind's spotting bonuses), or one of a

@@ -215,6 +215,9 @@ export interface WeaponDef {
   heRadiusM: number;          // splash radius, 0 for direct small arms
   ammo: number;               // magazine/ready rounds
   reloadS: number;
+  /** guns (tank, SPG, AT): seconds a regular, stationary crew needs to load one round, by calibre
+   * (sim/gunTiming.ts). `rate` is NOT used for these guns' cycle; it stays for automatic weapons. */
+  loadS?: number;
   smoke?: boolean;            // can fire smoke rounds
   indirect?: boolean;         // mortar
   /** crew-served weapons (mortar/hmg/atgun): seconds to set up after the crew stops (see sim/crewWeapon.ts) */
@@ -388,6 +391,14 @@ export interface Soldier {
   blast?: { from: Vec2; time: number; force: number; origin: Vec2 };
   /** Knocked down by a blast: cannot move, fire or throw until battle time reaches this. */
   stunnedUntil?: number;
+  /** Dazed by that blast (sim/daze.ts) until this battle time: cannot fire, throw, reload, work a
+   * crew task, spot, loot or obey a movement order — he may only crawl to better cover. */
+  dazedUntil?: number;
+  /** Recovering from the daze until this battle time: accuracy and task speed x0.7 fading to 1. */
+  shakenUntil?: number;
+  /** A dazed man's self-preservation crawl (sim/daze.ts): the path he drags himself along (empty =
+   * lying still) and when he next looks around for something better. */
+  dazeCrawl?: { path: Vec2[]; lookAt: number };
   /** Crew-served weapon task this man is assigned to right now (sim/crewWeapon.ts, spec
    * 2026-09-17 §6); absent when he has none. `progress` 0..1 of the task; `walking` while he is
    * still on his way to the station. Written by the sim each step, read by the HUD and renderer. */
@@ -471,7 +482,22 @@ export interface VehicleDef {
   widthM: number;
   speedRoadMs: number;        // metres per second
   speedOffroadMs: number;
-  turnRateRad: number;        // radians per second
+  /** @deprecated legacy hull turn rate (rad/s). No entry of data/units.ts carries it any more; it is
+   * read ONLY by `hullTurnRad`/`turretTraverseRad` in sim/gunTiming.ts as the documented fallback for
+   * VehicleDef literals (tests) that lack the historical figures below. */
+  turnRateRad?: number;
+  /** historical turret traverse, deg/s, typical combat value (casemates: the gun's handwheel traverse) */
+  turretTraverseDegS?: number;
+  /** hand traverse when the engine is dead (powered turrets), deg/s */
+  turretTraverseHandDegS?: number;
+  /** historical hull turn in place, deg/s (wheel-steered halftracks: see `turnRadiusM`) */
+  hullTurnDegS?: number;
+  /** turretless vehicles: the gun traverses this many degrees either side of the hull axis */
+  gunArcDeg?: number;
+  /** wheel-steered vehicles cannot pivot: turn rate = speed / this radius (m), zero at rest */
+  turnRadiusM?: number;
+  /** rounds in the ready rack: they load at full speed, the rest x1.25 from the hull racks */
+  readyRack?: number;
   armor: { front: number; side: number; rear: number; top: number };  // mm
   mainWeaponId: string | null;
   coaxWeaponId: string | null;
@@ -483,6 +509,27 @@ export interface VehicleDef {
   layout?: VehicleLayoutDef;
   /** men it carries besides its crew (SdKfz 251: 10); absent = none */
   passengers?: number;
+}
+
+/** A gunner's lay on one target (vehicles: sim/combat.ts; the same bracketing fields serve AT guns). */
+export interface GunLay {
+  /** identity of the target: 'v<id>' vehicle, 't<teamId>' infantry team, 'p' a point */
+  key: string;
+  /** where the gun is being laid */
+  aim: Vec2;
+  /** seconds of target designation left (commander's call) */
+  designateLeftS: number;
+  /** seconds of fine lay (or follow-up correction) left, and of the whole lay for the progress */
+  fineLeftS: number;
+  totalS: number;
+  /** follow-up correction on a target already fired at */
+  followUp?: boolean;
+  /** observed misses on this target (bracketing), where we and the target stood when they fell */
+  misses?: number;
+  bracketFrom?: Vec2;
+  bracketAt?: Vec2;
+  /** battle time the target was lost from sight (the lay is kept a few seconds) */
+  lostAt?: number;
 }
 
 export interface Vehicle {
@@ -515,6 +562,26 @@ export interface Vehicle {
   aimVehicleId?: number;
   /** battle time until which the gunner holds fire for a better presentation */
   aimHoldUntil?: number;
+  // ---- loading and laying phases of the main gun (sim/gunTiming.ts, sim/combat.ts; all optional) ----
+  /** what the main gun is waiting for: the loader, the gunner's lay, or nothing */
+  gunState?: 'loading' | 'laying' | 'ready';
+  /** 0..1 progress of the round being loaded (1 = in the breech, breech closed) */
+  loadProgress?: number;
+  /** 0..1 progress of the lay on the current target (designation + fine lay; 1 = laid) */
+  layProgress?: number;
+  /** seconds the whole current load takes / took (`mainFireTimer` holds what is left of it) */
+  loadTotalS?: number;
+  /** the gunner's lay on the current target */
+  gunLay?: GunLay;
+  /** rounds taken from the ready rack since it was last restocked */
+  readyRackUsed?: number;
+  /** battle time of the last main-gun round */
+  lastMainShotAt?: number;
+  /** battle time until which a moving vehicle stands still for an aimed shot (short halt) */
+  fireHaltUntil?: number;
+  /** when the current short halt began / battle time before which it will not halt again */
+  fireHaltSince?: number;
+  noFireHaltUntil?: number;
   /** equipment states (sim/vehicleDamage.ts); absent = all ok */
   damage?: VehicleDamage;
   /** seat -> soldier id (null = empty); filled from the team's crew on first use */
@@ -598,6 +665,8 @@ export type TeamStatusWord =
   // computeTeamStatus (sim/morale.ts) runs; that function itself never emits it — see 'Waiting'.
   | 'Idle' | 'Moving' | 'Moving Fast' | 'Sneaking' | 'Firing' | 'Defending'
   | 'Ambushing' | 'Pinned' | 'Cowering' | 'Panicked' | 'Routed' | 'Broken'
+  // most of the team is knocked down or dazed by a blast (sim/daze.ts)
+  | 'Stunned'
   | 'Destroyed' | 'Surrendered' | 'Knocked Out' | 'Setting up' | 'Aiming' | 'Loading'
   // crew-served weapons follow their open task (spec 2026-09-17 §6)
   | 'Unlimbering' | 'Spreading trails' | 'Digging in' | 'Packing up'
@@ -750,6 +819,10 @@ export interface FireMission {
   /** where the gunner lays on an armoured target, and which vehicle */
   aimPoint?: AimPoint;
   aimVehicleId?: number;
+  /** bracketing (sim/gunTiming.ts): observed misses on this target and where both parties stood */
+  misses?: number;
+  bracketFrom?: Vec2;
+  bracketAt?: Vec2;
 }
 
 // ------------------------------------------------------------------- battle

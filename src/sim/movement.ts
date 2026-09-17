@@ -8,6 +8,7 @@ import { findPath } from './path';
 import { isFirstFireFrozen } from './mind';
 import { stepCrewWeapons, isHeldForPacking, isHaulingGun } from './crewWeapon';
 import { stepOrderWaypoints } from './orders';
+import { isDazed, stepDazed } from './daze';
 
 const SPEEDS: Record<string, number> = {
   moving: 1.4,
@@ -50,6 +51,8 @@ export function stepMovement(state: BattleState, rng: Rng, dt: number): void {
   // Move orders with Shift-click waypoints: drop the ones the team has reached (paths were routed
   // through every waypoint in turn by orders.ts, so this only keeps order.waypoints current).
   stepOrderWaypoints(state);
+  // dazed by a blast (sim/daze.ts): the self-preservation crawl; nobody else moves these men
+  stepDazed(state, rng, dt);
   for (const s of state.soldiers.values()) {
     if (s.health === 'dead' || s.health === 'incapacitated') continue;
 
@@ -71,6 +74,8 @@ export function stepMovement(state: BattleState, rng: Rng, dt: number): void {
     }
     // knocked down by a blast (spec 2026-09-17 §4): lies where he landed until the stun ends
     if (s.stunnedUntil != null && state.time < s.stunnedUntil) { s.animFrame = 0; continue; }
+    // ...and then dazed: moved only by his own crawl for cover (stepDazed above)
+    if (isDazed(s, state.time)) continue;
 
     // stooping over an item on the ground (sim/pickup.ts, spec 2026-09-17 §9): holds still
     if (s.pickup?.until != null) { s.animFrame = 0; continue; }
@@ -229,8 +234,9 @@ function separateSoldiers(state: BattleState): void {
           const dir = d > 1e-4 ? vnorm(vsub(b.pos, a.pos)) : { x: 1, y: 0 };
           // A man lying stunned after a blast is not slid along the ground by his neighbours:
           // only the man who can move steps aside (both steps, so the pair still separates).
-          const aDown = a.stunnedUntil != null && state.time < a.stunnedUntil;
-          const bDown = b.stunnedUntil != null && state.time < b.stunnedUntil;
+          // (nor is a dazed one, sim/daze.ts)
+          const aDown = (a.stunnedUntil != null && state.time < a.stunnedUntil) || isDazed(a, state.time);
+          const bDown = (b.stunnedUntil != null && state.time < b.stunnedUntil) || isDazed(b, state.time);
           if (aDown && bDown) continue;
           const aStep = aDown ? 0 : bDown ? 0.1 : 0.05;
           const bStep = bDown ? 0 : aDown ? 0.1 : 0.05;

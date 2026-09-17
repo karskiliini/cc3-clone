@@ -141,6 +141,7 @@ export function teamStatusTextColor(word: TeamStatusWord): string {
     case 'Cowering': // shown as 'Seeking Cover'
       return HUD.statusGreen;
     case 'Pinned':
+    case 'Stunned': // most of the team knocked down / dazed by a blast (sim/daze.ts)
     case 'Hesitating':
     case 'Abandoned': // a serviceable vehicle waiting for its crew (spec 2026-09-17 §10)
     case 'Bailing out':

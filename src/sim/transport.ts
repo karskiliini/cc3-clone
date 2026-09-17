@@ -236,11 +236,24 @@ export function onPassengerOut(state: BattleState, v: Vehicle, s: Soldier, panic
   s.mind.anchor = { x: tile.x, y: tile.y };
 }
 
+function straightLineClear(state: BattleState, a: Vec2, b: Vec2): boolean {
+  const n = Math.max(2, Math.ceil(dist(a, b) * 2));
+  for (let k = 1; k <= n; k++) {
+    const x = Math.floor(a.x + ((b.x - a.x) * k) / n), y = Math.floor(a.y + ((b.y - a.y) * k) / n);
+    if (!inBounds(state.map, x, y) || !isPassable(state.map, x, y, 'infantry')) return false;
+  }
+  return true;
+}
+
 function walkTo(state: BattleState, s: Soldier, spot: Vec2, fast: boolean): void {
   const end = s.path.length > 0 ? s.path[s.path.length - 1] : null;
-  if (!end || dist(end, spot) > 0.6) {
-    s.path = findPath(state.map, s.pos, spot, 'infantry');
-    if (s.path.length === 0 || dist(s.path[s.path.length - 1], spot) > 0.05) s.path.push({ ...spot });
+  if (!end || dist(end, spot) > 0.3) {
+    // straight there when the ground allows: men funnelled through the same tile centres jam
+    if (straightLineClear(state, s.pos, spot)) s.path = [{ ...spot }];
+    else {
+      s.path = findPath(state.map, s.pos, spot, 'infantry');
+      if (s.path.length === 0 || dist(s.path[s.path.length - 1], spot) > 0.05) s.path.push({ ...spot });
+    }
   }
   if (s.activity !== 'moving' && s.activity !== 'movingFast') s.activity = fast ? 'movingFast' : 'moving';
   s.stance = 'standing';
@@ -263,6 +276,8 @@ function stepBoarding(state: BattleState, team: Team, v: Vehicle, def: VehicleDe
   const spot = doorSpot(state, v, def);
   const still = Math.abs(v.speed) <= 0.05;
   let outside = 0;
+  let place = 0; // his place in the queue behind the door
+  const fx = Math.sin(v.hullFacing), fy = -Math.cos(v.hullFacing);
   for (const id of team.soldierIds) {
     const s = state.soldiers.get(id);
     if (!s || !isAble(s) || s.vehicleId != null) continue;
@@ -280,8 +295,12 @@ function stepBoarding(state: BattleState, team: Team, v: Vehicle, def: VehicleDe
       s.activity = 'idle';
       continue;
     }
-    if (d <= DOOR_REACH_TILES) { s.path = []; s.activity = 'idle'; s.stance = 'crouching'; continue; } // waits his turn at the door
-    walkTo(state, s, spot, order.type === 'moveFast');
+    // the queue: a file behind the door, the next man at the door itself
+    const k = place++;
+    const side = k === 0 ? 0 : k % 2 === 1 ? 0.3 : -0.3;
+    const slot = { x: spot.x - fx * 0.55 * k + -fy * side, y: spot.y - fy * 0.55 * k + fx * side };
+    if (dist(s.pos, slot) <= 0.25) { s.path = []; s.activity = 'idle'; s.stance = 'crouching'; continue; } // waits his turn
+    walkTo(state, s, slot, order.type === 'moveFast');
   }
   if (outside === 0) {
     // everyone who could get in is in (the rest follow on foot)

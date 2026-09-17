@@ -119,8 +119,11 @@ describe('the round is chosen at load', () => {
       const rng = new Rng(9);
       let seen: string | undefined;
       run(g.state, rng, 12, () => { if (g.team.crewWeapon!.chambered && !seen) seen = g.team.crewWeapon!.chamberedType; });
-      expect(seen, String(target)).toBe(want);
       const after = soldierRounds(g.state, g.gunner);
+      // gun timing: loading is now the longer of the two phases, so the round can be fired in the
+      // very step its loading ends (never seen in the breech): then it is the type that left the stack
+      if (!seen) seen = (['ap', 'apcr', 'he'] as const).find((k) => after[k] < before[k]);
+      expect(seen, String(target)).toBe(want);
       expect(after[want], String(target)).toBeLessThan(before[want]);
       for (const k of ['ap', 'apcr', 'he'] as const) if (k !== want) expect(after[k], `${target} ${k}`).toBe(before[k]);
       // totals stay in step with what the HUD and the reload code read
@@ -131,10 +134,13 @@ describe('the round is chosen at load', () => {
   it('a wrong round for a new kind of target is unloaded (2 s) and goes back on the stack', () => {
     const g = gunVs(null);
     const rng = new Rng(4);
+    // gun timing: the gun is laid long before it is loaded now, so with the infantry in sight the HE
+    // round would be fired the moment it is in; they go to ground while it is being loaded
+    run(g.state, rng, 1);
+    g.state.spotted.german.clear();
     for (let i = 0; i < 100 && !g.team.crewWeapon!.chambered; i++) run(g.state, rng, 0.1);
     expect(g.team.crewWeapon!.chamberedType).toBe('he');
-    // the infantry goes to ground out of sight, a KV-1 rolls up
-    g.state.spotted.german.clear();
+    // the infantry has gone to ground out of sight, a KV-1 rolls up
     const heBefore = soldierRounds(g.state, g.gunner).he;
     const t = addTank(g.state, 'kv1', { x: 200, y: 200 }, Math.PI);
     g.state.spottedVehicles.german.add(t.v.id);

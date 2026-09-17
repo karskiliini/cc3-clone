@@ -4,12 +4,13 @@
 // selected: one 2-line row per soldier (surname/role/health, activity/weapon/
 // rounds), a header tab row for vehicle teams, and a left scroll arrow.
 // ============================================================================
-import type { Rect, BattleState, Team, Soldier, Vehicle, InputState, WeaponClass } from '@/shared/types';
+import type { Rect, BattleState, Team, Soldier, Vehicle, InputState, WeaponClass, RoundType } from '@/shared/types';
 import { PANEL_Y } from '@/shared/types';
 import { clamp } from '@/shared/math';
 import { HUD } from '@/render/palette';
 import { WEAPONS } from '@/data/weapons';
 import { crewTaskWord, CREW_TASK_WORDS } from '@/sim/crewWeapon';
+import { isDazed } from '@/sim/daze';
 import { AIM_WORD, AIM_WORDS, ROUND_LABEL, soldierRounds, vehicleRounds } from '@/sim/aimPoint';
 import { DAMAGE_WORDS, ROLE_WORD, crewRoleOf, vehicleDamageView } from '@/sim/vehicleDamage';
 import { VEHICLE_DEFS } from '@/data/units';
@@ -87,10 +88,25 @@ export const MONITOR_TEXT_CELLS = {
   activity: { maxW: NAME_W - 6, font: 'small' as const },
   status: { maxW: WIDTH - 2 - (ARROW_W + NAME_W + 1 + ROLE_W + 1) - 6, font: 'small' as const },
 };
+/** "Loading AP 60%": the round going into the breech and how far the loader has got (steps of 10%). */
+export function loadingWord(round: RoundType, progress: number): string {
+  return `Loading ${ROUND_LABEL[round]} ${Math.min(100, Math.max(0, Math.floor(progress * 10 + 1e-6) * 10))}%`;
+}
+/** "Aiming 60%": the gunner's lay on the centre of the target (an aimed spot reads "Aiming: tracks"). */
+export function layingWord(progress: number): string {
+  return `Aiming ${Math.min(100, Math.max(0, Math.floor(progress * 10 + 1e-6) * 10))}%`;
+}
+const PCT_STEPS = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1];
+/** Every word the main-gun phases can put in the activity column (feeds the width-fit test). */
+export const MONITOR_GUN_WORDS: string[] = [
+  ...(Object.keys(ROUND_LABEL) as RoundType[]).flatMap((r) => PCT_STEPS.map((p) => loadingWord(r, p))),
+  ...PCT_STEPS.map((p) => layingWord(p)),
+];
+
 /** Every word the role and status/activity columns can show. */
 export const MONITOR_ROLE_WORDS = ['Leader', 'Gunner', 'Assist', 'Assist. Ldr.', 'Loader', 'Driver', 'Commander', 'Soldat', 'Radioman', 'Crew'];
-export const MONITOR_STATUS_WORDS = ['Healthy', 'Slightly injured', 'Incap.', 'Dead', 'Pinned', 'Cowering', 'Panicked', 'Broken', 'Berserk'];
-export const MONITOR_ACTIVITY_WORDS = ['Dead', 'Unconscious', 'Wary', 'Shaken', 'Driving', 'Moving', 'Running', 'Crawling', 'Firing', 'Reloading', 'Loading', 'Assisting', 'Defending', 'Ambushing', 'Hiding', 'Fleeing', 'Charging', 'Surrendered', 'Waiting', 'Changing seat', 'Bailing out', 'Mounting', 'Mounted', 'Dismounting', ...CREW_TASK_WORDS, ...AIM_WORDS];
+export const MONITOR_STATUS_WORDS = ['Healthy', 'Slightly injured', 'Incap.', 'Dead', 'Pinned', 'Cowering', 'Panicked', 'Broken', 'Berserk', 'Dazed'];
+export const MONITOR_ACTIVITY_WORDS = ['Dead', 'Unconscious', 'Wary', 'Shaken', 'Driving', 'Moving', 'Running', 'Crawling', 'Firing', 'Reloading', 'Loading', 'Assisting', 'Defending', 'Ambushing', 'Hiding', 'Fleeing', 'Charging', 'Surrendered', 'Waiting', 'Changing seat', 'Bailing out', 'Mounting', 'Mounted', 'Dismounting', ...CREW_TASK_WORDS, ...AIM_WORDS, ...MONITOR_GUN_WORDS];
 /** Damaged-system words of the vehicle header (two per line). */
 export const MONITOR_DAMAGE_WORDS = DAMAGE_WORDS;
 export const MONITOR_DAMAGE_CELL = { maxW: Math.floor((WIDTH - 12) / 2) - 4, font: 'small' as const };
@@ -158,7 +174,16 @@ function activityWord(s: Soldier, team: Team | null, vehicle: Vehicle | undefine
     return aim && aim !== 'mass' ? `Aiming: ${AIM_WORD[aim]}` : task;
   }
   if (vehicle && vehicle.seatSwap?.soldierId === s.id) return 'Changing seat';
-  if (vehicle && vehicle.aimPoint && vehicle.aimPoint !== 'mass' && vehicle.seats?.gunner === s.id && vehicle.mainFireTimer > 0) return `Aiming: ${AIM_WORD[vehicle.aimPoint]}`;
+  // main gun phases (sim/gunTiming.ts): the loader's row shows "Loading AP 60%", the gunner's what he
+  // is laying on ("Aiming: tracks") or how far his lay has got ("Aiming 60%")
+  if (vehicle && vehicle.gunState) {
+    const seats = vehicle.seats;
+    const isGunner = seats?.gunner === s.id;
+    const laying = isGunner && !!vehicle.gunLay && (vehicle.layProgress ?? 1) < 1;
+    const loads = seats?.loader === s.id || (isGunner && !!seats && seats.loader == null && !laying);
+    if (loads && vehicle.gunState === 'loading' && vehicle.loadedRound) return loadingWord(vehicle.loadedRound, vehicle.loadProgress ?? 0);
+    if (laying) return vehicle.aimPoint && vehicle.aimPoint !== 'mass' ? `Aiming: ${AIM_WORD[vehicle.aimPoint]}` : layingWord(vehicle.layProgress ?? 0);
+  }
   if (s.mind.state === 'wary') return 'Wary';
   if (s.mind.state === 'shaken') return 'Shaken';
   switch (s.activity) {
@@ -204,8 +229,10 @@ function activityColor(s: Soldier): string {
 }
 
 /** Right-hand status column: Dead/Incap. always win, then a severe mind state, else health. */
-function statusCell(s: Soldier): { word: string; color: string } {
+function statusCell(s: Soldier, time: number): { word: string; color: string } {
   if (s.health === 'dead' || s.health === 'incapacitated') return { word: healthWord(s), color: HUD.red };
+  // knocked down / dazed by a blast (sim/daze.ts): out of it whatever his nerves say
+  if (isDazed(s, time) || (s.stunnedUntil != null && time < s.stunnedUntil)) return { word: 'Dazed', color: HUD.yellow };
   switch (s.mind.state) {
     case 'pinned': return { word: 'Pinned', color: HUD.yellow };
     case 'cowering': return { word: 'Cowering', color: HUD.yellow };
@@ -232,6 +259,9 @@ export const MONITOR_ABBREV: Record<string, string[]> = {
   'Aiming: engine': ['Aim: engine'],
   'Aiming: centre': ['Aim: centre'],
   'Changing seat': ['Chg. seat'],
+  // "Loading APCR 100%" -> "Load APCR 100%" -> "APCR 100%"
+  ...Object.fromEntries(MONITOR_GUN_WORDS.filter((w) => w.startsWith('Loading ')).map((w) => [w, [w.replace('Loading ', 'Load '), w.replace('Loading ', '')]])),
+  ...Object.fromEntries(MONITOR_GUN_WORDS.filter((w) => w.startsWith('Aiming ')).map((w) => [w, [w.replace('Aiming ', 'Aim ')]])),
   'Right track damaged': ['R. track damaged', 'R. track dmg.'],
   'Left track damaged': ['L. track damaged', 'L. track dmg.'],
   'Right track broken': ['R. track broken'],
@@ -447,7 +477,7 @@ export class SoldierMonitorPopup {
       drawHudBevel(ctx, statusR, true, HUD.black);
       setHudFont(ctx, 'small');
       cellText(ctx, nameR, s.name, HUD.text);
-      const st = statusCell(s);
+      const st = statusCell(s, state.time);
       cellText(ctx, statusR, st.word, st.color, 'right');
       setHudFont(ctx, 'map');
       cellText(ctx, roleR, roleName, HUD.text, 'center');

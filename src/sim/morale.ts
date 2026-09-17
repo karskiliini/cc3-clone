@@ -9,6 +9,7 @@ import { clamp, dist } from '@/shared/math';
 import { VEHICLE_DEFS } from '@/data/units';
 import { addMessage } from './messages';
 import { crewWeaponStatus } from './crewWeapon';
+import { isDazed } from './daze';
 
 // ============================================================================
 // morale.ts — team-level morale aggregation, casualty morale hits, tank-scare,
@@ -237,6 +238,9 @@ function computeTeamStatus(state: BattleState, team: Team, track: MoraleTrack): 
   if (majority((s) => s.activity === 'surrendered')) return { status: 'Surrendered', outOfAction, morale };
   if (majority((s) => s.activity === 'routed')) return { status: 'Routed', outOfAction, morale };
   if (morale < 25) return { status: 'Broken', outOfAction, morale };
+
+  // most of the team knocked down or dazed by a blast (sim/daze.ts)
+  if (majority((s) => s.vehicleId == null && (isDazed(s, state.time) || (s.stunnedUntil != null && state.time < s.stunnedUntil)))) return { status: 'Stunned', outOfAction, morale };
 
   // boarding, riding in or leaving a transport (sim/transport.ts)
   const riding = transportWord(state, team);

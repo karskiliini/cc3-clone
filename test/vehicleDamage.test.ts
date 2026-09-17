@@ -279,7 +279,8 @@ describe('equipment states', () => {
     expect(free.hull).toBeCloseTo(0, 5);          // only the turret turned
     expect(stuck.rel).toBeCloseTo(0, 5);          // the turret went nowhere on its own
     expect(stuck.hull).toBeGreaterThan(1.4);      // the hull did the laying
-    expect(stuck.t).toBeGreaterThan(free.t * 2);  // much slower
+    // historical rates: the Pz IV's turret traverses 14 deg/s, its hull lays the gun at half of 18 deg/s
+    expect(stuck.t).toBeGreaterThan(free.t * 1.4);  // slower
   });
 
   it('sight damaged: accuracy x0.6; destroyed: point-blank fire only; main gun destroyed: MG only', () => {

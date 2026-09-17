@@ -60,7 +60,13 @@ export function isMoving(s: Soldier, speedMps?: number): boolean {
   return speedMps === undefined || speedMps >= STILL_MPS;
 }
 
-export function moodFor(s: Soldier): Mood {
+/** `time` (and the measured `speedMps`) let a man dazed by a blast (sim/daze.ts) read as what he
+ * is doing: `panicked` while he drags himself to cover, `cowering` while he lies still. */
+export function moodFor(s: Soldier, time?: number, speedMps?: number): Mood {
+  if (time !== undefined && s.dazedUntil != null && time < s.dazedUntil && s.health !== 'dead' && s.health !== 'incapacitated'
+    && s.activity !== 'surrendered') {
+    return isMoving(s, speedMps) ? 'panicked' : 'cowering';
+  }
   switch (s.activity) {
     case 'surrendered': return 'surrendered';
     case 'berserk': return 'berserk';
@@ -92,7 +98,7 @@ export function postureFor(s: Soldier, time = 0, speedMps?: number): Posture {
   if (s.stance === 'prone') return 'prone';
   if (s.stance === 'standing') return 'standing';
   if (isMoving(s, speedMps)) return 'crouched';
-  if (moodFor(s) === 'pinned') return 'prone';
+  if (moodFor(s, time, speedMps) === 'pinned') return 'prone';
   const aiming = s.targetSoldierId != null || s.targetVehicleId != null || s.targetPoint != null;
   if (STEADY_ACTIVITIES.has(s.activity) || aiming) return 'kneeling';
   return 'crouched';
@@ -112,7 +118,7 @@ export function actionFor(s: Soldier, time: number, posture: Posture = postureFo
   if (s.health === 'incapacitated') return 'woundedCrawl';
   if (s.stunnedUntil != null && time < s.stunnedUntil) return 'hide';
   if (s.pickup?.until != null) return 'pickup';
-  const mood = moodFor(s);
+  const mood = moodFor(s, time, speedMps);
   if (isMoving(s, speedMps) && mood !== 'cowering' && mood !== 'surrendered') {
     if (posture === 'prone') return 'crawl';
     if (posture === 'crouched' || posture === 'kneeling' || s.activity === 'sneaking') return 'sneak';
@@ -253,7 +259,7 @@ export interface AnimPick {
 
 /** Everything but the atlas lookup, in one call. */
 export function pickAnimation(s: Soldier, time: number, targetPos?: Vec2 | null, posture: Posture = postureFor(s, time), speedMps?: number): AnimPick {
-  const mood = moodFor(s);
+  const mood = moodFor(s, time, speedMps);
   let action = actionFor(s, time, posture, speedMps);
   const flinch = isFlinching(s, time) && !GAITS.has(action) && action !== 'fire';
   if (flinch && action !== 'hit') action = 'hide';
