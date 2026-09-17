@@ -312,7 +312,18 @@ function drawPartFallback(ctx: CanvasRenderingContext2D, part: Debris, x: number
   const z = zoom;
   const cloth = UNIFORM[part.side][part.season === 'winter' ? 'winter' : 'summer'];
   ctx.fillStyle = cloth;
-  if (part.kind === 'torso') { ctx.fillRect(-2.5 * z, -2 * z, 5 * z, 4 * z); ctx.fillStyle = 'rgb(74,22,18)'; ctx.fillRect(-2.5 * z, -2 * z, z, 4 * z); }
+  // wreckage of a blown-up vehicle (atlas keys part.plate<n> / part.wheel<n> / part.hatch<n> pending)
+  if (part.kind === 'plate') {
+    ctx.fillStyle = 'rgb(38,36,33)'; ctx.beginPath();
+    ctx.moveTo(-6 * z, -3 * z); ctx.lineTo(5 * z, -4 * z); ctx.lineTo(7 * z, 2 * z); ctx.lineTo(-2 * z, 4 * z); ctx.lineTo(-7 * z, 1 * z); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgb(74,58,44)'; ctx.fillRect(-4 * z, -2 * z, 6 * z, Math.max(1, z));
+  } else if (part.kind === 'wheel') {
+    ctx.fillStyle = 'rgb(28,27,26)'; ctx.beginPath(); ctx.arc(0, 0, 3.5 * z, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgb(66,60,52)'; ctx.beginPath(); ctx.arc(0, 0, 1.6 * z, 0, Math.PI * 2); ctx.fill();
+  } else if (part.kind === 'hatch') {
+    ctx.fillStyle = 'rgb(44,42,38)'; ctx.beginPath(); ctx.ellipse(0, 0, 3 * z, 2.4 * z, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgb(20,20,20)'; ctx.fillRect(-0.5 * z, -2.4 * z, z, 1.2 * z);
+  } else if (part.kind === 'torso') { ctx.fillRect(-2.5 * z, -2 * z, 5 * z, 4 * z); ctx.fillStyle = 'rgb(74,22,18)'; ctx.fillRect(-2.5 * z, -2 * z, z, 4 * z); }
   else if (part.kind === 'head') { ctx.fillStyle = part.variant === 0 ? 'rgb(176,140,112)' : 'rgb(66,72,62)'; ctx.beginPath(); ctx.arc(0, 0, 1.3 * z, 0, Math.PI * 2); ctx.fill(); }
   else if (part.kind === 'arm') { ctx.fillRect(-2 * z, -0.6 * z, 4 * z, 1.2 * z); ctx.fillStyle = 'rgb(74,22,18)'; ctx.fillRect(-2 * z, -0.6 * z, z, 1.2 * z); }
   else if (part.kind === 'leg') { ctx.fillRect(-2.5 * z, -0.8 * z, 5 * z, 1.6 * z); ctx.fillStyle = 'rgb(30,26,22)'; ctx.fillRect(1.5 * z, -0.8 * z, z, 1.6 * z); }
@@ -350,9 +361,11 @@ function drawLooseObjects(ctx: CanvasRenderingContext2D, cam: Camera, state: Bat
     const spin = (1 - f.t) * Math.PI * 2 * 1.5 * (Math.round(o.pos.x * 7 + o.pos.y * 13) % 2 === 0 ? 1 : -1);
     draw(g.x, g.y - metresToPx(f.heightM, zoom) * 0.9, o.dir + spin, spin);
   };
-  if (showDead) {
+  {
     for (const part of state.debris ?? []) {
-      one(part, part.kind === 'torso' ? 3 : 1.6, (x, y, dirRad, spin) => {
+      const wreck = part.kind === 'plate' || part.kind === 'wheel' || part.kind === 'hatch';
+      if (!showDead && !wreck) continue; // body parts follow the "show dead" setting; wreckage always shows
+      one(part, wreck ? 4 : part.kind === 'torso' ? 3 : 1.6, (x, y, dirRad, spin) => {
         const atlas = partsAtlas(part.side, season, zoom);
         const key = atlas?.meta.entries[`part.${part.kind}${part.variant}`] ? `part.${part.kind}${part.variant}` : `part.${part.kind}`;
         const dirs = atlas?.meta.dirs ?? 16;
@@ -421,12 +434,16 @@ export function drawVehicleSprite(
   ctx: CanvasRenderingContext2D, defId: string, state: 'ok' | 'knockedOut', cx: number, cy: number,
   hullRad: number, turretRad: number, zoom: number, scale: number, turretBlown = false,
   brokenTrack: 'L' | 'R' | 'both' | null = null,
+  /** where the sim threw the blown-off turret (screen px) and how it lies; absent = beside the hull */
+  turretLanding?: { x: number; y: number; dirRad: number },
 ): void {
   const vdef = VEHICLE_DEFS[defId];
   // `turret.blown` (vehicleDamageView): the turret lies beside the hull. Until the vehicle atlas
   // has a `<def>.turret.blown` entry this falls back to the knocked-out turret, thrown clear.
   let tcx = cx, tcy = cy;
-  if (turretBlown) {
+  if (turretBlown && turretLanding) {
+    tcx = turretLanding.x; tcy = turretLanding.y; turretRad = turretLanding.dirRad;
+  } else if (turretBlown) {
     const pxPerM = 10 * zoom, c = Math.cos(hullRad), s = Math.sin(hullRad);
     tcx += (2.2 * c - 1.0 * -s) * pxPerM * 0.9;
     tcy += (2.2 * s + 1.0 * -c) * pxPerM * 0.9;
@@ -507,7 +524,9 @@ function drawVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
     const koLike = veh.state === 'knockedOut' || veh.state === 'burning' || (veh.state === 'abandoned' && !left);
     const p = worldToScreen(cam, veh.pos);
     const dmg = vehicleDamageView(veh);
-    drawVehicleSprite(ctx, veh.defId, koLike ? 'knockedOut' : 'ok', p.x, p.y, veh.hullFacing, veh.turretFacing, cam.zoom, scale, dmg.turretBlown, dmg.brokenTrack);
+    const tl = veh.turretLanding ? worldToScreen(cam, veh.turretLanding) : null;
+    drawVehicleSprite(ctx, veh.defId, koLike ? 'knockedOut' : 'ok', p.x, p.y, veh.hullFacing, veh.turretFacing, cam.zoom, scale, dmg.turretBlown, dmg.brokenTrack,
+      tl ? { x: tl.x, y: tl.y, dirRad: veh.turretLandingDir ?? veh.turretFacing + 2.3 } : undefined);
     if ((left || veh.exiting) && cam.zoom > 0.5) drawOpenHatches(ctx, cam, state, veh);
     if (dmg.engineSmoke) drawEngineSmoke(ctx, veh, p, state.time, cam.zoom, VEHICLE_DEFS[veh.defId]?.lengthM ?? 6);
   }

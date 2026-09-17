@@ -14,6 +14,7 @@ import { bestRoundAgainst } from './ballistics';
 import {
   bailOut, crewEffects, damageSpeedMul, isImmobile, mainGunUsable, stepCrewSeats, stepVehicleDamage, trackPullRad, turretFrozen,
 } from './vehicleDamage';
+import { cookOffLive, stepCookOff, stepFragmentLandings } from './vehicleExplosion';
 import { vehicleRounds } from './aimPoint';
 import {
   COARSE_LAY_RAD, SOFT_GROUND_TURN_MUL, cycleTimeS, gunArcRad, hullTurnRad, isSoftGround, timeToFirstShotS, turretTraverseRad, wantsHullTurn,
@@ -437,11 +438,14 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
   stepTransport(state, dt); // passengers boarding and leaving
   stepVehicleCrews(state, rng, dt); // hatch queues, climbs, crews going back (spec 2026-09-17 §10)
 
+  stepFragmentLandings(state, rng); // heavy wreckage coming down (sim/vehicleExplosion.ts)
   for (const v of state.vehicles.values()) {
     stepVehicleDamage(state, rng, v); // a crew getting out of a burning vehicle
     if (v.state === 'burning') {
       v.burnTimer += dt;
-      if (v.burnTimer >= BURN_TO_KO_S) v.state = 'knockedOut';
+      stepCookOff(state, rng, v); // rounds popping, then perhaps the rest (or the fuel tank)
+      // the fire lasts as long as something aboard may still blow up
+      if (v.burnTimer >= BURN_TO_KO_S && !cookOffLive(v)) v.state = 'knockedOut';
     }
     // A burning, knocked-out or abandoned vehicle is dead weight: it never drives, and any path
     // left over from an order or a reverse-to-cover is dropped. Immobilized is NOT in this list.

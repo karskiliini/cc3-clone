@@ -597,15 +597,17 @@ const MARKABLE_TERRAIN = new Set<Terrain>(['open', 'grass', 'tallgrass', 'crops'
  * VISIBLE mark is sized by weapon. */
 const CRATERABLE_TERRAIN = new Set<Terrain>(['open', 'grass', 'tallgrass', 'crops', 'snow', 'mud', 'dirtroad']);
 
-function leaveCrater(state: BattleState, pos: Vec2, weapon: WeaponDef): void {
+/** `underHullSizeM`: a vehicle blowing up (sim/vehicleExplosion.ts) leaves a full-size bowl and
+ * scorch of this size under its own hull instead of the small scorch of a round bursting on it. */
+export function leaveCrater(state: BattleState, pos: Vec2, weapon: WeaponDef, underHullSizeM?: number): void {
   const map: GameMap = state.map;
-  const c = craterForWeapon(weapon);
+  const c = underHullSizeM != null ? { sizeM: underHullSizeM, kind: 'shell' as const } : craterForWeapon(weapon);
   if (!c) return;
   const tx = Math.floor(pos.x), ty = Math.floor(pos.y);
   const t = tileAt(map, tx, ty);
   if (!MARKABLE_TERRAIN.has(t)) return;
   let onVehicle = false;
-  for (const v of state.vehicles.values()) if (dist(v.pos, pos) < 1.2) { onVehicle = true; break; }
+  if (underHullSizeM == null) for (const v of state.vehicles.values()) if (dist(v.pos, pos) < 1.2) { onVehicle = true; break; }
   // the visible bowl + ejecta must not spill over a wall, roof or river bank: shrink it to fit
   let sizeM = c.sizeM;
   const reach = Math.ceil(sizeM / TILE_M);

@@ -13,8 +13,11 @@ import { isPassable } from './path';
 import { inBounds } from './map';
 import { addMessage } from './messages';
 import { isDazed } from './daze';
+import { fireHazards, nearFireHazard } from './vehicleExplosion';
 
 const SEEK_INTERVAL_S = 2;
+/** Search radius (tiles) for a spot clear of a burning vehicle: 15 m plus room to choose. */
+const HAZARD_SEARCH_TILES = 12;
 
 function buildThreatSet(state: BattleState, s: Soldier, team: Team | undefined): ThreatWeighted[] {
   const threats: ThreatWeighted[] = [];
@@ -59,6 +62,7 @@ function bestCoverTile(
   state: BattleState, s: Soldier, team: Team | undefined, centre: Vec2, radius: number, threats: ThreatWeighted[],
 ): { tile: Vec2; score: number } | null {
   const map = state.map;
+  const hazards = fireHazards(state);
   let best: Vec2 | null = null;
   let bestScore = -Infinity;
   let bestOmni = -Infinity;
@@ -67,6 +71,8 @@ function bestCoverTile(
     if (!inBounds(map, tx, ty)) continue;
     if (!isPassable(map, tx, ty, 'infantry')) continue;
     if (occupiedByTeammate(state, team, s, tile)) continue;
+    // nobody takes cover beside a burning vehicle: it may blow up (sim/vehicleExplosion.ts)
+    if (hazards.length > 0 && nearFireHazard(hazards, tile, 1)) continue;
     const distPenalty = 0.03 * dist(centre, tile);
     const score = coverScore(map, tile, threats) - distPenalty;
     const omni = omniCoverAt(map, tile);
@@ -112,6 +118,26 @@ function seekForSoldier(state: BattleState, rng: Rng, s: Soldier): void {
   }
 
   if (state.time - mind.lastCoverSeekAt < SEEK_INTERVAL_S) return;
+
+  // --- A burning vehicle within 15 m: a man with nowhere to go gets clear of it before anything
+  // else (its ammunition may cook off), to the best cover outside that circle.
+  // (a gun crew stays with its emplaced gun)
+  if (s.path.length === 0 && !s.bailRun && !(team?.crewWeapon && !team.crewWeapon.abandoned)) {
+    const hazards = fireHazards(state);
+    if (hazards.length > 0 && nearFireHazard(hazards, s.pos)) {
+      mind.lastCoverSeekAt = state.time;
+      const found = bestCoverTile(state, s, team, s.pos, HAZARD_SEARCH_TILES, threats);
+      if (found) {
+        moveTo(state, s, found.tile);
+        // he hurries (movement.ts walks a path only in a moving activity; arriving restores it)
+        if (s.path.length > 0 && mind.state !== 'pinned' && mind.state !== 'cowering') s.activity = 'movingFast';
+        else if (s.path.length > 0) s.activity = 'sneaking';
+        // his post moves with him: he must not drift back while it burns
+        if (mind.anchor && nearFireHazard(hazards, mind.anchor)) mind.anchor = { ...found.tile };
+      }
+      return;
+    }
+  }
   if (threats.length === 0) return;
 
   // --- Pinned/cowering: crawl within 3 tiles if it helps by >=0.2.
@@ -199,6 +225,7 @@ export function settleTile(
   const team = state.teams.get(s.teamId);
   const threats = buildThreatSet(state, s, team);
   threats.unshift({ dirRad: headingRad, weight: 0.5 });
+  const hazards = fireHazards(state);
   const sx = Math.floor(slot.x), sy = Math.floor(slot.y);
   let best: Vec2 | null = null;
   let bestScore = -Infinity;
@@ -206,6 +233,7 @@ export function settleTile(
     const tx = Math.floor(tile.x), ty = Math.floor(tile.y);
     if (!inBounds(map, tx, ty) || !isPassable(map, tx, ty, 'infantry') || taken(tx, ty)) continue;
     const own = tx === sx && ty === sy;
+    if (!own && hazards.length > 0 && nearFireHazard(hazards, tile)) continue; // not beside a burning vehicle
     // off-slot tiles keep the slot's sub-tile jitter (softened) so men never line up on tile centres
     const p = own ? slot : { x: tx + 0.5 + (slot.x - sx - 0.5) * 0.6, y: ty + 0.5 + (slot.y - sy - 0.5) * 0.6 };
     // own tile gets a small stickiness bonus so open ground keeps the loose formation shape

@@ -237,7 +237,7 @@ function stepClimbs(state: BattleState): void {
       if (c.panicked) {
         s.activity = 'panicked'; s.mind.state = 'panicked';
         s.reloadTimer = 0; // movement.ts: free to pick a direction to run in
-        if (v) s.bailRun = { to: runSpot(state, v, s), until: state.time + BAIL_RUN_S };
+        if (v) s.bailRun = { to: runSpot(state, v, s), until: state.time + (v.state === 'burning' ? BAIL_RUN_FIRE_S : BAIL_RUN_S) };
       } else { s.activity = 'defending'; s.stance = 'crouching'; }
       if (c.passenger && v) onPassengerOut(state, v, s, c.panicked);
     } else if (c.passenger) {
@@ -253,6 +253,8 @@ function stepClimbs(state: BattleState): void {
 
 /** Seconds a man who bailed out in a panic runs before he goes to ground. */
 export const BAIL_RUN_S = 4;
+/** ...and out of a burning one: long enough to get clear of it (sim/vehicleExplosion.ts FIRE_HAZARD_M). */
+export const BAIL_RUN_FIRE_S = 8;
 
 /** Where a panicked man runs to: 8 to 14 m from the hull, away from the threat (else straight away
  * from the vehicle), over ground he can cross in a straight line. */
@@ -261,7 +263,8 @@ function runSpot(state: BattleState, v: Vehicle, s: Soldier): Vec2 {
   const base = s.mind.threatDir != null ? s.mind.threatDir + Math.PI : away;
   // men from the two sides fan out instead of running in file
   const lean = Math.sin(away - base) >= 0 ? 0.5 : -0.5;
-  for (const m of [14, 10, 6]) {
+  // out of a burning vehicle: clear of the 15 m its ammunition can reach before going to ground
+  for (const m of v.state === 'burning' ? [22, 18, 14, 10, 6] : [14, 10, 6]) {
     for (const off of [lean, 0, -lean, lean * 2.4]) {
       const a = base + off;
       const to = { x: s.pos.x + (Math.sin(a) * m) / TILE_M, y: s.pos.y + (-Math.cos(a) * m) / TILE_M };

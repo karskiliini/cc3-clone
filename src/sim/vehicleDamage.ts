@@ -19,6 +19,7 @@ import { addMessage } from './messages';
 import { crewShockSeconds, isServiceable, startExit, stepExit } from './vehicleCrew';
 import { LOOK_IN_HEIGHT_M, LOOK_IN_RANGE_M, passengersAboard, stressPassengers } from './transport';
 import { groundHeightAt } from './map';
+import { detonateVehicle, rackDetonationChance } from './vehicleExplosion';
 
 const DEG = Math.PI / 180;
 
@@ -530,7 +531,7 @@ export interface BailOpts {
 }
 
 /** A passenger hit inside the compartment: he stays aboard where he fell. */
-function hurtPassenger(state: BattleState, v: Vehicle, s: Soldier, to: 'dead' | 'incapacitated' | 'wounded', side: Side): void {
+export function hurtPassenger(state: BattleState, v: Vehicle, s: Soldier, to: 'dead' | 'incapacitated' | 'wounded', side: Side): void {
   if (s.health === 'dead' || s.health === 'incapacitated') return;
   if (to === 'wounded') { if (s.health !== 'wounded') { s.health = 'wounded'; s.morale = clamp(s.morale - 20, 0, 100); } return; }
   s.health = to;
@@ -694,16 +695,27 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
   const k = behindArmorFactor(weapon, round);
 
   // ---- catastrophic: ammunition, then fire
-  const ammoLeft = v.mainAmmo > 0 || !def.mainWeaponId ? 1 : 0.3;
-  if (def.mainWeaponId && rng.next() < c.ammoP * k * ammoLeft) {
-    v.state = 'burning';
-    v.turretBlown = def.hasTurret;
-    v.path = []; v.speed = 0;
-    if (team) killAll(state, v, team, input.shooterSide);
+  // (sim/vehicleExplosion.ts) a penetration into the ammunition: sometimes the whole load goes up at
+  // once — a real area event; an empty rack cannot, a nearly empty one rarely does, HE-heavy loads
+  // and Soviet 76 mm racks more often — otherwise the propellant burns: a fierce fire that may
+  // still cook the rounds off later
+  if (def.mainWeaponId && v.mainAmmo > 0 && rng.next() < c.ammoP * k) {
     state.events.push({ kind: 'vehicleKO', pos: { ...v.pos }, side: input.shooterSide });
-    if (team && team.side === state.config.playerSide) addMessage(state, `${team.name}\nAmmunition explodes!`, 'bad');
-    shooterMsg(state, input, `${name}: ammunition explodes!`);
-    res.ko = true; res.outcome = 'explosion';
+    res.ko = true;
+    if (rng.next() < rackDetonationChance(state, v, def)) {
+      if (team) killAll(state, v, team, input.shooterSide);
+      detonateVehicle(state, rng, v, input.shooterSide); // blast, turret, crater, "Ammunition explodes!"
+      shooterMsg(state, input, `${name}: ammunition explodes!`);
+      res.outcome = 'explosion';
+      return res;
+    }
+    v.state = 'burning';
+    v.path = []; v.speed = 0;
+    v.cookOff = { checkedS: 0, pops: 0, rackFire: true };
+    startFireBail(state, v, team);
+    if (team && team.side === state.config.playerSide) addMessage(state, `${team.name}\nAmmunition on fire — bail out!`, 'bad');
+    shooterMsg(state, input, `${name} is burning.`);
+    res.outcome = 'fire';
     return res;
   }
   const fireP = (c.fireP + (systemState(v, 'fuelLeak') !== 'ok' ? 0.25 : 0)) * clamp(k, 0.5, 1.2);
@@ -903,6 +915,8 @@ export interface VehicleDamageView {
   /** a broken track lies slewed beside the hull */
   brokenTrack: 'L' | 'R' | 'both' | null;
   turretBlown: boolean;
+  /** where the blown-off turret lies (tile coords) and its direction; absent = beside the hull */
+  turretLanding?: { pos: Vec2; dir: number };
   /** atlas state key for the turret sprite, or null for the normal one */
   turretKey: 'turret.blown' | null;
   /** damaged systems for the HUD, worst first */
@@ -920,6 +934,7 @@ export function vehicleDamageView(v: Vehicle): VehicleDamageView {
     burning: v.state === 'burning',
     brokenTrack: l && r ? 'both' : l ? 'L' : r ? 'R' : null,
     turretBlown: !!v.turretBlown,
+    turretLanding: v.turretBlown && v.turretLanding ? { pos: v.turretLanding, dir: v.turretLandingDir ?? 0 } : undefined,
     turretKey: v.turretBlown ? 'turret.blown' : null,
     systems,
   };

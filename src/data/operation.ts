@@ -72,17 +72,21 @@ export const OPERATION: OperationBattleDef[] = [
 
 /** Default forces for free "Battle" mode, keyed by year, for both sides. */
 export const DEFAULT_FORCES: Record<number, Record<Side, string[]>> = {
+  // Balance pass 2026-09 (after slower tank gunnery, re-manned tanks and blast daze the 9-seed
+  // attacker win rate fell to ~21%): the ATTACKER of each year's maps (german 1941, soviet
+  // 1942-45) gets more infantry (one to two extra squads) — an attack at even strength with two
+  // squads could not carry the victory locations before the clock ran out. Timings untouched.
   // Balance pass (border_1941/moscow_1941 attacker=german came in far under CC3's historical
   // norm of a stronger attacker): german gets a second mortar and a second PzKw III J; soviet
   // loses its Maxim HMG, whose suppression volume was the single biggest driver of the lopsided
   // harness results on these two maps (defender out-shot attacker 5-10x pre-change).
   1941: {
-    german: ['ger_rifle_41', 'ger_rifle_41', 'ger_mg34_hmg', 'ger_mortar81', 'ger_mortar81', 'ger_pak38', 'ger_sniper', 'ger_command', 'ger_pz3j', 'ger_pz3j', 'ger_pz4f1', 'ger_sdkfz251'],
+    german: ['ger_rifle_41', 'ger_rifle_41', 'ger_rifle_41', 'ger_mg34_hmg', 'ger_mortar81', 'ger_mortar81', 'ger_pak38', 'ger_sniper', 'ger_command', 'ger_pz3j', 'ger_pz3j', 'ger_pz4f1', 'ger_sdkfz251'],
     soviet: ['sov_rifle_41', 'sov_rifle_41', 'sov_mortar82', 'sov_45mm_at', 'sov_sniper', 'sov_command', 'sov_t26', 'sov_bt7', 'sov_kv1'],
   },
   1942: {
     german: ['ger_rifle_41', 'ger_assault_42', 'ger_mg34_hmg', 'ger_mortar81', 'ger_pak38', 'ger_sniper', 'ger_command', 'ger_pz4gh', 'ger_stug3g', 'ger_sdkfz251'],
-    soviet: ['sov_rifle_41', 'sov_smg_42', 'sov_maxim_hmg', 'sov_mortar82', 'sov_45mm_at', 'sov_sniper', 'sov_command', 'sov_t34_76', 'sov_t70', 'sov_kv1'],
+    soviet: ['sov_rifle_41', 'sov_rifle_41', 'sov_rifle_41', 'sov_smg_42', 'sov_maxim_hmg', 'sov_mortar82', 'sov_45mm_at', 'sov_sniper', 'sov_command', 'sov_t34_76', 'sov_t34_76', 'sov_t70', 'sov_kv1', 'sov_mortar82'],
   },
   // Balance pass (steppe_1943 attacker=soviet, defending on a dug-in trench line): the AI's
   // combat/targeting behavior on this map turned out very sensitive to soviet force SIZE -
@@ -94,15 +98,15 @@ export const DEFAULT_FORCES: Record<number, Record<Side, string[]>> = {
   // below (see steppe_1943.ts).
   1943: {
     german: ['ger_rifle_43', 'ger_assault_42', 'ger_mg42_hmg', 'ger_mortar81', 'ger_sniper', 'ger_command', 'ger_pz4gh', 'ger_stug3g', 'ger_tiger'],
-    soviet: ['sov_rifle_43', 'sov_smg_42', 'sov_maxim_hmg', 'sov_mortar82', 'sov_mortar82', 'sov_zis3', 'sov_sniper', 'sov_command', 'sov_sappers', 'sov_t34_76', 'sov_t34_76', 'sov_su76', 'sov_su85'],
+    soviet: ['sov_rifle_43', 'sov_rifle_43', 'sov_rifle_43', 'sov_smg_42', 'sov_smg_42', 'sov_t34_76', 'sov_maxim_hmg', 'sov_mortar82', 'sov_mortar82', 'sov_zis3', 'sov_sniper', 'sov_command', 'sov_sappers', 'sov_t34_76', 'sov_t34_76', 'sov_su76', 'sov_su85'],
   },
   1944: {
     german: ['ger_rifle_43', 'ger_assault_42', 'ger_mg42_hmg', 'ger_mortar81', 'ger_pak40', 'ger_pschreck', 'ger_sniper', 'ger_command', 'ger_stug3g', 'ger_panther'],
-    soviet: ['sov_rifle_43', 'sov_smg_42', 'sov_maxim_hmg', 'sov_mortar82', 'sov_zis3', 'sov_sniper', 'sov_command', 'sov_t34_85', 'sov_su76', 'sov_is2'],
+    soviet: ['sov_rifle_43', 'sov_rifle_43', 'sov_smg_42', 'sov_smg_42', 'sov_maxim_hmg', 'sov_mortar82', 'sov_zis3', 'sov_sniper', 'sov_command', 'sov_t34_85', 'sov_su76', 'sov_is2'],
   },
   1945: {
     german: ['ger_rifle_43', 'ger_assault_42', 'ger_mg42_hmg', 'ger_pak40', 'ger_pschreck', 'ger_pzfaust_44', 'ger_sniper', 'ger_command', 'ger_tiger', 'ger_panther'],
-    soviet: ['sov_rifle_43', 'sov_smg_42', 'sov_maxim_hmg', 'sov_zis3', 'sov_sniper', 'sov_command', 'sov_t34_85', 'sov_is2', 'sov_su85', 'sov_sappers'],
+    soviet: ['sov_rifle_43', 'sov_rifle_43', 'sov_smg_42', 'sov_smg_42', 'sov_maxim_hmg', 'sov_zis3', 'sov_sniper', 'sov_command', 'sov_t34_85', 'sov_is2', 'sov_su85', 'sov_sappers'],
   },
 };
 

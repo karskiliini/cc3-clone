@@ -117,7 +117,8 @@ describe('penetrations by zone', () => {
       expect(state.events.some((e) => e.kind === 'vehicleKO')).toBe(true);
       expect(state.messages.some((m) => m.text.endsWith('Ammunition explodes!'))).toBe(true);
     }
-    expect(boom).toBeGreaterThan(30);
+    // most rack hits now burn first (sim/vehicleExplosion.ts: 15-25 % of destroyed tanks end catastrophically)
+    expect(boom).toBeGreaterThan(10);
   });
 
   it('a hit that does not get through can still jam the ring, break the sight or spall, and shakes the crew', () => {

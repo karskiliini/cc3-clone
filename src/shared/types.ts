@@ -456,8 +456,10 @@ export interface GroundItem {
 }
 
 /** A piece of a body broken up by a severe blast (spec 2026-09-17 §8; sim/debris.ts). */
-export type DebrisKind = 'torso' | 'head' | 'arm' | 'leg' | 'boot';
+export type DebrisKind = 'torso' | 'head' | 'arm' | 'leg' | 'boot' | 'plate' | 'wheel' | 'hatch';
 export interface Debris {
+  /** 'plate' | 'wheel' | 'hatch': heavy fragments of a vehicle torn apart by its ammunition
+   * (sim/vehicleExplosion.ts); the rest are body parts */
   kind: DebrisKind;
   side: Side;
   season: Season;
@@ -469,6 +471,9 @@ export interface Debris {
   from?: Vec2;
   thrownAt?: number;
   force?: number;
+  /** heavy vehicle fragment still in the air: battle time it comes down (it can injure a man it
+   * lands on; cleared once resolved) */
+  landAt?: number;
 }
 
 // ----------------------------------------------------------------- vehicles
@@ -590,6 +595,15 @@ export interface Vehicle {
   seatSwap?: { role: CrewRole; soldierId: number; until: number };
   /** catastrophic ammunition explosion: the turret is blown off */
   turretBlown?: boolean;
+  /** where the blown-off turret came down (tile coords) and how it lies (radians, 0 = north,
+   * clockwise); absent = the renderer's default spot beside the hull */
+  turretLanding?: Vec2;
+  turretLandingDir?: number;
+  /** cook-off of a burning vehicle (sim/vehicleExplosion.ts): burn seconds already checked, rounds
+   * that have popped, and how it ended ('detonated': the ammunition went up; 'fuel': the fuel
+   * tank; 'burntOut': the fire died down without either); `rackFire`: the fire started in the
+   * ammunition itself, which cooks off more readily */
+  cookOff?: { checkedS: number; pops: number; ended?: 'detonated' | 'fuel' | 'burntOut'; rackFire?: boolean };
   /** battle time the crew must be out by (fire); set when a fire starts */
   bailBy?: number;
   // ---- leaving and re-entering (sim/vehicleCrew.ts, spec 2026-09-17 §10; all optional) ----
@@ -855,8 +869,16 @@ export const EXPLOSION_LIFE_SMALL = 0.3;
 export const EXPLOSION_LIFE_SMOKE = 2.0;
 
 export interface BattleEvent {
-  kind: 'shot' | 'hit' | 'kill' | 'explosion' | 'vlCaptured' | 'teamBroken' | 'vehicleKO' | 'message' | 'truce' | 'ended';
+  kind: 'shot' | 'hit' | 'kill' | 'explosion' | 'vlCaptured' | 'teamBroken' | 'vehicleKO' | 'message' | 'truce' | 'ended'
+    /** a vehicle blows up (ammunition or fuel): `pos`, `radiusM`, `turretLanding` when the turret was thrown */
+    | 'vehicleExplosion'
+    /** a round cooking off in a burning vehicle: `pos` */
+    | 'cookOffPop';
   pos?: Vec2;
+  /** vehicleExplosion: blast radius in metres */
+  radiusM?: number;
+  /** vehicleExplosion: where the blown-off turret lands (tile coords) */
+  turretLanding?: Vec2;
   side?: Side;
   weaponId?: string;
   text?: string;
