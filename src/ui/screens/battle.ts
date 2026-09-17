@@ -19,6 +19,7 @@ import { hitRect } from '@/ui/hud/hudChrome';
 import { drawLOSLine } from '@/ui/losTool';
 import { drawElevationReadout } from '@/ui/elevationReadout';
 import { GrassFx } from '@/render/grassFx';
+import { BlastFx } from '@/render/blastFx';
 import { transportAt } from '@/sim/transport';
 import { isRemountTarget } from '@/sim/vehicleCrew';
 import { drawText, textWidth } from '@/render/pixelfont';
@@ -98,6 +99,7 @@ export class BattleScreen implements Screen {
   private visionOverlay = new VisibilityOverlay();
   private depthOverlay = new DepthOverlay();
   private grassFx = new GrassFx();
+  private blastFx = new BlastFx();
   /** order endpoint/waypoint marker under the pointer (hover shows its line, click selects) */
   private hoveredOrderMarker: { teamId: number; kind: 'target' | 'waypoint'; index: number } | null = null;
   private selectedTeamId: number | null = null;
@@ -563,7 +565,9 @@ export class BattleScreen implements Screen {
     }
 
     game.audio?.setPaused(this.paused || state.phase !== 'running');
-    game.audio?.handleEvents(battle.drainEvents(), cam);
+    const events = battle.drainEvents();
+    this.blastFx.onEvents(events, state.time);
+    game.audio?.handleEvents(events, cam);
     game.audio?.ambient(state.phase === 'running' && !this.paused);
     game.audio?.updateVehicles(
       [...state.vehicles.values()].map((v) => {
@@ -591,6 +595,9 @@ export class BattleScreen implements Screen {
     ctx.clip();
     ctx.fillStyle = PALETTE.black;
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    // a tank blowing up shakes the view for a moment (undone by the restore below)
+    const shake = this.blastFx.shake(cam, state.time);
+    if (shake.x || shake.y) ctx.translate(shake.x, shake.y);
     this.terrain.draw(ctx, cam);
     this.terrain.drawOverlays(ctx, cam, state);
     if (game.settings.showDepthMap) this.depthOverlay.draw(ctx, cam);
@@ -601,6 +608,7 @@ export class BattleScreen implements Screen {
     drawUnits(ctx, cam, state, battle.playerSide(), this.selectedTeamIds, game.settings, this.showDead, this.hoveredOrderMarker, this.hoverTeamId);
     this.grassFx.drawStanding(ctx, cam, state, battle.playerSide());
     drawEffects(ctx, cam, state);
+    this.blastFx.draw(ctx, cam, state.time);
 
     const selTeam = this.selectedTeamId != null ? state.teams.get(this.selectedTeamId) ?? null : null;
     const aimingFire = this.pendingOrder === 'fire' || this.pendingOrder === 'smoke';

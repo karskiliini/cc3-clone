@@ -272,6 +272,16 @@ export class Sfx {
           this.emitAt('flagCapture', ev.pos, centre, 0.5);
           break;
         }
+        case 'vehicleExplosion': {
+          // ammunition going up: a heavy double report
+          this.emitAt('explosion', ev.pos, centre, 1.6);
+          this.emitAt('explosion', ev.pos, centre, 1.1);
+          break;
+        }
+        case 'cookOffPop': {
+          this.emitAt('ricochet', ev.pos, centre, 0.9);
+          break;
+        }
         case 'vehicleKO': {
           this.emitAt('explosion', ev.pos, centre);
           break;
