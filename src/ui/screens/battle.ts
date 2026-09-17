@@ -17,6 +17,7 @@ import { pickOrderMarker } from '@/render/orderMarkers';
 import { cycleTeamKey, handleDepthMapKey, offsetOrderPoints } from './viewKeys';
 import { hitRect } from '@/ui/hud/hudChrome';
 import { drawLOSLine } from '@/ui/losTool';
+import { eyeHeightM, EYE_VEHICLE_M } from '@/sim/los';
 import { TeamGrid } from '@/ui/hud/teamGrid';
 import { CombatMessages } from '@/ui/hud/combatMessages';
 import { BottomStrip } from '@/ui/hud/bottomStrip';
@@ -564,7 +565,8 @@ export class BattleScreen implements Screen {
     drawEffects(ctx, cam, state);
 
     const selTeam = this.selectedTeamId != null ? state.teams.get(this.selectedTeamId) ?? null : null;
-    if (this.pendingOrder && selTeam) {
+    const aimingFire = this.pendingOrder === 'fire' || this.pendingOrder === 'smoke';
+    if (this.pendingOrder && selTeam && !(aimingFire && (game.settings.losLines ?? true))) {
       // Rubber band: team -> Shift-click waypoints so far -> cursor. Use the order's own color from
       // the very first aiming frame (before commit), matching the line once the order is issued.
       const chain = [selTeam.pos, ...(MOVE_TYPES.includes(this.pendingOrder) ? this.pendingWaypoints : []), screenToWorld(cam, game.input.state.mouse)]
@@ -583,11 +585,29 @@ export class BattleScreen implements Screen {
       }
     }
 
-    if (this.pendingOrder === 'fire' && selTeam && game.input.state.keysDown.has('alt')) {
-      const leader = state.soldiers.get(selTeam.leaderId);
-      if (leader) {
-        const to = screenToWorld(cam, game.input.state.mouse);
-        drawLOSLine(ctx, cam, state.map, leader.pos, to, { state, team: selTeam });
+    // Aiming line, like the original: while a Fire or Smoke order is being placed, the line from
+    // each selected team to the pointer is coloured by what that team can actually see along it
+    // (bright green clear, dark green obscured, red blocked). No key needs to be held.
+    if (aimingFire && selTeam && (game.settings.losLines ?? true)) {
+      const to = screenToWorld(cam, game.input.state.mouse);
+      const ids = this.selectedTeamIds.length ? this.selectedTeamIds.slice(0, 8) : [selTeam.id];
+      for (const id of ids) {
+        const t = state.teams.get(id);
+        if (!t || t.outOfAction) continue;
+        const primary = id === selTeam.id;
+        let from = t.pos;
+        let eyeM = EYE_VEHICLE_M;
+        if (t.vehicleId == null) {
+          const leader = state.soldiers.get(t.leaderId);
+          const obs = leader && leader.health !== 'dead' ? leader : t.soldierIds.map((sid) => state.soldiers.get(sid)).find((x) => x && x.health !== 'dead');
+          if (!obs) continue;
+          from = obs.pos;
+          eyeM = eyeHeightM(obs.stance);
+        } else {
+          const veh = state.vehicles.get(t.vehicleId);
+          if (veh) from = veh.pos;
+        }
+        drawLOSLine(ctx, cam, state.map, from, to, { state, team: t }, { eyeM }, { label: primary, alpha: primary ? 1 : 0.6 });
       }
     }
 
