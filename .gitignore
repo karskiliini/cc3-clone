@@ -10,3 +10,4 @@ test-results/
 .scratch/
 !public/sprites/*.png
 __pycache__/
+tools/blender/.cache/

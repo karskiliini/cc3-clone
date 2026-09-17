@@ -31,6 +31,11 @@ const HEADING_ALIGN_RAD = 0.35;
 const PIVOT_RAD = (45 * Math.PI) / 180;
 const SHARP_TURN_RAD = (30 * Math.PI) / 180;
 export const SHARP_TURN_SPEED_MUL = 0.4;
+/** Below this heading error a tracked vehicle is lined up and steers straight at the waypoint;
+ * above it, it travels along its own heading while turning (no sideways slip). */
+export const TRACK_STRAIGHT_RAD = (4 * Math.PI) / 180;
+/** An intermediate waypoint counts as passed within this distance (an arc never hits it exactly). */
+export const WAYPOINT_REACH_TILES = 0.75;
 /** Wheel-steered halftrack: beyond this heading error it backs up in a K-turn, until within K_TURN_DONE. */
 const K_TURN_RAD = (100 * Math.PI) / 180;
 const K_TURN_DONE_RAD = (35 * Math.PI) / 180;
@@ -552,19 +557,36 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
       v.speed = 0;
       continue;
     }
-    const speedMs = fullSpeedMs * (headingErr > SHARP_TURN_RAD ? SHARP_TURN_SPEED_MUL : headingErr > HEADING_ALIGN_RAD ? 0.7 : 1);
+    let speedMs = fullSpeedMs * (headingErr > SHARP_TURN_RAD ? SHARP_TURN_SPEED_MUL : headingErr > HEADING_ALIGN_RAD ? 0.7 : 1);
+    // A tracked vehicle only ever travels along its own hull heading: it drives forward while it
+    // keeps turning, and never slips sideways toward the waypoint. So that the arc closes on the
+    // waypoint instead of orbiting it, the speed is held to what the hull can turn inside the
+    // remaining distance (turning radius = speed / turn rate <= 60% of the distance).
+    const d = dist(v.pos, wp);
+    if (headingErr > TRACK_STRAIGHT_RAD) {
+      const rate = hullTurnNow(state, v, def).rate;
+      speedMs = Math.min(speedMs, Math.max(0.3, rate * d * TILE_M * 0.6));
+    }
     v.speed = speedMs;
     // one damaged track drags the hull to that side; the driver keeps correcting
     v.hullFacing = wrapAngle(v.hullFacing + trackPullRad(v) * dt);
 
     const distTiles = (speedMs * dt) / TILE_M;
-    const d = dist(v.pos, wp);
-    if (d <= distTiles || d < 1e-4) {
-      v.pos = { x: wp.x, y: wp.y };
+    // an arc never lands exactly on a waypoint: an intermediate one counts as passed from close by
+    const reach = v.path.length > 1 ? Math.max(distTiles, WAYPOINT_REACH_TILES) : distTiles;
+    if (d <= reach || d < 1e-4) {
+      if (v.path.length === 1) v.pos = { x: wp.x, y: wp.y };
       v.path.shift();
-    } else {
+    } else if (headingErr <= TRACK_STRAIGHT_RAD) {
+      // lined up: drive at the waypoint (the residual error is turned out as it goes)
       const dir = vnorm(vsub(wp, v.pos));
       v.pos = vadd(v.pos, vscale(dir, distTiles));
+    } else {
+      const fwd = { x: Math.sin(v.hullFacing), y: -Math.cos(v.hullFacing) };
+      const next = vadd(v.pos, vscale(fwd, distTiles));
+      const nt = tileAt(map, Math.floor(next.x), Math.floor(next.y));
+      // never cut a corner into something a vehicle cannot enter: turn on the spot instead
+      if (Number.isFinite(TERRAIN_PROPS[nt].vehicleCost)) v.pos = next; else v.speed = 0;
     }
 
     if (props.crushable) crushTile(map, tx, ty);
