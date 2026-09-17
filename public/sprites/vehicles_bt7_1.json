@@ -1,0 +1,72 @@
+{
+ "scale": 1,
+ "cell": {
+  "w": 98,
+  "h": 96
+ },
+ "anchor": {
+  "x": 49,
+  "y": 48
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "bt7.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "bt7.hull.ko": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "bt7.hull.blown": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "bt7.hull.trackL": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "bt7.hull.trackR": {
+   "start": 256,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "bt7.turret.ok": {
+   "start": 320,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "bt7.turret.ko": {
+   "start": 384,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "bt7.turret.blown": {
+   "start": 448,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "bt7",
+ "hasTurret": true,
+ "lengthM": 5.7,
+ "widthM": 2.3,
+ "turretPivotM": {
+  "x": 0.0,
+  "y": 0.62
+ }
+}

@@ -1,0 +1,72 @@
+{
+ "scale": 1,
+ "cell": {
+  "w": 104,
+  "h": 102
+ },
+ "anchor": {
+  "x": 52,
+  "y": 51
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "pz4f1.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pz4f1.hull.ko": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pz4f1.hull.blown": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pz4f1.hull.trackL": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pz4f1.hull.trackR": {
+   "start": 256,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pz4f1.turret.ok": {
+   "start": 320,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pz4f1.turret.ko": {
+   "start": 384,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pz4f1.turret.blown": {
+   "start": 448,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "pz4f1",
+ "hasTurret": true,
+ "lengthM": 5.9,
+ "widthM": 2.9,
+ "turretPivotM": {
+  "x": 0.0,
+  "y": 0.18
+ }
+}

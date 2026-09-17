@@ -1,0 +1,72 @@
+{
+ "scale": 2,
+ "cell": {
+  "w": 238,
+  "h": 232
+ },
+ "anchor": {
+  "x": 119,
+  "y": 116
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "kv1.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "kv1.hull.ko": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "kv1.hull.blown": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "kv1.hull.trackL": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "kv1.hull.trackR": {
+   "start": 256,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "kv1.turret.ok": {
+   "start": 320,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "kv1.turret.ko": {
+   "start": 384,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "kv1.turret.blown": {
+   "start": 448,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "kv1",
+ "hasTurret": true,
+ "lengthM": 6.8,
+ "widthM": 3.3,
+ "turretPivotM": {
+  "x": 0.0,
+  "y": 0.75
+ }
+}

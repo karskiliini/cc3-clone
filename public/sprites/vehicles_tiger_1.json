@@ -1,0 +1,72 @@
+{
+ "scale": 1,
+ "cell": {
+  "w": 116,
+  "h": 116
+ },
+ "anchor": {
+  "x": 57,
+  "y": 58
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "tiger.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "tiger.hull.ko": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "tiger.hull.blown": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "tiger.hull.trackL": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "tiger.hull.trackR": {
+   "start": 256,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "tiger.turret.ok": {
+   "start": 320,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "tiger.turret.ko": {
+   "start": 384,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "tiger.turret.blown": {
+   "start": 448,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "tiger",
+ "hasTurret": true,
+ "lengthM": 6.3,
+ "widthM": 3.6,
+ "turretPivotM": {
+  "x": 0.0,
+  "y": 0.05
+ }
+}

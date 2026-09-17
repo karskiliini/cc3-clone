@@ -1,0 +1,1011 @@
+{
+ "scale": 2,
+ "dirs": 64,
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicles": {
+  "pz3j": {
+   "file": "vehicles_pz3j_2",
+   "cell": {
+    "w": 198,
+    "h": 194
+   },
+   "anchor": {
+    "x": 98,
+    "y": 96
+   },
+   "columns": 16,
+   "hasTurret": true,
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.1
+   },
+   "entries": {
+    "pz3j.hull.ok": {
+     "start": 0,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "pz3j.hull.ko": {
+     "start": 64,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "pz3j.hull.blown": {
+     "start": 128,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "pz3j.hull.trackL": {
+     "start": 192,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "pz3j.hull.trackR": {
+     "start": 256,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "pz3j.turret.ok": {
+     "start": 320,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "pz3j.turret.ko": {
+     "start": 384,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "pz3j.turret.blown": {
+     "start": 448,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    }
+   }
+  },
+  "pz4f1": {
+   "file": "vehicles_pz4f1_2",
+   "cell": {
+    "w": 208,
+    "h": 202
+   },
+   "anchor": {
+    "x": 103,
+    "y": 101
+   },
+   "columns": 16,
+   "hasTurret": true,
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.18
+   },
+   "entries": {
+    "pz4f1.hull.ok": {
+     "start": 0,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "pz4f1.hull.ko": {
+     "start": 64,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "pz4f1.hull.blown": {
+     "start": 128,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "pz4f1.hull.trackL": {
+     "start": 192,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "pz4f1.hull.trackR": {
+     "start": 256,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "pz4f1.turret.ok": {
+     "start": 320,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "pz4f1.turret.ko": {
+     "start": 384,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "pz4f1.turret.blown": {
+     "start": 448,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    }
+   }
+  },
+  "pz4gh": {
+   "file": "vehicles_pz4gh_2",
+   "cell": {
+    "w": 208,
+    "h": 202
+   },
+   "anchor": {
+    "x": 103,
+    "y": 101
+   },
+   "columns": 16,
+   "hasTurret": true,
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.18
+   },
+   "entries": {
+    "pz4gh.hull.ok": {
+     "start": 0,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "pz4gh.hull.ko": {
+     "start": 64,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "pz4gh.hull.blown": {
+     "start": 128,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "pz4gh.hull.trackL": {
+     "start": 192,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "pz4gh.hull.trackR": {
+     "start": 256,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "pz4gh.turret.ok": {
+     "start": 320,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "pz4gh.turret.ko": {
+     "start": 384,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "pz4gh.turret.blown": {
+     "start": 448,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    }
+   }
+  },
+  "stug3g": {
+   "file": "vehicles_stug3g_2",
+   "cell": {
+    "w": 214,
+    "h": 216
+   },
+   "anchor": {
+    "x": 95,
+    "y": 99
+   },
+   "columns": 16,
+   "hasTurret": false,
+   "turretPivotM": null,
+   "entries": {
+    "stug3g.hull.ok": {
+     "start": 0,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "stug3g.hull.ko": {
+     "start": 64,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "stug3g.hull.trackL": {
+     "start": 128,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "stug3g.hull.trackR": {
+     "start": 192,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    }
+   }
+  },
+  "panther": {
+   "file": "vehicles_panther_2",
+   "cell": {
+    "w": 244,
+    "h": 242
+   },
+   "anchor": {
+    "x": 121,
+    "y": 123
+   },
+   "columns": 16,
+   "hasTurret": true,
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.3
+   },
+   "entries": {
+    "panther.hull.ok": {
+     "start": 0,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "panther.hull.ko": {
+     "start": 64,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "panther.hull.blown": {
+     "start": 128,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "panther.hull.trackL": {
+     "start": 192,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "panther.hull.trackR": {
+     "start": 256,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "panther.turret.ok": {
+     "start": 320,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "panther.turret.ko": {
+     "start": 384,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "panther.turret.blown": {
+     "start": 448,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    }
+   }
+  },
+  "tiger": {
+   "file": "vehicles_tiger_2",
+   "cell": {
+    "w": 228,
+    "h": 226
+   },
+   "anchor": {
+    "x": 113,
+    "y": 114
+   },
+   "columns": 16,
+   "hasTurret": true,
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.05
+   },
+   "entries": {
+    "tiger.hull.ok": {
+     "start": 0,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "tiger.hull.ko": {
+     "start": 64,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "tiger.hull.blown": {
+     "start": 128,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "tiger.hull.trackL": {
+     "start": 192,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "tiger.hull.trackR": {
+     "start": 256,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "tiger.turret.ok": {
+     "start": 320,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "tiger.turret.ko": {
+     "start": 384,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "tiger.turret.blown": {
+     "start": 448,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    }
+   }
+  },
+  "sdkfz251": {
+   "file": "vehicles_sdkfz251_2",
+   "cell": {
+    "w": 170,
+    "h": 166
+   },
+   "anchor": {
+    "x": 82,
+    "y": 80
+   },
+   "columns": 16,
+   "hasTurret": false,
+   "turretPivotM": null,
+   "entries": {
+    "sdkfz251.hull.ok": {
+     "start": 0,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "sdkfz251.hull.ko": {
+     "start": 64,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "sdkfz251.hull.trackL": {
+     "start": 128,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "sdkfz251.hull.trackR": {
+     "start": 192,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    }
+   }
+  },
+  "marder3": {
+   "file": "vehicles_marder3_2",
+   "cell": {
+    "w": 190,
+    "h": 186
+   },
+   "anchor": {
+    "x": 84,
+    "y": 82
+   },
+   "columns": 16,
+   "hasTurret": false,
+   "turretPivotM": null,
+   "entries": {
+    "marder3.hull.ok": {
+     "start": 0,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "marder3.hull.ko": {
+     "start": 64,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "marder3.hull.trackL": {
+     "start": 128,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "marder3.hull.trackR": {
+     "start": 192,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    }
+   }
+  },
+  "t26": {
+   "file": "vehicles_t26_2",
+   "cell": {
+    "w": 164,
+    "h": 160
+   },
+   "anchor": {
+    "x": 81,
+    "y": 80
+   },
+   "columns": 16,
+   "hasTurret": true,
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.42
+   },
+   "entries": {
+    "t26.hull.ok": {
+     "start": 0,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t26.hull.ko": {
+     "start": 64,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t26.hull.blown": {
+     "start": 128,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t26.hull.trackL": {
+     "start": 192,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t26.hull.trackR": {
+     "start": 256,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t26.turret.ok": {
+     "start": 320,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t26.turret.ko": {
+     "start": 384,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t26.turret.blown": {
+     "start": 448,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    }
+   }
+  },
+  "bt7": {
+   "file": "vehicles_bt7_2",
+   "cell": {
+    "w": 192,
+    "h": 188
+   },
+   "anchor": {
+    "x": 96,
+    "y": 94
+   },
+   "columns": 16,
+   "hasTurret": true,
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.62
+   },
+   "entries": {
+    "bt7.hull.ok": {
+     "start": 0,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "bt7.hull.ko": {
+     "start": 64,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "bt7.hull.blown": {
+     "start": 128,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "bt7.hull.trackL": {
+     "start": 192,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "bt7.hull.trackR": {
+     "start": 256,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "bt7.turret.ok": {
+     "start": 320,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "bt7.turret.ko": {
+     "start": 384,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "bt7.turret.blown": {
+     "start": 448,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    }
+   }
+  },
+  "t34_76": {
+   "file": "vehicles_t34_76_2",
+   "cell": {
+    "w": 232,
+    "h": 226
+   },
+   "anchor": {
+    "x": 115,
+    "y": 113
+   },
+   "columns": 16,
+   "hasTurret": true,
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.62
+   },
+   "entries": {
+    "t34_76.hull.ok": {
+     "start": 0,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t34_76.hull.ko": {
+     "start": 64,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t34_76.hull.blown": {
+     "start": 128,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t34_76.hull.trackL": {
+     "start": 192,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t34_76.hull.trackR": {
+     "start": 256,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t34_76.turret.ok": {
+     "start": 320,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t34_76.turret.ko": {
+     "start": 384,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t34_76.turret.blown": {
+     "start": 448,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    }
+   }
+  },
+  "kv1": {
+   "file": "vehicles_kv1_2",
+   "cell": {
+    "w": 238,
+    "h": 232
+   },
+   "anchor": {
+    "x": 119,
+    "y": 116
+   },
+   "columns": 16,
+   "hasTurret": true,
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.75
+   },
+   "entries": {
+    "kv1.hull.ok": {
+     "start": 0,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "kv1.hull.ko": {
+     "start": 64,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "kv1.hull.blown": {
+     "start": 128,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "kv1.hull.trackL": {
+     "start": 192,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "kv1.hull.trackR": {
+     "start": 256,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "kv1.turret.ok": {
+     "start": 320,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "kv1.turret.ko": {
+     "start": 384,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "kv1.turret.blown": {
+     "start": 448,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    }
+   }
+  },
+  "t70": {
+   "file": "vehicles_t70_2",
+   "cell": {
+    "w": 154,
+    "h": 150
+   },
+   "anchor": {
+    "x": 76,
+    "y": 75
+   },
+   "columns": 16,
+   "hasTurret": true,
+   "turretPivotM": {
+    "x": -0.28,
+    "y": 0.05
+   },
+   "entries": {
+    "t70.hull.ok": {
+     "start": 0,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t70.hull.ko": {
+     "start": 64,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t70.hull.blown": {
+     "start": 128,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t70.hull.trackL": {
+     "start": 192,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t70.hull.trackR": {
+     "start": 256,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t70.turret.ok": {
+     "start": 320,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t70.turret.ko": {
+     "start": 384,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t70.turret.blown": {
+     "start": 448,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    }
+   }
+  },
+  "t34_85": {
+   "file": "vehicles_t34_85_2",
+   "cell": {
+    "w": 232,
+    "h": 228
+   },
+   "anchor": {
+    "x": 115,
+    "y": 114
+   },
+   "columns": 16,
+   "hasTurret": true,
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.55
+   },
+   "entries": {
+    "t34_85.hull.ok": {
+     "start": 0,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t34_85.hull.ko": {
+     "start": 64,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t34_85.hull.blown": {
+     "start": 128,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t34_85.hull.trackL": {
+     "start": 192,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t34_85.hull.trackR": {
+     "start": 256,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t34_85.turret.ok": {
+     "start": 320,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t34_85.turret.ko": {
+     "start": 384,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "t34_85.turret.blown": {
+     "start": 448,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    }
+   }
+  },
+  "is2": {
+   "file": "vehicles_is2_2",
+   "cell": {
+    "w": 268,
+    "h": 266
+   },
+   "anchor": {
+    "x": 133,
+    "y": 134
+   },
+   "columns": 16,
+   "hasTurret": true,
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.85
+   },
+   "entries": {
+    "is2.hull.ok": {
+     "start": 0,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "is2.hull.ko": {
+     "start": 64,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "is2.hull.blown": {
+     "start": 128,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "is2.hull.trackL": {
+     "start": 192,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "is2.hull.trackR": {
+     "start": 256,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "is2.turret.ok": {
+     "start": 320,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "is2.turret.ko": {
+     "start": 384,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "is2.turret.blown": {
+     "start": 448,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    }
+   }
+  },
+  "su76": {
+   "file": "vehicles_su76_2",
+   "cell": {
+    "w": 178,
+    "h": 176
+   },
+   "anchor": {
+    "x": 88,
+    "y": 87
+   },
+   "columns": 16,
+   "hasTurret": false,
+   "turretPivotM": null,
+   "entries": {
+    "su76.hull.ok": {
+     "start": 0,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "su76.hull.ko": {
+     "start": 64,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "su76.hull.trackL": {
+     "start": 128,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "su76.hull.trackR": {
+     "start": 192,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    }
+   }
+  },
+  "su85": {
+   "file": "vehicles_su85_2",
+   "cell": {
+    "w": 270,
+    "h": 272
+   },
+   "anchor": {
+    "x": 123,
+    "y": 127
+   },
+   "columns": 16,
+   "hasTurret": false,
+   "turretPivotM": null,
+   "entries": {
+    "su85.hull.ok": {
+     "start": 0,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "su85.hull.ko": {
+     "start": 64,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "su85.hull.trackL": {
+     "start": 128,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    },
+    "su85.hull.trackR": {
+     "start": 192,
+     "frames": 1,
+     "fps": 0,
+     "loop": false
+    }
+   }
+  }
+ }
+}

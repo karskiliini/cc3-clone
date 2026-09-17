@@ -1,0 +1,842 @@
+{
+ "scale": 1,
+ "cell": {
+  "w": 78,
+  "h": 78
+ },
+ "anchor": {
+  "x": 35,
+  "y": 36
+ },
+ "columns": 32,
+ "dirs": 32,
+ "entries": {
+  "mortar81.baseplate": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "mortar81.tube": {
+   "start": 32,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "mortar81.setup": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "mortar81.packed": {
+   "start": 96,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "mortar82.baseplate": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "mortar82.tube": {
+   "start": 160,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "mortar82.setup": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "mortar82.packed": {
+   "start": 224,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "mg34_hmg.tripod": {
+   "start": 256,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "mg34_hmg.setup": {
+   "start": 288,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "mg34_hmg.packed": {
+   "start": 320,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "mg42_hmg.tripod": {
+   "start": 352,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "mg42_hmg.setup": {
+   "start": 384,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "mg42_hmg.packed": {
+   "start": 416,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "maxim.tripod": {
+   "start": 448,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "maxim.setup": {
+   "start": 480,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "maxim.packed": {
+   "start": 512,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pak38.limbered": {
+   "start": 544,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pak38.trailsClosed": {
+   "start": 576,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pak38.trailLeftOpen": {
+   "start": 608,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pak38.trailRightOpen": {
+   "start": 640,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pak38.trailsOpen": {
+   "start": 672,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pak38.emplaced": {
+   "start": 704,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pak38.recoil": {
+   "start": 736,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pak40.limbered": {
+   "start": 768,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pak40.trailsClosed": {
+   "start": 800,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pak40.trailLeftOpen": {
+   "start": 832,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pak40.trailRightOpen": {
+   "start": 864,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pak40.trailsOpen": {
+   "start": 896,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pak40.emplaced": {
+   "start": 928,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pak40.recoil": {
+   "start": 960,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "m1937_45mm.limbered": {
+   "start": 992,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "m1937_45mm.trailsClosed": {
+   "start": 1024,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "m1937_45mm.trailLeftOpen": {
+   "start": 1056,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "m1937_45mm.trailRightOpen": {
+   "start": 1088,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "m1937_45mm.trailsOpen": {
+   "start": 1120,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "m1937_45mm.emplaced": {
+   "start": 1152,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "m1937_45mm.recoil": {
+   "start": 1184,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "zis3.limbered": {
+   "start": 1216,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "zis3.trailsClosed": {
+   "start": 1248,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "zis3.trailLeftOpen": {
+   "start": 1280,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "zis3.trailRightOpen": {
+   "start": 1312,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "zis3.trailsOpen": {
+   "start": 1344,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "zis3.emplaced": {
+   "start": 1376,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "zis3.recoil": {
+   "start": 1408,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "ptrd.setup": {
+   "start": 1440,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "ptrd.half": {
+   "start": 1472,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "ptrd.packed": {
+   "start": 1504,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "mortar81.half": {
+   "start": 32,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "mortar82.half": {
+   "start": 160,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "mg34_hmg.half": {
+   "start": 256,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "mg42_hmg.half": {
+   "start": 352,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "maxim.half": {
+   "start": 448,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pak38.setup": {
+   "start": 704,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pak38.half": {
+   "start": 608,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pak38.packed": {
+   "start": 544,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pak40.setup": {
+   "start": 928,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pak40.half": {
+   "start": 832,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pak40.packed": {
+   "start": 768,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "m1937_45mm.setup": {
+   "start": 1152,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "m1937_45mm.half": {
+   "start": 1056,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "m1937_45mm.packed": {
+   "start": 992,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "zis3.setup": {
+   "start": 1376,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "zis3.half": {
+   "start": 1280,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "zis3.packed": {
+   "start": 1216,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "weapon-local metres: x = right, y = FORWARD (toward the muzzle), origin = pivot = cell anchor",
+ "weapons": {
+  "mortar81": {
+   "muzzleM": {
+    "x": 0.0,
+    "y": 0.99
+   },
+   "artScale": 1.5,
+   "states": [
+    "baseplate",
+    "tube",
+    "setup",
+    "packed"
+   ],
+   "aliases": {
+    "half": "tube"
+   },
+   "stations": {
+    "gunner": {
+     "x": -0.6,
+     "y": 0.1
+    },
+    "loader": {
+     "x": 0.6,
+     "y": 0.55
+    },
+    "ammo": {
+     "x": 1.1,
+     "y": -0.45
+    },
+    "trailLeft": null,
+    "trailRight": null,
+    "baseplate": {
+     "x": 0.0,
+     "y": -0.6
+    },
+    "bipod": {
+     "x": 0.0,
+     "y": 1.75
+    }
+   }
+  },
+  "mortar82": {
+   "muzzleM": {
+    "x": 0.0,
+    "y": 0.99
+   },
+   "artScale": 1.5,
+   "states": [
+    "baseplate",
+    "tube",
+    "setup",
+    "packed"
+   ],
+   "aliases": {
+    "half": "tube"
+   },
+   "stations": {
+    "gunner": {
+     "x": -0.6,
+     "y": 0.1
+    },
+    "loader": {
+     "x": 0.6,
+     "y": 0.55
+    },
+    "ammo": {
+     "x": 1.1,
+     "y": -0.45
+    },
+    "trailLeft": null,
+    "trailRight": null,
+    "baseplate": {
+     "x": 0.0,
+     "y": -0.6
+    },
+    "bipod": {
+     "x": 0.0,
+     "y": 1.75
+    }
+   }
+  },
+  "mg34_hmg": {
+   "muzzleM": {
+    "x": 0.0,
+    "y": 1.425
+   },
+   "artScale": 1.5,
+   "states": [
+    "tripod",
+    "setup",
+    "packed"
+   ],
+   "aliases": {
+    "half": "tripod"
+   },
+   "stations": {
+    "gunner": {
+     "x": 0.0,
+     "y": -1.15
+    },
+    "loader": {
+     "x": -0.95,
+     "y": -0.1
+    },
+    "ammo": {
+     "x": -1.12,
+     "y": -0.35
+    },
+    "trailLeft": null,
+    "trailRight": null,
+    "tripod": {
+     "x": 0.0,
+     "y": -0.7
+    }
+   }
+  },
+  "mg42_hmg": {
+   "muzzleM": {
+    "x": 0.0,
+    "y": 1.425
+   },
+   "artScale": 1.5,
+   "states": [
+    "tripod",
+    "setup",
+    "packed"
+   ],
+   "aliases": {
+    "half": "tripod"
+   },
+   "stations": {
+    "gunner": {
+     "x": 0.0,
+     "y": -1.15
+    },
+    "loader": {
+     "x": -0.95,
+     "y": -0.1
+    },
+    "ammo": {
+     "x": -1.12,
+     "y": -0.35
+    },
+    "trailLeft": null,
+    "trailRight": null,
+    "tripod": {
+     "x": 0.0,
+     "y": -0.7
+    }
+   }
+  },
+  "maxim": {
+   "muzzleM": {
+    "x": 0.0,
+    "y": 1.296
+   },
+   "artScale": 1.35,
+   "states": [
+    "tripod",
+    "setup",
+    "packed"
+   ],
+   "aliases": {
+    "half": "tripod"
+   },
+   "stations": {
+    "gunner": {
+     "x": 0.0,
+     "y": -1.35
+    },
+    "loader": {
+     "x": 0.95,
+     "y": -0.1
+    },
+    "ammo": {
+     "x": 1.15,
+     "y": -0.4
+    },
+    "trailLeft": null,
+    "trailRight": null,
+    "tripod": {
+     "x": 0.0,
+     "y": -1.75
+    }
+   }
+  },
+  "pak38": {
+   "muzzleM": {
+    "x": 0.0,
+    "y": 2.71
+   },
+   "artScale": 1.0,
+   "states": [
+    "limbered",
+    "trailsClosed",
+    "trailLeftOpen",
+    "trailRightOpen",
+    "trailsOpen",
+    "emplaced",
+    "recoil"
+   ],
+   "aliases": {
+    "setup": "emplaced",
+    "half": "trailLeftOpen",
+    "packed": "limbered"
+   },
+   "stations": {
+    "gunner": {
+     "x": -0.55,
+     "y": -0.6
+    },
+    "loader": {
+     "x": 0.55,
+     "y": -0.95
+    },
+    "trailLeft": {
+     "x": -1.28,
+     "y": -2.61
+    },
+    "trailRight": {
+     "x": 1.28,
+     "y": -2.61
+    },
+    "ammo": {
+     "x": 1.45,
+     "y": -1.15
+    },
+    "tail": {
+     "x": 0.0,
+     "y": -3.05
+    },
+    "trailLeftClosed": {
+     "x": -0.55,
+     "y": -2.45
+    },
+    "trailRightClosed": {
+     "x": 0.55,
+     "y": -2.45
+    }
+   }
+  },
+  "pak40": {
+   "muzzleM": {
+    "x": 0.0,
+    "y": 3.31
+   },
+   "artScale": 1.0,
+   "states": [
+    "limbered",
+    "trailsClosed",
+    "trailLeftOpen",
+    "trailRightOpen",
+    "trailsOpen",
+    "emplaced",
+    "recoil"
+   ],
+   "aliases": {
+    "setup": "emplaced",
+    "half": "trailLeftOpen",
+    "packed": "limbered"
+   },
+   "stations": {
+    "gunner": {
+     "x": -0.55,
+     "y": -0.6
+    },
+    "loader": {
+     "x": 0.55,
+     "y": -0.95
+    },
+    "trailLeft": {
+     "x": -1.49,
+     "y": -2.95
+    },
+    "trailRight": {
+     "x": 1.49,
+     "y": -2.95
+    },
+    "ammo": {
+     "x": 1.45,
+     "y": -1.15
+    },
+    "tail": {
+     "x": 0.0,
+     "y": -3.45
+    },
+    "trailLeftClosed": {
+     "x": -0.55,
+     "y": -2.85
+    },
+    "trailRightClosed": {
+     "x": 0.55,
+     "y": -2.85
+    }
+   }
+  },
+  "m1937_45mm": {
+   "muzzleM": {
+    "x": 0.0,
+    "y": 2.0
+   },
+   "artScale": 1.0,
+   "states": [
+    "limbered",
+    "trailsClosed",
+    "trailLeftOpen",
+    "trailRightOpen",
+    "trailsOpen",
+    "emplaced",
+    "recoil"
+   ],
+   "aliases": {
+    "setup": "emplaced",
+    "half": "trailLeftOpen",
+    "packed": "limbered"
+   },
+   "stations": {
+    "gunner": {
+     "x": -0.55,
+     "y": -0.6
+    },
+    "loader": {
+     "x": 0.55,
+     "y": -0.95
+    },
+    "trailLeft": {
+     "x": -1.2,
+     "y": -2.54
+    },
+    "trailRight": {
+     "x": 1.2,
+     "y": -2.54
+    },
+    "ammo": {
+     "x": 1.45,
+     "y": -1.15
+    },
+    "tail": {
+     "x": 0.0,
+     "y": -2.95
+    },
+    "trailLeftClosed": {
+     "x": -0.55,
+     "y": -2.35
+    },
+    "trailRightClosed": {
+     "x": 0.55,
+     "y": -2.35
+    }
+   }
+  },
+  "zis3": {
+   "muzzleM": {
+    "x": 0.0,
+    "y": 3.19
+   },
+   "artScale": 1.0,
+   "states": [
+    "limbered",
+    "trailsClosed",
+    "trailLeftOpen",
+    "trailRightOpen",
+    "trailsOpen",
+    "emplaced",
+    "recoil"
+   ],
+   "aliases": {
+    "setup": "emplaced",
+    "half": "trailLeftOpen",
+    "packed": "limbered"
+   },
+   "stations": {
+    "gunner": {
+     "x": -0.55,
+     "y": -0.6
+    },
+    "loader": {
+     "x": 0.55,
+     "y": -0.95
+    },
+    "trailLeft": {
+     "x": -1.58,
+     "y": -3.02
+    },
+    "trailRight": {
+     "x": 1.58,
+     "y": -3.02
+    },
+    "ammo": {
+     "x": 1.45,
+     "y": -1.15
+    },
+    "tail": {
+     "x": 0.0,
+     "y": -3.55
+    },
+    "trailLeftClosed": {
+     "x": -0.55,
+     "y": -2.95
+    },
+    "trailRightClosed": {
+     "x": 0.55,
+     "y": -2.95
+    }
+   }
+  },
+  "ptrd": {
+   "muzzleM": {
+    "x": 0.0,
+    "y": 1.86
+   },
+   "artScale": 1.2,
+   "states": [
+    "setup",
+    "half",
+    "packed"
+   ],
+   "aliases": {},
+   "stations": {
+    "gunner": {
+     "x": 0.0,
+     "y": -1.3
+    },
+    "loader": {
+     "x": 0.6,
+     "y": -0.9
+    },
+    "ammo": {
+     "x": 0.4,
+     "y": -0.3
+    },
+    "trailLeft": null,
+    "trailRight": null
+   }
+  }
+ }
+}

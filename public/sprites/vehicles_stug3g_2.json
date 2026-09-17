@@ -1,0 +1,44 @@
+{
+ "scale": 2,
+ "cell": {
+  "w": 214,
+  "h": 216
+ },
+ "anchor": {
+  "x": 95,
+  "y": 99
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "stug3g.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "stug3g.hull.ko": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "stug3g.hull.trackL": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "stug3g.hull.trackR": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "stug3g",
+ "hasTurret": false,
+ "lengthM": 5.4,
+ "widthM": 2.9
+}

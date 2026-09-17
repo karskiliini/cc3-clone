@@ -1,0 +1,72 @@
+{
+ "scale": 1,
+ "cell": {
+  "w": 84,
+  "h": 82
+ },
+ "anchor": {
+  "x": 41,
+  "y": 41
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "t26.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "t26.hull.ko": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "t26.hull.blown": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "t26.hull.trackL": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "t26.hull.trackR": {
+   "start": 256,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "t26.turret.ok": {
+   "start": 320,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "t26.turret.ko": {
+   "start": 384,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "t26.turret.blown": {
+   "start": 448,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "t26",
+ "hasTurret": true,
+ "lengthM": 4.6,
+ "widthM": 2.4,
+ "turretPivotM": {
+  "x": 0.0,
+  "y": 0.42
+ }
+}

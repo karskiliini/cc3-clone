@@ -1,0 +1,44 @@
+{
+ "scale": 1,
+ "cell": {
+  "w": 92,
+  "h": 90
+ },
+ "anchor": {
+  "x": 45,
+  "y": 44
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "su76.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "su76.hull.ko": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "su76.hull.trackL": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "su76.hull.trackR": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "su76",
+ "hasTurret": false,
+ "lengthM": 5.0,
+ "widthM": 2.7
+}

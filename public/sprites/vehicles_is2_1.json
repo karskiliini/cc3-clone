@@ -1,0 +1,72 @@
+{
+ "scale": 1,
+ "cell": {
+  "w": 136,
+  "h": 134
+ },
+ "anchor": {
+  "x": 67,
+  "y": 68
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "is2.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "is2.hull.ko": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "is2.hull.blown": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "is2.hull.trackL": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "is2.hull.trackR": {
+   "start": 256,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "is2.turret.ok": {
+   "start": 320,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "is2.turret.ko": {
+   "start": 384,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "is2.turret.blown": {
+   "start": 448,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "is2",
+ "hasTurret": true,
+ "lengthM": 6.8,
+ "widthM": 3.1,
+ "turretPivotM": {
+  "x": 0.0,
+  "y": 0.85
+ }
+}

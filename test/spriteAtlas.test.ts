@@ -42,8 +42,8 @@ describe('atlas index maths', () => {
   it('names the atlases a battle needs', () => {
     expect(soldierAtlasName('german', 'autumn', 1)).toBe('soldiers_german_summer_1');
     expect(battleAtlasNames(['german', 'soviet'], 'winter')).toEqual([
-      'soldiers_german_winter_1', 'soldiers_soviet_winter_1', 'vehicles_1', 'weapons_1',
-      'soldiers_german_winter_2', 'soldiers_soviet_winter_2', 'vehicles_2', 'weapons_2',
+      'soldiers_german_winter_1', 'soldiers_soviet_winter_1', 'weapons_1',
+      'soldiers_german_winter_2', 'soldiers_soviet_winter_2', 'weapons_2',
     ]);
   });
 
@@ -89,6 +89,10 @@ describe('placeholder atlases follow the contract', () => {
     expect(v.meta.dirs).toBe(64);
     expect(turretPivotM(v.meta, 't34_76')).toEqual({ x: 0, y: -0.8 });
     expect(turretPivotM(v.meta, 'unknown')).toEqual({ x: 0, y: 0 });
+    // per-vehicle atlases store the pivot with +y forward; the game wants +y aft
+    const own = { ...v.meta, vehicle: 'kv1', turretPivotM: { x: 0, y: 0.62 } } as AtlasMeta;
+    expect(turretPivotM(own, 'kv1')).toEqual({ x: 0, y: -0.62 });
+    expect(turretPivotM(own, 't34_76')).toEqual({ x: 0, y: 0 });
     expect(buildWeaponPlaceholder(1).meta.dirs).toBe(32);
   });
 });
