@@ -53,8 +53,10 @@ export const STILL_MPS = 0.06;
 
 /** A delayed burst cleanup must never keep a fleeing or cowering man in a firing pose. */
 export function smgCombatInterrupted(s: Soldier): boolean {
-  return s.activity === 'panicked' || s.activity === 'routed' || s.activity === 'cowering' || s.activity === 'surrendered'
-    || s.mind.state === 'panicked' || s.mind.state === 'broken' || s.mind.state === 'cowering';
+  const panicFire = s.aiming?.hasty === 'panic' || s.smgBurst?.hasty === 'panic';
+  return (!panicFire && (s.activity === 'panicked' || s.mind.state === 'panicked'))
+    || s.activity === 'routed' || s.activity === 'cowering' || s.activity === 'surrendered'
+    || s.mind.state === 'broken' || s.mind.state === 'cowering';
 }
 
 /** Is he actually going somewhere? A path alone is not enough: men who hide, lie in ambush or are

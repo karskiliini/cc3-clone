@@ -4,6 +4,7 @@ import { angleTo, clamp, dist, facingAngle, facingFromAngle, wrapAngle } from '@
 import type { Target } from './combat';
 import type { Rng } from '@/shared/rng';
 import { chooseSmgHandling, smgBodyFacing } from './smgFire';
+import { hastyFireKind } from './hastyFire';
 
 type Aim = NonNullable<Soldier['aiming']>;
 interface Memory { lastPos: Vec2; movedAt: number; walkUntil: number; shot?: Aim; shotAt: number }
@@ -66,11 +67,15 @@ export function infantryAimReady(s: Soldier, weapon: WeaponDef, target: Target, 
     const followUp = !!m.shot && now - m.shotAt < 8 && sameTarget(m.shot, t)
       && m.shot.weaponId === weapon.id && m.shot.stance === s.stance && dist(m.shot.from, s.pos) * TILE_M <= 0.3;
     const handling = weapon.cls === 'smg' && rng ? chooseSmgHandling(s, t.at, team, rng) : undefined;
+    const hasty = hastyFireKind(s, weapon, t.at, team);
+    const turnS = Math.abs(wrapAngle(angleTo(s.pos, t.at) - facingAngle(s.facing))) / Math.PI * 0.6;
+    const duration = hasty ? (hasty === 'panic' ? 0.18 : weapon.cls === 'lmg' ? 0.5 : 0.3) + turnS
+      : aimSeconds(s, weapon, t.at, now, followUp, handling?.mode === 'hip');
     aim = s.aiming = {
-      startedAt: now, readyAt: now + aimSeconds(s, weapon, t.at, now, followUp, handling?.mode === 'hip'), fromFacing: facingAngle(s.facing),
+      startedAt: now, readyAt: now + duration, fromFacing: facingAngle(s.facing),
       from: { ...s.pos }, at: { ...t.at }, targetKind: t.kind, targetId: t.id, weaponId: weapon.id,
       stance: s.stance, orderAt: team?.order?.issuedAt, orderType: team?.order?.type,
-      fireMode: handling?.mode, uncontrolled: handling?.uncontrolled,
+      fireMode: handling?.mode, uncontrolled: handling?.uncontrolled, hasty,
     };
   }
   aim.at = { ...t.at };

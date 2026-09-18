@@ -383,10 +383,12 @@ export interface Soldier {
     weaponId: string; stance: Stance; orderAt?: number; orderType?: OrderType;
     fireMode?: 'aimed' | 'hip';
     uncontrolled?: boolean;
+    hasty?: 'assault' | 'pressure' | 'panic';
   };
   /** SMG trigger hold: rounds leave at their cyclic rate, with the same bearing read by the pose. */
   smgBurst?: {
     mode: 'aimed' | 'hip'; uncontrolled: boolean;
+    hasty?: 'assault' | 'pressure' | 'panic';
     start: number; until: number; interval: number; rounds: number; fired: number; nextAt: number;
     from: Vec2; stance: Stance; aim: Vec2; bodyFacing: number; heading: number;
     sweep: number; sweepSign: number; recoil: number; lastRoundAt: number; weaponId: string;

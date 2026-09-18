@@ -47,6 +47,9 @@ order first (hotkey, order bar, or right-click menu), then click the target.
   range, training, exhaustion, and suppression affect acquisition time. Moving riflemen pause to aim
   and continue their route between shots. `tools/animPreview.html` demonstrates these at battle speed.
 - SMGs use timed rounds with visible shoulder/hip poses, torso rotation, recoil and sweeping fire.
+  Close assaults and heavy defensive pressure allow faster, less accurate snap fire with rifles,
+  pistols, LMGs and SMGs. Full panic occasionally produces a brief erratic shot or burst, followed
+  by hesitation or flight; broken and cowering men do not fire. Weapon cycling and reloads still apply.
   Aimed fire uses short bursts (or a PPSh single shot at range); hip fire is a less accurate close-range
   choice. Prone men keep their weapons shouldered, with smaller recoil and narrower sweeps. Frightened,
   inexperienced men are more likely to hold the trigger until their magazine is empty. Becoming unable

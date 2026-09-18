@@ -9,8 +9,10 @@ Shoulder fire is the default. Close, hurried engagements and stress can prompt h
 quicker presentation and substantially wider dispersion. Prone soldiers always use shoulder fire.
 At 75 m or more, controlled MP40 trigger pulls use two rounds and the selective-fire PPSh uses one.
 Short area bursts traverse a small angle; loss of discipline can produce a full-magazine sweep.
-High stress and low experience increase that probability, while fully panicked or cowering soldiers
-stop firing. These thresholds and probabilities are gameplay tuning, not measured psychological laws.
+High stress and low experience increase that probability. Full panic interrupts deliberate fire,
+but permits occasional brief erratic bursts; broken and cowering soldiers stop firing. Close assaults
+and heavy defensive pressure can also prompt hurried acquisition with poorer accuracy and wider
+dispersion. These thresholds and probabilities are gameplay tuning, not measured psychological laws.
 
 The visual and physical shot share a bearing. The supplementary sprite atlases provide five torso
 twists with planted legs and three recoil stages for standing, crouching, kneeling and prone fire.

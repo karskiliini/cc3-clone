@@ -14,6 +14,7 @@ import type { LosHeights } from './los';
 import { estimateAim, traceRound, traceTracers } from './shotTrace';
 import { clearInfantryAim, infantryAimReady, infantryCanAim, infantryDidFire, observeInfantryMotion } from './infantryAim';
 import { createSmgBurst, smgBodyFacing, smgHullIntercept, smgMuzzle, smgMuzzleHeight, smgRoundAim } from './smgFire';
+import { hastyFireKind, isPanicking, panicFireOpportunity } from './hastyFire';
 import { addSmoke } from './smoke';
 import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';
@@ -151,9 +152,8 @@ function tracerKindFor(weapon: WeaponDef): 'bullet' | 'mg' | 'shell' | 'mortar' 
 
 const AT_WEAPON_CLASSES = new Set(['atgun', 'atrocket', 'atrifle', 'tankgun']);
 
-function canSoldierFire(s: Soldier, state: BattleState): boolean {
-  if ((s.smgBurst || WEAPONS[s.weaponId]?.cls === 'smg')
-    && (s.mind.state === 'panicked' || s.mind.state === 'broken' || s.mind.state === 'cowering')) return false;
+function canSoldierFire(s: Soldier, state: BattleState, allowPanic = false): boolean {
+  if (s.mind.state === 'broken' || s.mind.state === 'cowering' || (!allowPanic && isPanicking(s))) return false;
   if (s.vehicleId != null) {
     // passengers fire over the sides of a HALTED transport (badly); crews never with their own arms
     if (s.seat !== 'passenger') return false;
@@ -164,7 +164,7 @@ function canSoldierFire(s: Soldier, state: BattleState): boolean {
   if (s.pickup?.until != null) return false; // stooping over an item (sim/pickup.ts)
   if (s.hatch) return false; // climbing through a hatch (sim/vehicleCrew.ts)
   if (s.health === 'dead' || s.health === 'incapacitated') return false;
-  if (s.activity === 'surrendered' || s.activity === 'routed' || s.activity === 'panicked' || s.activity === 'cowering') return false;
+  if (s.activity === 'surrendered' || s.activity === 'routed' || s.activity === 'cowering') return false;
   if (isFirstFireFrozen(state, s.id)) return false;
   return !!WEAPONS[s.weaponId];
 }
@@ -797,6 +797,13 @@ function areaImpact(state: BattleState, rng: Rng, from: Vec2, side: Side, weapon
 
 function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: WeaponDef, target: Target, wantTracer: boolean): void {
   const map = state.map;
+  if (shooter.aiming?.hasty) {
+    const aim = targetPosOf(target), range = dist(shooter.pos, aim);
+    const heading = angleTo(shooter.pos, aim) + rng.gauss() * (shooter.aiming.hasty === 'panic' ? 0.12 : 0.045);
+    resolveSmallArmsRay(state, rng, shooter, weapon,
+      { x: shooter.pos.x + Math.sin(heading) * range, y: shooter.pos.y - Math.cos(heading) * range }, heading);
+    return;
+  }
   if (target.kind === 'point') {
     const aim = target.guesstimate ? estimateAim(state, rng, shooter.pos, target.pos) : target.pos;
     const shot = traceRound(state, rng, shooter.pos, aim, weapon, { eyeM: eyeHeightM(shooter.stance), targetM: target.guesstimate ? 0.5 : 1.7 });
@@ -885,14 +892,14 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
   }
 }
 
-/** Resolve the SMG's actual ray. A sweeping round cannot roll a hit on the originally selected
+/** Resolve an SMG or hurried small-arms ray. A sweeping round cannot roll a hit on the originally selected
  * man when its barrel is pointing elsewhere; cover and vegetation also intercept this same ray. */
-function resolveSmgRound(state: BattleState, rng: Rng, s: Soldier, weapon: WeaponDef, aim: Vec2, heading: number): void {
-  const b = s.smgBurst!;
+function resolveSmallArmsRay(state: BattleState, rng: Rng, s: Soldier, weapon: WeaponDef, aim: Vec2, heading: number): void {
+  const b = s.smgBurst;
   const from = smgMuzzle(s, heading), range = dist(s.pos, aim);
   const to = { x: from.x + Math.sin(heading) * range, y: from.y - Math.cos(heading) * range };
   const initialHull = smgHullIntercept(state, from, to, s.vehicleId);
-  const shot = traceRound(state, rng, from, initialHull?.pos ?? to, weapon, { eyeM: smgMuzzleHeight(s, b.mode), targetM: 0.8 });
+  const shot = traceRound(state, rng, from, initialHull?.pos ?? to, weapon, { eyeM: smgMuzzleHeight(s, b?.mode ?? 'aimed'), targetM: 0.8 });
   let hull: ReturnType<typeof smgHullIntercept> = null;
   for (let leg = 1; leg < shot.points.length; leg++) {
     hull = smgHullIntercept(state, shot.points[leg - 1], shot.points[leg], s.vehicleId);
@@ -931,7 +938,7 @@ function resolveSmgRound(state: BattleState, rng: Rng, s: Soldier, weapon: Weapo
     if (contact.distance > 0.3 || hit) continue;
     const cover = coverFrom(state.map, v.pos, angleTo(v.pos, s.pos));
     const accuracy = hitChance(weapon, dist(s.pos, v.pos) * TILE_M, cover, v.stance, s, v.path.length > 0)
-      * (b.mode === 'hip' ? 0.5 : 1) * (b.uncontrolled ? 0.65 : 1) * (1 - b.recoil * 0.25)
+      * (b?.mode === 'hip' ? 0.5 : 1) * (b?.uncontrolled ? 0.65 : 1) * (1 - (b?.recoil ?? 0) * 0.25)
       * recoveryFactor(s, state.time) * (s.seat === 'passenger' ? PASSENGER_FIRE_MUL : 1);
     if (!rng.chance(accuracy)) continue;
     applyHit(state, v, weapon, rng, s.side, s); track.smallArmsHit++; hit = true;
@@ -939,7 +946,7 @@ function resolveSmgRound(state: BattleState, rng: Rng, s: Soldier, weapon: Weapo
     state.sparks.push({ pos: { ...v.pos }, t: state.time, kind: 'body' });
     break;
   }
-  traceTracers(state, shot, 'bullet', hit);
+  traceTracers(state, shot, tracerKindFor(weapon), hit);
   if (hull && !hit) {
     const v = hull.vehicle;
     state.sparks.push({ pos: { ...hull.pos }, t: state.time, kind: 'armor' });
@@ -958,7 +965,7 @@ function stepSmgBurst(state: BattleState, rng: Rng, s: Soldier, weapon: WeaponDe
   if (!b) return false;
   if (weapon.id !== b.weaponId || s.stance !== b.stance || dist(s.pos, b.from) * TILE_M > 0.3
     || team?.order?.issuedAt !== b.orderAt || team?.order?.type !== b.orderType
-    || s.suppression > 85 || s.activity === 'reloading' || (s.dodgeUntil != null && state.time < s.dodgeUntil)) {
+    || (s.suppression > 85 && b.hasty !== 'panic') || s.activity === 'reloading' || (s.dodgeUntil != null && state.time < s.dodgeUntil)) {
     s.smgBurst = undefined; clearInfantryAim(s); s.fireTimer = Math.max(s.fireTimer, 0.3); return true;
   }
   // A 10 Hz step can contain two PPSh rounds. Their due times, direction and ammunition are
@@ -970,7 +977,7 @@ function stepSmgBurst(state: BattleState, rng: Rng, s: Soldier, weapon: WeaponDe
     b.lastRoundAt = at; b.fired++; b.nextAt += b.interval;
     s.ammo--; s.lastFiredAt = at; s.facing = facingFromAngle(b.bodyFacing);
     const age = Math.max(0, state.time - at), tracerStart = state.tracers.length;
-    resolveSmgRound(state, rng, s, weapon, round.pos, round.heading);
+    resolveSmallArmsRay(state, rng, s, weapon, round.pos, round.heading);
     for (let i = tracerStart; i < state.tracers.length; i++) state.tracers[i].t = age;
     if (state.tracers[tracerStart]) state.tracers[tracerStart].fromHeightM = smgMuzzleHeight(s, b.mode) * 1.3;
     state.flashes.push({ pos: smgMuzzle(s, b.heading), facing: b.heading, t: age, atMuzzle: true, heightM: smgMuzzleHeight(s, b.mode) * 1.3 });
@@ -984,7 +991,12 @@ function stepSmgBurst(state: BattleState, rng: Rng, s: Soldier, weapon: WeaponDe
 function fireBurst(state: BattleState, rng: Rng, soldier: Soldier, weapon: WeaponDef, target: Target): void {
   // guns cycle on their LOADING and LAYING phases (crewWeapon.ts / gunTiming.ts), not on `rate`
   soldier.fireTimer = weapon.cls === 'atgun' && weapon.loadS != null ? 0.5 : 1 / weapon.rate;
-  if (soldier.activity !== 'moving' && soldier.activity !== 'sneaking' && soldier.activity !== 'movingFast') {
+  // A hurried return shot is followed by hesitation under heavy fire. Fast presentation must
+  // not cancel suppression's reduction in sustained fire rate.
+  if (soldier.aiming?.hasty && soldier.suppression >= 55) {
+    soldier.fireTimer = Math.max(soldier.fireTimer, 4 + (soldier.suppression - 55) * 0.08);
+  }
+  if (!isPanicking(soldier) && soldier.activity !== 'moving' && soldier.activity !== 'sneaking' && soldier.activity !== 'movingFast') {
     soldier.activity = 'firing';
   }
   if (weapon.cls === 'smg') {
@@ -1044,10 +1056,15 @@ function fireBurst(state: BattleState, rng: Rng, soldier: Soldier, weapon: Weapo
 }
 
 function stepSoldierCombat(state: BattleState, rng: Rng, dt: number, soldier: Soldier, track: CombatTrack): void {
-  if (!canSoldierFire(soldier, state)) { clearInfantryAim(soldier); soldier.smgBurst = undefined; return; }
+  if (!canSoldierFire(soldier, state, true)) { clearInfantryAim(soldier); soldier.smgBurst = undefined; return; }
   const weapon = WEAPONS[soldier.weaponId];
   if (!weapon || weapon.indirect) { clearInfantryAim(soldier); soldier.smgBurst = undefined; return; }
   const team = state.teams.get(soldier.teamId);
+  const panic = isPanicking(soldier);
+  const panicWindow = panicFireOpportunity(soldier, weapon, state.time, rng);
+  if (panic && (!panicWindow || team?.crewWeapon?.gunnerId === soldier.id)) {
+    clearInfantryAim(soldier); soldier.smgBurst = undefined; return;
+  }
   if (stepSmgBurst(state, rng, soldier, weapon, team)) return;
   const crewAimed = team?.crewWeapon?.gunnerId === soldier.id;
   if (!crewAimed) observeInfantryMotion(soldier, state.time);
@@ -1096,7 +1113,7 @@ function stepSoldierCombat(state: BattleState, rng: Rng, dt: number, soldier: So
   // now driven by the mental state (pinned fires at 30%, cowering/panicked already excluded by
   // canSoldierFire) rather than the raw suppression number, which used to race ahead of the state
   // machine by a tick.
-  if (soldier.mind.state !== 'berserk') {
+  if (soldier.mind.state !== 'berserk' && !panic) {
     // Tried loosening 30%->40% and >85->90 (paired with the suppression-decay change above);
     // harness showed the combination made attacker win rate worse, not better. Reverted to the
     // original spec §6.7 thresholds — the shot-volume gap turned out to be dominated by the AI's
@@ -1108,6 +1125,7 @@ function stepSoldierCombat(state: BattleState, rng: Rng, dt: number, soldier: So
 
   const target = pickTarget(state, soldier, team, weapon);
   if (!target) { clearInfantryAim(soldier); return; }
+  if (panic && hastyFireKind(soldier, weapon, targetPosOf(target), team) !== 'panic') { clearInfantryAim(soldier); return; }
   // crew-served weapons (HMG / AT gun): lay and load before the first round of a new fire mission
   if (team?.crewWeapon) {
     const wait = fireMissionWait(state, team, soldier, {

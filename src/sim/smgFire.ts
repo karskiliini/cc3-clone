@@ -34,13 +34,14 @@ export function createSmgBurst(s: Soldier, weapon: WeaponDef, at: Vec2, team: Te
   const rangeM = dist(s.pos, at) * TILE_M;
   // The PPSh has a selector; an MP40's short trigger pull is still automatic fire.
   const short = mode === 'aimed' && rangeM >= 75 ? (weapon.id === 'ppsh41' ? 1 : 2) : weapon.burst;
-  const rounds = Math.min(s.ammo, chosen.uncontrolled ? s.ammo : short);
   const interval = 1 / (CYCLIC_RPS[weapon.id] ?? 10), heading = angleTo(s.pos, at);
+  const hasty = s.aiming?.hasty;
+  const rounds = Math.min(s.ammo, hasty === 'panic' ? Math.ceil(0.65 / interval) : chosen.uncontrolled ? s.ammo : short);
   const area = team?.order?.type === 'fire' && s.aiming?.targetKind === 'point';
   const sweep = (chosen.uncontrolled ? (mode === 'hip' ? 55 : 35) : area ? 7 : mode === 'hip' ? 5 : 0)
     * DEG * (s.stance === 'prone' ? 0.55 : 1);
   return {
-    mode, uncontrolled: chosen.uncontrolled, start: now, until: now + Math.max(0, rounds - 1) * interval + 0.25,
+    mode, uncontrolled: chosen.uncontrolled, hasty, start: now, until: now + Math.max(0, rounds - 1) * interval + 0.25,
     interval, rounds, fired: 0, nextAt: now, from: { ...s.pos }, stance: s.stance, aim: { ...at },
     bodyFacing: smgBodyFacing(s.aiming?.fromFacing ?? facingAngle(s.facing), heading, s.stance === 'prone'),
     heading, sweep, sweepSign: rng.chance(0.5) ? -1 : 1, recoil: 0, lastRoundAt: -Infinity,
@@ -58,7 +59,8 @@ export function smgRoundAim(s: Soldier, b: SmgBurst, index: number, rng: Rng): {
   // Start on the aim point, sweep across it, then settle on the opposite edge. A short aimed
   // burst at one man has no intentional traverse, only the small recoil/handling component.
   const traverse = b.sweepSign * b.sweep * 0.5 * Math.sin(progress * Math.PI * 1.5);
-  const dispersion = (b.mode === 'hip' ? 0.023 : 0.0035) * control * (b.uncontrolled ? 1.7 : 1);
+  const dispersion = (b.mode === 'hip' ? 0.023 : 0.0035) * control * (b.uncontrolled ? 1.7 : 1)
+    + (b.hasty === 'panic' ? 0.08 : b.hasty ? 0.025 : 0) * brace;
   const climb = b.sweepSign * recoil * 0.008 * Math.sin(index * 1.3);
   const heading = angleTo(s.pos, b.aim) + traverse + rng.gauss() * dispersion + climb;
   const range = dist(s.pos, b.aim) * (1 + Math.max(0, index - 2) * recoil * 0.003);
