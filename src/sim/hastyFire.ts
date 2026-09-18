@@ -7,7 +7,8 @@ export type HastyFire = 'assault' | 'pressure' | 'panic';
 const HANDHELD = new Set(['rifle', 'pistol', 'smg', 'lmg']);
 export function isPanicking(s: Soldier): boolean { return s.mind.state === 'panicked' || s.activity === 'panicked'; }
 export function hastyFireKind(s: Soldier, w: WeaponDef, at: Vec2, team?: Team): HastyFire | undefined {
-  if (!HANDHELD.has(w.cls) || w.id.includes('scoped') || team?.crewWeapon?.gunnerId === s.id) return;
+  if (!HANDHELD.has(w.cls) || w.id.includes('scoped')
+    || (team?.crewWeapon?.gunnerId === s.id && team.crewWeapon.weaponId === s.weaponId)) return;
   const range = dist(s.pos, at) * TILE_M;
   if (isPanicking(s)) return range <= 80 ? 'panic' : undefined;
   if (team?.order?.type === 'assault' && range <= 80) return 'assault';

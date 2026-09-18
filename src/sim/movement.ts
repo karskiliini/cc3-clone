@@ -232,7 +232,7 @@ function separateSoldiers(state: BattleState, dt: number): void {
     // group multiplies the correction, and increasing the update rate makes men slide faster.
     const held = s.aiming || (s.smgBurst && state.time < s.smgBurst.until) || s.hatch || (s.stunnedUntil != null && state.time < s.stunnedUntil)
       || isDazed(s, state.time) || s.pickup?.until != null || isFirstFireFrozen(state, s.id)
-      || (s.crewTask && !s.crewTask.walking) || isHaulingGun(state, s);
+      || (s.crewTask && !s.crewTask.walking) || isHaulingGun(state, s) || isHeldForPacking(state, s);
     budgets.set(s.id, held ? 0 : infantrySpeedMs(s, 0.3) * dt / TILE_M);
   }
   for (const arr of buckets.values()) {

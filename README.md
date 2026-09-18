@@ -54,6 +54,12 @@ order first (hotkey, order bar, or right-click menu), then click the target.
   choice. Prone men keep their weapons shouldered, with smaller recoil and narrower sweeps. Frightened,
   inexperienced men are more likely to hold the trigger until their magazine is empty. Becoming unable
   to fire or receiving a new order interrupts the burst. `tools/smgPreview.html` shows the behaviors.
+- Crew MG mounts are separate loads carried by an assistant. A fallen or unable carrier drops the
+  mount; another capable crewman must walk over and collect it. MG34/MG42 tripod guns can continue
+  as light MGs without the mount. The Maxim needs a carrier to move. Losing an assistant never
+  dismantles a gun already mounted; a lone portable-gun operator can pack the gun and leave its
+  tripod behind. Carriers move more slowly with their hands occupied. `tools/mgMountPreview.html`
+  demonstrates packing, casualties, recovery and remounting with the real simulation and renderer.
 - Unit vision: while teams are selected the map shows what they can see of an enemy standing in the open —
   untouched where he would be spotted for sure, a dark-green tint where only obscured (concealment, distance,
   behind the soldiers' facing), darkened where out of range (300 m ring) or blocked. **L** toggles it

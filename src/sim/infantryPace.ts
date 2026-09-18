@@ -18,5 +18,6 @@ export function infantrySpeedMs(s: Soldier, requestedMs: number): number {
   if (s.fatigue > 70) speed *= 0.5;
   if (s.health === 'wounded') speed *= 0.7;
   if (s.carrying) speed *= 0.5;
+  if (s.carryingMgMount != null) speed *= 0.7;
   return speed;
 }

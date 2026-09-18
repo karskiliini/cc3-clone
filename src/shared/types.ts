@@ -204,6 +204,8 @@ export interface WeaponDef {
   id: string;
   name: string;               // display name e.g. "Kar98k", "MG42", "7.5cm KwK 40"
   cls: WeaponClass;
+  /** Portable version when a crew MG's separate mount cannot be brought along. */
+  unmountedWeaponId?: string;
   rangeM: number;             // max effective range in metres
   minRangeM?: number;         // mortars
   rate: number;               // shots per second (bursts count as shots)
@@ -350,6 +352,8 @@ export interface SoldierMind {
 }
 
 export interface Soldier {
+  /** Derived each crew step: hands occupied carrying this team's MG mount. */
+  carryingMgMount?: number;
   /** gun gunners: rounds left by type (sum = ammo + ammoReserve); sim/aimPoint.ts `soldierRounds` */
   rounds?: RoundCounts;
   id: number;
@@ -793,6 +797,7 @@ export type TeamStatusWord =
   | 'Destroyed' | 'Surrendered' | 'Knocked Out' | 'Setting up' | 'Aiming' | 'Loading'
   // crew-served weapons follow their open task (spec 2026-09-17 §6)
   | 'Unlimbering' | 'Spreading trails' | 'Digging in' | 'Packing up'
+  | 'Need carrier' | 'Recovering mount'
   // Manual vocabulary this HUD was missing (round5 critique #9): a team with no active order or
   // that has finished one (arrived, nothing left to do) waits for orders; a team whose obedience
   // roll failed (sim/orders.ts canObey) is visibly hesitating rather than looking merely idle; a
@@ -865,6 +870,15 @@ export type CrewWeaponPhase = 'packed' | 'settingUp' | 'ready' | 'packing';
 
 export interface CrewWeaponState {
   weaponId: string;
+  /** A separate physical load: the gunner cannot carry both gun and mount. */
+  mount?: {
+    state: 'deployed' | 'carried' | 'ground'; pos: Vec2; carrierId: number | null;
+    recovery?: { soldierId: number; path: Vec2[]; worked: number };
+  };
+  /** Portable MG being used without its tripod; weaponId retains the mounted identity. */
+  lightMode?: boolean;
+  /** A nonportable MG is waiting for a capable mount carrier before it can move. */
+  mountBlocked?: boolean;
   /** weapon pivot (baseplate / tripod / gun axle), tile coords; follows the gunner while packed */
   pos: Vec2;
   /** radians, 0 = north, clockwise (muzzle direction) */

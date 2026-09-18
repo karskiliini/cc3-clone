@@ -162,6 +162,7 @@ function canSoldierFire(s: Soldier, state: BattleState, allowPanic = false): boo
   }
   if (isStunned(s, state.time) || isDazed(s, state.time)) return false; // dazed: no fire, no reload (sim/daze.ts)
   if (s.pickup?.until != null) return false; // stooping over an item (sim/pickup.ts)
+  if (s.carryingMgMount != null) return false;
   if (s.hatch) return false; // climbing through a hatch (sim/vehicleCrew.ts)
   if (s.health === 'dead' || s.health === 'incapacitated') return false;
   if (s.activity === 'surrendered' || s.activity === 'routed' || s.activity === 'cowering') return false;
@@ -1062,11 +1063,11 @@ function stepSoldierCombat(state: BattleState, rng: Rng, dt: number, soldier: So
   const team = state.teams.get(soldier.teamId);
   const panic = isPanicking(soldier);
   const panicWindow = panicFireOpportunity(soldier, weapon, state.time, rng);
-  if (panic && (!panicWindow || team?.crewWeapon?.gunnerId === soldier.id)) {
+  if (panic && (!panicWindow || (team?.crewWeapon?.gunnerId === soldier.id && team.crewWeapon.weaponId === soldier.weaponId))) {
     clearInfantryAim(soldier); soldier.smgBurst = undefined; return;
   }
   if (stepSmgBurst(state, rng, soldier, weapon, team)) return;
-  const crewAimed = team?.crewWeapon?.gunnerId === soldier.id;
+  const crewAimed = team?.crewWeapon?.gunnerId === soldier.id && team.crewWeapon.weaponId === soldier.weaponId;
   if (!crewAimed) observeInfantryMotion(soldier, state.time);
 
   if (soldier.activity === 'reloading') {
@@ -1076,7 +1077,9 @@ function stepSoldierCombat(state: BattleState, rng: Rng, dt: number, soldier: So
       const take = Math.min(weapon.ammo, soldier.ammoReserve);
       soldier.ammo = take;
       soldier.ammoReserve -= take;
-      soldier.activity = 'idle';
+      const moveType = team?.order?.type;
+      soldier.activity = isPanicking(soldier) ? 'panicked' : soldier.path.length === 0 ? 'idle'
+        : moveType === 'sneak' ? 'sneaking' : moveType === 'moveFast' || moveType === 'assault' ? 'movingFast' : 'moving';
     }
     return;
   }
@@ -1167,6 +1170,7 @@ function stepGrenades(state: BattleState, rng: Rng, dt: number, track: CombatTra
   if (!grenadeWeapon) return;
   for (const s of state.soldiers.values()) {
     if (s.health === 'dead' || s.health === 'incapacitated') continue;
+    if (s.carryingMgMount != null || s.crewTask?.id === 'liftTripod' || s.crewTask?.id === 'placeTripod') continue;
     if (s.smgBurst && state.time < s.smgBurst.until) continue;
     if (s.activity === 'surrendered' || s.activity === 'routed' || s.activity === 'sneaking' || s.activity === 'ambushing') continue;
     if (s.grenades <= 0 || isStunned(s, state.time) || isDazed(s, state.time)) continue;

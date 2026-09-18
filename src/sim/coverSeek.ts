@@ -123,7 +123,7 @@ function seekForSoldier(state: BattleState, rng: Rng, s: Soldier): void {
   // --- A burning vehicle within 15 m: a man with nowhere to go gets clear of it before anything
   // else (its ammunition may cook off), to the best cover outside that circle.
   // (a gun crew stays with its emplaced gun)
-  if (s.path.length === 0 && !s.bailRun && !(team?.crewWeapon && !team.crewWeapon.abandoned)) {
+  if (s.path.length === 0 && !s.bailRun && !(team?.crewWeapon && !team.crewWeapon.abandoned && !team.crewWeapon.lightMode)) {
     const hazards = fireHazards(state);
     if (hazards.length > 0 && nearFireHazard(hazards, s.pos)) {
       mind.lastCoverSeekAt = state.time;

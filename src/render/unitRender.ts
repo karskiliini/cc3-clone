@@ -17,7 +17,7 @@ import { drawOrderMarkers } from '@/render/orderMarkers';
 import { getWeaponSprite } from '@/render/sprites';
 import { getCrewPoseSprite, type CrewPose, type SoldierPose } from '@/render/soldierArt';
 import { weaponMuzzleM, trailVariant, type WeaponVariant } from '@/render/weaponArt';
-import { CREW_LAYOUT, gunHaulers, crewServedClass, crewWeaponView, crewWeaponVisual, trailOpenFrac, towLengthM, weaponFramePoint } from '@/sim/crewWeapon';
+import { CREW_LAYOUT, gunHaulers, crewServedClass, crewWeaponView, crewWeaponVisual, separateMgMount, trailOpenFrac, towLengthM, weaponFramePoint } from '@/sim/crewWeapon';
 import { FLASH_LIFE, TILE_M } from '@/shared/types';
 import type { CrewWeaponState, Vec2, Vehicle } from '@/shared/types';
 import { vehicleDamageView, vehicleLayout } from '@/sim/vehicleDamage';
@@ -636,7 +636,7 @@ function codeVariant(state: BattleState, cw: CrewWeaponState): WeaponVariant {
 }
 
 /** Per-frame crew pose / position overrides, keyed by soldier id. */
-function crewSoldierDraws(state: BattleState): Map<number, CrewSoldierDraw> {
+export function crewSoldierDraws(state: BattleState): Map<number, CrewSoldierDraw> {
   const out = new Map<number, CrewSoldierDraw>();
   for (const team of state.teams.values()) {
     if (team.vehicleId != null) continue;
@@ -656,10 +656,35 @@ function crewSoldierDraws(state: BattleState): Map<number, CrewSoldierDraw> {
     const gunnerOk = !!gunner && gunner.health !== 'dead' && gunner.health !== 'incapacitated' && !crewFleeing(gunner);
     const fired = gunnerOk && state.time - gunner!.lastFiredAt < 0.6;
     const f8 = facingFromAngle(cw.facing);
+    if (cls === 'hmg' && cw.mount?.state === 'carried') {
+      // The physical load chooses the carrier. A stopped carrier still holds it until his
+      // placement task begins; walking toward that task keeps the carrying silhouette.
+      const carrier = crew.find(s => s.id === cw.mount!.carrierId);
+      if (carrier && (!carrier.crewTask || carrier.crewTask.walking)) {
+        out.set(carrier.id, { pose: 'carryTripod', pos: carrier.pos, facing: carrier.facing, frame: frameOf(carrier, state.time) });
+      }
+    }
+    if (cw.lightMode) {
+      // The gunner now carries an ordinary LMG. Only a man actually recovering the separate
+      // mount has a crew task; do not pull anybody back to the old emplacement's stations.
+      for (const s of crew) {
+        const anim = crewTaskAnim(s, state.time);
+        if (!anim) continue;
+        const at = cw.mount?.pos ?? cw.pos;
+        const heading = Math.atan2(at.x - s.pos.x, -(at.y - s.pos.y));
+        out.set(s.id, { pose: anim.fallbackPose, pos: s.pos, facing: facingFromAngle(heading), frame: 0,
+          keys: anim.keys, progress: anim.progress, heading });
+      }
+      continue;
+    }
     if (cw.abandoned) continue;
     if (cw.phase === 'packed') {
+      if (cls === 'hmg') {
+        if (gunnerOk) out.set(gunner!.id, { pose: 'carryMg', pos: gunner!.pos, facing: gunner!.facing, frame: frameOf(gunner!, state.time) });
+        continue;
+      }
       // on the move: carry the parts / push the gun along by its trails
-      const carry: [CrewPose, CrewPose] = cls === 'mortar' ? ['carryTube', 'carryPlate'] : cls === 'hmg' ? ['carryMg', 'carryTripod'] : ['haul', 'haul'];
+      const carry: [CrewPose, CrewPose] = cls === 'mortar' ? ['carryTube', 'carryPlate'] : ['haul', 'haul'];
       const movers = cls === 'atgun' && team.crewWeapon ? gunHaulers(state, team, cw) : gunnerOk ? [gunner!, ...crew] : crew;
       movers.slice(0, 2).forEach((s, i) => {
         if (s.path.length === 0 && i > 0) return;
@@ -735,7 +760,7 @@ function crewTeamVisible(state: BattleState, team: Team, playerSide: Side): bool
 
 /** Weapons on the ground (under the crew), their firing cues, and the zoom-0.5 weapon symbol.
  * Also moves this frame's muzzle flashes / tracer origins from the gunner to the weapon muzzle. */
-function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side): void {
+export function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side): void {
   const season = state.map.def.season;
   const scale = unitSpriteScale(cam.zoom);
   const px = (m: number) => (m / TILE_M) * 20 * cam.zoom; // metres -> screen px
@@ -745,6 +770,25 @@ function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, state: Batt
     if (!cw) continue;
     const cls = crewServedClass(cw.weaponId);
     if (!cls) continue;
+    const teamVisible = crewTeamVisible(state, team, playerSide);
+    if (teamVisible && separateMgMount(cw) && visible(cw.mount!.pos, cam)) {
+      // Cull the left-behind mount at its own location, even when the light gun has gone
+      // offscreen. The exact tripod entry contains no duplicate gun beside it.
+      const mount = worldToScreen(cam, cw.mount!.pos);
+      const drawn = cam.zoom > 0.5 && drawWeaponState(ctx, cw.weaponId, ['tripod'], cw.facing, mount.x, mount.y, cam.zoom);
+      if (!drawn) {
+        // A small mount-only silhouette while the atlas loads. The legacy weapon fallback's
+        // "half" image includes a gun, so it cannot represent a separate load.
+        ctx.save(); ctx.translate(mount.x, mount.y); ctx.rotate(cw.facing);
+        ctx.strokeStyle = '#343b32'; ctx.lineWidth = Math.max(1, 2 * cam.zoom);
+        ctx.beginPath();
+        ctx.moveTo(0, -2 * cam.zoom); ctx.lineTo(-5 * cam.zoom, 4 * cam.zoom);
+        ctx.moveTo(0, -2 * cam.zoom); ctx.lineTo(5 * cam.zoom, 4 * cam.zoom);
+        ctx.moveTo(0, -2 * cam.zoom); ctx.lineTo(0, 7 * cam.zoom);
+        ctx.stroke(); ctx.restore();
+      }
+    }
+    if (cw.lightMode) continue;
     const gunner = state.soldiers.get(cw.gunnerId);
     const gunnerOk = !!gunner && gunner.health !== 'dead' && gunner.health !== 'incapacitated';
     const muzzle = weaponFramePoint(cw.pos, cw.facing, weaponMuzzleM(cw.weaponId));
@@ -756,7 +800,7 @@ function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, state: Batt
         if (t.t < 0.1 && dist(t.from, gunner!.pos) < 0.02) t.from = { ...muzzle };
       }
     }
-    if (!crewTeamVisible(state, team, playerSide) || !visible(cw.pos, cam)) continue;
+    if (!teamVisible || !visible(cw.pos, cam)) continue;
     const dir = { x: Math.sin(cw.facing), y: -Math.cos(cw.facing) };
     if (cam.zoom <= 0.5) {
       // small distinct symbol beside the team's dot cluster: a short dark barrel with a dot
@@ -778,6 +822,7 @@ function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, state: Batt
     const pos = cw.pos;
     const rot = cw.facing;
     const visual = crewWeaponVisual(state, cw);
+    if (visual === 'tripod' && separateMgMount(cw)) continue;
     let p = worldToScreen(cam, pos);
     const since = gunnerOk ? state.time - gunner!.lastFiredAt : 99;
     const drawn = drawWeaponState(ctx, cw.weaponId, weaponStateChain(visual), rot, p.x, p.y, cam.zoom);
