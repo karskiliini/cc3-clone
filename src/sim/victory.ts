@@ -62,8 +62,11 @@ export function sideScore(state: BattleState, side: Side): number {
 export function computeResult(state: BattleState): BattleResult {
   const player = state.config.playerSide;
   const enemy = otherSide(player);
-  const ps = state.sides[player].score;
-  const es = state.sides[enemy].score;
+  // A side's score goes negative when it loses more men than it has points (score = ... - losses).
+  // Below -20 that flipped the sign of the ratio, so a side that had been wiped out without taking
+  // anything was graded the WINNER ("totalDefeat" for the side holding every VL). Floor at 0.
+  const ps = Math.max(0, state.sides[player].score);
+  const es = Math.max(0, state.sides[enemy].score);
   const ratio = (ps + 20) / (es + 20);
   if (ratio >= 8) return 'totalVictory';
   if (ratio >= 4) return 'decisiveVictory';
@@ -163,11 +166,17 @@ export function stepVictory(state: BattleState, dt: number): void {
   // ~5 min normally (and in a typical, not-lopsided battle side morale shouldn't even reach this
   // floor before ~12 min once casualties/morale decay are tuned). This is a hard safety floor, not
   // a soft target: total elimination (below) and the duration timeout can still end a battle early.
+  // A side that is exhausted or wiped out leaves the field to the other: the ground it still
+  // "held" on paper goes to the side left standing. (Without this a defender destroyed to the last
+  // man in three minutes still won on points, because nobody had yet walked onto its victory
+  // locations — the AI-vs-AI harness graded 11 of 54 such routs as attacker defeats or draws.)
+  const beaten = new Set<Side>();
   if (state.time >= MIN_CEASEFIRE_TIME_S) {
     for (const side of SIDES) {
       if (state.sides[side].morale < 10) {
         addMessage(state, `Ceasefire — ${sideName(side)} forces are exhausted.`, 'warn');
         ended = true;
+        beaten.add(side);
       }
     }
   }
@@ -175,7 +184,16 @@ export function stepVictory(state: BattleState, dt: number): void {
   for (const side of SIDES) {
     const teams = [...state.teams.values()].filter((t) => t.side === side);
     // a crew hiding beside its abandoned vehicle does not keep a beaten side in the battle
-    if (teams.length > 0 && teams.every((t) => t.outOfAction || t.status === 'Abandoned' || t.status === 'Bailing out')) ended = true;
+    if (teams.length > 0 && teams.every((t) => t.outOfAction || t.status === 'Abandoned' || t.status === 'Bailing out')) { ended = true; beaten.add(side); }
+  }
+
+  if (ended && beaten.size === 1) {
+    const loser = [...beaten][0];
+    const winner = otherSide(loser);
+    for (const vl of state.map.victoryLocations) {
+      if (vl.owner === loser) { vl.owner = winner; vl.capturingSide = null; vl.captureTimer = 0; }
+    }
+    for (const side of SIDES) state.sides[side].score = sideScore(state, side);
   }
 
   if (ended) {

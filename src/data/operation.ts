@@ -80,13 +80,28 @@ export const DEFAULT_FORCES: Record<number, Record<Side, string[]>> = {
   // norm of a stronger attacker): german gets a second mortar and a second PzKw III J; soviet
   // loses its Maxim HMG, whose suppression volume was the single biggest driver of the lopsided
   // harness results on these two maps (defender out-shot attacker 5-10x pre-change).
+  // Attack-AI pass 2026-09-18 (the attacker now prepares with mortars and tank guns, bounds from
+  // cover to cover, keeps its armour with the squads and masses on one objective at a time; a side
+  // that is wiped out or exhausted cedes its victory locations). With the old boosts the attacker
+  // then won 85-90 % on the 1941, 1944 and 1945 maps, so ATTACKER-side boosts are taken back, one
+  // team per year, measured over 36 seeds per map:
+  //   1941 german: the second PzKw III J goes again (border 89 -> 52 %, moscow 89 -> 55 %);
+  //   1944 soviet: one SMG squad goes (forest 66 -> 48 %);
+  //   1945 soviet: the SU-85 goes (berlin 75 -> 45 %).
+  // and where the attacker was still under 30 %:
+  //   1943 soviet: one T-34/76 becomes a second SU-85, the only Soviet gun of the year with a
+  //   chance against the Tiger's front (steppe 9-seed 25 -> 56 %, 36-seed 44 -> 49 %);
+  //   1942 soviet: the 45 mm AT gun becomes a ZiS-3 (the one Soviet 1942 weapon that goes through
+  //   the 80 mm fronts of the PzKw IV H / StuG III G) and sappers with satchel charges join.
+  //   village_1942 stays low all the same (about 10-25 %): nothing else the Soviets have in 1942
+  //   can hurt the two German AFVs from the front, and the defender's list is out of bounds here.
   1941: {
-    german: ['ger_rifle_41', 'ger_rifle_41', 'ger_rifle_41', 'ger_mg34_hmg', 'ger_mortar81', 'ger_mortar81', 'ger_pak38', 'ger_sniper', 'ger_command', 'ger_pz3j', 'ger_pz3j', 'ger_pz4f1', 'ger_sdkfz251'],
+    german: ['ger_rifle_41', 'ger_rifle_41', 'ger_rifle_41', 'ger_mg34_hmg', 'ger_mortar81', 'ger_mortar81', 'ger_pak38', 'ger_sniper', 'ger_command', 'ger_pz3j', 'ger_pz4f1', 'ger_sdkfz251'],
     soviet: ['sov_rifle_41', 'sov_rifle_41', 'sov_mortar82', 'sov_45mm_at', 'sov_sniper', 'sov_command', 'sov_t26', 'sov_bt7', 'sov_kv1'],
   },
   1942: {
     german: ['ger_rifle_41', 'ger_assault_42', 'ger_mg34_hmg', 'ger_mortar81', 'ger_pak38', 'ger_sniper', 'ger_command', 'ger_pz4gh', 'ger_stug3g', 'ger_sdkfz251'],
-    soviet: ['sov_rifle_41', 'sov_rifle_41', 'sov_rifle_41', 'sov_smg_42', 'sov_maxim_hmg', 'sov_mortar82', 'sov_45mm_at', 'sov_sniper', 'sov_command', 'sov_t34_76', 'sov_t34_76', 'sov_t70', 'sov_kv1', 'sov_mortar82'],
+    soviet: ['sov_rifle_41', 'sov_rifle_41', 'sov_rifle_41', 'sov_smg_42', 'sov_maxim_hmg', 'sov_mortar82', 'sov_zis3', 'sov_sniper', 'sov_command', 'sov_t34_76', 'sov_t34_76', 'sov_t70', 'sov_kv1', 'sov_mortar82', 'sov_sappers'],
   },
   // Balance pass (steppe_1943 attacker=soviet, defending on a dug-in trench line): the AI's
   // combat/targeting behavior on this map turned out very sensitive to soviet force SIZE -
@@ -98,15 +113,15 @@ export const DEFAULT_FORCES: Record<number, Record<Side, string[]>> = {
   // below (see steppe_1943.ts).
   1943: {
     german: ['ger_rifle_43', 'ger_assault_42', 'ger_mg42_hmg', 'ger_mortar81', 'ger_sniper', 'ger_command', 'ger_pz4gh', 'ger_stug3g', 'ger_tiger'],
-    soviet: ['sov_rifle_43', 'sov_rifle_43', 'sov_rifle_43', 'sov_smg_42', 'sov_smg_42', 'sov_t34_76', 'sov_maxim_hmg', 'sov_mortar82', 'sov_mortar82', 'sov_zis3', 'sov_sniper', 'sov_command', 'sov_sappers', 'sov_t34_76', 'sov_t34_76', 'sov_su76', 'sov_su85'],
+    soviet: ['sov_rifle_43', 'sov_rifle_43', 'sov_rifle_43', 'sov_smg_42', 'sov_smg_42', 'sov_t34_76', 'sov_maxim_hmg', 'sov_mortar82', 'sov_mortar82', 'sov_zis3', 'sov_sniper', 'sov_command', 'sov_sappers', 'sov_t34_76', 'sov_su85', 'sov_su76', 'sov_su85'],
   },
   1944: {
     german: ['ger_rifle_43', 'ger_assault_42', 'ger_mg42_hmg', 'ger_mortar81', 'ger_pak40', 'ger_pschreck', 'ger_sniper', 'ger_command', 'ger_stug3g', 'ger_panther'],
-    soviet: ['sov_rifle_43', 'sov_rifle_43', 'sov_smg_42', 'sov_smg_42', 'sov_maxim_hmg', 'sov_mortar82', 'sov_zis3', 'sov_sniper', 'sov_command', 'sov_t34_85', 'sov_su76', 'sov_is2'],
+    soviet: ['sov_rifle_43', 'sov_rifle_43', 'sov_smg_42', 'sov_maxim_hmg', 'sov_mortar82', 'sov_zis3', 'sov_sniper', 'sov_command', 'sov_t34_85', 'sov_su76', 'sov_is2'],
   },
   1945: {
     german: ['ger_rifle_43', 'ger_assault_42', 'ger_mg42_hmg', 'ger_pak40', 'ger_pschreck', 'ger_pzfaust_44', 'ger_sniper', 'ger_command', 'ger_tiger', 'ger_panther'],
-    soviet: ['sov_rifle_43', 'sov_rifle_43', 'sov_smg_42', 'sov_smg_42', 'sov_maxim_hmg', 'sov_zis3', 'sov_sniper', 'sov_command', 'sov_t34_85', 'sov_is2', 'sov_su85', 'sov_sappers'],
+    soviet: ['sov_rifle_43', 'sov_rifle_43', 'sov_smg_42', 'sov_smg_42', 'sov_maxim_hmg', 'sov_zis3', 'sov_sniper', 'sov_command', 'sov_t34_85', 'sov_is2', 'sov_sappers'],
   },
 };
 
