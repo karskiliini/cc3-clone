@@ -201,8 +201,14 @@ describe('dismounting', () => {
     step(state, rng, 30);
     expect(aboard(men, v).length).toBe(5);
     applyOrder(state, team, { type: 'move', target: { x: 130, y: 120 }, issuedAt: state.time }, rng);
-    step(state, rng, 60);
+    const orderedAt = state.time;
+    // Unload in sequence, then cover roughly 70 metres at a loaded walking pace.
+    while (state.time - orderedAt < 120 && men.some((m) => m.vehicleId != null || m.hatch || m.path.length > 0)) {
+      step(state, rng, 0.1);
+    }
     expect(aboard(men, v).length).toBe(0);
+    expect(men.every((m) => !m.hatch && m.path.length === 0)).toBe(true);
+    expect(state.time - orderedAt).toBeGreaterThan(60);
     for (const m of men) expect(dist(m.pos, { x: 130, y: 120 }) * TILE_M).toBeLessThan(12);
   });
 

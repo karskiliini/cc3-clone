@@ -18,6 +18,7 @@ import { tileAt } from './map';
 import { TERRAIN_PROPS } from './terrain';
 import { findPath } from './path';
 import { bestCoverNear } from './coverSeek';
+import { INFANTRY_PACE, infantrySpeedMs } from './infantryPace';
 
 /** Daze length before the man's own qualities, seconds: weakest knock-down .. heaviest blast. */
 export const DAZE_BASE_MIN_S = 6;
@@ -31,8 +32,8 @@ export const RECOVER_MAX_S = 30;
 export const RECOVER_FACTOR_MIN = 0.7;
 /** How much a dazed man sees of what he normally would. */
 export const DAZE_VISION_FACTOR = 0.25;
-/** Self-preservation crawl: a wounded man's crawl (0.25 m/s) x1.5 — fear helps. */
-export const DAZE_CRAWL_MS = 0.375;
+/** Self-preservation crawl, before ground, wounds and fatigue. */
+export const DAZE_CRAWL_MS = INFANTRY_PACE.crawl;
 /** He looks for something better within this many metres... */
 export const DAZE_CRAWL_RADIUS_M = 12;
 /** ...and only bothers when it is this much better than where he lies. */
@@ -126,7 +127,7 @@ function endDaze(state: BattleState, s: Soldier): void {
 
 function crawl(state: BattleState, s: Soldier, path: Vec2[], dt: number): void {
   const tile = tileAt(state.map, Math.floor(s.pos.x), Math.floor(s.pos.y));
-  let remaining = (DAZE_CRAWL_MS * TERRAIN_PROPS[tile].speedMul * (s.health === 'wounded' ? 0.7 : 1) * dt) / TILE_M;
+  let remaining = (infantrySpeedMs(s, DAZE_CRAWL_MS) * TERRAIN_PROPS[tile].speedMul * dt) / TILE_M;
   while (remaining > 0 && path.length > 0) {
     const wp = path[0];
     const d = dist(s.pos, wp);

@@ -90,6 +90,9 @@ describe('suppression pins regardless of fear', () => {
 });
 
 describe('orders perf: AI re-plan tick', () => {
+  // The merged sim (attack-plan AI + medic/projectile steps) runs the 120 s battle in ~5.3 s
+  // wall; bun's default 5 s test timeout times out the SIM, not the assertion (issueOrder ~21 ms).
+  // Explicit timeout: supported by both vitest and bun test.
   it('border_1941 seed 1 spends under 300 ms in issueOrder over 120 s', () => {
     const cfg: BattleConfig = { ...baseConfig, seed: 1, durationS: 1200, forces: DEFAULT_FORCES[1941], aiBothSides: true };
     const battle = new Battle(cfg);
@@ -109,5 +112,5 @@ describe('orders perf: AI re-plan tick', () => {
     }
     console.log(`issueOrder total=${total.toFixed(1)}ms worst step=${worst.toFixed(1)}ms`);
     expect(total).toBeLessThan(300);
-  });
+  }, 30000);
 });

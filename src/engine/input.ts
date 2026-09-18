@@ -21,6 +21,13 @@ function unlockAudio(): void {
   game.audio?.unlock?.();
 }
 
+function isEditingText(target: EventTarget | null): boolean {
+  const element = target as HTMLElement | null;
+  return !!element && (element.isContentEditable
+    || ['INPUT', 'TEXTAREA', 'SELECT'].includes(element.tagName)
+    || !!element.closest?.('[role="textbox"]'));
+}
+
 export function createInput(canvas: HTMLCanvasElement): { state: InputState; endFrame(): void } {
   const state: InputState = {
     mouse: { x: 0, y: 0 },
@@ -29,6 +36,7 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
     releases: [],
     keysDown: new Set(),
     keysPressed: new Set(),
+    keysReleased: new Set(),
     wheel: 0,
     wheelDX: 0,
     wheelDY: 0,
@@ -82,6 +90,7 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
     state.buttons.right = false;
     state.buttons.middle = false;
     state.keysDown.clear();
+    state.keysReleased.clear();
     spaceHeld = false;
     spaceUsedForPan = false;
     ctrlPhysical = false;
@@ -103,7 +112,8 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
     if (button === 0) state.buttons.left = false;
     else if (button === 1) state.buttons.middle = false;
     else if (button === 2) state.buttons.right = false;
-    state.releases.push({ x: p.x, y: p.y, button });
+    // Keep the modifier at mouse-up even if Shift is released before the next frame.
+    state.releases.push({ x: p.x, y: p.y, button, shift: e.shiftKey });
   });
 
   window.addEventListener('contextmenu', (e: Event) => {
@@ -112,7 +122,9 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
 
   // Right-drag-to-pan and left-drag-to-select must never trigger the
   // browser's native text/image selection or drag-ghost affordances.
-  window.addEventListener('selectstart', (e: Event) => e.preventDefault());
+  window.addEventListener('selectstart', (e: Event) => {
+    if (!isEditingText(e.target)) e.preventDefault();
+  });
   canvas.addEventListener('dragstart', (e: Event) => e.preventDefault());
 
   // Space is both "pause" (tap) and the hold-modifier for Space+left-drag
@@ -126,14 +138,26 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
   let ctrlPhysical = false;
   let ctrlAliasThisFrame = false;
 
+  window.addEventListener('focusin', (e: FocusEvent) => {
+    if (!isEditingText(e.target)) return;
+    state.keysDown.clear();
+    state.keysPressed.clear();
+    state.keysReleased.clear();
+    spaceHeld = false;
+    spaceUsedForPan = false;
+    ctrlPhysical = false;
+    ctrlAliasThisFrame = false;
+  });
+
   window.addEventListener('mousedown', (e: MouseEvent) => {
     if (spaceHeld && (e.button === 0 || e.button === 1)) spaceUsedForPan = true;
   });
 
   window.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (isEditingText(e.target) || e.isComposing) return;
     unlockAudio();
     const key = e.key.toLowerCase();
-    if (PREVENT_KEYS.has(key)) e.preventDefault();
+    if (PREVENT_KEYS.has(key) || (/^[0-9]$/.test(key) && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey)) e.preventDefault();
     const isSpace = key === ' ' || key === 'spacebar';
     if (key === 'control') ctrlPhysical = true;
     if (isSpace) {
@@ -156,8 +180,9 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
 
   window.addEventListener('keyup', (e: KeyboardEvent) => {
     const key = e.key.toLowerCase();
+    if (state.keysDown.has(key) && !isEditingText(e.target) && !e.isComposing) state.keysReleased.add(key);
     if (key === ' ' || key === 'spacebar') {
-      if (spaceHeld && !spaceUsedForPan) state.keysPressed.add(' ');
+      if (spaceHeld && !spaceUsedForPan && !isEditingText(e.target) && !e.isComposing) state.keysPressed.add(' ');
       spaceHeld = false;
       spaceUsedForPan = false;
     }
@@ -212,6 +237,7 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
     state.clicks.length = 0;
     state.releases.length = 0;
     state.keysPressed.clear();
+    state.keysReleased.clear();
     if (ctrlAliasThisFrame) {
       if (!ctrlPhysical) state.keysDown.delete('control');
       ctrlAliasThisFrame = false;

@@ -110,8 +110,9 @@ export class Sfx {
     return false;
   }
 
-  /** Play a one-shot sound. `gain` is relative to master (0..1-ish). */
-  play(kind: SfxKind, gain = 1, pan?: number): void {
+  /** Play a one-shot sound. `gain` is relative to master (0..1-ish). Timed SMG events
+   * each supply one round; callers without that flag retain the short burst preview. */
+  play(kind: SfxKind, gain = 1, pan?: number, options?: { singleRound?: boolean }): void {
     if (!this.ready()) return;
     if (gain <= 0) return;
     if (!this.admit(kind)) return;
@@ -125,7 +126,7 @@ export class Sfx {
 
     switch (kind) {
       case 'rifle': crack(ctx, dest, when, g, pan, 1); break;
-      case 'smg': burstOfCracks(ctx, dest, when, g, pan, { count: 3 + Math.round(Math.random()), spacing: 0.07, bp: 1800 }); break;
+      case 'smg': burstOfCracks(ctx, dest, when, g, pan, { count: options?.singleRound ? 1 : 3 + Math.round(Math.random()), spacing: 0.07, bp: 1800 }); break;
       case 'lmg': burstOfCracks(ctx, dest, when, g, pan, { count: 5 + Math.floor(Math.random() * 3), spacing: 0.09, bp: 1300, thump: 90 }); break;
       case 'hmg': hmgBurst(ctx, dest, when, g, pan); break;
       case 'pistol': crack(ctx, dest, when, g, pan, 1.3); break;
@@ -251,7 +252,7 @@ export class Sfx {
       switch (ev.kind) {
         case 'shot': {
           const kind = weaponSfxKind(ev.weaponId);
-          this.emitAt(kind, ev.pos, centre);
+          this.emitAt(kind, ev.pos, centre, 1, { singleRound: ev.singleRound });
           break;
         }
         case 'explosion': {
@@ -328,9 +329,10 @@ export class Sfx {
     pos: { x: number; y: number } | undefined,
     centre: { x: number; y: number },
     baseGain = 1,
+    options?: { singleRound?: boolean },
   ): void {
     if (!pos) {
-      this.play(kind, baseGain);
+      this.play(kind, baseGain, undefined, options);
       return;
     }
     const dxTiles = pos.x - centre.x;
@@ -338,7 +340,7 @@ export class Sfx {
     const distM = Math.hypot(dxTiles, dyTiles) * 2; // TILE_M = 2
     const atten = clamp(1 - distM / 400, 0.05, 1) ** 2;
     const pan = clamp(dxTiles / 40, -0.8, 0.8);
-    this.play(kind, baseGain * atten, pan);
+    this.play(kind, baseGain * atten, pan, options);
   }
 }
 

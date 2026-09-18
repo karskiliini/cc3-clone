@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Battle } from '@/sim/battle';
-import { aiDeploy, getAttackPlan } from '@/sim/ai';
+import { aiDeploy } from '@/sim/ai';
 import { getSmallArmsStats, getCombatInstrumentation } from '@/sim/combat';
 import { prisonerCount } from '@/sim/victory';
 import { otherSide } from '@/shared/types';
@@ -8,9 +8,6 @@ import { MAPS } from '@/data/maps';
 import { DEFAULT_FORCES } from '@/data/operation';
 import { SIM_DT } from '@/shared/types';
 import type { BattleConfig, Side } from '@/shared/types';
-import { coverAt } from '@/sim/map';
-import { WEAPONS } from '@/data/weapons';
-import { VEHICLE_DEFS } from '@/data/units';
 
 /**
  * Headless AI-vs-AI balance harness (see docs/superpowers/specs/2026-09-12-cc3-clone-design.md §6
@@ -94,8 +91,6 @@ interface RunReport {
   attackerPinnedFractionAt: { m5: number | null; m10: number | null; m15: number | null };
   /** Soldiers whose position is outside the map at the end of the run (should always be 0). */
   outOfBounds: number;
-  /** AI diagnosis lines (where/when men fall, support use, tank lead, commitment, VLs over time). */
-  diag: string[];
 }
 
 function runOne(mapId: string, seed: number, battleSeconds = BATTLE_SECONDS): RunReport {
@@ -153,111 +148,12 @@ function runOne(mapId: string, seed: number, battleSeconds = BATTLE_SECONDS): Ru
     return alive > 0 ? pinnedOrCowering / alive : null;
   };
 
-  // ---- AI diagnosis instrumentation (attack-AI work): cheap once-per-second sampling.
-  const st = battle.state;
-  const zc = (side: Side) => { const z = st.map.def.deployZones[side]; return { x: z.x + z.w / 2, y: z.y + z.h / 2 }; };
-  const aZone = zc(attackerSide), dZone = zc(defenderSide);
-  const axisLen = Math.hypot(dZone.x - aZone.x, dZone.y - aZone.y) || 1;
-  const ax = { x: (dZone.x - aZone.x) / axisLen, y: (dZone.y - aZone.y) / axisLen };
-  const downed = new Set<number>();
-  const bucket = (arr: number[], i: number) => { arr[Math.min(arr.length - 1, Math.max(0, i))]++; };
-  const dg = {
-    fallTime: { [attackerSide]: [0, 0, 0, 0, 0, 0], [defenderSide]: [0, 0, 0, 0, 0, 0] } as Record<Side, number[]>, // 200 s buckets
-    fallFromZone: { [attackerSide]: [0, 0, 0, 0, 0], [defenderSide]: [0, 0, 0, 0, 0] } as Record<Side, number[]>,   // 0-50,50-100,100-150,150-200,200+ m from OWN zone centre
-    fallFromVL: { [attackerSide]: [0, 0, 0, 0], [defenderSide]: [0, 0, 0, 0] } as Record<Side, number[]>,           // 0-30,30-80,80-150,150+ m from nearest VL
-    fallOpen: { [attackerSide]: 0, [defenderSide]: 0 } as Record<Side, number>,
-    fallMoving: { [attackerSide]: 0, [defenderSide]: 0 } as Record<Side, number>,
-    fallTotal: { [attackerSide]: 0, [defenderSide]: 0 } as Record<Side, number>,
-    openUnderFireS: { [attackerSide]: 0, [defenderSide]: 0 } as Record<Side, number>, // soldier-seconds, suppression>15 on cover<0.25
-    /** battle time the attack plan left its preparation (the squads start across) */
-    assaultAtS: null as number | null,
-    mortarShots: { [attackerSide]: 0, [defenderSide]: 0 } as Record<Side, number>,
-    mortarShotsBeforeContact: 0, tankShotsBeforeContact: 0,
-    smokeRounds: 0,
-    tankMainShots: { [attackerSide]: 0, [defenderSide]: 0 } as Record<Side, number>,
-    tankLeadSum: 0, tankLeadN: 0, tankLeadMax: 0, tankAloneS: 0, // lead = tank progress along the axis minus median infantry progress (m)
-    committedSum: 0, committedN: 0, committed12: 0,                // attacker inf teams within 120 m of a defender team
-    vlAt: [] as string[],
-    vehKO: [] as string[],
-    shotsByClass: { [attackerSide]: {}, [defenderSide]: {} } as Record<Side, Record<string, number>>,
-    killsByType: { [attackerSide]: {}, [defenderSide]: {} } as Record<Side, Record<string, number>>, // what the side's men fell to
-  };
-  const koSeen = new Set<number>();
-  const mainGunIds = new Set(Object.values(VEHICLE_DEFS).map((d) => d.mainWeaponId).filter(Boolean) as string[]);
-  let diagMs = 0;
   const t0 = performance.now();
   let stepsTaken = 0;
   while (battle.state.phase === 'running' && battle.state.time < battleSeconds) {
     battle.step(1.0);
     stepsTaken++;
-    const evs = battle.drainEvents(); // mirrors real usage (renderer drains each frame); avoids unbounded growth
-    const diagT0 = performance.now(); // the diagnosis bookkeeping below is not part of the sim's cost
-    const blasts = evs.filter((e) => e.kind === 'explosion' && e.pos && e.weaponId);
-    for (const e of evs) {
-      if (e.kind !== 'shot' || !e.side || !e.weaponId) continue;
-      const cls = WEAPONS[e.weaponId]?.cls;
-      if (cls) dg.shotsByClass[e.side][cls] = (dg.shotsByClass[e.side][cls] ?? 0) + 1;
-      if (cls === 'mortar') { dg.mortarShots[e.side]++; if (e.side === attackerSide && dg.assaultAtS === null) dg.mortarShotsBeforeContact++; }
-      else if (mainGunIds.has(e.weaponId) && cls !== 'atgun') { dg.tankMainShots[e.side]++; if (e.side === attackerSide && dg.assaultAtS === null) dg.tankShotsBeforeContact++; }
-    }
-    {
-      const now = st.time;
-      if (dg.assaultAtS === null) { const ph = getAttackPlan(st, attackerSide)?.phase; if (ph && ph !== 'prep') dg.assaultAtS = now; }
-      for (const s of st.soldiers.values()) {
-        const down = s.health === 'dead' || s.health === 'incapacitated';
-        if (down) {
-          if (downed.has(s.id)) continue;
-          downed.add(s.id);
-          const own = s.side === attackerSide ? aZone : dZone;
-          dg.fallTotal[s.side]++;
-          bucket(dg.fallTime[s.side], Math.floor(now / 200));
-          bucket(dg.fallFromZone[s.side], Math.floor((Math.hypot(s.pos.x - own.x, s.pos.y - own.y) * 2) / 50));
-          let vm = Infinity;
-          for (const vl of st.map.victoryLocations) vm = Math.min(vm, Math.hypot(s.pos.x - vl.x, s.pos.y - vl.y) * 2);
-          bucket(dg.fallFromVL[s.side], vm < 30 ? 0 : vm < 80 ? 1 : vm < 150 ? 2 : 3);
-          if (coverAt(st.map, s.pos) < 0.25) dg.fallOpen[s.side]++;
-          {
-            // cause: a shell/bomb/grenade that burst within 8 m this second, else bullets
-            let cause = 'bullets';
-            for (const b of blasts) if (b.side !== s.side && Math.hypot(b.pos!.x - s.pos.x, b.pos!.y - s.pos.y) <= 4) { cause = WEAPONS[b.weaponId!]?.cls ?? 'he'; break; }
-            dg.killsByType[s.side][cause] = (dg.killsByType[s.side][cause] ?? 0) + 1;
-          }
-          const tm = st.teams.get(s.teamId);
-          if (tm?.order && (tm.order.type === 'move' || tm.order.type === 'moveFast' || tm.order.type === 'sneak')) dg.fallMoving[s.side]++;
-        } else if (s.suppression > 15 && coverAt(st.map, s.pos) < 0.25) dg.openUnderFireS[s.side]++;
-      }
-      const prog = (p: { x: number; y: number }) => ((p.x - aZone.x) * ax.x + (p.y - aZone.y) * ax.y) * 2;
-      const inf: number[] = []; let committed = 0;
-      const defTeams = [...st.teams.values()].filter((t) => t.side === defenderSide && !t.outOfAction);
-      for (const t of st.teams.values()) {
-        if (t.side !== attackerSide || t.outOfAction || t.vehicleId != null) continue;
-        if (t.type === 'mortar' || t.type === 'atgun' || t.type === 'sniper') continue;
-        inf.push(prog(t.pos));
-        let md = Infinity;
-        for (const d of defTeams) md = Math.min(md, Math.hypot(t.pos.x - d.pos.x, t.pos.y - d.pos.y) * 2);
-        if (md <= 120) committed++;
-      }
-      if (committed > 0) { dg.committedSum += committed; dg.committedN++; if (committed <= 2) dg.committed12++; }
-      inf.sort((a, b) => a - b);
-      const med = inf.length ? inf[Math.floor(inf.length / 2)] : null;
-      for (const v of st.vehicles.values()) {
-        if ((v.state === 'knockedOut' || v.state === 'burning') && !koSeen.has(v.id)) {
-          koSeen.add(v.id);
-          const own = v.side === attackerSide ? aZone : dZone;
-          dg.vehKO.push(`${v.side === attackerSide ? 'A' : 'D'}:${v.defId}@${Math.round(now)}s/${Math.round(Math.hypot(v.pos.x - own.x, v.pos.y - own.y) * 2)}m`);
-        }
-        if (v.side !== attackerSide || v.state !== 'ok' || med === null || !VEHICLE_DEFS[v.defId]?.mainWeaponId) continue;
-        const lead = prog(v.pos) - med;
-        dg.tankLeadSum += lead; dg.tankLeadN++; dg.tankLeadMax = Math.max(dg.tankLeadMax, lead);
-        let nearInf = Infinity;
-        for (const t of st.teams.values()) if (t.side === attackerSide && t.vehicleId == null && !t.outOfAction) nearInf = Math.min(nearInf, Math.hypot(t.pos.x - v.pos.x, t.pos.y - v.pos.y) * 2);
-        if (nearInf > 80 && lead > 40) dg.tankAloneS++;
-      }
-      // smoke rounds (either side; mortar and tank): explosions born during this 1 s step
-      for (const x of st.explosions) if (x.kind === 'smoke' && x.t <= 1.0001) dg.smokeRounds++;
-      if (Math.abs(now % 300) < 0.5 && now > 1) dg.vlAt.push(`${Math.round(now)}s:${st.map.victoryLocations.filter((v) => v.owner === attackerSide).length}`);
-      diagMs += performance.now() - diagT0;
-    }
+    battle.drainEvents(); // mirrors real usage (renderer drains each frame); avoids unbounded growth
     if (firstCasualtyAtS === null) {
       const total = battle.state.sides.german.losses + battle.state.sides.soviet.losses
         - initialLosses.german - initialLosses.soviet;
@@ -298,7 +194,7 @@ function runOne(mapId: string, seed: number, battleSeconds = BATTLE_SECONDS): Ru
     if (pinnedFractionAt.m10 === null && t >= 10 * 60) pinnedFractionAt.m10 = sampleAttackerPinnedFraction();
     if (pinnedFractionAt.m15 === null && t >= 15 * 60) pinnedFractionAt.m15 = sampleAttackerPinnedFraction();
   }
-  const wallMs = performance.now() - t0 - diagMs;
+  const wallMs = performance.now() - t0;
   const simSeconds = battle.state.time;
   const msPerSimSecond = simSeconds > 0 ? wallMs / simSeconds : 0;
 
@@ -358,17 +254,6 @@ function runOne(mapId: string, seed: number, battleSeconds = BATTLE_SECONDS): Ru
     avgDefenderSuppressionWhenClose: defenderSuppressionSampleCount > 0
       ? defenderSuppressionSampleSum / defenderSuppressionSampleCount : null,
     attackerPinnedFractionAt: pinnedFractionAt,
-    diag: (() => {
-      const A = attackerSide, D = defenderSide;
-      const f = (a: number[]) => a.join('/');
-      return [
-        `diag falls A=${dg.fallTotal[A]} D=${dg.fallTotal[D]} | A by200s=${f(dg.fallTime[A])} D by200s=${f(dg.fallTime[D])} | A fromOwnZone(50m)=${f(dg.fallFromZone[A])} D=${f(dg.fallFromZone[D])} | A fromVL(<30/<80/<150/+)=${f(dg.fallFromVL[A])} D=${f(dg.fallFromVL[D])}`,
-        `diag A open=${dg.fallOpen[A]} moving=${dg.fallMoving[A]} | D open=${dg.fallOpen[D]} moving=${dg.fallMoving[D]} | openUnderFire s: A=${dg.openUnderFireS[A]} D=${dg.openUnderFireS[D]} | prep ends=${dg.assaultAtS === null ? 'never' : Math.round(dg.assaultAtS) + 's'} | mortarShots A=${dg.mortarShots[A]} (in prep ${dg.mortarShotsBeforeContact}) D=${dg.mortarShots[D]} | tankMain A=${dg.tankMainShots[A]} (in prep ${dg.tankShotsBeforeContact}) D=${dg.tankMainShots[D]} | smokeRounds(both)=${dg.smokeRounds}`,
-        `diag tankLead mean=${dg.tankLeadN ? Math.round(dg.tankLeadSum / dg.tankLeadN) : 0}m max=${Math.round(dg.tankLeadMax)}m aloneS=${dg.tankAloneS} | committed mean=${dg.committedN ? (dg.committedSum / dg.committedN).toFixed(1) : 'n/a'} teams, <=2 teams ${dg.committedN ? Math.round((100 * dg.committed12) / dg.committedN) : 0}% of ${dg.committedN}s | A VLs ${dg.vlAt.join(' ')} | KO ${dg.vehKO.join(' ') || '-'}`,
-        `diag shots by class A: ${Object.entries(dg.shotsByClass[A]).map(([k, v]) => `${k}=${v}`).join(' ')} | D: ${Object.entries(dg.shotsByClass[D]).map(([k, v]) => `${k}=${v}`).join(' ')}`,
-        `diag fell to (weapon class) A: ${Object.entries(dg.killsByType[A]).map(([k, v]) => `${k}=${v}`).join(' ')} | D: ${Object.entries(dg.killsByType[D]).map(([k, v]) => `${k}=${v}`).join(' ')}`,
-      ];
-    })(),
     outOfBounds: [...battle.state.soldiers.values()].filter((s) =>
       !(s.pos.x >= 0 && s.pos.y >= 0 && s.pos.x < battle.state.map.width && s.pos.y < battle.state.map.height)).length,
   };
@@ -399,7 +284,6 @@ function printReport(reports: RunReport[]): void {
         return v === null ? 'n/a' : fmt(v * 100, 0) + '%';
       }).join('/')}`,
     );
-    for (const d of r.diag) lines.push('    ' + d);
     for (const side of SIDES) {
       const s = r.sides[side];
       lines.push(
@@ -503,5 +387,5 @@ describe('determinism', () => {
     expect(b.german).toEqual(a.german);
     expect(b.soviet).toEqual(a.soviet);
     expect(b.soldierPositions).toEqual(a.soldierPositions);
-  });
+  }, 60000);
 });

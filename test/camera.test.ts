@@ -96,19 +96,29 @@ describe('camera', () => {
     expect(cam.y).toBeCloseTo(60 - viewTilesH / 2, 6);
   });
 
-  it('zoomIn increases cam.zoom (magnifies) and zoomOut decreases it (pulls back)', () => {
+  it('zoomIn magnifies continuously (no level jumps) and clamps at the bounds', () => {
     const cam = createCamera();
     expect(cam.zoom).toBe(1);
     zoomIn(cam, 1000, 1000);
-    expect(cam.zoom).toBe(2);
-    zoomIn(cam, 1000, 1000);
-    expect(cam.zoom).toBe(2); // clamped at the top of ZOOM_LEVELS
+    expect(cam.zoom).toBeGreaterThan(1);
+    expect(cam.zoom).toBeLessThan(2);
+    for (let i = 0; i < 10; i++) zoomIn(cam, 1000, 1000);
+    expect(cam.zoom).toBe(2); // clamped at the top
     zoomOut(cam, 1000, 1000);
-    expect(cam.zoom).toBe(1);
-    zoomOut(cam, 1000, 1000);
-    expect(cam.zoom).toBe(0.5);
-    zoomOut(cam, 1000, 1000);
+    expect(cam.zoom).toBeLessThan(2);
+    for (let i = 0; i < 20; i++) zoomOut(cam, 1000, 1000);
     expect(cam.zoom).toBe(0.5); // clamped at the bottom
+  });
+
+  it('zoom keeps the anchored world point fixed on screen', () => {
+    const cam = createCamera();
+    centerCamera(cam, { x: 30, y: 30 });
+    const anchor = { x: 100, y: 80 };
+    const before = screenToWorld(cam, anchor);
+    zoomIn(cam, 1000, 1000, anchor);
+    const after = screenToWorld(cam, anchor);
+    expect(after.x).toBeCloseTo(before.x, 6);
+    expect(after.y).toBeCloseTo(before.y, 6);
   });
 
   it('zooming out shows more of the map (more tiles fit the same viewport)', () => {

@@ -24,6 +24,17 @@ function soldier(activity: Activity, state: MentalState, health: Soldier['health
 }
 
 describe('poseForSoldier', () => {
+  it('also raises the rifle during acquisition when the atlas has not loaded', () => {
+    const s = soldier('idle', 'calm');
+    s.aiming = { startedAt: 10, readyAt: 13, fromFacing: 0, from: { ...s.pos },
+      at: { x: 20, y: 0 }, targetKind: 'point', weaponId: s.weaponId, stance: s.stance };
+    expect(poseForSoldier(s, 10.1)).toBe('standing');
+    expect(poseForSoldier(s, 11)).toBe('wary');
+    expect(poseForSoldier(s, 13)).toBe('wary');
+    s.stance = 'prone';
+    expect(poseForSoldier(s, 11)).toBe('prone');
+  });
+
   it('draws a calm soldier in his ordinary stance', () => {
     expect(poseForSoldier(soldier('idle', 'calm', 'healthy', 'standing'))).toBe('standing');
     expect(poseForSoldier(soldier('idle', 'calm', 'healthy', 'crouching'))).toBe('crouching');

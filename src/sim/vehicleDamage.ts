@@ -719,6 +719,7 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
       res.outcome = 'explosion';
       return res;
     }
+    v.fire = { t0: state.time };
     v.state = 'burning';
     v.path = []; v.speed = 0;
     v.cookOff = { checkedS: 0, pops: 0, rackFire: true };
@@ -764,6 +765,7 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
   if (!wasImmobile && isImmobile(v)) shooterMsg(state, input, `${name} immobilised.`);
 
   if (rng.next() < fireP) {
+    v.fire = { t0: state.time };
     v.state = 'burning';
     v.path = []; v.speed = 0;
     startFireBail(state, v, team);

@@ -25,14 +25,15 @@ import { hatchWorld, isServiceable } from '@/sim/vehicleCrew';
 import { dist, facingFromAngle } from '@/shared/math';
 import {
   drawSoldier as drawAtlasSoldier, drawVehiclePart, drawWeapon as drawAtlasWeapon, drawWeaponState, requestBattleAtlases,
-  soldierAtlas, vehicleAtlasHas, itemAtlas, partsAtlas, drawAtlasFrame, type Atlas,
+  soldierAtlas, smgAtlas, vehicleAtlasHas, itemAtlas, partsAtlas, drawAtlasFrame, type Atlas,
 } from '@/render/spriteAtlas';
 import {
   frameFor, moodFor, pickAnimation, postureFor, transitionPosture, trembleOffset, entryKeyChain,
   crewTaskAnim, progressFrame, weaponStateChain, hatchClimbAnim, hatchClimbFrame,
-  type AnimAction, type Posture,
+  SoldierMotion, smgCombatInterrupted, type AnimAction, type Posture,
 } from '@/render/soldierAnim';
 import { ragdollSample, metresToPx } from '@/render/soldierAnim';
+import { smgPose } from '@/render/smgAnim';
 import type { Debris, GroundItem, Season } from '@/shared/types';
 import { WEAPONS } from '@/data/weapons';
 import { drawRagdollFlight, drawRagdollLanded, landedFacing8, ragdollBeginFrame, ragdollPhase } from '@/render/ragdoll';
@@ -51,26 +52,18 @@ function ensureAtlases(state: BattleState): void {
 
 /** Render-side memory per soldier: measured ground speed (for gait cadence) and the last posture
  * with its change time (for stand <-> prone transitions). Never read by the sim. */
-interface AnimTrack { x: number; y: number; t: number; speed: number; measured: boolean; posture: Posture; since: number }
+interface AnimTrack { motion: SoldierMotion; posture: Posture; since: number; prev?: Posture }
 /** Measured ground speed, or undefined until the first measurement (the path decides then). */
-const trackSpeed = (tr: AnimTrack): number | undefined => (tr.measured ? tr.speed : undefined);
-const animTracks = new Map<number, AnimTrack>();
-let animTrackTime = -1;
+const trackSpeed = (tr: AnimTrack): number | undefined => (tr.motion.measured ? tr.motion.speedMps : undefined);
+const animTracks = new WeakMap<Soldier, AnimTrack>();
 function animTrackFor(s: Soldier, time: number): AnimTrack {
-  if (time < animTrackTime - 0.5) animTracks.clear(); // a new battle
-  animTrackTime = time;
-  let tr = animTracks.get(s.id);
-  if (!tr) { const posture = postureFor(s, time); tr = { x: s.pos.x, y: s.pos.y, t: time, speed: 0, measured: false, posture, since: time - 10 }; animTracks.set(s.id, tr); return tr; }
-  const dt = time - tr.t;
-  if (dt >= 0.1) {
-    const v = (Math.hypot(s.pos.x - tr.x, s.pos.y - tr.y) * TILE_M) / dt;
-    tr.speed = v > 12 ? tr.speed : tr.speed * 0.5 + v * 0.5; // ignore teleports (knockback, deploy)
-    tr.x = s.pos.x; tr.y = s.pos.y; tr.t = time; tr.measured = true;
-  }
+  let tr = animTracks.get(s);
+  if (!tr) { const posture = postureFor(s, time); tr = { motion: new SoldierMotion(s, time), posture, since: time - 10 }; animTracks.set(s, tr); return tr; }
+  tr.motion.update(s, time);
   const posture = postureFor(s, time, trackSpeed(tr));
   if (posture !== tr.posture) {
     // keep the old posture visible in `transitionPosture` by remembering it in `prev`
-    (tr as AnimTrack & { prev?: Posture }).prev = tr.posture;
+    tr.prev = tr.posture;
     tr.posture = posture; tr.since = time;
   }
   return tr;
@@ -91,12 +84,12 @@ const CREW_KEYS: Record<CrewPose, string[]> = {
 
 /** Draw one living soldier from his side's atlas. False => no atlas / no usable entry. */
 function drawSoldierFromAtlas(
-  ctx: CanvasRenderingContext2D, atlas: Atlas, state: BattleState, s: Soldier, p: { x: number; y: number }, zoom: number,
+  ctx: CanvasRenderingContext2D, atlas: Atlas | null, state: BattleState, s: Soldier, p: { x: number; y: number }, zoom: number,
   crew: CrewSoldierDraw | undefined,
 ): boolean {
   const time = state.time;
   const tr = animTrackFor(s, time);
-  const prev = (tr as AnimTrack & { prev?: Posture }).prev ?? tr.posture;
+  const prev = tr.prev ?? tr.posture;
   const posture = transitionPosture(prev, tr.posture, time - tr.since);
   const target = s.targetSoldierId != null ? state.soldiers.get(s.targetSoldierId)?.pos : s.targetVehicleId != null ? state.vehicles.get(s.targetVehicleId)?.pos : null;
   const pick = pickAnimation(s, time, target, posture, trackSpeed(tr));
@@ -117,6 +110,20 @@ function drawSoldierFromAtlas(
       (entry) => (prog == null ? frameFor(s, time, 'idle', entry, 0, pick.mood) : progressFrame(prog, entry.frames)),
       p.x + j0.x, p.y + j0.y, zoom) != null;
   }
+  const smg = !crew && (pick.action === 'aim' || pick.action === 'fire') ? smgPose(s, time, posture) : null;
+  if (smg) {
+    if (smg.source === 'soldier') {
+      return drawAtlasSoldier(ctx, atlas, [smg.key, ...pick.keys], smg.bodyHeading, () => 0, p.x, p.y, zoom) != null;
+    }
+    const burstAtlas = smgAtlas(s.side, state.map.def.season, zoom);
+    if (drawAtlasSoldier(ctx, burstAtlas, [smg.key], smg.bodyHeading, () => smg.frame, p.x, p.y, zoom)) return true;
+    // The main sheet remains usable while the small supplementary atlas loads. Its alert
+    // low-ready frame keeps hip fire visibly lower than the shouldered aim / fire pose.
+    keys = smg.key.includes('.hip.') ? entryKeyChain(posture, 'idle', 'alert', 'smg')
+      : entryKeyChain(posture, pick.action === 'fire' ? 'fire' : 'aim', pick.mood, 'smg');
+    return drawAtlasSoldier(ctx, atlas, keys, smg.heading,
+      (entry) => Math.min(entry.frames - 1, smg.frame), p.x, p.y, zoom) != null;
+  }
   if (crew?.pose) {
     const mood = moodFor(s);
     keys = mood === 'calm' ? CREW_KEYS[crew.pose] : [...CREW_KEYS[crew.pose].map((k) => `${k}.${mood}`), ...CREW_KEYS[crew.pose]];
@@ -127,7 +134,8 @@ function drawSoldierFromAtlas(
     keys = entryKeyChain('crouched', 'idle', pick.mood, pick.weapon);
   }
   const j = trembleOffset(s, time, pick.mood);
-  return drawAtlasSoldier(ctx, atlas, keys, heading, (entry) => frameFor(s, time, action, entry, tr.speed, pick.mood), p.x + j.x, p.y + j.y, zoom) != null;
+  return drawAtlasSoldier(ctx, atlas, keys, heading,
+    (entry) => frameFor(s, time, action, entry, trackSpeed(tr), pick.mood, tr.motion.gaitCycles), p.x + j.x, p.y + j.y, zoom) != null;
 }
 
 
@@ -203,8 +211,11 @@ function spriteDrawSize(sprite: HTMLCanvasElement, zoom: number, scale = 1): { d
   return { dw, dh };
 }
 
-function frameOf(soldier: Soldier): 0 | 1 {
-  return (Math.floor(soldier.animFrame) % 2 === 0 ? 0 : 1);
+function frameOf(soldier: Soldier, time: number): 0 | 1 {
+  if (!smgCombatInterrupted(soldier) && (soldier.aiming || (soldier.smgBurst && time < soldier.smgBurst.until))) return 0;
+  const tr = animTrackFor(soldier, time);
+  const pick = pickAnimation(soldier, time, null, tr.posture, trackSpeed(tr));
+  return frameFor(soldier, time, pick.action, { frames: 2, fps: 2, loop: true }, trackSpeed(tr), pick.mood, tr.motion.gaitCycles) as 0 | 1;
 }
 
 function visible(s: { x: number; y: number }, cam: Camera): boolean {
@@ -658,7 +669,7 @@ function crewSoldierDraws(state: BattleState): Map<number, CrewSoldierDraw> {
           // (the sim keeps the haulers at their stations from the gun's axle pose)
           void towLengthM;
         }
-        out.set(s.id, { pose: carry[i], pos, facing: cls === 'atgun' ? f8 : s.facing, frame: (Math.floor(s.animFrame) % 2 === 0 ? 0 : 1) });
+        out.set(s.id, { pose: carry[i], pos, facing: cls === 'atgun' ? f8 : s.facing, frame: frameOf(s, state.time) });
       });
       continue;
     }
@@ -818,7 +829,7 @@ function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, state: Batt
  * panicked/pinned/cowering/berserk/surrendered/wary man is never drawn the same as a calm one.
  * `activity` wins over `mind.state` where both could apply (it's the more specific, sim-owned
  * signal); `mind.state` only adds poses `Activity` has no room for. Exported for tests. */
-export function poseForSoldier(s: Soldier): SoldierPose {
+export function poseForSoldier(s: Soldier, time = s.aiming?.readyAt ?? 0): SoldierPose {
   if (s.health === 'incapacitated') return 'woundedCrawl';
   switch (s.activity) {
     case 'surrendered': return 'surrendered';
@@ -828,6 +839,10 @@ export function poseForSoldier(s: Soldier): SoldierPose {
     case 'cowering': return 'cowering';
     case 'pinned': return 'pinned';
     default: break;
+  }
+  if (s.aiming && s.stance === 'standing') {
+    const aim = s.aiming;
+    if (aim.startedAt - s.lastFiredAt <= 2 || time - aim.startedAt >= (aim.readyAt - aim.startedAt) * 0.2) return 'wary';
   }
   if (s.mind.state === 'wary' || s.mind.state === 'shaken') return 'wary';
   return s.stance;
@@ -894,16 +909,16 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
     const selected = selectedTeamIds.includes(s.teamId);
     if (selected) drawSelectionRing(ctx, p);
     const atlas = soldierAtlas(s.side, season, cam.zoom);
-    if (atlas && drawSoldierFromAtlas(ctx, atlas, state, s, p, cam.zoom, crewDraw)) {
+    if (drawSoldierFromAtlas(ctx, atlas, state, s, p, cam.zoom, crewDraw)) {
       drawSuppressionStipple(ctx, p, s, 9 * cam.zoom);
       if (selected) drawFacingTick(ctx, p, s.facing);
       continue;
     }
-    const stance: SoldierPose = crewDraw?.pose === 'mgProne' ? 'prone' : crewDraw?.stance ?? poseForSoldier(s);
+    const stance: SoldierPose = crewDraw?.pose === 'mgProne' ? 'prone' : crewDraw?.stance ?? poseForSoldier(s, state.time);
     const outline = s.side === playerSide ? 'friendly' : 'enemy';
     const sprite = crewDraw?.pose
       ? getCrewPoseSprite(s.side, season, crewDraw.pose, crewDraw.facing, crewDraw.frame, outline, scale)
-      : getSoldierSprite(s.side, season, stance, crewDraw ? crewDraw.facing : s.facing, frameOf(s), outline, scale);
+      : getSoldierSprite(s.side, season, stance, crewDraw ? crewDraw.facing : s.facing, frameOf(s, state.time), outline, scale);
     const { dw, dh } = spriteDrawSize(sprite, cam.zoom, scale);
     ctx.drawImage(sprite, Math.round(p.x - dw / 2), Math.round(p.y - dh / 2), dw, dh);
     drawSuppressionStipple(ctx, p, s, Math.max(dw, dh) * 0.6);

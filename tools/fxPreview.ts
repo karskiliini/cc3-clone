@@ -60,6 +60,12 @@ function makeState(): BattleState {
     flashes: [],
     tracers: [],
     explosions: [],
+    sparks: [],
+    soldiers: new Map(),
+    map: { def: { season: 'summer' }, width: 64, height: 64, tiles: new Array(64 * 64).fill('grass') },
+    config: { playerSide: 'german' },
+    spotted: { german: new Set(), soviet: new Set() },
+    spottedVehicles: { german: new Set(), soviet: new Set() },
     vehicles: new Map<number, Vehicle>(),
     time: 12.3, // nonzero so knocked-out wisp phase isn't degenerate
   } as unknown as BattleState;
@@ -83,7 +89,25 @@ function drawVehicleHull(pos: { x: number; y: number }): void {
 
 function main(): void {
   paintBackground();
-  const rows: { name: string; y: number; build: (state: BattleState, cx: number, cy: number, stage: number) => void }[] = [
+  const vegetation = new URLSearchParams(location.search).has('vegetation');
+  const rows: { name: string; y: number; build: (state: BattleState, cx: number, cy: number, stage: number) => void }[] = vegetation ? [
+    {
+      name: 'Clipped leaves', y: 100,
+      build: (s, cx, cy, i) => { s.sparks.push({ pos: w(cx, cy), kind: 'leaf', t: s.time - STAGES[i] * 0.8 }); },
+    },
+    {
+      name: 'Branch splinters', y: 240,
+      build: (s, cx, cy, i) => { s.sparks.push({ pos: w(cx, cy), kind: 'wood', t: s.time - STAGES[i] * 0.8 }); },
+    },
+    {
+      name: 'Deflected MG round', y: 400,
+      build: (s, cx, cy, i) => {
+        s.sparks.push({ pos: w(cx, cy), kind: 'ricochet', t: s.time - STAGES[i] * 0.8 });
+        s.tracers.push({ from: w(cx - 85, cy + 20), to: w(cx, cy), t: STAGES[i] * TRACER_LIFE, hit: false, kind: 'mg' });
+        s.tracers.push({ from: w(cx, cy), to: w(cx + 75, cy + 45), t: STAGES[i] * TRACER_LIFE, hit: false, kind: 'mg', deflected: true });
+      },
+    },
+  ] : [
     {
       name: 'Flash (infantry)',
       y: 60,
@@ -156,11 +180,18 @@ function main(): void {
   }
 
   // extra: a knocked-out (non-burning) vehicle for comparison, far right margin
-  const koPos = w(980, 570);
-  drawVehicleHull(koPos);
-  state.vehicles.set(vehId, makeVehicle(koPos, 'knockedOut', 0));
+  if (!vegetation) {
+    const koPos = w(980, 570);
+    drawVehicleHull(koPos);
+    state.vehicles.set(vehId, makeVehicle(koPos, 'knockedOut', 0));
+  }
 
   drawEffects(ctx, cam, state);
+
+  if (vegetation) {
+    legend.textContent = 'Leaves, splinters, and a bent tracer with an orange outgoing streak. Columns show 5%, 35%, 65%, and 90% of each effect’s life.';
+    return;
+  }
 
   // crude reference crater swatch (NOT the real terrain crater sprite —
   // terrainRender.ts is owned by another agent and not touched here)

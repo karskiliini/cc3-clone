@@ -134,7 +134,7 @@ export type LosVisibilityFn = (from: Vec2, to: Vec2, eyeM?: number, targetM?: nu
 
 /** Is this soldier an eligible spotter (alive, conscious, dismounted)? */
 function soldierCanSpot(s: Soldier): boolean {
-  return s.health !== 'dead' && s.health !== 'incapacitated' && s.vehicleId === null;
+  return s.health !== 'dead' && s.health !== 'incapacitated' && s.vehicleId === null && !s.carrying;
 }
 
 /** The spotters `updateSpotting` uses for one side, optionally restricted to some teams. */

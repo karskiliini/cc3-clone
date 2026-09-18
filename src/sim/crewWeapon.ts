@@ -44,6 +44,7 @@ import { AIM_HOLD_MAX_S, SKILL_ACE, aimLayMul, chooseAimPoint, chooseRound, gunn
 import { expectedArmorMm } from './vehicleDamage';
 import { formationBaseHeading, rotateOffset } from './spawn';
 import { isDazed, recoveryFactor } from './daze';
+import { INFANTRY_PACE, infantrySpeedMs } from './infantryPace';
 
 export type CrewServedClass = 'mortar' | 'hmg' | 'atgun';
 const CREW_SERVED = new Set<WeaponClass>(['mortar', 'hmg', 'atgun']);
@@ -56,8 +57,8 @@ export const REMAN_RADIUS_TILES = 1.5;
 export const RETURN_RADIUS_TILES = 40 / TILE_M;
 /** A man this close (tiles) to a station is at it. */
 export const AT_STATION_TILES = 0.3;
-/** Walking pace between stations, m/s (a crouched scuttle). */
-export const STATION_WALK_MS = 1.6;
+/** Requested walking pace between stations, m/s; crouched men keep their lower posture cap. */
+export const STATION_WALK_MS = INFANTRY_PACE.walk;
 /** Swinging a limbered gun round by its trail, rad/s. */
 const SWING_RATE = 1.2;
 
@@ -458,8 +459,9 @@ function pickWorker(free: Soldier[], station: Vec2, task: CrewTaskId, gunnerId: 
 /** One step of a crewman towards `target` (tile coords). Returns true when he is at it. */
 function walkTo(state: BattleState, s: Soldier, target: Vec2, dt: number): boolean {
   const d = dist(s.pos, target);
-  if (d <= 0.04) { s.pos = { x: target.x, y: target.y }; return true; }
-  const step = Math.min(d, (STATION_WALK_MS * (s.health === 'wounded' ? 0.7 : 1) * dt) / TILE_M);
+  if (d <= 1e-4) return true;
+  const tile = tileAt(state.map, Math.floor(s.pos.x), Math.floor(s.pos.y));
+  const step = Math.min(d, (infantrySpeedMs(s, STATION_WALK_MS) * TERRAIN_PROPS[tile].speedMul * dt) / TILE_M);
   const nx = s.pos.x + ((target.x - s.pos.x) / d) * step;
   const ny = s.pos.y + ((target.y - s.pos.y) / d) * step;
   const tx = Math.floor(nx), ty = Math.floor(ny);
@@ -821,9 +823,9 @@ function taskDurationS(cw: CrewWeaponState, task: CrewTaskId, worker: Soldier, g
 }
 
 /** Hauling pace of a manhandled gun, m/s. */
-export const HAUL_SPEED_MS = 1.3;
+export const HAUL_SPEED_MS = 0.65;
 /** How fast the men can slew the gun about its axle while pushing it, rad/s. */
-export const HAUL_TURN_RATE = 0.9;
+export const HAUL_TURN_RATE = 0.25;
 /** Hauler stations either side of the towing eye (metres, weapon frame). */
 export function haulStationM(weaponId: string, i: number): Vec2 {
   return { x: i === 0 ? -0.4 : 0.4, y: towLengthM(weaponId) };
@@ -851,6 +853,15 @@ export function gunHaulers(state: BattleState, team: Team, cw: CrewWeaponState):
  * gun is pushed muzzle-first), and the haulers are put at their stations FROM the axle pose. */
 function haulGun(state: BattleState, team: Team, cw: CrewWeaponState, gunner: Soldier, dt: number): void {
   const path = gunner.path;
+  const towingEye = weaponFramePoint(cw.pos, cw.facing, haulStationM(cw.weaponId, 0));
+  if (dist(gunner.pos, towingEye) > 1e-4) {
+    // Finishing the packing drill does not teleport the gunner onto the towing eye. He and the
+    // other hauler walk into place while the axle stays still, then begin pushing next step.
+    gunHaulers(state, team, cw).forEach((s, i) => {
+      walkTo(state, s, weaponFramePoint(cw.pos, cw.facing, haulStationM(cw.weaponId, i)), dt);
+    });
+    return;
+  }
   if (path.length > 0 && !isFleeing(gunner) && isAbleCrewman(state, gunner)) {
     const wp = path[0];
     const want = dist(cw.pos, wp) > 0.05 ? angleTo(cw.pos, wp) : cw.facing;
@@ -872,8 +883,8 @@ function haulGun(state: BattleState, team: Team, cw: CrewWeaponState, gunner: So
   // the men, from the axle pose
   gunHaulers(state, team, cw).forEach((s, i) => {
     const st = weaponFramePoint(cw.pos, cw.facing, haulStationM(cw.weaponId, i));
-    if (i === 0 || dist(s.pos, st) <= 0.15) s.pos = st;
-    else walkTo(state, s, st, dt * 2); // the second man catches up with the trail at a trot
+    if (i === 0) s.pos = st;
+    else walkTo(state, s, st, dt);
     s.facing = facingFromAngle(cw.facing);
     s.animFrame = Math.floor(state.time / 0.3) % 2;
     if (i > 0 && path.length === 0) s.path = [];

@@ -39,7 +39,7 @@ function makeState(): BattleState {
     explosions: [],
     tracers: [],
     flashes: [],
-    bloodDecals: [],
+    bloodDecals: [], projectiles: [], sparks: [], pendingBursts: [], structureFx: [],
     result: null,
     events: [],
     nextId: 1,

@@ -6,14 +6,17 @@ export function createCamera(): Camera {
   return { x: 0, y: 0, zoom: 1 };
 }
 
-export const ZOOM_LEVELS = [0.5, 1, 2];
+/** Zoom bounds: fully out (whole-map overview) to fully in (CC3's close view). */
+export const ZOOM_MIN = 0.5;
+export const ZOOM_MAX = 2;
+/** Continuous zoom (user ask: no jumps between views): each wheel notch / button press scales
+ * by this factor instead of snapping to a level. */
+export const ZOOM_STEP_FACTOR = 1.25;
 
-/** Steps the camera's zoom to the next level up/down in ZOOM_LEVELS, keeping
- * the world point under `anchor` (screen coords, if given) fixed on screen. */
+/** Scales the camera's zoom continuously, keeping the world point under `anchor` (screen
+ * coords, if given) fixed on screen. */
 function stepZoom(cam: Camera, dir: 1 | -1, mapW: number, mapH: number, anchor?: Vec2): void {
-  const idx = ZOOM_LEVELS.indexOf(cam.zoom);
-  const nextIdx = idx < 0 ? ZOOM_LEVELS.indexOf(1) : Math.min(ZOOM_LEVELS.length - 1, Math.max(0, idx + dir));
-  const nextZoom = ZOOM_LEVELS[nextIdx];
+  const nextZoom = clamp(cam.zoom * (dir > 0 ? ZOOM_STEP_FACTOR : 1 / ZOOM_STEP_FACTOR), ZOOM_MIN, ZOOM_MAX);
   if (nextZoom === cam.zoom) return;
   const before = anchor ? screenToWorld(cam, anchor) : null;
   cam.zoom = nextZoom;

@@ -506,6 +506,7 @@ function nearPlayerUnits(state: BattleState, p: Vec2, rTiles: number): boolean {
 /** "Wall breached." — reported when the player can know about it: his own round did it (a fire
  * mission is his order, however far away it lands) or one of his men is close enough to see. */
 function notifyBreach(state: BattleState, st: StructState, p: Vec2, side: Side | null): void {
+  pushStructureFx(state, 'breach', p, state.map.tiles[Math.floor(p.y) * state.map.width + Math.floor(p.x)] === 'buildingStone');
   if (state.time - st.lastBreachMsgAt < 8) return;
   if (side !== state.config.playerSide && !nearPlayerUnits(state, p, 25)) return;
   st.lastBreachMsgAt = state.time;
@@ -513,11 +514,22 @@ function notifyBreach(state: BattleState, st: StructState, p: Vec2, side: Side |
 }
 
 function notifyCollapse(state: BattleState, st: StructState, b: BuildingRec): void {
+  const c = {
+    x: b.floorTiles.reduce((acc, i) => acc + (i % state.map.width), 0) / b.floorTiles.length,
+    y: b.floorTiles.reduce((acc, i) => acc + Math.floor(i / state.map.width), 0) / b.floorTiles.length,
+  };
+  pushStructureFx(state, 'collapse', c, b.stone);
   if (state.time - st.lastCollapseMsgAt < 5) return;
   st.lastCollapseMsgAt = state.time;
   const name = b.stone ? (buildingIsBig(state.map, b.id) ? 'Tenement block' : 'Stone house') : 'Wooden house';
   addMessage(state, `${name} has collapsed.`, 'warn');
 }
+
+/** B3: visual record of a structural event for the renderer (capped by sim/battle.ts). */
+function pushStructureFx(state: BattleState, kind: 'breach' | 'collapse', p: Vec2, stone: boolean): void {
+  state.structureFx.push({ kind, pos: { ...p }, t0: state.time, stone, extentTiles: [] });
+}
+
 
 function notifyBuried(state: BattleState, st: StructState, teamId: number): void {
   const last = st.lastBuriedMsgAt.get(teamId) ?? -Infinity;

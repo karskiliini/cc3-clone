@@ -93,6 +93,8 @@ function hotCore(ctx: CanvasRenderingContext2D, x: number, y: number, coreR: num
 }
 
 // ------------------------------------------------------------------- flashes
+/** Soldier atlases are viewed twelve degrees away from vertical, at ten pixels per metre. */
+const MUZZLE_HEIGHT_PX_PER_M = Math.sin(12 * Math.PI / 180) * 10;
 function drawFlashes(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
   for (const f of state.flashes) {
     const frac = clamp(f.t / FLASH_LIFE, 0, 1);
@@ -101,12 +103,12 @@ function drawFlashes(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     // Full brightness for the first ~0.1s of life, then fade for the rest.
     const holdFrac = clamp(0.1 / FLASH_LIFE, 0, 1);
     const alpha = frac < holdFrac ? 1 : clamp(1 - (frac - holdFrac) / (1 - holdFrac), 0, 1);
-    const standoff = big ? 12 : 8;
+    const standoff = f.atMuzzle ? 0 : big ? 12 : 8;
     const dx = Math.sin(f.facing) * standoff;
     const dy = -Math.cos(f.facing) * standoff;
     const p = worldToScreen(cam, f.pos);
     const sx = p.x + dx * cam.zoom;
-    const sy = p.y + dy * cam.zoom;
+    const sy = p.y + (dy - (f.heightM ?? 0) * MUZZLE_HEIGHT_PX_PER_M) * cam.zoom;
     if (big) {
       // tank gun: small irregular yellow-white flicker (no geometric cross)
       const haloD = 12 * cam.zoom;
@@ -141,9 +143,9 @@ function drawFlashes(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
       hotCore(ctx, sx, sy, coreD / 2, haloD * 0.9, alpha);
       ctx.restore();
     } else {
-      // infantry: 10px star
-      const haloD = 10 * cam.zoom;
-      const coreD = 5 * cam.zoom;
+      // infantry: smaller star (muzzle is offset already, keep it tight)
+      const haloD = 6 * cam.zoom;
+      const coreD = 3 * cam.zoom;
       ctx.save();
       ctx.globalAlpha = alpha * 0.95;
       ctx.fillStyle = '#ff9a3c';
@@ -181,6 +183,7 @@ function drawTracers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     const lifeFrac = clamp(t.t / TRACER_LIFE, 0, 1);
     if (lifeFrac >= 1) continue;
     const from = worldToScreen(cam, t.from);
+    from.y -= (t.fromHeightM ?? 0) * MUZZLE_HEIGHT_PX_PER_M * cam.zoom;
     const to = worldToScreen(cam, t.to);
     const dx = to.x - from.x, dy = to.y - from.y;
     const segLen = Math.hypot(dx, dy) || 1;
@@ -203,6 +206,7 @@ function drawTracers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     let coreColor: string | null = null;
     if (t.kind === 'mg') { color = '#ffd070'; width = 2.5; }
     else if (t.kind === 'shell') { color = '#ffb060'; width = 3; coreColor = '#fff6d0'; }
+    if (t.deflected) { color = '#ff9850'; width = 1.5; coreColor = null; }
     ctx.save();
     ctx.lineCap = 'round';
     // wf19: a thin dark under-stroke so the streak keeps its edge on bright grass and snow
@@ -234,6 +238,33 @@ function drawTracers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
       ctx.moveTo(hbx, hby);
       ctx.lineTo(hx, hy);
       ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+/** Leaves and splinters mark contact; a brief hot star makes a turned round legible. All
+ * positions and lifetimes come from sim events, so pausing freezes the impact as well. */
+function drawVegetationImpacts(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
+  for (const spark of state.sparks) {
+    if (spark.kind !== 'leaf' && spark.kind !== 'wood' && spark.kind !== 'ricochet') continue;
+    const age = state.time - spark.t;
+    if (age < 0 || age >= 0.8) continue;
+    const p = worldToScreen(cam, spark.pos), progress = age / 0.8;
+    const turn = spark.kind === 'ricochet';
+    ctx.save();
+    ctx.globalAlpha = 1 - progress;
+    ctx.fillStyle = spark.kind === 'leaf' ? '#91ac50' : '#c39b63';
+    ctx.strokeStyle = turn ? '#fff1bc' : '#79623d';
+    ctx.lineWidth = turn ? 1.5 : 1;
+    for (let i = 0; i < (turn ? 4 : 6); i++) {
+      const a = hash2(Math.floor(spark.pos.x * 32), i, Math.floor(spark.pos.y * 32)) * Math.PI * 2;
+      const reach = (2 + progress * (turn ? 14 : 10)) * cam.zoom;
+      const x = p.x + Math.cos(a) * reach;
+      const y = p.y + Math.sin(a) * reach - Math.sin(progress * Math.PI) * 5 * cam.zoom;
+      if (turn) {
+        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(x, y); ctx.stroke();
+      } else ctx.fillRect(x, y, 2 * cam.zoom, (i % 2 ? 1 : 2) * cam.zoom);
     }
     ctx.restore();
   }
@@ -466,13 +497,14 @@ function drawMovementDust(ctx: CanvasRenderingContext2D, cam: Camera, state: Bat
   }
   ctx.restore();
   for (const v of state.vehicles.values()) {
-    if (v.state !== 'ok' || v.speed <= 0.3 || v.path.length === 0) continue;
+    if (v.state !== 'ok' || Math.abs(v.speed) <= 0.3) continue;
     if (v.side !== viewer && !state.spottedVehicles[viewer].has(v.id)) continue;
     const p = worldToScreen(cam, v.pos);
     if (p.x < -60 || p.y < -60 || p.x > VIEW_W + 60 || p.y > VIEW_H + 60) continue;
     if (!dusty(v.pos.x, v.pos.y)) continue;
-    const bx = -Math.sin(v.hullFacing), by = Math.cos(v.hullFacing);
-    const k = clamp(v.speed / 6, 0.35, 1);
+    const direction = Math.sign(v.speed);
+    const bx = -Math.sin(v.hullFacing) * direction, by = Math.cos(v.hullFacing) * direction;
+    const k = clamp(Math.abs(v.speed) / 6, 0.35, 1);
     for (let i = 0; i < 8; i++) {
       const phase = (state.time * 0.9 + i / 8) % 1;
       const track = (i % 2 === 0 ? -1 : 1) * 11 * z;
@@ -550,6 +582,7 @@ export function drawEffects(ctx: CanvasRenderingContext2D, cam: Camera, state: B
   drawBurningVehicles(ctx, cam, state);
   drawExplosions(ctx, cam, state);
   drawTracers(ctx, cam, state);
+  drawVegetationImpacts(ctx, cam, state);
   drawFlashes(ctx, cam, state);
 
   ctx.restore();

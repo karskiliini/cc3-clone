@@ -15,8 +15,9 @@ import { Sfx } from '@/audio/sfx';
 
 class FakeParam {
   value = 0;
+  linearRamps: { value: number; when: number }[] = [];
   setValueAtTime() { return this; }
-  linearRampToValueAtTime() { return this; }
+  linearRampToValueAtTime(value: number, when: number) { this.linearRamps.push({ value, when }); return this; }
   exponentialRampToValueAtTime() { return this; }
   setTargetAtTime() { return this; }
 }
@@ -46,7 +47,8 @@ class FakeOsc extends FakeNode {
 class FakeBufferSource extends FakeNode {
   buffer: unknown = null;
   loop = false;
-  start() {}
+  starts: number[] = [];
+  start(when: number) { this.starts.push(when); }
   stop() {}
 }
 
@@ -59,18 +61,23 @@ class FakeDelay extends FakeNode {
 }
 
 class FakeAudioContext {
+  static latest: FakeAudioContext;
+  constructor() { FakeAudioContext.latest = this; }
   state: 'running' | 'suspended' | 'closed' = 'running';
   currentTime = 0;
   sampleRate = 44100;
   destination = new FakeNode();
-  createGain() { return new FakeGain(); }
+  gains: FakeGain[] = [];
+  sources: FakeBufferSource[] = [];
+  panners: FakePanner[] = [];
+  createGain() { const gain = new FakeGain(); this.gains.push(gain); return gain; }
   createBiquadFilter() { return new FakeBiquad(); }
   createOscillator() { return new FakeOsc(); }
-  createBufferSource() { return new FakeBufferSource(); }
+  createBufferSource() { const source = new FakeBufferSource(); this.sources.push(source); return source; }
   createBuffer(_channels: number, length: number) {
     return { getChannelData: () => new Float32Array(length) };
   }
-  createStereoPanner() { return new FakePanner(); }
+  createStereoPanner() { const panner = new FakePanner(); this.panners.push(panner); return panner; }
   createDelay() { return new FakeDelay(); }
   async resume() { this.state = 'running'; }
 }
@@ -127,6 +134,34 @@ describe('Sfx.handleEvents — battle events actually request sounds', () => {
     expect(counts.explosion ?? 0).toBe(2);
     expect(counts.ricochet ?? 0).toBe(1);
     expect(counts.flagCapture ?? 0).toBe(1);
+  });
+
+  it('synthesizes one crack per timed SMG round with its distance gain and stereo position', () => {
+    const sfx = makeUnlockedSfx();
+    const audio = FakeAudioContext.latest;
+    audio.currentTime = 7;
+    const cam = { x: 0, y: 0, zoom: 1 } as Camera; // viewport centre = (40,24)
+    sfx.handleEvents([
+      { kind: 'shot', weaponId: 'mp40', singleRound: true, pos: { x: 40, y: 24 } },
+      { kind: 'shot', weaponId: 'ppsh41', singleRound: true, pos: { x: 60, y: 24 } },
+      { kind: 'shot', weaponId: 'mp40', singleRound: true },
+    ], cam);
+    expect(audio.sources).toHaveLength(3);
+    expect(audio.sources.map((source) => source.starts)).toEqual([[7], [7], [7]]);
+    // Master gain is the first node; each crack adds exactly one envelope.
+    expect(audio.gains.slice(1).map((gain) => gain.gain.linearRamps[0].value)).toEqual([0.85, 0.85 * 0.81, 0.85]);
+    expect(audio.panners.map((panner) => panner.pan.value)).toEqual([0, 0.5]);
+    expect(sfx.debugState().counts.smg).toBe(3);
+  });
+
+  it('keeps the legacy SMG preview as a short burst', () => {
+    const sfx = makeUnlockedSfx();
+    const audio = FakeAudioContext.latest;
+    sfx.play('smg');
+    expect(audio.sources.length).toBeGreaterThanOrEqual(3);
+    expect(audio.sources.length).toBeLessThanOrEqual(4);
+    expect(audio.sources[0].starts).toEqual([audio.currentTime]);
+    expect(audio.sources[1].starts[0]).toBeGreaterThan(audio.currentTime);
   });
 
   it('un-silences kill (scream) and teamBroken — round-5 fix #3', () => {

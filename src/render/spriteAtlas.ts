@@ -88,6 +88,8 @@ export function validateAtlasMeta(meta: unknown): string | null {
 export function atlasScaleForZoom(zoom: number): 1 | 2 { return zoom >= 2 ? 2 : 1; }
 export function seasonKey(season: Season): 'summer' | 'winter' { return season === 'winter' ? 'winter' : 'summer'; }
 export function soldierAtlasName(side: Side, season: Season, scale: 1 | 2): string { return `soldiers_${side}_${seasonKey(season)}_${scale}`; }
+/** Planted feet, five torso angles and a per-round kick for aimed / hip SMG bursts. */
+export function smgAtlasName(side: Side, season: Season, scale: 1 | 2): string { return `smg_${side}_${seasonKey(season)}_${scale}`; }
 export function vehicleAtlasName(scale: 1 | 2): string { return `vehicles_${scale}`; }
 export function weaponAtlasName(scale: 1 | 2): string { return `weapons_${scale}`; }
 /** Kit on the ground (spec 2026-09-17 §9): entries `item.<id>`, 16 dirs, one frame each. */
@@ -101,6 +103,7 @@ export function battleAtlasNames(sides: readonly Side[], season: Season): string
   const out: string[] = [];
   for (const scale of [1, 2] as const) {
     for (const side of sides) out.push(soldierAtlasName(side, season, scale));
+    for (const side of sides) out.push(smgAtlasName(side, season, scale));
     out.push(weaponAtlasName(scale));
     out.push(itemAtlasName(scale));
     for (const side of sides) out.push(partsAtlasName(side, season, scale));
@@ -196,7 +199,7 @@ export function requestBattleAtlases(sides: readonly Side[], season: Season, onP
   const upfront = names.filter((n) => !n.endsWith('_2'));
   wanted = upfront;
   for (const name of Array.from(slots.keys())) {
-    if ((name.startsWith('soldiers_') || name.startsWith('parts_')) && !names.includes(name)) slots.delete(name);
+    if ((name.startsWith('soldiers_') || name.startsWith('smg_') || name.startsWith('parts_')) && !names.includes(name)) slots.delete(name);
   }
   let done = 0;
   return Promise.all(upfront.map((n) => loadAtlas(n).then(() => { done++; onProgress?.(done / upfront.length); }))).then(() => undefined);
@@ -245,6 +248,9 @@ export function atlasForZoom(nameOf: (scale: 1 | 2) => string, zoom: number): At
 
 export function soldierAtlas(side: Side, season: Season, zoom: number): Atlas | null {
   return atlasForZoom((sc) => soldierAtlasName(side, season, sc), zoom);
+}
+export function smgAtlas(side: Side, season: Season, zoom: number): Atlas | null {
+  return atlasForZoom((sc) => smgAtlasName(side, season, sc), zoom);
 }
 export function itemAtlas(zoom: number): Atlas | null { return atlasForZoom(itemAtlasName, zoom); }
 export function partsAtlas(side: Side, season: Season, zoom: number): Atlas | null {

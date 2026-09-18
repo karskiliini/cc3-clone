@@ -9,8 +9,8 @@
 //   entry key  = `<posture>.<action>[.<mood>][@weapon]`, with a fallback chain
 //                (mood variant -> base action -> idle) for entries an atlas does not carry;
 //   direction  = heading quantised to the atlas's direction count (16 for soldiers);
-//   frame      = a pure function of the clock: per-soldier phase offset, gait cadence from ground
-//                speed (no foot sliding), fire kick from lastFiredAt, reload progress, flinch from
+//   frame      = per-soldier phase offset plus accumulated physical travel for gaits;
+//                battle time for quiet idle cycles, fire kick from lastFiredAt, reload progress, flinch from
 //                mind.lastIncomingAt.
 // Also the pure half of the blast ragdoll (§4): flight timing / arc / variant choice.
 // ============================================================================
@@ -36,7 +36,7 @@ export const STRIDE_M: Record<'walk' | 'run' | 'sneak' | 'crawl' | 'woundedCrawl
   walk: 1.5, run: 2.4, sneak: 1.0, crawl: 0.8, woundedCrawl: 0.5,
 };
 /** Speed assumed when the caller cannot measure one (m/s). */
-const DEFAULT_SPEED: Record<keyof typeof STRIDE_M, number> = { walk: 1.4, run: 3.6, sneak: 0.8, crawl: 0.5, woundedCrawl: 0.25 };
+const DEFAULT_SPEED: Record<keyof typeof STRIDE_M, number> = { walk: 1.1, run: 2.4, sneak: 0.7, crawl: 0.3, woundedCrawl: 0.25 };
 const GAITS = new Set<AnimAction>(['walk', 'run', 'sneak', 'crawl', 'woundedCrawl']);
 
 const STEADY_ACTIVITIES = new Set(['firing', 'reloading', 'defending', 'ambushing']);
@@ -51,12 +51,20 @@ export function phaseOffset(id: number): number {
 /** Below this measured ground speed (m/s) a man counts as standing still, whatever his path says. */
 export const STILL_MPS = 0.06;
 
+/** A delayed burst cleanup must never keep a fleeing or cowering man in a firing pose. */
+export function smgCombatInterrupted(s: Soldier): boolean {
+  return s.activity === 'panicked' || s.activity === 'routed' || s.activity === 'cowering' || s.activity === 'surrendered'
+    || s.mind.state === 'panicked' || s.mind.state === 'broken' || s.mind.state === 'cowering';
+}
+
 /** Is he actually going somewhere? A path alone is not enough: men who hide, lie in ambush or are
  * held by the sim keep a leftover path while not moving a step, and must not crawl on the spot.
  * `speedMps` is the ground speed the renderer measured; omit it when unknown (first frame, tests)
  * and the path decides. */
-export function isMoving(s: Soldier, speedMps?: number): boolean {
-  if (s.path.length === 0 || s.health === 'dead' || s.health === 'incapacitated') return false;
+export function isMoving(s: Soldier, speedMps?: number, time?: number): boolean {
+  const interrupted = WEAPONS[s.weaponId]?.cls === 'smg' && smgCombatInterrupted(s);
+  const bursting = !interrupted && s.smgBurst && (time === undefined || (time >= s.smgBurst.start && time < s.smgBurst.until));
+  if ((s.aiming && !interrupted) || bursting || s.path.length === 0 || s.health === 'dead' || s.health === 'incapacitated') return false;
   return speedMps === undefined || speedMps >= STILL_MPS;
 }
 
@@ -65,7 +73,7 @@ export function isMoving(s: Soldier, speedMps?: number): boolean {
 export function moodFor(s: Soldier, time?: number, speedMps?: number): Mood {
   if (time !== undefined && s.dazedUntil != null && time < s.dazedUntil && s.health !== 'dead' && s.health !== 'incapacitated'
     && s.activity !== 'surrendered') {
-    return isMoving(s, speedMps) ? 'panicked' : 'cowering';
+    return isMoving(s, speedMps, time) ? 'panicked' : 'cowering';
   }
   switch (s.activity) {
     case 'surrendered': return 'surrendered';
@@ -97,16 +105,17 @@ export function postureFor(s: Soldier, time = 0, speedMps?: number): Posture {
   if (s.stunnedUntil != null && time < s.stunnedUntil) return 'prone';
   if (s.stance === 'prone') return 'prone';
   if (s.stance === 'standing') return 'standing';
-  if (isMoving(s, speedMps)) return 'crouched';
+  if (isMoving(s, speedMps, time)) return 'crouched';
   if (moodFor(s, time, speedMps) === 'pinned') return 'prone';
-  const aiming = s.targetSoldierId != null || s.targetVehicleId != null || s.targetPoint != null;
+  const aiming = s.aiming != null || (s.smgBurst != null && time >= s.smgBurst.start && time < s.smgBurst.until)
+    || s.targetSoldierId != null || s.targetVehicleId != null || s.targetPoint != null;
   if (STEADY_ACTIVITIES.has(s.activity) || aiming) return 'kneeling';
   return 'crouched';
 }
 
 /** Standing <-> prone passes through kneeling for a moment so a man does not pop between them.
  * `since` = seconds since the posture changed (tracked render-side). */
-export const POSTURE_TRANSITION_S = 0.22;
+export const POSTURE_TRANSITION_S = 0.45;
 export function transitionPosture(prev: Posture, next: Posture, since: number): Posture {
   if (since >= POSTURE_TRANSITION_S || prev === next) return next;
   const tall = (p: Posture) => (p === 'standing' ? 2 : p === 'prone' ? 0 : 1);
@@ -120,8 +129,15 @@ export function actionFor(s: Soldier, time: number, posture: Posture = postureFo
   if (s.health === 'incapacitated') return speedMps !== undefined && speedMps >= STILL_MPS ? 'woundedCrawl' : 'hit';
   if (s.stunnedUntil != null && time < s.stunnedUntil) return 'hide';
   if (s.pickup?.until != null) return 'pickup';
+  // A medic bandaging his teammate (B8, sim/medic.ts): the 'throw' pose is the closest atlas
+  // action to a bandage; it loops on the clock while `bandageUntil` is still ahead of `time`.
+  if (s.bandageUntil != null && time < s.bandageUntil) return 'throw';
   const mood = moodFor(s, time, speedMps);
-  if (isMoving(s, speedMps) && mood !== 'cowering' && mood !== 'surrendered') {
+  // Every round drives a kick while the timed burst holds the feet, even with a saved path.
+  // Keep follow-through between rounds; do not restart a gait or flinch halfway through it.
+  if (s.smgBurst && time >= s.smgBurst.start && time < s.smgBurst.until
+    && !smgCombatInterrupted(s) && mood !== 'cowering' && mood !== 'surrendered') return 'fire';
+  if (isMoving(s, speedMps, time) && mood !== 'cowering' && mood !== 'surrendered') {
     if (posture === 'prone') return 'crawl';
     if (posture === 'crouched' || posture === 'kneeling' || s.activity === 'sneaking') return 'sneak';
     return s.activity === 'movingFast' || mood === 'panicked' || mood === 'berserk' ? 'run' : 'walk';
@@ -131,6 +147,7 @@ export function actionFor(s: Soldier, time: number, posture: Posture = postureFo
   const sinceFire = time - s.lastFiredAt;
   if (sinceFire >= 0 && sinceFire < FIRE_KICK_S) return 'fire';
   if (s.activity === 'reloading' && s.reloadTimer > 0) return 'reload';
+  if (s.aiming) return 'aim';
   if (s.activity === 'hiding' || s.activity === 'ambushing') return 'hide';
   if (s.activity === 'firing' || s.targetSoldierId != null || s.targetVehicleId != null || s.targetPoint != null) return 'aim';
   return 'idle';
@@ -189,9 +206,19 @@ export function quantiseDir(rad: number, dirs = 16): number {
 
 /** The heading to draw: along the path when moving, at the target when aiming, else the sim's
  * 8-way facing. Gives moving / aiming figures real 16-way turns. */
-export function headingFor(s: Soldier, targetPos?: Vec2 | null, speedMps?: number): number {
+export function headingFor(s: Soldier, targetPos?: Vec2 | null, speedMps?: number, time = s.smgBurst?.lastRoundAt ?? s.aiming?.readyAt ?? 0): number {
   const to = (p: Vec2) => Math.atan2(p.x - s.pos.x, -(p.y - s.pos.y));
-  if (isMoving(s, speedMps)) {
+  const interrupted = WEAPONS[s.weaponId]?.cls === 'smg' && smgCombatInterrupted(s);
+  if (!interrupted && s.smgBurst && time >= s.smgBurst.start && time < s.smgBurst.until) return s.smgBurst.heading;
+  if (s.aiming && !interrupted) {
+    const aim = s.aiming;
+    const duration = Math.min(1.2, Math.max(0.01, aim.readyAt - aim.startedAt));
+    const progress = Math.max(0, Math.min(1, (time - aim.startedAt) / duration));
+    const eased = progress * progress * (3 - 2 * progress);
+    const delta = Math.atan2(Math.sin(to(aim.at) - aim.fromFacing), Math.cos(to(aim.at) - aim.fromFacing));
+    return aim.fromFacing + delta * eased;
+  }
+  if (isMoving(s, speedMps, time)) {
     const next = s.path[0];
     if (Math.hypot(next.x - s.pos.x, next.y - s.pos.y) > 0.05) return to(next);
   } else if (targetPos) return to(targetPos);
@@ -201,26 +228,65 @@ export function headingFor(s: Soldier, targetPos?: Vec2 | null, speedMps?: numbe
 
 /** Gait cycles per second so the feet keep pace with the ground: speed / stride length. Shaken
  * men step slower and hesitantly. */
-export function gaitCadence(action: AnimAction, speedMps: number, mood: Mood = 'calm'): number {
+export function gaitCadence(action: AnimAction, speedMps?: number, mood: Mood = 'calm'): number {
   if (!GAITS.has(action)) return 0;
   const a = action as keyof typeof STRIDE_M;
-  const v = speedMps > 0.05 ? speedMps : DEFAULT_SPEED[a];
+  const v = speedMps === undefined ? DEFAULT_SPEED[a] : Math.max(0, speedMps);
   return (v / STRIDE_M[a]) * (mood === 'shaken' ? 0.8 : 1);
 }
 
-/** Frame index within an entry — a pure function of the battle clock and the soldier. */
-export function frameFor(s: Soldier, time: number, action: AnimAction, entry: AnimEntryInfo, speedMps = 0, mood: Mood = moodFor(s)): number {
+/** Render-side motion state, sampled only when the battle clock advances. */
+export class SoldierMotion {
+  speedMps = 0;
+  measured = false;
+  gaitCycles = 0;
+  private x: number;
+  private y: number;
+  private time: number;
+  private gait: AnimAction;
+
+  constructor(s: Soldier, time: number) {
+    this.x = s.pos.x; this.y = s.pos.y; this.time = time;
+    this.gait = actionFor(s, time);
+  }
+
+  update(s: Soldier, time: number): void {
+    const dt = time - this.time;
+    const distanceM = Math.hypot(s.pos.x - this.x, s.pos.y - this.y) * TILE_M;
+    // Same sim tick: repeated renders cannot create speed. Rebase a paused deployment move.
+    this.x = s.pos.x; this.y = s.pos.y;
+    if (dt === 0) return;
+    this.time = time;
+    if (dt < 0) { this.gaitCycles = 0; this.speedMps = 0; this.measured = false; return; }
+    this.measured = true;
+    // A hidden/offscreen interval or a knockback/deployment jump is not a sequence of steps.
+    if (dt > 0.75 || distanceM / dt > 6) { this.speedMps = 0; return; }
+    this.speedMps = distanceM / dt;
+    const action = actionFor(s, time, postureFor(s, time, this.speedMps), this.speedMps);
+    // Haulers follow their gun's station without a personal path. Actual travel still advances
+    // their feet; posture supplies a stride if neither the current nor previous action is a gait.
+    const gait = GAITS.has(action) ? action : GAITS.has(this.gait) ? this.gait
+      : s.stance === 'prone' ? 'crawl' : s.stance === 'crouching' ? 'sneak' : 'walk';
+    if (distanceM > 0) this.gaitCycles += distanceM / STRIDE_M[gait as keyof typeof STRIDE_M];
+    this.gait = action;
+  }
+}
+
+/** Frame index within an entry. The renderer supplies accumulated gait cycles; a clock-driven
+ * preview may omit them when its speed is constant. An explicit zero speed is always still. */
+export function frameFor(s: Soldier, time: number, action: AnimAction, entry: AnimEntryInfo, speedMps?: number, mood: Mood = moodFor(s), gaitCycles?: number): number {
   const n = Math.max(1, entry.frames | 0);
   if (n === 1) return 0;
   const off = phaseOffset(s.id);
   if (GAITS.has(action)) {
-    const cycles = time * gaitCadence(action, speedMps, mood) + off;
+    const cycles = (gaitCycles ?? time * gaitCadence(action, speedMps, mood)) + off;
     return Math.floor((cycles - Math.floor(cycles)) * n) % n;
   }
   if (action === 'fire') {
     const t = Math.max(0, time - s.lastFiredAt);
     return Math.min(n - 1, Math.floor((t / FIRE_KICK_S) * n));
   }
+  if (action === 'aim') return progressFrame(aimProgress(s, time), n);
   if (action === 'reload') {
     const total = WEAPONS[s.weaponId]?.reloadS ?? 3;
     const prog = total > 0 ? 1 - Math.max(0, Math.min(total, s.reloadTimer)) / total : 1;
@@ -234,7 +300,9 @@ export function frameFor(s: Soldier, time: number, action: AnimAction, entry: An
     return Math.min(n - 1, Math.floor(prog * n));
   }
   if (action === 'hit') return n - 1;
-  const fps = entry.fps > 0 ? entry.fps : n / 1.2;
+  const sourceFps = entry.fps > 0 ? entry.fps : n / 1.2;
+  const fps = action === 'idle' ? Math.min(sourceFps, n / 4.5)
+    : action === 'hide' ? Math.min(sourceFps, n / 2.5) : sourceFps;
   const f = Math.floor(time * fps + off * n);
   return entry.loop === false ? Math.min(n - 1, f) : ((f % n) + n) % n;
 }
@@ -248,7 +316,7 @@ export function isFlinching(s: Soldier, time: number): boolean {
 /** Shaken / cowering / stationary-panicked men tremble: a 1 px jitter at irregular intervals. */
 export function trembleOffset(s: Soldier, time: number, mood: Mood = moodFor(s)): { x: number; y: number } {
   if (mood !== 'shaken' && mood !== 'cowering' && !(mood === 'panicked' && !isMoving(s))) return { x: 0, y: 0 };
-  const tick = Math.floor(time * (mood === 'shaken' ? 7 : 11));
+  const tick = Math.floor(time * (mood === 'shaken' ? 3 : 5));
   const h = phaseOffset(s.id * 31 + tick);
   if (mood === 'shaken' && h > 0.4) return { x: 0, y: 0 };
   return { x: h < 0.2 ? -1 : h < 0.4 ? 1 : 0, y: h > 0.7 ? 1 : 0 };
@@ -259,6 +327,12 @@ export interface AnimPick {
   heading: number; keys: string[]; flinch: boolean;
 }
 
+/** Acquisition plays once, then holds. The sim clears the timer when firing or losing aim. */
+function aimProgress(s: Soldier, time: number): number {
+  const aim = s.aiming;
+  return aim ? Math.max(0, Math.min(1, (time - aim.startedAt) / Math.max(0.01, aim.readyAt - aim.startedAt))) : 1;
+}
+
 /** Everything but the atlas lookup, in one call. */
 export function pickAnimation(s: Soldier, time: number, targetPos?: Vec2 | null, posture: Posture = postureFor(s, time), speedMps?: number): AnimPick {
   const mood = moodFor(s, time, speedMps);
@@ -266,7 +340,15 @@ export function pickAnimation(s: Soldier, time: number, targetPos?: Vec2 | null,
   const flinch = isFlinching(s, time) && !GAITS.has(action) && action !== 'fire';
   if (flinch && action !== 'hit') action = 'hide';
   const weapon = weaponSuffix(s.weaponId);
-  return { posture, action, mood, weapon, heading: headingFor(s, targetPos, speedMps), keys: entryKeyChain(posture, action, mood, weapon), flinch };
+  let keys = entryKeyChain(posture, action, mood, weapon);
+  if (action === 'aim' && s.aiming && s.aiming.startedAt - s.lastFiredAt > 2) {
+    // The atlas has no dedicated raise: lowered -> alert low-ready -> shouldered aim.
+    // A follow-up shot keeps the rifle up instead of repeating the full raise.
+    const progress = aimProgress(s, time);
+    if (progress < 0.2) keys = entryKeyChain(posture, 'idle', 'calm', weapon);
+    else if (progress < 0.55) keys = entryKeyChain(posture, 'idle', 'alert', weapon);
+  }
+  return { posture, action, mood, weapon, heading: headingFor(s, targetPos, speedMps, time), keys, flinch };
 }
 
 // ------------------------------------------------------------------ crew-served weapons (§6) ---
@@ -341,7 +423,13 @@ export const HATCH_PROGRESS_KEYS = ['crew.bailout', 'crew.mount'] as const;
 export function hatchClimbAnim(s: Soldier, time: number): HatchClimbAnim | null {
   const c = s.hatch;
   if (!c) return null;
-  const p = Math.max(0, Math.min(1, (time - c.start) / Math.max(1e-6, c.until - c.start)));
+  let p = Math.max(0, Math.min(1, (time - c.start) / Math.max(1e-6, c.until - c.start)));
+  if (c.dropAt != null) {
+    // Give hauling himself out the first half of the frames and the hurried drop the rest.
+    p = time < c.dropAt
+      ? 0.5 * Math.max(0, Math.min(1, (time - c.start) / Math.max(1e-6, c.dropAt - c.start)))
+      : 0.5 + 0.5 * Math.max(0, Math.min(1, (time - c.dropAt) / Math.max(1e-6, c.until - c.dropAt)));
+  }
   const dx = c.to.x - c.from.x, dy = c.to.y - c.from.y;
   const heading = Math.abs(dx) + Math.abs(dy) > 1e-6 ? Math.atan2(dx, -dy) : 0;
   const out = c.kind === 'bailout';
@@ -442,3 +530,10 @@ export function ragdollHeading(blast: NonNullable<Soldier['blast']>, pos: Vec2):
 
 /** Metres -> screen px at `zoom` (10 px per metre at zoom 1). */
 export function metresToPx(m: number, zoom: number): number { return (m / TILE_M) * 20 * zoom; }
+
+/** B8: the sim marks when a medic has started bandaging; the renderer reads
+ *  `bandageUntil` (seconds of sim time) and plays the 'throw' pose as a
+ *  stand-in for a dedicated bandage anim while the clock is still counting. */
+export function markBandage(s: Soldier, until: number): void {
+  s.bandageUntil = until;
+}

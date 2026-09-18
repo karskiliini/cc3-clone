@@ -8,6 +8,8 @@ import { stepVehicleMinds, stepVehicles, onVehicleHit, onVehicleNearMiss } from 
 import { applyOrder } from '@/sim/orders';
 import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';
+import { dist } from '@/shared/math';
+import { hasLOS } from '@/sim/los';
 
 const W = 200, H = 200;
 
@@ -45,7 +47,7 @@ function makeState(map: GameMap): BattleState {
     },
     spotted: { german: new Set(), soviet: new Set() },
     spottedVehicles: { german: new Set(), soviet: new Set() },
-    messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [],
+    messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [], projectiles: [], sparks: [], pendingBursts: [], structureFx: [],
     result: null, events: [], nextId: 100,
   };
 }
@@ -94,7 +96,7 @@ function makeAtGunSoldier(id: number, pos: { x: number; y: number }): Soldier {
 }
 
 describe('vehicle crew mind: cover-seeking (spec §10)', () => {
-  it('a tank shot at by a visible PaK reverses toward cover blocking LOS to it, hull kept within 30 deg of it', () => {
+  it('a tank shot at by a visible PaK turns and drives into side cover blocking LOS to it', () => {
     // The building sits off to the side (not on the vehicle's current north-south line of sight to
     // the PaK, which starts clear) so that only a nearby tile behind it is actually better cover.
     const map = makeMap((tiles) => setTile(tiles, 12, 10, 'buildingStone'));
@@ -113,13 +115,13 @@ describe('vehicle crew mind: cover-seeking (spec §10)', () => {
     onVehicleHit(state, v, WEAPONS.pak40, false, { ...pak.pos });
 
     const rng = new Rng(1);
-    for (let i = 0; i < 10; i++) stepVehicleMinds(state, rng, 0.5);
+    for (let i = 0; i < 14 / 0.05; i++) { state.time += 0.05; stepVehicleMinds(state, rng, 0.05); }
 
     expect(cmdr.mind.threatLevel).toBeGreaterThan(0);
-    const hullToThreat = Math.abs(v.hullFacing - 0); // threat is due north (angle 0)
-    expect(Math.min(hullToThreat, Math.abs(hullToThreat - 2 * Math.PI))).toBeLessThanOrEqual(Math.PI / 6 + 1e-6);
-    // The vehicle should have moved away from its start position toward the blocked-LOS tile.
-    expect(v.pos.y).not.toBeCloseTo(10.5, 1);
+    // Cover lies to the side: the hull must turn to drive there, instead of facing north while
+    // the whole tank translates sideways. Cover remains a reachable, LOS-screened destination.
+    expect(dist(v.pos, { x: 10.5, y: 10.5 })).toBeGreaterThan(1);
+    expect(hasLOS(state.map, v.pos, pak.pos)).toBe(false);
   });
 
   it('a tank under rifle fire alone does not move (small arms never raise threatLevel above 0.3)', () => {
@@ -222,7 +224,7 @@ describe('vehicle crew fear from non-penetrating hits (spec §10.2)', () => {
 });
 
 describe('vehicle crew alarm from AT near misses (spec §10c)', () => {
-  it('a PaK round missing an unspotted tank alarms the crew and starts a reverse to cover', () => {
+  it('a PaK round missing an unspotted tank alarms the crew and starts a drive to cover', () => {
     const map = makeMap((tiles) => setTile(tiles, 12, 10, 'buildingStone'));
     const state = makeState(map);
     const v = makeVehicle(1, 1, 'pz4gh', { pos: { x: 10.5, y: 10.5 }, hullFacing: 0 });
@@ -236,8 +238,9 @@ describe('vehicle crew alarm from AT near misses (spec §10c)', () => {
     expect(cmdr.mind.threatLevel).toBeGreaterThanOrEqual(0.8);
 
     const rng = new Rng(1);
-    for (let i = 0; i < 10; i++) stepVehicleMinds(state, rng, 0.5);
-    expect(v.pos.y).not.toBeCloseTo(10.5, 1);
+    for (let i = 0; i < 14 / 0.05; i++) { state.time += 0.05; stepVehicleMinds(state, rng, 0.05); }
+    expect(dist(v.pos, { x: 10.5, y: 10.5 })).toBeGreaterThan(1);
+    expect(hasLOS(state.map, v.pos, pakPos)).toBe(false);
   });
 
   it('small-arms misses do not alarm a tank crew', () => {

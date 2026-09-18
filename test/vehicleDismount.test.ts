@@ -65,7 +65,7 @@ describe('bailing out is seen and takes time', () => {
     }
   });
 
-  it('an orderly dismount takes 1.5 to 2.5 s per man and ends kneeling by the vehicle; a panicked one is faster and ends in a run', () => {
+  it('an orderly dismount takes 1.5 to 2.5 s per man and ends kneeling by the vehicle; a panicked one takes longer and ends prone in shock', () => {
     const a = tank('pz4gh', 80);
     bailOut(a.state, a.v, a.team, 'abandoned', null, { panicked: false, cause: 'shortCrew' });
     const first = climbing(a.crew)[0];
@@ -84,13 +84,15 @@ describe('bailing out is seen and takes time', () => {
     const b = tank('pz4gh', 30);
     bailOut(b.state, b.v, b.team, 'abandoned');
     const runner = climbing(b.crew)[0];
-    const quick = runner.hatch!.until - runner.hatch!.start;
-    expect(quick).toBeLessThan(dur);
-    step(b.state, new Rng(2), quick + 0.05);
+    const panicClimb = runner.hatch!.until - runner.hatch!.start;
+    expect(panicClimb).toBeGreaterThan(dur);
+    step(b.state, new Rng(2), panicClimb + 0.05);
     expect(runner.hatch).toBeUndefined();
-    expect(runner.activity).toBe('panicked');
+    expect(runner.stance).toBe('prone');
+    expect(runner.dazedUntil).toBeGreaterThan(b.state.time);
+    const landed = { ...runner.pos };
     step(b.state, new Rng(2), 1);
-    expect(dist(runner.pos, b.v.pos) * TILE_M).toBeGreaterThan(VEHICLE_DEFS[b.v.defId].widthM / 2 + 2); // already running
+    expect(dist(runner.pos, landed)).toBeLessThan(0.01);
 
     // a wounded man takes longer
     const c = tank('pz4gh', 80);
@@ -155,7 +157,9 @@ describe('bailing out is seen and takes time', () => {
       fires++;
       expect(v.state).toBe('burning');
       expect(v.exiting?.fire).toBe(true);
-      step(state, rng, 6);
+      // Injured crew now struggle through each hatch before dropping down; a shared hatch
+      // must have time for all its surviving men, including those wounded by the fire.
+      step(state, rng, 18);
       for (const c of crew) if (!down(c)) { expect(c.vehicleId).toBeNull(); expect(c.hatch).toBeUndefined(); }
     }
     expect(fires).toBeGreaterThan(3);
