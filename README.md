@@ -60,6 +60,11 @@ order first (hotkey, order bar, or right-click menu), then click the target.
   dismantles a gun already mounted; a lone portable-gun operator can pack the gun and leave its
   tripod behind. Carriers move more slowly with their hands occupied. `tools/mgMountPreview.html`
   demonstrates packing, casualties, recovery and remounting with the real simulation and renderer.
+- Explosions account for posture and physical shelter. Trenches, craters and intervening walls
+  reduce injury, suppression and knockback; exposed standing men are more vulnerable than men
+  crouching or prone. Grass and smoke provide no blast shielding. A burst inside the same
+  fighting position bypasses its shelter. Shells, rockets, grenades and vehicle detonations use
+  the same exposure rules. `tools/blastProtectionPreview.html` compares the resulting motion.
 - Unit vision: while teams are selected the map shows what they can see of an enemy standing in the open —
   untouched where he would be spotted for sure, a dark-green tint where only obscured (concealment, distance,
   behind the soldiers' facing), darkened where out of range (300 m ring) or blocked. **L** toggles it

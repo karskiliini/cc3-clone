@@ -65,7 +65,7 @@ describe('blast knockback', () => {
       expect(s.blast!.time).toBe(10);
       return (s.pos.x - (10.5 + dTiles)) * TILE_M;
     };
-    const near = throwOf(mortar, 0.5), far = throwOf(mortar, 2.5), small = throwOf(grenade, 0.5);
+    const near = throwOf(mortar, 0.5), far = throwOf(mortar, 2), small = throwOf(grenade, 0.5);
     for (const m of [near, far, small]) { expect(m).toBeGreaterThanOrEqual(1 - 1e-6); expect(m).toBeLessThanOrEqual(15 + 1e-6); }
     expect(near).toBeGreaterThan(far);
     expect(near).toBeGreaterThan(small);

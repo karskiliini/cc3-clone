@@ -20,6 +20,7 @@ import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';
 import { addMessage } from './messages';
 import { coverFrom } from './cover';
+import { blastExposure, type BlastExposure } from './blastExposure';
 import { applyDaze, isDazed, recoveryFactor } from './daze';
 import { onIncomingFire, onExplosionNear, onOwnWound, onCasualtySeen, onGunnerHit, onFired, isFirstFireFrozen, addStress, onKnockedDown } from './mind';
 import { isVehicleReversing, onVehicleHit, onVehicleNearMiss } from './vehicle';
@@ -382,6 +383,7 @@ export function applyHit(
   rng: Rng,
   killerSide?: Side,
   killer?: Soldier,
+  coverOverride?: number,
 ): void {
   // A soldier who is already incapacitated or dead cannot be hit again: no re-rolled outcome, no
   // repeated kill/casualty message, no double-counted kill (regression: the same "has been killed"
@@ -389,7 +391,7 @@ export function applyHit(
   // already-incapacitated body before it was excluded from targeting).
   if (victim.health === 'dead' || victim.health === 'incapacitated') return;
 
-  const cover = coverAt(state.map, victim.pos);
+  const cover = coverOverride ?? coverAt(state.map, victim.pos);
   const result: Health | null = damageRoll(weapon, cover, rng);
   if (!result) return;
 
@@ -478,31 +480,32 @@ export function blastForce(weapon: WeaponDef, dTiles: number): number {
   return (1 - dTiles / radiusTiles) * clamp(weapon.heRadiusM / 6, 0.4, 1.5);
 }
 
-/** Spec 2026-09-17 §4, sim side: an HE burst throws a man 0.5-15 m straight away from it (scaled
+/** An exposed man is thrown away from a sufficiently strong burst, up to 15 m (scaled
  * by force; never through a wall, a vehicle, water or off the map — it stops at the last passable
- * point), records the `blast` for the renderer's ragdoll, and knocks a SURVIVOR inside the inner
- * half of the radius down: prone, path dropped, unable to act for 1.5-4 s (longer when wounded or
- * green) with a stress spike through the mind's own hook. Seeded Rng only. */
-export function applyBlastKnockback(state: BattleState, rng: Rng, s: Soldier, burst: Vec2, weapon: WeaponDef, woundedByIt = false): void {
+ * point). The original posture and physical shelter attenuate force before throw, stun, daze
+ * and the renderer's flight arc. Weak waves cannot lift a man. Survivors in the inner radius
+ * land prone and temporarily cannot act; wounded/green men take longer to recover. */
+export function applyBlastKnockback(state: BattleState, rng: Rng, s: Soldier, burst: Vec2, weapon: WeaponDef, woundedByIt = false,
+  exposure: BlastExposure = blastExposure(state, s, burst), knockdownShare = 0.5): void {
   const radiusTiles = weapon.heRadiusM / TILE_M;
   const d = dist(s.pos, burst);
-  const force = blastForce(weapon, d);
-  if (force <= 0.05) return;
+  const force = blastForce(weapon, d) * exposure.force;
+  if (force < 0.22) return;
   const ang = d > 1e-3 ? Math.atan2(s.pos.y - burst.y, s.pos.x - burst.x) : rng.range(0, Math.PI * 2);
-  // User request: a big enough, close enough blast throws a man up to 15 m. Quadratic in force, so
-  // a grenade at arm's length gives about 5 m, a mortar bomb about 10 m, a heavy shell the full 15 m.
-  const throwM = clamp(1 + force * force * 9.5, 1, 15);
+  // Quadratic impulse keeps exposed standing men vulnerable without giving every sheltered man
+  // the old minimum one-metre throw. The renderer uses this same attenuated force for its arc.
+  const throwM = clamp(force * force * 9.5, 0, 15);
   const origin = { x: s.pos.x, y: s.pos.y };
   // the ground trace is shared with corpses, kit and body parts (debris.ts)
   const p = blastThrowEnd(state, origin, ang, throwM);
   s.pos = { x: p.x, y: p.y };
   s.blast = { from: { x: burst.x, y: burst.y }, time: state.time, force, origin };
   if (s.health === 'dead' || s.health === 'incapacitated') return;
-  if (d > radiusTiles / 2) return;
+  if (d > radiusTiles * knockdownShare) return;
   let stun = rng.range(1.5, 3);
   if (s.health === 'wounded') stun += 0.6;
   if (s.experience < 35) stun += 0.5;
-  s.stunnedUntil = state.time + Math.min(4, stun);
+  s.stunnedUntil = Math.max(s.stunnedUntil ?? 0, state.time + Math.min(4, stun * clamp(force / 0.6, 0.4, 1)));
   // then dazed, then recovering (sim/daze.ts): experience shortens it, a second blast extends it
   applyDaze(state, s, force, woundedByIt);
   s.stance = 'prone';
@@ -521,18 +524,23 @@ export function throwLooseObjects(state: BattleState, rng: Rng, burst: Vec2, wea
     if (Math.abs(s.pos.x - burst.x) > radiusTiles || Math.abs(s.pos.y - burst.y) > radiusTiles) continue;
     const d = dist(s.pos, burst);
     if (d > radiusTiles) continue;
+    const exposure = blastExposure(state, s, burst);
     dropKit(state, rng, s);
-    applyBlastKnockback(state, rng, s, burst, weapon);
-    if (isSevereBlast(weapon, d)) dismember(state, rng, s, burst, blastForce(weapon, d));
+    applyBlastKnockback(state, rng, s, burst, weapon, false, exposure);
+    if (exposure.cover < 0.5 && isSevereBlast(weapon, d)) dismember(state, rng, s, burst, blastForce(weapon, d) * exposure.force);
   }
   const forceAt = (dTiles: number): number => blastForce(weapon, dTiles);
   throwItems(state, rng, burst, radiusTiles, forceAt);
   throwDebris(state, rng, burst, radiusTiles, forceAt);
 }
 
-export function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: WeaponDef, shooterSide: Side, from?: Vec2, skipVehicleId?: number): void {
-  const map = state.map;
+export function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: WeaponDef, shooterSide: Side, from?: Vec2, skipVehicleId?: number,
+  blastOptions: { innerLethalM?: number; knockdownShare?: number; directHitId?: number; killer?: Soldier } = {}): void {
   const radiusTiles = weapon.heRadiusM / TILE_M;
+  // Perceived shock uses the position and posture at impact, before any throw or casualty.
+  for (const s of state.soldiers.values()) {
+    if (s.health !== 'dead' && s.health !== 'incapacitated' && s.vehicleId == null) onExplosionNear(state, s, pos);
+  }
   if (radiusTiles > 0) {
     // men this burst gets to act on as living targets; the bodies already lying there are thrown
     // afterwards (throwLooseObjects), so nobody is thrown twice by one burst
@@ -546,13 +554,15 @@ export function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: W
       const d = dist(s.pos, pos);
       if (d > radiusTiles) continue;
       hitNow.add(s.id);
-      const cover = coverAt(map, s.pos);
+      const exposure = blastExposure(state, s, pos);
       const healthBefore = s.health;
-      const chance = (1 - d / radiusTiles) * weapon.lethality * (1 - cover * 0.7);
+      const falloff = 1 - d / radiusTiles;
+      const inner = blastOptions.innerLethalM != null && d * TILE_M <= blastOptions.innerLethalM;
+      const chance = blastOptions.directHitId === s.id ? 1 : clamp((inner ? 1 : falloff * weapon.lethality) * exposure.injury, 0, 1);
       if (rng.chance(chance)) {
-        applyHit(state, s, weapon, rng, shooterSide);
+        applyHit(state, s, weapon, rng, shooterSide, blastOptions.killer, exposure.cover);
       } else {
-        const amount = weapon.suppression * 30;
+        const amount = weapon.suppression * 30 * falloff * exposure.shock;
         s.suppression = clamp(s.suppression + amount, 0, 100);
         addSuppressionStat(state, shooterSide, amount);
       }
@@ -560,16 +570,12 @@ export function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: W
       const health = s.health as Health; // applyHit may have changed it
       const down = health === 'dead' || health === 'incapacitated';
       if (down) dropKit(state, rng, s);
-      applyBlastKnockback(state, rng, s, pos, weapon, healthBefore !== 'wounded' && health === 'wounded');
-      shedGearInBlast(state, rng, s, pos, blastForce(weapon, d));
+      applyBlastKnockback(state, rng, s, pos, weapon, healthBefore !== 'wounded' && health === 'wounded', exposure, blastOptions.knockdownShare);
+      shedGearInBlast(state, rng, s, pos, blastForce(weapon, d) * exposure.force);
       // spec 2026-09-17 §8: a severe blast tears the casualty apart
-      if (down && isSevereBlast(weapon, d)) dismember(state, rng, s, pos, blastForce(weapon, d));
+      if (down && exposure.cover < 0.5 && isSevereBlast(weapon, d)) dismember(state, rng, s, pos, blastForce(weapon, d) * exposure.force);
     }
     throwLooseObjects(state, rng, pos, weapon, hitNow);
-  }
-  for (const s of state.soldiers.values()) {
-    if (s.health === 'dead' || s.health === 'incapacitated' || s.vehicleId != null) continue;
-    onExplosionNear(state, s, pos);
   }
   // bursts on or beside enemy vehicles: top hits, fragments into open compartments
   if (radiusTiles > 0) {
@@ -586,25 +592,6 @@ export function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: W
   leaveCrater(state, pos, weapon);
   treesInBlast(state, rng, pos, weapon);
   applyBlastDamage(state, pos, weapon, { side: shooterSide, from });
-}
-
-/** A shell fired flat by a gun crew (AT gun, infantry gun, Panzerfaust) bursts where it lands.
- * resolveRound has already rolled the direct hit and the suppression it causes, so this adds only
- * what an explosion does to the WORLD — the burst effect, the ground mark and the structure damage
- * — never a second casualty roll against the men it has already been resolved against. Without it
- * a gun crew could shell a building all day and never scratch it: applyHESplash is reached only
- * from the vehicle, mortar and grenade paths. */
-function heBurstAt(state: BattleState, rng: Rng, pos: Vec2, weapon: WeaponDef, shooter: Soldier): void {
-  if (weapon.heRadiusM <= 0 || weapon.cls === 'flamethrower' || weapon.cls === 'grenade') return;
-  state.explosions.push({ pos: { ...pos }, radiusM: weapon.heRadiusM, t: 0, kind: weapon.heRadiusM >= 3 ? 'he' : 'small' });
-  state.events.push({ kind: 'explosion', pos: { ...pos }, side: shooter.side, weaponId: weapon.id });
-  leaveCrater(state, pos, weapon);
-  treesInBlast(state, rng, pos, weapon);
-  throwLooseObjects(state, rng, pos, weapon);
-  // the bodies, kit and parts lying there are part of the world too (spec 2026-09-17 §8 / §9)
-  // structure/terrain damage: walls breach, roofs cave (kept in heBurstAt, so every HE path
-  // — direct point fire, indirect fire, pending grenade bursts — hits the world the same way)
-  applyBlastDamage(state, pos, weapon, { side: shooter.side, from: shooter.pos });
 }
 
 /** Blast mark size by explosive: grenade ~1 m scorched hole, AT rocket a small scorch, mortar
@@ -855,11 +842,17 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
       areaImpact(state, rng, shooter.pos, shooter.side, weapon, shot.impact, shooter);
       return;
     }
+    if (weapon.heRadiusM > 0 && weapon.cls !== 'flamethrower') {
+      // One casualty roll for the direct hit, with the same wave affecting nearby men using
+      // their original posture and cover. Do not hit the target once here and again in splash.
+      applyHESplash(state, rng, { ...victim.pos }, weapon, shooter.side, shooter.pos, undefined,
+        { directHitId: victim.id, killer: shooter });
+      return;
+    }
     if (SMALL_ARMS_CLASSES.has(weapon.cls)) getTrack(state).smallArmsHit++;
     onIncomingFire(state, rng, victim, shooter, victim.pos, weapon.cls, false);
     applyHit(state, victim, weapon, rng, shooter.side, shooter);
     state.sparks.push({ pos: { ...victim.pos }, t: state.time, kind: 'body' });
-    heBurstAt(state, rng, victim.pos, weapon, shooter);
   } else {
     const spread = 0.5 + distM / 200;
     const aimed = { x: victim.pos.x + rng.gauss() * spread, y: victim.pos.y + rng.gauss() * spread };
@@ -870,8 +863,11 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
       areaImpact(state, rng, shooter.pos, shooter.side, weapon, impact, shooter);
       return;
     }
+    if (weapon.heRadiusM > 0 && weapon.cls !== 'flamethrower') {
+      applyHESplash(state, rng, impact, weapon, shooter.side, shooter.pos, undefined, { killer: shooter });
+      return;
+    }
     if (weapon.heRadiusM === 0) state.explosions.push({ pos: { ...impact }, radiusM: 0, t: 0, kind: 'small' });
-    else heBurstAt(state, rng, impact, weapon, shooter);
     onIncomingFire(state, rng, victim, shooter, impact, weapon.cls);
     for (const s2 of state.soldiers.values()) {
       if (s2.side === shooter.side) continue;

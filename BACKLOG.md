@@ -11,12 +11,16 @@ Process requests in the order received. New requests are appended to the queue w
 
 ## Active
 
-None.
+**010 — Bug/feature: Explosion protection and posture.**
+
+Request: Good cover should substantially reduce explosion effects. Exposed standing soldiers should take more damage and be thrown by sufficiently strong blasts.
+
+Completion: Apply cover and posture consistently to blast injury, suppression, knockback and recovery, including vehicle explosions. Preserve directional protection and close exposed blast danger, verify relative outcomes and visible knockdown behavior, then commit and push.
 
 ## Queued
 
 None.
-The next request receives ID 010.
+The next request receives ID 011.
 
 ## Completed
 
