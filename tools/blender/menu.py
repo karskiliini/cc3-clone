@@ -5,8 +5,8 @@
 Also writes public/menu/poster_plain.png: the same scene without the soldier, the backdrop of the
 working screens (setup, requisition, options, debrief) where he would only compete with the panels.
 
-The CC3 menu look, in our own art: a Soviet rifleman (SSh-40 helmet, greatcoat) points out at the viewer from the left third, rim-lit by a burning town whose ruins
-stand against the fire glow behind the menu buttons.  Everything is a simple procedural shape
+The CC3 menu look, in our own art: a Soviet rifleman (SSh-40 helmet, greatcoat) on the left third
+points toward the menu buttons, rim-lit by a burning town whose ruins stand against the fire glow behind the menu buttons.  Everything is a simple procedural shape
 (metaball body, lathed helmet, boxes); the drama comes from the lighting.  The render is graded in
 numpy with a single maroon-to-flame gradient map so the poster has one clean palette (no texture
 noise), then darkened toward the top bar and the bottom button strip so the chrome stays legible.
@@ -21,7 +21,7 @@ import sys
 import bpy
 import bmesh
 import numpy as np
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import clear_scene, make_material, save_png  # noqa: E402
@@ -57,7 +57,7 @@ def box(name, center, size, mat, rot_z=0.0):
     bm = bmesh.new()
     bmesh.ops.create_cube(bm, size=1.0)
     bmesh.ops.scale(bm, vec=Vector(size), verts=bm.verts)
-    bmesh.ops.rotate(bm, cent=(0, 0, 0), matrix=__import__("mathutils").Matrix.Rotation(rot_z, 3, "Z"), verts=bm.verts)
+    bmesh.ops.rotate(bm, cent=(0, 0, 0), matrix=Matrix.Rotation(rot_z, 3, "Z"), verts=bm.verts)
     bmesh.ops.translate(bm, vec=Vector(center), verts=bm.verts)
     bm.to_mesh(me)
     bm.free()
@@ -134,19 +134,6 @@ class Meta:
         return e
 
 
-def emission_mat(name, rgb, strength):
-    m = bpy.data.materials.new(name)
-    m.use_nodes = True
-    nt = m.node_tree
-    nt.nodes.clear()
-    em = nt.nodes.new("ShaderNodeEmission")
-    em.inputs["Color"].default_value = (*rgb, 1.0)
-    em.inputs["Strength"].default_value = strength
-    out = nt.nodes.new("ShaderNodeOutputMaterial")
-    nt.links.new(em.outputs[0], out.inputs[0])
-    return m
-
-
 def sky_mat():
     """Backdrop: emissive radial glow (fire) low right of centre fading to near black up top."""
     m = bpy.data.materials.new("sky")
@@ -209,7 +196,7 @@ def build():
     wood = make_material("wood", "#2c1c12", roughness=0.6)
     ruin = make_material("ruin", "#120c0a", roughness=1.0)
 
-    # ---- the rifleman, chest to the camera, pointing at the viewer with his left hand ----
+    # ---- the rifleman, chest to the camera, pointing with his left hand ----
     fx = 0.0      # modelled at the origin; the 'figure' empty places and turns him
     body = Meta("body", dark)
     body.ellipsoid((fx, 0.08, 1.02), 0.22, 0.13, 0.30)                     # chest (greatcoat)
@@ -219,7 +206,7 @@ def build():
     body.capsule((fx + 0.12, -0.02, 1.33), (fx + 0.02, -0.07, 1.20), 0.035)
     body.capsule((fx - 0.21, 0.08, 1.24), (fx - 0.25, 0.10, 0.86), 0.062)   # right arm hanging
     body.capsule((fx - 0.25, 0.10, 0.86), (fx - 0.22, 0.02, 0.60), 0.055)
-    # left arm (screen right) thrust at the viewer: shoulder -> elbow -> wrist, foreshortened
+    # left arm (screen right) thrust forward: shoulder -> elbow -> wrist, foreshortened
     sh = (fx + 0.19, 0.06, 1.25)
     el = (fx + 0.28, -0.18, 1.26)
     wr = (fx + 0.19, -0.46, 1.40)
@@ -259,7 +246,7 @@ def build():
     helm.rotation_euler = (math.radians(-7), 0, 0)
 
     # stand him left of the buttons, turned a little toward the fire (screen right) so the
-    # rim light draws his profile, the pointing hand still aimed at the viewer
+    # rim light draws his profile; he points past the viewer toward the menu buttons
     fig = bpy.data.objects.new("figure", None)
     scene.collection.objects.link(fig)
     fig.location = (FIG_X, 0.0, 0.0)
