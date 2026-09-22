@@ -7,7 +7,8 @@ working screens (setup, requisition, options, debrief) where he would only compe
 
 The CC3 menu look, in our own art: a Soviet rifleman (SSh-40 helmet, greatcoat) on the left third
 points toward the menu buttons, rim-lit by a burning town whose ruins stand against the fire glow behind the menu buttons.  Everything is a simple procedural shape
-(metaball body, lathed helmet, boxes); the drama comes from the lighting.  The render is graded in
+(metaball body, lathed helmet, boxes); the figure is a matte near-black silhouette that only the
+fire behind him rim-lights, like a poster.  The render is graded in
 numpy with a single maroon-to-flame gradient map so the poster has one clean palette (no texture
 noise), then darkened toward the top bar and the bottom button strip so the chrome stays legible.
 
@@ -29,7 +30,7 @@ from common import clear_scene, make_material, save_png  # noqa: E402
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 OUT = os.path.join(ROOT, "public", "menu", "poster.png")
 W, H = 800, 600
-FIG_X = -0.42   # figure position (m, screen left of centre)
+FIG_X = -0.50   # figure position (m, screen left of centre)
 SS = 2   # supersample
 
 # gradient map, luminance 0..1 -> sRGB (dark oxblood -> maroon -> brick red -> flame -> hot white)
@@ -180,7 +181,7 @@ def build():
     scene.world = bpy.data.worlds.new("w")
     scene.world.use_nodes = True
     scene.world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.01, 0.002, 0.002, 1)
-    scene.world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.3
+    scene.world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.02
 
     cam_d = bpy.data.cameras.new("cam")
     cam_d.lens = 40
@@ -190,60 +191,69 @@ def build():
     cam.rotation_euler = (math.radians(90), 0, 0)
     scene.camera = cam
 
-    dark = make_material("fig", "#241a16", roughness=0.95)
-    skin = make_material("skin", "#4a3228", roughness=0.85)
-    steel = make_material("steel", "#3c3a30", roughness=0.35, metallic=0.4)
-    wood = make_material("wood", "#2c1c12", roughness=0.6)
+    # the figure is a poster silhouette: dark, matte, no specular; only the fire behind him
+    # draws a thin warm rim along his edges
+    dark = make_material("fig", "#3a2a22", roughness=1.0)
+    dark.node_tree.nodes["Principled BSDF"].inputs["Specular IOR Level"].default_value = 0.0
     ruin = make_material("ruin", "#120c0a", roughness=1.0)
 
-    # ---- the rifleman, chest to the camera, pointing with his left hand ----
+    # ---- the rifleman in a greatcoat, rifle slung, pointing with his left hand ----
     fx = 0.0      # modelled at the origin; the 'figure' empty places and turns him
     body = Meta("body", dark)
-    body.ellipsoid((fx, 0.08, 1.02), 0.22, 0.13, 0.30)                     # chest (greatcoat)
-    body.ellipsoid((fx, 0.08, 0.70), 0.21, 0.12, 0.30)
-    body.capsule((fx - 0.19, 0.08, 1.29), (fx + 0.19, 0.08, 1.29), 0.072)   # shoulders
-    body.capsule((fx - 0.12, -0.02, 1.33), (fx - 0.02, -0.07, 1.20), 0.035)  # greatcoat collar
-    body.capsule((fx + 0.12, -0.02, 1.33), (fx + 0.02, -0.07, 1.20), 0.035)
-    body.capsule((fx - 0.21, 0.08, 1.24), (fx - 0.25, 0.10, 0.86), 0.062)   # right arm hanging
-    body.capsule((fx - 0.25, 0.10, 0.86), (fx - 0.22, 0.02, 0.60), 0.055)
-    # left arm (screen right) thrust forward: shoulder -> elbow -> wrist, foreshortened
-    sh = (fx + 0.19, 0.06, 1.25)
-    el = (fx + 0.28, -0.18, 1.26)
-    wr = (fx + 0.19, -0.46, 1.40)
-    body.capsule(sh, el, 0.062)
-    body.capsule(el, wr, 0.050)
-    body.capsule((fx - 0.07, 0.02, 1.34), (fx + 0.07, 0.02, 1.34), 0.045)   # collar
-    body.capsule((fx, 0.05, 1.32), (fx, 0.05, 1.46), 0.052)                 # neck
-    gear = Meta("gear", dark)                                                 # kit over the greatcoat
-    collar = lathe("collar", [(0.085 + 0.024 * math.cos(math.radians(t)), 0.03 * math.sin(math.radians(t)))
-                              for t in range(0, 361, 30)], dark, (fx, 0.05, 1.37), segs=32, scale=(1.0, 0.95, 1.0))
-    gear.capsule((fx - 0.17, -0.02, 1.30), (fx + 0.12, -0.10, 0.80), 0.014)   # bag strap across the chest
-    gear.capsule((fx + 0.17, -0.02, 1.30), (fx - 0.10, -0.10, 0.84), 0.012)
+    body.ellipsoid((fx, 0.08, 1.02), 0.24, 0.14, 0.32)                      # chest (greatcoat)
+    body.ellipsoid((fx, 0.08, 0.70), 0.23, 0.13, 0.30)
+    body.capsule((fx - 0.20, 0.08, 1.31), (fx + 0.20, 0.08, 1.31), 0.070)    # square shoulders
+    body.capsule((fx - 0.23, 0.08, 1.27), (fx - 0.27, 0.10, 0.88), 0.064)    # right arm hanging
+    body.capsule((fx - 0.27, 0.10, 0.88), (fx - 0.24, 0.02, 0.62), 0.056)
+    # left arm (screen right) thrust forward: shoulder -> elbow -> wrist
+    sh = (fx + 0.21, 0.06, 1.28)
+    el = (fx + 0.28, -0.08, 1.39)
+    wr = (fx + 0.29, -0.27, 1.56)
+    body.capsule(sh, el, 0.064)
+    body.capsule(el, wr, 0.050)                                               # greatcoat sleeve
+    body.capsule((fx, 0.05, 1.34), (fx, 0.05, 1.46), 0.050)                  # neck
+    collar = lathe("collar", [(0.098, 0.045), (0.088, 0.0), (0.084, -0.04)], dark,          # stand-up collar
+                   (fx, 0.05, 1.39), segs=32, scale=(1.0, 0.95, 1.0))
 
-    hand = Meta("hand", skin)
-    hand.ellipsoid((wr[0] + 0.005, wr[1] - 0.05, wr[2]), 0.042, 0.048, 0.040)           # fist
-    hand.capsule((wr[0] + 0.01, wr[1] - 0.08, wr[2] + 0.025),
-                 (wr[0] + 0.035, wr[1] - 0.15, wr[2] + 0.04), 0.012)                     # index finger
-    hand.capsule((wr[0] - 0.03, wr[1] - 0.06, wr[2] + 0.01),
-                 (wr[0] - 0.02, wr[1] - 0.10, wr[2] + 0.03), 0.013)                      # thumb
-    for k in range(3):                                                                    # curled fingers
-        hand.ellipsoid((wr[0] + 0.005, wr[1] - 0.085, wr[2] - 0.004 - 0.017 * k), 0.022, 0.018, 0.009)
+    # the hand at silhouette level, pointing ahead-right: back of the hand, a straight index
+    # finger, the thumb laid along it, three curled fingers under the knuckles
+    hand = Meta("hand", dark)
+    ax = Vector((0.80, -0.50, 0.28)).normalized()           # pointing direction (figure space)
+    up = Vector((0.0, 0.0, 1.0))
+    side = ax.cross(up).normalized()
+    w = Vector(wr)
+    P = lambda a, s_, u: tuple(w + ax * a + side * s_ + up * u)   # noqa: E731
+    hand.capsule(P(-0.03, 0, 0), P(0.02, 0, 0), 0.030)                    # cuff / wrist
+    hand.ellipsoid(P(0.055, 0, 0), 0.034, 0.030, 0.030)                   # back of the hand
+    hand.capsule(P(0.08, 0, 0.012), P(0.17, 0, 0.018), 0.0095)           # index finger
+    hand.capsule(P(0.05, 0.02, 0.022), P(0.095, 0.012, 0.028), 0.010)    # thumb
+    for k in range(3):                                                    # curled fingers
+        hand.capsule(P(0.085, 0, -0.004 - 0.014 * k), P(0.075, 0, -0.018 - 0.014 * k), 0.0085)
 
-    head = Meta("head", skin)
-    hz = 1.575
-    head.ellipsoid((fx, 0.04, hz), 0.082, 0.092, 0.108)
-    head.ellipsoid((fx, -0.005, hz - 0.07), 0.060, 0.050, 0.040)                        # jaw/chin
-    head.capsule((fx, -0.058, hz + 0.005), (fx, -0.07, hz - 0.03), 0.012)               # nose
-    head.capsule((fx - 0.04, -0.045, hz + 0.035), (fx + 0.04, -0.045, hz + 0.035), 0.014)  # brow
+    head = Meta("head", dark)
+    hz = 1.565
+    head.ellipsoid((fx, 0.04, hz), 0.080, 0.090, 0.104)
+    head.ellipsoid((fx, -0.005, hz - 0.068), 0.058, 0.050, 0.038)                       # jaw/chin
+    head.capsule((fx, -0.056, hz + 0.0), (fx, -0.068, hz - 0.03), 0.011)                # nose
     for sgn in (-1, 1):
-        head.ellipsoid((fx + sgn * 0.083, 0.04, hz - 0.005), 0.016, 0.026, 0.034)        # ears
+        head.ellipsoid((fx + sgn * 0.08, 0.04, hz - 0.01), 0.015, 0.024, 0.03)          # ears
 
-    # SSh-40: a deep hemispherical dome with a short, even lip all round (no German skirt/visor)
-    prof = [(0.001, 0.132)] + [(0.122 * math.sin(math.radians(a)), 0.132 * math.cos(math.radians(a)))
-                               for a in range(8, 91, 8)]
-    prof += [(0.126, -0.010), (0.138, -0.024), (0.141, -0.029)]
-    helm = lathe("helmet", prof, steel, (fx, 0.035, hz + 0.045), scale=(1.0, 1.08, 1.0))
-    helm.rotation_euler = (math.radians(-7), 0, 0)
+    # SSh-40: a low, deep dome whose sides come straight down over the temples and flare
+    # out slightly at the rim; no brim, no visor, no German neck skirt
+    prof = [(0.001, 0.112)] + [(0.121 * math.sin(math.radians(a)), 0.112 * math.cos(math.radians(a)))
+                               for a in range(10, 91, 10)]
+    prof += [(0.123, -0.030), (0.127, -0.050), (0.133, -0.062)]
+    helm = lathe("helmet", prof, dark, (fx, 0.035, hz + 0.05), scale=(1.0, 1.08, 1.0))
+    helm.rotation_euler = (math.radians(-5), 0, 0)
+
+    # Mosin slung on the right shoulder: muzzle and bayonet rise behind it, strap over the chest
+    r0 = Vector((fx - 0.15, 0.17, 0.62))
+    r1 = Vector((fx - 0.25, 0.19, 1.66))
+    d = (r1 - r0).normalized()
+    rifle = [cylinder("stock", r0, r0 + d * 0.6, 0.024, dark),
+             cylinder("barrel", r0 + d * 0.55, r1, 0.011, dark),
+             cylinder("bayonet", r1, r1 + d * 0.28, 0.0045, dark, segs=6),
+             cylinder("sling", (fx - 0.20, 0.0, 1.33), (fx + 0.06, -0.12, 0.75), 0.009, dark, segs=6)]
 
     # stand him left of the buttons, turned a little toward the fire (screen right) so the
     # rim light draws his profile; he points past the viewer toward the menu buttons
@@ -251,7 +261,7 @@ def build():
     scene.collection.objects.link(fig)
     fig.location = (FIG_X, 0.0, 0.0)
     fig.rotation_euler = (0, 0, math.radians(18))
-    for o in (body.o, gear.o, collar, hand.o, head.o, helm):
+    for o in (body.o, collar, hand.o, head.o, helm, *rifle):
         o.parent = fig
     fx = FIG_X
 
@@ -305,7 +315,7 @@ def build():
         mod.operation, mod.solver, mod.object = "DIFFERENCE", "EXACT", wo
         return o
 
-    facade(-16.0, 26.0, 10.0, 9.0, 1)
+    facade(-16.0, 26.0, 10.0, 5.0, 1)
     facade(-5.5, 36.0, 5.0, 6.0, 4)
     facade(2.0, 30.0, 8.0, 13.0, 2)
     facade(10.5, 21.0, 6.5, 7.0, 3)
@@ -339,8 +349,8 @@ def build():
         lo.rotation_quaternion = Vector((0, 0, -1)).rotation_difference((Vector(target) - Vector(loc)).normalized())
         return lo
 
-    area("rim", (fx + 1.1, 1.0, 1.8), (fx, 0.0, 1.3), 220.0, 0.8, (1.0, 0.55, 0.22))
-    area("rim2", (-1.3, 0.9, 1.9), (fx, 0.0, 1.4), 60.0, 0.8, (1.0, 0.35, 0.12))
+    area("rim", (fx + 0.8, 1.3, 1.7), (fx, 0.0, 1.3), 700.0, 0.5, (1.0, 0.55, 0.22))
+    area("rim2", (fx - 0.9, 1.3, 1.9), (fx, 0.0, 1.4), 300.0, 0.5, (1.0, 0.35, 0.12))
     area("glow", (3.0, 14.0, 1.5), (1.5, 5.0, 0.5), 120.0, 4.0, (1.0, 0.5, 0.15))
     return scene
 

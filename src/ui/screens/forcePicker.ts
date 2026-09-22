@@ -112,13 +112,15 @@ export class ForcePicker {
   private rosterScroll = 0;
   private mouse: Vec2 = { x: -1, y: -1 };
 
+  // pool on the left under FORCE POOL (reading up the left edge), roster on the right with
+  // ACTIVE ROSTER reading down the right edge: each title has its own clear column
   private regularBtn: Rect = { x: 60, y: 96, w: 104, h: 22 };
   private armorBtn: Rect = { x: 170, y: 96, w: 104, h: 22 };
-  private poolRect: Rect = { x: 60, y: 128, w: 330, h: 7 * ROW_H + 2 };
-  private infoRect: Rect = { x: 60, y: 346, w: 330, h: 146 };
-  private retireBtn: Rect = { x: 700, y: 96, w: 70, h: 22 };
-  private rosterRect: Rect = { x: 440, y: 128, w: 330, h: 7 * ROW_H + 2 };
-  private pointsRect: Rect = { x: 440, y: 346, w: 330, h: 34 };
+  private poolRect: Rect = { x: 60, y: 128, w: 324, h: 7 * ROW_H + 2 };
+  private infoRect: Rect = { x: 60, y: 346, w: 324, h: 146 };
+  private retireBtn: Rect = { x: 670, y: 96, w: 70, h: 22 };
+  private rosterRect: Rect = { x: 416, y: 128, w: 324, h: 7 * ROW_H + 2 };
+  private pointsRect: Rect = { x: 416, y: 346, w: 324, h: 34 };
 
   constructor(side: Side, year: number, points: number, initialRosterIds: string[]) {
     this.side = side;
@@ -226,7 +228,7 @@ export class ForcePicker {
     }
 
     // ---- active roster ----
-    drawVerticalStencil(ctx, 'ACTIVE ROSTER', 434, 492, 44, 364);
+    drawVerticalStencil(ctx, 'ACTIVE ROSTER', 748, 128, 44, 364, true);
     ctx.font = UI.label;
     ctx.textAlign = 'left';
     ctx.fillStyle = UI.text;

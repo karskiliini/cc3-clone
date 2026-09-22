@@ -13,15 +13,15 @@ interface MenuButtonSpec {
   action: () => void;
 }
 
-const BTN_W = 330;
+const BTN_W = 310;
 const BTN_H = 50;
 
 /** The title screen: three banner buttons stepped down across the fire glow, as in CC3. */
 export class MainMenuScreen implements Screen {
   private buttons: MenuButtonSpec[] = [
-    { label: 'Play A Game', rect: { x: 380, y: 170, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new BattleSetupScreen()) },
-    { label: 'Operation', rect: { x: 406, y: 262, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OperationScreen()) },
-    { label: 'Options', rect: { x: 432, y: 354, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OptionsScreen(this, false)) },
+    { label: 'Play A Game', rect: { x: 414, y: 170, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new BattleSetupScreen()) },
+    { label: 'Operation', rect: { x: 438, y: 262, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OperationScreen()) },
+    { label: 'Options', rect: { x: 462, y: 354, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OptionsScreen(this, false)) },
   ];
   private hotIndex = -1;
 

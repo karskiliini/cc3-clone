@@ -110,12 +110,13 @@ export class DebriefScreen implements Screen {
     const y0 = TEAMS.y + 64;
     const maxRows = Math.floor((TEAMS.y + TEAMS.h - 10 - y0) / rowH) + 1;
     const cols = [0, 118, 190, 228, 262];
-    for (let c = 0; c < 2; c++) {
+    const fled = state.fledSide === player;
+    const teams = [...state.teams.values()].filter((t) => t.side === player);
+    // the second column only when the list overflows the first
+    for (let c = 0; c < (teams.length > maxRows ? 2 : 1); c++) {
       const x = TEAMS.x + 20 + c * (colW + 20);
       ['Team', 'Experience', 'Men', 'Kills', 'State'].forEach((h, i) => drawLabel(ctx, h, x + cols[i], TEAMS.y + 44, UI.note, UI.dim));
     }
-    const fled = state.fledSide === player;
-    const teams = [...state.teams.values()].filter((t) => t.side === player);
     ctx.save();
     ctx.font = UI.body;
     teams.slice(0, maxRows * 2).forEach((team, i) => {

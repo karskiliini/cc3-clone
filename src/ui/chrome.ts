@@ -205,13 +205,15 @@ export function drawDarkPanel(ctx: CanvasRenderingContext2D, r: Rect): void {
   ctx.restore();
 }
 
-/** `text` rotated -90deg (reading bottom-to-top) in chunky letter-spaced Impact with a
- * dark outline and a flame gradient — the requisition screen's "FORCE POOL" /
- * "ACTIVE ROSTER" labels. `maxLen` squeezes the run to fit. */
-export function drawVerticalStencil(ctx: CanvasRenderingContext2D, text: string, x: number, yBottom: number, size: number, maxLen: number): void {
+/** `text` set vertically in chunky letter-spaced Impact with a dark outline and a flame
+ * gradient — the requisition screen's "FORCE POOL" / "ACTIVE ROSTER" labels, one on each
+ * outer edge. Upward (default): reads bottom-to-top from (x, y) = its baseline's bottom end,
+ * glyphs to the left of x. Downward: reads top-to-bottom from (x, y) = its top-left corner,
+ * glyphs to the right of x. `maxLen` squeezes the run to fit. */
+export function drawVerticalStencil(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, size: number, maxLen: number, downward = false): void {
   ctx.save();
-  ctx.translate(x, yBottom);
-  ctx.rotate(-Math.PI / 2);
+  ctx.translate(x, y);
+  ctx.rotate(downward ? Math.PI / 2 : -Math.PI / 2);
   ctx.font = `900 ${size}px Impact, "Arial Black", Arial, sans-serif`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
