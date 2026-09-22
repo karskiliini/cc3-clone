@@ -86,6 +86,7 @@ describe('shift-click waypoint chaining', () => {
     st.time += 1.2;
     stepOrderWaypoints(st);
     stepOrderWaypoints(st);
+    expect(team.order!.waypoints ?? []).not.toContainEqual(wp2);
   });
 
   /** A point whose routing leg FROM it fails (impassable start tile): routeVia to a chain through

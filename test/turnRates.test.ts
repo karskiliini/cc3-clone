@@ -33,7 +33,7 @@ function swingS(defId: string, deg: number, prepare?: (v: Vehicle) => void): num
 }
 
 describe('data: every vehicle carries its OWN historical rates', () => {
-  it('no shared default, no legacy field, no "hull rate x 2" turret rule anywhere', async () => {
+  it('no shared default, no legacy field, no "hull rate x 2" turret rule anywhere', () => {
     for (const def of Object.values(VEHICLE_DEFS)) {
       expect(def.turretTraverseDegS, def.id).toBeGreaterThan(0);
       expect(def.turretTraverseHandDegS, def.id).toBeGreaterThan(0);
@@ -51,18 +51,9 @@ describe('data: every vehicle carries its OWN historical rates', () => {
       expect(VEHICLE_DEFS[id].hullTurnDegS, id).toBe(hull);
     }
     expect([VEHICLE_DEFS.stug3g.gunArcDeg, VEHICLE_DEFS.marder3.gunArcDeg, VEHICLE_DEFS.su76.gunArcDeg, VEHICLE_DEFS.su85.gunArcDeg]).toEqual([12, 21, 16, 10]);
-    // source scan: the old rule is gone (fs walk — works under bun AND vitest, unlike import.meta.glob)
-    const sources: Record<string, string> = {};
-    // tsconfig has no node types (DOM project): read via Bun.Glob + Bun.file, cast through unknown
-    const bun = (globalThis as unknown as {
-      Bun: {
-        Glob: new (p: string) => { scan(o: { cwd: string; dot: boolean }): AsyncIterable<string> };
-        file: (p: string) => { text(): Promise<string> };
-      };
-    }).Bun;
-    for await (const rel of new bun.Glob('**/*.ts').scan({ cwd: new URL('../src/', import.meta.url).pathname, dot: false })) {
-      sources[rel] = await bun.file(new URL('../src/', import.meta.url).pathname + rel).text();
-    }
+    // source scan: the old rule is gone
+    const sources = (import.meta as unknown as { glob: (p: string, o: object) => Record<string, string> })
+      .glob('../src/**/*.ts', { query: '?raw', import: 'default', eager: true });
     expect(Object.keys(sources).length).toBeGreaterThan(20);
     for (const [f, text] of Object.entries(sources)) expect(/turnRateRad\s*\*\s*2/.test(text), f).toBe(false);
   });

@@ -418,7 +418,9 @@ export class BattleScreen implements Screen {
       this.setSelection(battle.selectableTeams(battle.playerSide()).map((t) => t.id));
     }
 
-    if (this.selectedTeamId != null && !this.commandMenu.isOpen) {
+    // no order hotkeys under Ctrl/Cmd: Ctrl+A is select all, not Assault
+    const modHeld = input.keysDown.has('control') || input.keysDown.has('meta');
+    if (this.selectedTeamId != null && !this.commandMenu.isOpen && !modHeld) {
       for (const ot of ORDER_TYPES) {
         if (input.keysPressed.has(ORDER_HOTKEYS[ot])) { this.pendingOrder = ot; this.pendingWaypoints = []; }
       }
