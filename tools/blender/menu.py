@@ -5,12 +5,14 @@
 Also writes public/menu/poster_plain.png: the same scene without the soldier, the backdrop of the
 working screens (setup, requisition, options, debrief) where he would only compete with the panels.
 
-The CC3 menu look, in our own art: a Soviet rifleman (SSh-40 helmet, greatcoat) on the left third
-points toward the menu buttons, rim-lit by a burning town whose ruins stand against the fire glow behind the menu buttons.  Everything is a simple procedural shape
-(metaball body, lathed helmet, boxes); the figure is a matte near-black silhouette that only the
-fire behind him rim-lights, like a poster.  The render is graded in
-numpy with a single maroon-to-flame gradient map so the poster has one clean palette (no texture
+The CC3 menu look, in our own art: a Soviet rifleman (SSh-40 helmet, greatcoat, Mosin slung muzzle
+up) on the left third, back three-quarters to the viewer, looks toward a burning town whose ruins
+stand against the fire glow behind the menu buttons.  Everything is a simple procedural shape
+(metaball body, lathed helmet, boxes).  The town render is graded in numpy with a single
+maroon-to-flame gradient map so the poster has one clean palette (no texture
 noise), then darkened toward the top bar and the bottom button strip so the chrome stays legible.
+The soldier is rendered only as a coverage mask and painted flat #120806 with a 1-2 px rim of fire
+light on the edges facing the glow, so he is a true poster silhouette with no shading at all.
 
 Scene: metres, camera looks along +Y, +Z up.  The figure stands at x<0 (screen left).
 --raw also writes poster_raw.png (the ungraded render) next to the poster, for tuning.
@@ -30,8 +32,9 @@ from common import clear_scene, make_material, save_png  # noqa: E402
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 OUT = os.path.join(ROOT, "public", "menu", "poster.png")
 W, H = 800, 600
-FIG_X = -0.50   # figure position (m, screen left of centre)
+FIG_X = -0.44   # figure position (m, screen left of centre)
 SS = 2   # supersample
+FIG_RGB = (18, 8, 6)   # the soldier's flat silhouette colour (#120806)
 
 # gradient map, luminance 0..1 -> sRGB (dark oxblood -> maroon -> brick red -> flame -> hot white)
 GRADE = [(0.00, (14, 4, 4)), (0.10, (38, 8, 7)), (0.28, (92, 20, 12)), (0.50, (168, 52, 22)),
@@ -188,80 +191,63 @@ def build():
     cam = bpy.data.objects.new("cam", cam_d)
     scene.collection.objects.link(cam)
     cam.location = (0.0, -1.55, 1.48)
-    cam.rotation_euler = (math.radians(90), 0, 0)
+    cam.rotation_euler = (math.radians(95), 0, 0)   # tilted up: more sky behind the figure
     scene.camera = cam
 
-    # the figure is a poster silhouette: dark, matte, no specular; only the fire behind him
-    # draws a thin warm rim along his edges
-    dark = make_material("fig", "#3a2a22", roughness=1.0)
-    dark.node_tree.nodes["Principled BSDF"].inputs["Specular IOR Level"].default_value = 0.0
+    # The figure only supplies a mask: main() paints it flat near-black and draws the rim in
+    # numpy, so no light, shading or specular can ever show on him.
+    fig_mat = make_material("fig", "#120806", roughness=1.0)
     ruin = make_material("ruin", "#120c0a", roughness=1.0)
 
-    # ---- the rifleman in a greatcoat, rifle slung, pointing with his left hand ----
-    fx = 0.0      # modelled at the origin; the 'figure' empty places and turns him
-    body = Meta("body", dark)
-    body.ellipsoid((fx, 0.08, 1.02), 0.24, 0.14, 0.32)                      # chest (greatcoat)
-    body.ellipsoid((fx, 0.08, 0.70), 0.23, 0.13, 0.30)
-    body.capsule((fx - 0.20, 0.08, 1.31), (fx + 0.20, 0.08, 1.31), 0.070)    # square shoulders
-    body.capsule((fx - 0.23, 0.08, 1.27), (fx - 0.27, 0.10, 0.88), 0.064)    # right arm hanging
-    body.capsule((fx - 0.27, 0.10, 0.88), (fx - 0.24, 0.02, 0.62), 0.056)
-    # left arm (screen right) thrust forward: shoulder -> elbow -> wrist
-    sh = (fx + 0.21, 0.06, 1.28)
-    el = (fx + 0.28, -0.08, 1.39)
-    wr = (fx + 0.29, -0.27, 1.56)
-    body.capsule(sh, el, 0.064)
-    body.capsule(el, wr, 0.050)                                               # greatcoat sleeve
-    body.capsule((fx, 0.05, 1.34), (fx, 0.05, 1.46), 0.050)                  # neck
-    collar = lathe("collar", [(0.098, 0.045), (0.088, 0.0), (0.084, -0.04)], dark,          # stand-up collar
-                   (fx, 0.05, 1.39), segs=32, scale=(1.0, 0.95, 1.0))
+    # ---- the rifleman, modelled facing +Y (into the scene), his right side at +X ----
+    body = Meta("body", fig_mat)
+    body.ellipsoid((0, 0, 1.04), 0.23, 0.14, 0.32)                         # greatcoat chest
+    body.ellipsoid((0, 0.01, 0.72), 0.25, 0.16, 0.34)                      # skirt widening down
+    body.capsule((-0.20, 0, 1.31), (0.20, 0, 1.31), 0.068)                 # square shoulders
+    body.capsule((0, 0.01, 1.34), (0, 0.02, 1.46), 0.050)                  # neck
+    # right arm: hand up on the sling in front of the shoulder
+    body.capsule((0.21, 0, 1.30), (0.25, 0.06, 1.02), 0.060)
+    body.capsule((0.25, 0.06, 1.02), (0.17, 0.15, 1.20), 0.050)
+    body.ellipsoid((0.16, 0.17, 1.23), 0.030, 0.035, 0.040)                # fist on the strap
+    # left arm hanging, elbow a little out
+    body.capsule((-0.21, 0, 1.30), (-0.26, 0.00, 1.00), 0.060)
+    body.capsule((-0.26, 0.00, 1.00), (-0.24, 0.05, 0.74), 0.052)
+    collar = lathe("collar", [(0.098, 0.045), (0.088, 0.0), (0.084, -0.04)], fig_mat,          # stand-up collar
+                   (0, 0.01, 1.39), segs=32, scale=(1.0, 0.95, 1.0))
 
-    # the hand at silhouette level, pointing ahead-right: back of the hand, a straight index
-    # finger, the thumb laid along it, three curled fingers under the knuckles
-    hand = Meta("hand", dark)
-    ax = Vector((0.80, -0.50, 0.28)).normalized()           # pointing direction (figure space)
-    up = Vector((0.0, 0.0, 1.0))
-    side = ax.cross(up).normalized()
-    w = Vector(wr)
-    P = lambda a, s_, u: tuple(w + ax * a + side * s_ + up * u)   # noqa: E731
-    hand.capsule(P(-0.03, 0, 0), P(0.02, 0, 0), 0.030)                    # cuff / wrist
-    hand.ellipsoid(P(0.055, 0, 0), 0.034, 0.030, 0.030)                   # back of the hand
-    hand.capsule(P(0.08, 0, 0.012), P(0.17, 0, 0.018), 0.0095)           # index finger
-    hand.capsule(P(0.05, 0.02, 0.022), P(0.095, 0.012, 0.028), 0.010)    # thumb
-    for k in range(3):                                                    # curled fingers
-        hand.capsule(P(0.085, 0, -0.004 - 0.014 * k), P(0.075, 0, -0.018 - 0.014 * k), 0.0085)
-
-    head = Meta("head", dark)
+    head = Meta("head", fig_mat)
     hz = 1.565
-    head.ellipsoid((fx, 0.04, hz), 0.080, 0.090, 0.104)
-    head.ellipsoid((fx, -0.005, hz - 0.068), 0.058, 0.050, 0.038)                       # jaw/chin
-    head.capsule((fx, -0.056, hz + 0.0), (fx, -0.068, hz - 0.03), 0.011)                # nose
+    head.ellipsoid((0, 0.02, hz), 0.080, 0.090, 0.104)
+    head.ellipsoid((0, 0.06, hz - 0.068), 0.058, 0.050, 0.038)             # jaw/chin
+    head.capsule((0, 0.10, hz), (0, 0.115, hz - 0.03), 0.011)              # nose
     for sgn in (-1, 1):
-        head.ellipsoid((fx + sgn * 0.08, 0.04, hz - 0.01), 0.015, 0.024, 0.03)          # ears
+        head.ellipsoid((sgn * 0.08, 0.02, hz - 0.01), 0.015, 0.024, 0.03)  # ears
 
     # SSh-40: a low, deep dome whose sides come straight down over the temples and flare
     # out slightly at the rim; no brim, no visor, no German neck skirt
     prof = [(0.001, 0.112)] + [(0.121 * math.sin(math.radians(a)), 0.112 * math.cos(math.radians(a)))
                                for a in range(10, 91, 10)]
     prof += [(0.123, -0.030), (0.127, -0.050), (0.133, -0.062)]
-    helm = lathe("helmet", prof, dark, (fx, 0.035, hz + 0.05), scale=(1.0, 1.08, 1.0))
-    helm.rotation_euler = (math.radians(-5), 0, 0)
+    helm = lathe("helmet", prof, fig_mat, (0, 0.005, hz + 0.05), scale=(1.0, 1.08, 1.0))
+    helm.rotation_euler = (math.radians(5), 0, 0)
 
-    # Mosin slung on the right shoulder: muzzle and bayonet rise behind it, strap over the chest
-    r0 = Vector((fx - 0.15, 0.17, 0.62))
-    r1 = Vector((fx - 0.25, 0.19, 1.66))
+    # Mosin slung on the right shoulder, muzzle up, bayonet fixed; the strap runs over the
+    # shoulder down the front to his fist
+    r0 = Vector((0.22, -0.15, 0.80))
+    r1 = Vector((0.36, -0.17, 1.72))
     d = (r1 - r0).normalized()
-    rifle = [cylinder("stock", r0, r0 + d * 0.6, 0.024, dark),
-             cylinder("barrel", r0 + d * 0.55, r1, 0.011, dark),
-             cylinder("bayonet", r1, r1 + d * 0.28, 0.0045, dark, segs=6),
-             cylinder("sling", (fx - 0.20, 0.0, 1.33), (fx + 0.06, -0.12, 0.75), 0.009, dark, segs=6)]
+    rifle = [cylinder("stock", r0, r0 + d * 0.55, 0.026, fig_mat),
+             cylinder("barrel", r0 + d * 0.50, r1, 0.012, fig_mat),
+             cylinder("bayonet", r1, r1 + d * 0.30, 0.005, fig_mat, segs=6),
+             cylinder("strap", (0.31, -0.16, 1.50), (0.21, 0.02, 1.36), 0.008, fig_mat, segs=6)]
 
-    # stand him left of the buttons, turned a little toward the fire (screen right) so the
-    # rim light draws his profile; he points past the viewer toward the menu buttons
+    # stand him on the left third, back three-quarters to the viewer, looking toward the
+    # burning town behind the menu buttons
     fig = bpy.data.objects.new("figure", None)
     scene.collection.objects.link(fig)
-    fig.location = (FIG_X, 0.0, 0.0)
-    fig.rotation_euler = (0, 0, math.radians(18))
-    for o in (body.o, collar, hand.o, head.o, helm, *rifle):
+    fig.location = (FIG_X, 0.0, 0.14)     # on a rise of rubble (below the frame)
+    fig.rotation_euler = (0, 0, math.radians(-38))
+    for o in (body.o, collar, head.o, helm, *rifle):
         o.parent = fig
     fx = FIG_X
 
@@ -338,7 +324,7 @@ def build():
     bm.free()
     obj("mound", gm, ruin)
 
-    # ---- light: fire rim from behind-right, a dim warm fill from the front-left ----
+    # ---- light: the fire's glow over the rubble ----
     def area(name, loc, target, energy, size, rgb):
         ld = bpy.data.lights.new(name, "AREA")
         ld.energy, ld.size, ld.color = energy, size, rgb
@@ -349,16 +335,15 @@ def build():
         lo.rotation_quaternion = Vector((0, 0, -1)).rotation_difference((Vector(target) - Vector(loc)).normalized())
         return lo
 
-    area("rim", (fx + 0.8, 1.3, 1.7), (fx, 0.0, 1.3), 700.0, 0.5, (1.0, 0.55, 0.22))
-    area("rim2", (fx - 0.9, 1.3, 1.9), (fx, 0.0, 1.4), 300.0, 0.5, (1.0, 0.35, 0.12))
     area("glow", (3.0, 14.0, 1.5), (1.5, 5.0, 0.5), 120.0, 4.0, (1.0, 0.5, 0.15))
     return scene
 
 
 # --------------------------------------------------------------------------------------- grade --
-def grade(rgba):
-    """Gradient-map the luminance onto the poster palette, then shade top bar / bottom strip."""
-    rgb = rgba[..., :3].astype(np.float32) / 255.0
+def grade(rgb255):
+    """Gradient-map the luminance onto the poster palette, then shade top bar / bottom strip.
+    Takes and returns float RGB(A) 0..255 arrays."""
+    rgb = rgb255[..., :3] / 255.0
     lum = rgb @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
     lum = np.clip(lum * 1.15, 0, 1) ** 0.85
     xs = np.array([g[0] for g in GRADE], dtype=np.float32)
@@ -372,11 +357,11 @@ def grade(rgba):
     r = np.sqrt(((x - 0.5) / 0.75) ** 2 + ((y - 0.5) / 0.75) ** 2)
     shade *= 1.0 - 0.45 * np.clip(r - 0.35, 0, 1) ** 1.5                   # vignette
     out *= shade[..., None]
-    res = np.dstack([np.clip(out + 0.5, 0, 255).astype(np.uint8), np.full((h, w), 255, np.uint8)])
-    return res
+    return np.dstack([out, np.full((h, w), 255, np.float32)]).astype(np.float32)
 
 
 def render(scene, name):
+    """Renders and returns the float RGBA image at supersampled size (H*SS, W*SS, 4), top row first."""
     tmp = os.path.join(bpy.app.tempdir or "/tmp", name)
     scene.render.filepath = tmp
     scene.render.image_settings.file_format = "PNG"
@@ -385,9 +370,34 @@ def render(scene, name):
     buf = np.empty(W * SS * H * SS * 4, dtype=np.float32)
     img.pixels.foreach_get(buf)
     bpy.data.images.remove(img)
-    a = buf.reshape(H * SS, W * SS, 4)[::-1]
-    a = a.reshape(H, SS, W, SS, 4).mean(axis=(1, 3))
-    return (np.clip(a, 0, 1) * 255 + 0.5).astype(np.uint8)
+    return buf.reshape(H * SS, W * SS, 4)[::-1].copy()
+
+
+def downsample(a):
+    """(H*SS, W*SS, C) float 0..255 -> (H, W, C) uint8, box filtered."""
+    h, w, c = a.shape
+    a = a.reshape(h // SS, SS, w // SS, SS, c).mean(axis=(1, 3))
+    return (np.clip(a, 0, 255) + 0.5).astype(np.uint8)
+
+
+def silhouette(town, mask):
+    """Paints the soldier over the graded town: flat #120806, plus a thin rim of fire light on
+    the edges that face the glow (up and to the right), fading out down the figure."""
+    m = mask[..., None]
+    out = town * (1 - m) + np.array(FIG_RGB, np.float32) * m
+    # rim: figure pixels whose neighbour toward the fire is background (about 2 px at 1:1)
+    k = 2 * SS
+    toward = np.zeros_like(mask)
+    toward[k:, :-k] = mask[:-k, k:]                       # the pixel up-right of each pixel
+    edge = np.clip(mask - toward, 0, 1)
+    side = np.zeros_like(mask)
+    side[:, :-k] = mask[:, k:]                            # the pixel to the right
+    edge = np.maximum(edge, np.clip(mask - side, 0, 1) * 0.8)
+    h = mask.shape[0]
+    fade = np.clip(1.25 - np.arange(h, dtype=np.float32) / h * 1.4, 0.25, 1.0)[:, None]
+    glow = np.clip(town * 1.25 + 30, 0, 255)                # the fire behind that edge, brighter
+    a = (edge * fade)[..., None] * 0.95
+    return out * (1 - a) + glow * a
 
 
 def main():
@@ -397,17 +407,33 @@ def main():
     scene.render.threads_mode = "FIXED"   # the machine is shared with other render jobs
     scene.render.threads = 4
     scene.cycles.use_denoising = True
-    rgba = render(scene, "poster.png")
-    if raw:
-        save_png(OUT.replace(".png", "_raw.png"), rgba)
-    save_png(OUT, grade(rgba))
-    print("wrote", OUT)
-    # the same town without the soldier: the backdrop of the working screens behind their panels
-    for o in bpy.data.objects["figure"].children:
+    figure = list(bpy.data.objects["figure"].children)
+
+    # the town alone (also the working screens' backdrop)
+    for o in figure:
         o.hide_render = True
+    raw_town = render(scene, "poster_plain.png")
+    town_ss = grade((np.clip(raw_town, 0, 1) * 255).astype(np.float32))
     plain = OUT.replace(".png", "_plain.png")
-    save_png(plain, grade(render(scene, "poster_plain.png")))
+    save_png(plain, downsample(town_ss))
     print("wrote", plain)
+    if raw:
+        save_png(OUT.replace(".png", "_raw.png"), downsample(np.clip(raw_town, 0, 1) * 255))
+
+    # the soldier's mask: only his objects, transparent film, alpha = coverage
+    others = [o for o in scene.objects if o.type in ("MESH", "META") and o not in figure]
+    for o in others:
+        o.hide_render = True
+    for o in figure:
+        o.hide_render = False
+    scene.render.film_transparent = True
+    scene.cycles.samples = 16
+    scene.cycles.use_denoising = False
+    mask = render(scene, "poster_mask.png")[..., 3]
+
+    rgb = silhouette(town_ss[..., :3], mask)
+    save_png(OUT, downsample(np.dstack([rgb, np.full(mask.shape, 255, np.float32)])))
+    print("wrote", OUT)
 
 
 main()
