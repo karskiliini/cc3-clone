@@ -83,7 +83,7 @@ function makeState(map: ReturnType<typeof buildMap>): BattleState {
     explosions: [],
     tracers: [],
     flashes: [],
-    bloodDecals: [],
+    bloodDecals: [], projectiles: [], sparks: [], pendingBursts: [], structureFx: [],
     result: null,
     events: [],
     nextId: 1000,

@@ -40,8 +40,9 @@ import {
   missionBracketMul, onMissionShotAtVehicle,
 } from './crewWeapon';
 import { observerVisibility } from './spotting';
-import { applyBlastDamage } from './structures';
+import { treesInBlast } from './trees';
 import { blastThrowEnd, dismember, isSevereBlast, throwDebris } from './debris';
+import { applyBlastDamage } from './structures';
 import { dropKit, shedGearInBlast, throwItems } from './items';
 import type { Order } from '@/shared/types';
 
@@ -573,9 +574,12 @@ function heBurstAt(state: BattleState, rng: Rng, pos: Vec2, weapon: WeaponDef, s
   state.explosions.push({ pos: { ...pos }, radiusM: weapon.heRadiusM, t: 0, kind: weapon.heRadiusM >= 3 ? 'he' : 'small' });
   state.events.push({ kind: 'explosion', pos: { ...pos }, side: shooter.side, weaponId: weapon.id });
   leaveCrater(state, pos, weapon);
-  applyBlastDamage(state, pos, weapon, { side: shooter.side, from: shooter.pos });
-  // the bodies, kit and parts lying there are part of the world too (spec 2026-09-17 §8 / §9)
+  treesInBlast(state, rng, pos, weapon);
   throwLooseObjects(state, rng, pos, weapon);
+  // the bodies, kit and parts lying there are part of the world too (spec 2026-09-17 §8 / §9)
+  // structure/terrain damage: walls breach, roofs cave (kept in heBurstAt, so every HE path
+  // — direct point fire, indirect fire, pending grenade bursts — hits the world the same way)
+  applyBlastDamage(state, pos, weapon, { side: shooter.side, from: shooter.pos });
 }
 
 /** Blast mark size by explosive: grenade ~1 m scorched hole, AT rocket a small scorch, mortar
@@ -685,8 +689,18 @@ function fireAtVehicle(
   const pSpot = aim === 'mass' ? p : p * spotHitMul(aim, distM, Math.abs(vehicle.speed) > 0.1, shot.skill ?? 0.7);
   const pAny = aim === 'mass' ? p : pSpot + (p - pSpot) * SPOT_MISS_STILL_HITS;
   const r = rng.next();
+  // the round is in flight (A1, visual): shells at ~600 m/s, rockets at 80 m/s. Damage is
+  // resolved at once (the visual catches up); the renderer plays the arrival on landing.
+  const projKind: 'shell' | 'atrocket' = weapon.cls === 'atrocket' ? 'atrocket' : 'shell';
+  const speed = projKind === 'atrocket' ? 80 : 600;
+  state.projectiles.push({
+    kind: projKind, weaponId: weapon.id, from: { ...shooterPos }, to: { ...vehicle.pos },
+    t0: state.time, flightS: Math.max(0.08, distM / speed), dirRad: angleTo(shooterPos, vehicle.pos),
+    arcM: 0, hitKind: r >= pAny ? 'ricochet' : 'impact', preResolved: true,
+  });
   if (r >= pAny) {
     if (wantTracer) state.tracers.push({ from: { ...shooterPos }, to: { ...vehicle.pos }, t: 0, hit: false, kind });
+    state.sparks.push({ pos: { ...vehicle.pos }, t: 0, kind: 'dust' });
     onVehicleNearMiss(state, vehicle, weapon, shooterPos);
     return false;
   }
@@ -696,7 +710,13 @@ function fireAtVehicle(
     weapon, round, shooterPos, shooterSide, shooterTeamId: shot.shooterTeamId, distM,
     aimPoint: aim !== 'mass' && r < pSpot ? aim : undefined,
   });
-  if (!res.penetrated) state.events.push({ kind: 'hit', pos: { ...vehicle.pos }, side: shooterSide });
+  if (!res.penetrated) {
+    state.events.push({ kind: 'armorClank', pos: { ...vehicle.pos }, side: shooterSide });
+    state.sparks.push({ pos: { ...vehicle.pos }, t: 0, kind: 'armor' });
+  } else {
+    state.events.push({ kind: 'penHit', pos: { ...vehicle.pos }, side: shooterSide });
+    state.sparks.push({ pos: { ...vehicle.pos }, t: 0, kind: 'pen' });
+  }
   if (vehicle.state !== 'knockedOut' && vehicle.state !== 'burning') {
     onVehicleHit(state, vehicle, weapon, res.penetrated, { ...shooterPos });
   }
@@ -788,6 +808,7 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
     if (wantTracer) state.tracers.push({ from: { ...shooter.pos }, to: { ...victim.pos }, t: 0, hit: true, kind: tracerKindFor(weapon) });
     onIncomingFire(state, rng, victim, shooter, victim.pos, weapon.cls, false);
     applyHit(state, victim, weapon, rng, shooter.side, shooter);
+    state.sparks.push({ pos: { ...victim.pos }, t: 0, kind: 'body' });
     heBurstAt(state, rng, victim.pos, weapon, shooter);
   } else {
     const spread = 0.5 + distM / 200;
@@ -828,6 +849,18 @@ function fireBurst(state: BattleState, rng: Rng, soldier: Soldier, weapon: Weapo
   const flashKind = weapon.cls === 'atgun' || weapon.cls === 'atrocket' ? 'shell' as const : undefined;
   state.flashes.push({ pos: { ...soldier.pos }, facing: facingAngle(soldier.facing), t: 0, kind: flashKind });
   state.events.push({ kind: 'shot', pos: { ...soldier.pos }, weaponId: weapon.id, side: soldier.side });
+  // B2: a rocket launcher vents its backblast — a dust puff behind the firer (opposite his
+  // facing), read by the renderer as a flash with no muzzle cone.
+  if (weapon.cls === 'atrocket') {
+    // B2: a rocket launcher vents its backblast — a dust puff behind the firer (opposite his
+    // facing), and the launch whomp for audio.
+    const back = facingTo(soldier.pos, tPos) + Math.PI;
+    state.sparks.push({
+      pos: { x: soldier.pos.x + Math.sin(back) * 1.2, y: soldier.pos.y - Math.cos(back) * 1.2 },
+      t: state.time, kind: 'backblast',
+    });
+    state.events.push({ kind: 'rocketLaunch', pos: { ...soldier.pos }, side: soldier.side, weaponId: weapon.id });
+  }
 
   // Every MG round and every tank/AT shell gets a tracer; small arms (rifle/
   // SMG) show a tracer roughly every 3rd shot, like the original's darting
@@ -948,19 +981,46 @@ function stepGrenades(state: BattleState, rng: Rng, dt: number, track: CombatTra
     if (s.health === 'dead' || s.health === 'incapacitated') continue;
     if (s.activity === 'surrendered' || s.activity === 'routed' || s.activity === 'sneaking' || s.activity === 'ambushing') continue;
     if (s.grenades <= 0 || isStunned(s, state.time) || isDazed(s, state.time)) continue;
+    const charging = state.teams.get(s.teamId)?.order?.type === 'assault';
     const timer = (track.grenadeTimer.get(s.id) ?? 0) - dt;
-    if (timer > 0) { track.grenadeTimer.set(s.id, timer); continue; }
+    // C4: an assaulting man throws on arrival, not on the cooldown — the whole point of the charge
+    if (timer > 0 && !charging) { track.grenadeTimer.set(s.id, timer); continue; }
 
     const enemy = nearestSpottedEnemy(state, s);
     if (enemy && dist(enemy.pos, s.pos) * TILE_M <= 25 && hasLOS(state.map, s.pos, enemy.pos)) {
       s.grenades--;
       track.grenadeTimer.set(s.id, 1 / 0.1);
       state.events.push({ kind: 'shot', pos: { ...s.pos }, weaponId: 'grenade', side: s.side });
-      applyHESplash(state, rng, enemy.pos, grenadeWeapon, s.side);
+      // ballistic throw (A1/B1): the man winds up (throwAt drives the animation), the grenade
+      // flies an arc, and the HE burst fires when it lands — not at throw time
+      s.throwAt = state.time;
+      const distM = dist(enemy.pos, s.pos) * TILE_M;
+      const flightS = 0.8 + Math.min(0.4, distM / 60);
+      state.projectiles.push({
+        kind: 'grenade', weaponId: grenadeWeapon.id, from: { ...s.pos }, to: { ...enemy.pos },
+        t0: state.time, flightS, dirRad: angleTo(s.pos, enemy.pos), arcM: 2 + Math.min(2, distM / 15),
+        hitKind: 'impact',
+      });
+      state.pendingBursts.push({ at: state.time + flightS, pos: { ...enemy.pos }, weaponId: grenadeWeapon.id, side: s.side, shooterId: s.id });
     } else {
       track.grenadeTimer.set(s.id, 1);
     }
   }
+}
+
+/** Delayed grenade/satchel bursts (A1): the HE splash fires at `at`, not at throw time. */
+export function stepPendingBursts(state: BattleState, rng: Rng): void {
+  if (state.pendingBursts.length === 0) return;
+  const due: number[] = [];
+  for (let i = 0; i < state.pendingBursts.length; i++) {
+    const b = state.pendingBursts[i];
+    if (state.time < b.at) continue;
+    const w = WEAPONS[b.weaponId];
+    const shooter = b.shooterId != null ? state.soldiers.get(b.shooterId) : undefined;
+    applyHESplash(state, rng, b.pos, w ?? WEAPONS.grenade, b.side, shooter?.pos);
+    due.push(i);
+  }
+  for (let i = due.length - 1; i >= 0; i--) state.pendingBursts.splice(due[i], 1);
 }
 
 // ------------------------------------------------------------------- mortars
@@ -1204,9 +1264,8 @@ function stepMortarTeam(state: BattleState, rng: Rng, dt: number, team: Team, tr
   const aim = pickMortarAim(state, team, gunner, weapon, track);
   if (!aim) return;
   const target = aim.pos;
-  const isSmokeOrder = aim.kind === 'smoke';
-  const distM = dist(gunner.pos, target) * TILE_M;
-
+  const distM = dist(team.pos, target) * TILE_M;
+  const isSmokeOrder = team.order?.type === 'smoke';
   const { obs, spotter, mul, own } = mortarObservation(state, team, target);
   const extraDelay = obs !== 'none' && spotter && !own
     ? MORTAR_SPOTTER_DELAY_S[1] - (MORTAR_SPOTTER_DELAY_S[1] - MORTAR_SPOTTER_DELAY_S[0]) * clamp(spotter.experience / 100, 0, 1)
@@ -1231,6 +1290,11 @@ function stepMortarTeam(state: BattleState, rng: Rng, dt: number, team: Team, tr
   const impact = { x: target.x + rng.gauss() * errTiles, y: target.y + rng.gauss() * errTiles };
   impact.x = clamp(impact.x, 0.01, state.map.width - 0.01);
   impact.y = clamp(impact.y, 0.01, state.map.height - 0.01);
+  state.projectiles.push({
+    kind: 'mortar', weaponId: weapon.id, from: { ...gunner.pos }, to: { ...impact },
+    t0: state.time, flightS: 3 + dist(gunner.pos, impact) * TILE_M / 60,
+    dirRad: angleTo(gunner.pos, impact), arcM: 10, hitKind: 'impact', preResolved: false,
+  });
 
   if (isSmokeOrder) {
     const order = team.order!;
@@ -1359,8 +1423,40 @@ function pickVehicleTarget(state: BattleState, vehicle: Vehicle): Target | null 
     const picked = pickVehicleAttackTarget(state, vehicle, weapon, order);
     if (picked !== 'free') return picked;
   }
-
   if (weapon && weapon.penetrationMm > 0) {
+    // An infantry team clearly firing at us right now (a man seen shooting within the last 3 s)
+    // is engaged first: the answer is HE at the men, even with a tank standing nearby. A target
+    // the PLAYER ordered (attack-unit fire) is handled above; a tank in defend/ambush facing
+    // enemy armour still goes for the tank (threat ranking below chooses the vehicle target and
+    // the loader then picks AP for it). Otherwise: threat ranking by time to first shot.
+    let firingTeamId: number | null = null;
+    let firingScore = Infinity;
+    for (const id of state.spotted[vehicle.side]) {
+      const s = state.soldiers.get(id);
+      if (!s || s.health === 'dead' || s.health === 'incapacitated') continue;
+      const d = dist(vehicle.pos, s.pos) * TILE_M;
+      if (d > weapon.rangeM) continue;
+      if (state.time - s.lastFiredAt < 3) {
+        const score = d / 100 + (vehicle.gunLay?.key === `t${s.teamId}` ? -4 : 0);
+        if (score < firingScore) { firingScore = score; firingTeamId = s.teamId; }
+      }
+    }
+    if (firingTeamId != null) {
+      const hisTeam = state.teams.get(firingTeamId);
+      if (hisTeam && !hisTeam.outOfAction) {
+        let bestMan: Soldier | null = null;
+        let bestD = Infinity;
+        for (const mid of hisTeam.soldierIds) {
+          const m = state.soldiers.get(mid);
+          if (!m || m.health === 'dead' || m.health === 'incapacitated') continue;
+          if (!state.spotted[vehicle.side].has(mid)) continue;
+          const d = dist(vehicle.pos, m.pos) * TILE_M;
+          if (d > weapon.rangeM || d >= bestD) continue;
+          bestD = d; bestMan = m;
+        }
+        if (bestMan) return { kind: 'soldier', soldier: bestMan };
+      }
+    }
     // threat ranking by TIME TO FIRST SHOT: the enemy we can lay on soonest and who can lay on us
     // soonest comes first (a duel is decided by who lays first); the target already being laid on
     // is kept unless another is clearly more urgent; range breaks ties

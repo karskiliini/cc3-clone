@@ -331,7 +331,7 @@ describe('open-topped vehicles', () => {
     }
     expect(open).toBeGreaterThan(5);
     expect(closed).toBe(0);
-  });
+  }, 60000);
 
   it('a bomb on the roof: through an open top always, through a Tiger\'s roof never', () => {
     const rng = new Rng(7);

@@ -35,7 +35,7 @@ function makeState(): BattleState {
     },
     spotted: { german: new Set(), soviet: new Set() },
     spottedVehicles: { german: new Set(), soviet: new Set() },
-    messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [],
+    messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [], projectiles: [], sparks: [], pendingBursts: [], structureFx: [],
     result: null, events: [], nextId: 100,
   };
 }
@@ -167,5 +167,49 @@ describe('daze and overrun', () => {
     expect(canReactToOverrun(state, s)).toBe(false);
     state.time = 26;
     expect(canReactToOverrun(state, s)).toBe(true);
+  });
+});
+
+describe('friendly hold and 0.5 m/s threshold', () => {
+  /** A corridor of impassable rock both sides of the road at y=30 so a friendly in the way has
+   * nowhere to dodge: the vehicle must halt, never crush him. */
+  function corridor(): { state: BattleState; tank: Vehicle; friend: Soldier } {
+    const { state, tank } = tankSetup();
+    for (let x = 22; x < 40; x++) {
+      state.map.tiles[x + 29 * W] = 'water' as Terrain;
+      state.map.tiles[x + 31 * W] = 'water' as Terrain;
+    }
+    const friend = addInfantry(state, 2, 'german', { x: 30.5, y: 30.5 }, { stance: 'prone', activity: 'pinned' });
+    return { state, tank, friend };
+  }
+
+  it('a friendly with nowhere to dodge halts the vehicle (speed 0 while held) and is never crushed', () => {
+    const { state, tank, friend } = corridor();
+    drive(state, new Rng(7), 3.5);
+    expect(friend.health).not.toBe('dead');
+    expect(friend.crushed).toBeUndefined();
+    // halted in front of the man: held, warning message issued
+    expect(tank.pos.x).toBeLessThan(29.9);
+    expect(state.messages.map((m) => m.text).some((t) => t.includes('our men in the way'))).toBe(true);
+    expect(tank.holdUntil).toBeDefined();
+  });
+
+  it('the held vehicle resumes once the man moves aside', () => {
+    const { state, tank, friend } = corridor();
+    drive(state, new Rng(7), 3.5);
+    expect(tank.pos.x).toBeLessThan(29.9);
+    // clear the way: he is no longer under the hull
+    friend.pos = { x: 30.5, y: 27.5 };
+    friend.stance = 'standing';
+    drive(state, new Rng(8), 3);
+    expect(tank.pos.x).toBeGreaterThan(31);
+  });
+
+  it('an enemy is crushed at 0.5 m/s: a slow enemy push still runs him down', () => {
+    const { state } = tankSetup();
+    const s = addInfantry(state, 2, 'soviet', { x: 30.5, y: 30.5 }, { stance: 'prone', activity: 'pinned' });
+    s.mind.state = 'pinned';
+    drive(state, new Rng(1), 12);
+    expect(s.health).toBe('dead');
   });
 });

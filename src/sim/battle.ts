@@ -17,20 +17,26 @@ import { stepGrowth } from './growth';
 import { stepVictory } from './victory';
 import { updateSpotting } from './spotting';
 import { stepSmoke } from './smoke';
-import { stepCombat } from './combat';
-import { stepMorale } from './morale';
+import { stepCombat, stepPendingBursts } from './combat';
+import { stepTreeFires } from './trees';
 import { stepAI, aiDeploy } from './ai';
+import { stepMorale } from './morale';
 import { addMessage } from './messages';
 import { stepMinds } from './mind';
 import { stepCoverSeeking } from './coverSeek';
 import { stepItemDrops } from './items';
 import { stepPickups } from './pickup';
+import { stepMedic } from './medic';
 import { TEAM_DEFS, VEHICLE_DEFS } from '@/data/units';
 import { getMap } from '@/data/maps';
 
 export { addMessage } from './messages';
 
 const DEPLOY_SPACING_TILES = 6;
+
+/** Seconds the leader's shouted order confirmation takes to land (B7): the team's order
+ * markers stay ghosted until then — the shout is visible, audible feedback of latency. */
+export const ORDER_SHOUT_CONFIRM_S = 0.8;
 
 export class Battle {
   state: BattleState;
@@ -67,6 +73,10 @@ export class Battle {
       result: null,
       events: [],
       nextId: 1,
+      projectiles: [],
+      sparks: [],
+      pendingBursts: [],
+      structureFx: [],
     };
 
     for (const side of SIDES) {
@@ -158,8 +168,10 @@ export class Battle {
     stepCombat(state, this.rng, dt);
     stepMorale(state, this.rng, dt);
     // kit as objects (spec 2026-09-17 §9): casualties leave theirs, able men pick things up
-    stepItemDrops(state, this.rng);
+    stepPendingBursts(state, this.rng);
+    stepTreeFires(state, this.rng, dt);
     stepPickups(state, this.rng, dt);
+    stepMedic(state, this.rng, dt);
     stepVictory(state, dt);
     stepSmoke(state.map, dt);
 
@@ -189,6 +201,18 @@ export class Battle {
     state.tracers = state.tracers.filter((t) => t.t < TRACER_LIFE);
     for (const f of state.flashes) f.t += dt;
     state.flashes = state.flashes.filter((f) => f.t < FLASH_LIFE);
+    // projectiles in flight: the visual plays the arrival when it lands (sim damage already applied)
+    if (state.projectiles.length > 0) {
+      for (const p of state.projectiles) {
+        if (!p.preResolved && state.time >= p.t0 + p.flightS) p.preResolved = true;
+      }
+      state.projectiles = state.projectiles.filter((p) => state.time < p.t0 + p.flightS + (p.kind === 'mortar' ? 0.25 : 0.1));
+    }
+    // impact sparks / puffs (A2): t = spawn time; the renderer fades on state.time - t
+    if (state.sparks.length > 0) state.sparks = state.sparks.filter((s) => state.time - s.t < 0.8);
+    // delayed grenade/satchel bursts are consumed by sim/combat.ts stepPendingBursts
+    // structure FX visuals linger for the renderer, capped (B3)
+    if (state.structureFx.length > 32) state.structureFx.splice(0, state.structureFx.length - 32);
   }
 
   issueOrder(teamId: number, order: Order): void {
@@ -196,6 +220,17 @@ export class Battle {
     if (!team) return;
     const full: Order = { ...order, issuedAt: this.state.time };
     applyOrder(this.state, team, full, this.rng);
+    // B7: the leader shouts the order back — a beat later (voice over the din, not radio),
+    // so the audio reads as human latency rather than a UI click echo. Until the shout lands
+    // (ORDER_SHOUT_CONFIRM_S) the team's order marker renders ghosted (orderMarkers.ts).
+    const leader = this.state.soldiers.get(team.leaderId);
+    if (leader && leader.health !== 'dead' && leader.health !== 'incapacitated') {
+      team.shoutAt = this.state.time + ORDER_SHOUT_CONFIRM_S;
+      this.state.events.push({
+        kind: 'orderShout', pos: { ...leader.pos }, side: leader.side,
+        weaponId: order.type, teamId: team.id,
+      });
+    }
   }
 
   deployTeam(teamId: number, pos: Vec2): boolean {

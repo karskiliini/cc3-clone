@@ -34,7 +34,9 @@ import {
   paintCrater, paintFoxhole, paintTrenches, buildTrenchDraw, craterExtentPx, foxholeExtentPx, oldCraterDiameter,
   type CraterDraw, type FoxholeDraw, type TrenchDraw,
 } from '@/render/craterArt';
-import { worldToScreen, ZOOM_LEVELS } from '@/engine/camera';
+import { worldToScreen, ZOOM_MIN, ZOOM_MAX } from '@/engine/camera';
+/** The zoom levels the chunk cache keys on, sampled across the continuous range. */
+const ZOOM_LEVELS = [0.5, 0.75, 1, 1.5, 2];
 
 const CHUNK_TILES = 16;
 const CHUNK_PX = CHUNK_TILES * TILE_PX; // 320

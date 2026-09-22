@@ -36,7 +36,7 @@ function makeState(): BattleState {
       soviet: { side: 'soviet', morale: 80, truceOffered: false, truceAccepted: false, kills: 0, losses: 0, score: 0 },
     },
     spotted: { german: new Set(), soviet: new Set() }, spottedVehicles: { german: new Set(), soviet: new Set() },
-    messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [], result: null, events: [], nextId: 10,
+    messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [], projectiles: [], sparks: [], pendingBursts: [], structureFx: [], result: null, events: [], nextId: 10,
   };
 }
 const mortar: WeaponDef = {

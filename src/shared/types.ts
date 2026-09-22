@@ -428,6 +428,11 @@ export interface Soldier {
   seat?: 'passenger';
   /** Just out of a vehicle in a panic (§10): he runs to `to` whatever his mind says, until then. */
   bailRun?: { to: Vec2; until: number };
+  /** A grenade throw (B1/A1): the throw animation plays until this battle time; the projectile
+   * was spawned at release. */
+  throwAt?: number;
+  /** Carrying an incapacitated comrade (B8): which man, since when. Half speed, patient hidden. */
+  carrying?: { patientId: number; since: number };
 }
 
 /** Kit lying on the ground (spec 2026-09-17 §9; sim/items.ts). `weapon`: `weaponId` with the
@@ -475,9 +480,73 @@ export interface Debris {
    * lands on; cleared once resolved) */
   landAt?: number;
 }
+// ----------------------------------------------------------------- projectiles
+export type ProjectileKind = 'shell' | 'atrocket' | 'grenade' | 'satchel' | 'mortar';
+/** A round in flight, VISUAL ONLY (sim damage resolution stays instant). Pushed by sim/combat.ts
+ * + sim/structures triggers; drawn by render/effects.ts `drawProjectiles`; expired when
+ * `state.time >= t0 + flightS`. */
+export interface Projectile {
+  kind: ProjectileKind;
+  weaponId: string;
+  from: Vec2;
+  to: Vec2;
+  t0: number;                 // battle seconds (launch)
+  flightS: number;
+  dirRad: number;             // for rocket/shell orientation
+  arcM: number;               // lob height: 0 AT shells/rockets, 2-4 grenade/satchel, 6-12 mortar
+  hitKind: 'impact' | 'ricochet' | 'airburst';
+  /** impact effect already pushed at launch (mortar/shell resolve instantly): the renderer plays
+   * the arrival spark when the projectile lands instead of pushing one. */
+  preResolved?: boolean;
+}
+/** Short-lived impact sparks/puffs (A2): capped list, drawn by drawSparks. */
+export interface Spark {
+  pos: Vec2;
+  t: number;
+  kind: 'armor' | 'dust' | 'wood' | 'stone' | 'brick' | 'body' | 'pen' | 'backblast';
+}
+/** Delayed grenade/satchel burst (A1): the HE splash fires when `state.time >= at`. */
+export interface PendingBurst {
+  at: number;
+  pos: Vec2;
+  weaponId: string;
+  side: Side;
+  shooterId?: number;
+}
+/** Building destruction visuals (B3): dust, chips, settling rubble over `extentTiles`. */
+export interface StructureFx {
+  kind: 'breach' | 'caveIn' | 'collapse';
+  pos: Vec2;
+  t0: number;
+  stone: boolean;
+  extentTiles: number[];
+}
+
+export interface BattleEvent {
+  kind: 'shot' | 'hit' | 'kill' | 'explosion' | 'vlCaptured' | 'teamBroken' | 'vehicleKO' | 'message' | 'truce' | 'ended'
+    /** a vehicle blows up (ammunition or fuel): `pos`, `radiusM`, `turretLanding` when the turret was thrown */
+    | 'vehicleExplosion'
+    /** a round cooking off in a burning vehicle: `pos` */
+    | 'cookOffPop'
+    /** a leader shouted an order to his team (B7): `teamId` */
+    | 'orderShout'
+    /** AT rocket launched from a shoulder (B2) */
+    | 'rocketLaunch'
+    /** non-penetrating armour hit (A2) */
+    | 'armorClank'
+    /** penetrating armour hit (A2) */
+    | 'penHit'
+    /** grenade landed and bounced (A1) */
+    | 'grenadeBounce'
+    /** weapon crew began setting up / packing a crew-served weapon (B4) */
+    | 'mgSetup'
+    /** a building lost structure (B3); `weaponId` carries 'breach' | 'caveIn' | 'collapse' */
+    | 'structureFx';
+}
 
 // ----------------------------------------------------------------- vehicles
 export type VehicleState = 'ok' | 'immobilized' | 'knockedOut' | 'burning' | 'abandoned';
+
 
 export interface VehicleDef {
   id: string;
@@ -592,6 +661,10 @@ export interface Vehicle {
   lastMainShotAt?: number;
   /** battle time until which a moving vehicle stands still for an aimed shot (short halt) */
   fireHaltUntil?: number;
+  /** C3: a vehicle held for a friendly man under its hull path until this battle time. */
+  holdUntil?: number;
+  /** A3: when the vehicle caught fire (visual burn timeline); set at fire start, kept after KO. */
+  fire?: { t0: number };
   /** when the current short halt began / battle time before which it will not halt again */
   fireHaltSince?: number;
   noFireHaltUntil?: number;
@@ -645,19 +718,22 @@ export type TeamType =
   | 'rifle' | 'smg' | 'mg' | 'mortar' | 'atgun' | 'sniper' | 'atteam'
   | 'tank' | 'spg' | 'halftrack' | 'command' | 'engineer';
 
-export type OrderType = 'move' | 'moveFast' | 'sneak' | 'fire' | 'smoke' | 'defend' | 'ambush';
-export const ORDER_TYPES: OrderType[] = ['move', 'moveFast', 'sneak', 'fire', 'smoke', 'defend', 'ambush'];
+export type OrderType = 'move' | 'moveFast' | 'sneak' | 'fire' | 'smoke' | 'defend' | 'ambush' | 'assault';
+export const ORDER_TYPES: OrderType[] = ['move', 'moveFast', 'sneak', 'fire', 'smoke', 'defend', 'ambush', 'assault'];
 export const ORDER_LABELS: Record<OrderType, string> = {
   move: 'MOVE', moveFast: 'MOVE FAST', sneak: 'SNEAK', fire: 'FIRE',
-  smoke: 'SMOKE', defend: 'DEFEND', ambush: 'AMBUSH',
+  smoke: 'SMOKE', defend: 'DEFEND', ambush: 'AMBUSH', assault: 'ASSAULT',
 };
-/** Original CC3 keyboard reference: Z Move, X Move Fast, C Sneak, V Fire, B Smoke, N Defend, M Ambush */
+/** Original CC3 keyboard reference: Z Move, X Move Fast, C Sneak, V Fire, B Smoke, N Defend, M Ambush.
+ * Assault (C4) is new: A. Each key must be unique — the battle-screen hotkey loop applies the LAST
+ * match in ORDER_TYPES order, so a duplicate key silently overwrites the earlier order (X used to
+ * double for both moveFast and assault, making X unusable). */
 export const ORDER_HOTKEYS: Record<OrderType, string> = {
-  move: 'z', moveFast: 'x', sneak: 'c', fire: 'v', smoke: 'b', defend: 'n', ambush: 'm',
+  move: 'z', moveFast: 'x', sneak: 'c', fire: 'v', smoke: 'b', defend: 'n', ambush: 'm', assault: 'a',
 };
 /** Order dot colours from the manual: Move blue, Move Fast purple, Sneak yellow, Fire red (orange = suppression), Smoke gray; Defend blue arc, Ambush green arc */
 export const ORDER_DOT_COLOR: Record<OrderType, string> = {
-  move: '#3c6cff', moveFast: '#b040e0', sneak: '#f0e040', fire: '#e02020', smoke: '#a0a0a0', defend: '#3c6cff', ambush: '#30c030',
+  move: '#3c6cff', moveFast: '#b040e0', sneak: '#f0e040', fire: '#e02020', smoke: '#a0a0a0', defend: '#3c6cff', ambush: '#30c030', assault: '#e08a2c',
 };
 export const AMBUSH_TRIGGER_M = 30;   // manual: ambush launches when enemy within 30 m
 
@@ -750,6 +826,13 @@ export interface Team {
   transportId?: number;
   /** crew-served weapon (mortar/HMG/AT gun) on the ground or carried; managed by sim/crewWeapon.ts */
   crewWeapon?: CrewWeaponState;
+  /** B4: heavy MG crew — who carries the gun / tripod on the move. */
+  carrierId?: number;
+  tripodCarrierId?: number;
+  /** B4: false after the tripod carrier was lost (downgraded to light MG timing). */
+  heavy?: boolean;
+  /** B7: battle time the leader's shout lands (order ingest); soldiers react after this. */
+  shoutAt?: number;
 }
 
 /** packed = carried/limbered (or lying unassembled); settingUp/packing = transition timers running. */
@@ -889,7 +972,20 @@ export interface BattleEvent {
     /** a vehicle blows up (ammunition or fuel): `pos`, `radiusM`, `turretLanding` when the turret was thrown */
     | 'vehicleExplosion'
     /** a round cooking off in a burning vehicle: `pos` */
-    | 'cookOffPop';
+    | 'cookOffPop'
+    | 'orderShout'
+    /** AT rocket launched from a shoulder (B2) */
+    | 'rocketLaunch'
+    /** non-penetrating armour hit (A2) */
+    | 'armorClank'
+    /** penetrating armour hit (A2) */
+    | 'penHit'
+    /** grenade landed and bounced (A1) */
+    | 'grenadeBounce'
+    /** weapon crew began setting up / packing a crew-served weapon (B4) */
+    | 'mgSetup'
+    /** a building lost structure (B3); `weaponId` carries 'breach' | 'caveIn' | 'collapse' */
+    | 'structureFx';
   pos?: Vec2;
   /** vehicleExplosion: blast radius in metres */
   radiusM?: number;
@@ -953,6 +1049,14 @@ export interface BattleState {
   items?: GroundItem[];
   /** Body parts (spec 2026-09-17 §8), capped, oldest removed. Optional: created lazily. */
   debris?: Debris[];
+  /** rounds in flight (visual only, A1); sim expires them at t0+flightS */
+  projectiles: Projectile[];
+  /** impact sparks and puffs (A2), capped ~64 */
+  sparks: Spark[];
+  /** delayed grenade/satchel HE bursts (A1) */
+  pendingBursts: PendingBurst[];
+  /** building destruction visuals (B3), capped ~32 */
+  structureFx: StructureFx[];
 }
 
 // --------------------------------------------------------------- UI shared

@@ -22,7 +22,9 @@ export type Posture = 'standing' | 'crouched' | 'kneeling' | 'prone';
 export type AnimAction =
   | 'idle' | 'aim' | 'fire' | 'reload' | 'hide' | 'walk' | 'run' | 'sneak' | 'crawl' | 'throw' | 'hit' | 'woundedCrawl'
   /** stooping over an item on the ground (spec 2026-09-17 §9; sim/pickup.ts) */
-  | 'pickup';
+  | 'pickup'
+  /** B8: kneeling over a comrade, hands working a dressing */
+  | 'bandage';
 export type Mood = 'calm' | 'alert' | 'shaken' | 'pinned' | 'cowering' | 'panicked' | 'berserk' | 'surrendered';
 export type WeaponSuffix = 'rifle' | 'smg' | 'lmg' | 'none';
 
@@ -31,6 +33,27 @@ export interface AnimEntryInfo { frames: number; fps: number; loop: boolean }
 
 export const FIRE_KICK_S = 0.25;
 export const FLINCH_S = 0.35;
+/** B1: full grenade-throw animation (wind-up -> release -> follow-through). */
+export const THROW_S = 0.9;
+/** B8: how long a bandage / stabilise animation plays. */
+export const BANDAGE_S = 3;
+const bandageStarts = new WeakMap<Soldier, number>();
+/** B8: sim calls this when a treatment starts; the renderer plays the bandage pose until
+ * `at + BANDAGE_S`. */
+export function markBandage(s: Soldier, at: number): void { bandageStarts.set(s, at); }
+export function isBandaging(s: Soldier, time: number): boolean {
+  const at = bandageStarts.get(s);
+  return at != null && time >= at && time - at < BANDAGE_S;
+}
+
+
+/** 0..1 progress of the reload in progress (1 when none / finished). Shared by `frameFor` and
+ * the procedural reload fallback in unitRender. */
+export function reloadProgress(s: Soldier, time: number): number {
+  if (!(s.activity === 'reloading' && s.reloadTimer > 0)) return 1;
+  const total = WEAPONS[s.weaponId]?.reloadS ?? 3;
+  return total > 0 ? 1 - Math.max(0, Math.min(total, s.reloadTimer)) / total : 1;
+}
 /** Ground covered by one full gait cycle (two steps / one elbow-knee cycle), metres. */
 export const STRIDE_M: Record<'walk' | 'run' | 'sneak' | 'crawl' | 'woundedCrawl', number> = {
   walk: 1.5, run: 2.4, sneak: 1.0, crawl: 0.8, woundedCrawl: 0.5,
@@ -119,6 +142,9 @@ export function actionFor(s: Soldier, time: number, posture: Posture = postureFo
   // himself along (measured ground speed), never as an idle loop on the spot.
   if (s.health === 'incapacitated') return speedMps !== undefined && speedMps >= STILL_MPS ? 'woundedCrawl' : 'hit';
   if (s.stunnedUntil != null && time < s.stunnedUntil) return 'hide';
+  if (s.throwAt != null && time - s.throwAt >= 0 && time - s.throwAt < THROW_S) return 'throw';
+  if (isBandaging(s, time)) return 'bandage';
+  // stooping over an item (spec §9): takes precedence over idle/aim while the sim gives him the task
   if (s.pickup?.until != null) return 'pickup';
   const mood = moodFor(s, time, speedMps);
   if (isMoving(s, speedMps) && mood !== 'cowering' && mood !== 'surrendered') {
@@ -233,13 +259,21 @@ export function frameFor(s: Soldier, time: number, action: AnimAction, entry: An
     const prog = until > from ? Math.max(0, Math.min(1, (time - from) / (until - from))) : 1;
     return Math.min(n - 1, Math.floor(prog * n));
   }
+  if (action === 'throw' && s.throwAt != null) {
+    const prog = Math.max(0, Math.min(1, (time - s.throwAt) / THROW_S));
+    return Math.min(n - 1, Math.floor(prog * n));
+  }
+  if (action === 'bandage') {
+    const at = bandageStarts.get(s);
+    const prog = at != null ? Math.max(0, Math.min(1, (time - at) / BANDAGE_S)) : 0;
+    return Math.min(n - 1, Math.floor(prog * n));
+  }
   if (action === 'hit') return n - 1;
   const fps = entry.fps > 0 ? entry.fps : n / 1.2;
   const f = Math.floor(time * fps + off * n);
   return entry.loop === false ? Math.min(n - 1, f) : ((f % n) + n) % n;
 }
 
-/** A round has just landed near him: flinch (the renderer shows the posture's `hide` frame). */
 export function isFlinching(s: Soldier, time: number): boolean {
   const dt = time - s.mind.lastIncomingAt;
   return dt >= 0 && dt < FLINCH_S;

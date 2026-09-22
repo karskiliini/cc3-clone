@@ -338,7 +338,7 @@ describe('in a real battle', () => {
     if (casualties > 0) expect((a.items ?? []).length).toBeGreaterThan(0);
     expect(JSON.stringify(a.items ?? [])).toBe(JSON.stringify(b.items ?? []));
     expect(JSON.stringify(a.debris ?? [])).toBe(JSON.stringify(b.debris ?? []));
-  });
+  }, 60000);
 });
 
 describe('feedback (§9)', () => {

@@ -242,6 +242,7 @@ export function detonateVehicle(state: BattleState, rng: Rng, v: Vehicle, killer
   if (radiusM <= 0) return false;
   const load = loadFraction(state, v, def);
   const team = state.teams.get(v.teamId);
+  v.fire = { t0: state.time };
   v.state = 'burning';
   v.path = []; v.speed = 0;
   v.exiting = undefined; v.unloading = undefined; v.remount = undefined; v.bailBy = undefined; v.seatSwap = undefined;

@@ -36,7 +36,7 @@ function makeState(fill: Terrain = 'grass'): BattleState {
     },
     spotted: { german: new Set(), soviet: new Set() },
     spottedVehicles: { german: new Set(), soviet: new Set() },
-    messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [],
+    messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [], projectiles: [], sparks: [], pendingBursts: [], structureFx: [],
     result: null, events: [], nextId: 10,
   } as BattleState;
 }

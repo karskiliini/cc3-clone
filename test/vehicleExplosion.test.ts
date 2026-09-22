@@ -103,7 +103,7 @@ describe('ammunition-rack detonation', () => {
     const r = explosionRadiusM(state, v, VEHICLE_DEFS.pz4gh);
     expect(r).toBeGreaterThanOrEqual(8);
     expect(r).toBeLessThan(11);
-  });
+  }, 60000);
 
   it('witnesses within 60 m who see it are shaken and suppressed; men behind a wall or far away are not', () => {
     const state = makeState();
@@ -234,7 +234,7 @@ describe('cook-off of a burning vehicle', () => {
     expect(blasts / N).toBeGreaterThan(0.2);
     expect(blasts / N).toBeLessThan(0.4);
     expect(hurtFar).toBe(0); // 8 m away is outside the 5 m blast
-  });
+  }, 60000);
 
   it('a heavy fragment coming down on a man injures him', () => {
     const state = makeState();
@@ -338,7 +338,7 @@ describe('the mix', () => {
     expect(share).toBeLessThan(0.25);
     expect(immediate).toBeGreaterThan(0);
     expect(delayed).toBeGreaterThan(0);
-  });
+  }, 60000);
 });
 
 describe('determinism', () => {

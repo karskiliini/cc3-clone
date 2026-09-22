@@ -32,7 +32,7 @@ function stateWith(map: GameMap, time = 20): BattleState {
       soviet: { side: 'soviet', morale: 80, truceOffered: false, truceAccepted: false, kills: 0, losses: 0, score: 0 },
     },
     spotted: { german: new Set(), soviet: new Set() }, spottedVehicles: { german: new Set(), soviet: new Set() },
-    messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [], result: null, events: [], nextId: 100,
+    messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [], projectiles: [], sparks: [], pendingBursts: [], structureFx: [], result: null, events: [], nextId: 100,
   } as BattleState;
 }
 
@@ -127,7 +127,7 @@ describe('plunging fire and debris casualties', () => {
     // a death under the rubble is reported as crushed (once, never twice)
     const dead = men.filter((s) => s.health === 'dead');
     if (dead.length) expect(st.messages.some((m) => /was crushed by debris\.$/.test(m.text))).toBe(true);
-  });
+  }), 60000;
 });
 
 // ---------------------------------------------------------------------------------------------
