@@ -6,8 +6,9 @@ import { Battle } from '@/sim/battle';
 import { OPERATION, initialForcePool } from '@/data/operation';
 import { TEAM_DEFS } from '@/data/units';
 import { getMap } from '@/data/maps';
-import { drawDarkPanel, drawLogo, drawScreenTitle, drawShadowText, drawSmallMetalButton } from '@/ui/chrome';
-import { beginMenuFrame, toMenuInput, BottomStrip, ForcePicker, wordWrap } from './common';
+import { drawDarkPanel, drawHeading, drawLabel, drawShadowText, drawSmallMetalButton, UI } from '@/ui/chrome';
+import { drawMenuFrame, toMenuInput, BottomStrip, truncateText } from './common';
+import { ForcePicker } from './forcePicker';
 import { MainMenuScreen } from './mainMenu';
 import { DeployScreen } from './deploy';
 
@@ -73,44 +74,38 @@ export function advanceOperation(result: BattleResult): void {
   saveOperation(op);
 }
 
+const NEW_PANEL: Rect = { x: 200, y: 170, w: 400, h: 200 };
+
 export class OperationScreen implements Screen {
-  private mode: 'new' | 'briefing' | 'complete';
+  private mode: 'new' | 'briefing' | 'complete' = 'new';
   private newSide: Side = 'german';
   private hasSaved: boolean;
+  private mouse = { x: -1, y: -1 };
 
   // new-operation widgets
-  private sideGerR: Rect = { x: 220, y: 220, w: 176, h: 26 };
-  private sideSovR: Rect = { x: 404, y: 220, w: 176, h: 26 };
-  private startR: Rect = { x: 320, y: 272, w: 160, h: 26 };
-  private continueR: Rect = { x: 300, y: 312, w: 200, h: 26 };
+  private sideGerR: Rect = { x: 300, y: 234, w: 132, h: 26 };
+  private sideSovR: Rect = { x: 444, y: 234, w: 132, h: 26 };
+  private startR: Rect = { x: 224, y: 284, w: 352, h: 26 };
+  private continueR: Rect = { x: 224, y: 324, w: 352, h: 26 };
 
   private picker: ForcePicker | null = null;
-  private strip: BottomStrip;
+  private strip = new BottomStrip({});
 
   constructor() {
     this.hasSaved = loadOperation() != null;
-    if (!game.operation) {
-      this.mode = 'new';
-      this.strip = new BottomStrip({ showBack: true, nextEnabled: false });
-    } else if (game.operation.index >= OPERATION.length) {
-      this.mode = 'complete';
-      this.strip = new BottomStrip({ showBack: true, nextEnabled: false });
-    } else {
-      this.mode = 'briefing';
-      this.strip = new BottomStrip({ showBack: true, nextLabel: 'Next →' });
-      this.initPicker();
-    }
+    if (game.operation && game.operation.index >= OPERATION.length) this.mode = 'complete';
+    else if (game.operation) this.enterBriefing();
   }
 
-  private initPicker(): void {
+  private enterBriefing(): void {
     const op = game.operation;
     if (!op) return;
+    this.mode = 'briefing';
+    this.strip = new BottomStrip({ next: 'Next →' });
     const battleDef = OPERATION[op.index];
-    const mapDef = getMap(battleDef.mapId);
     // Seed the starting roster from surviving teams, but only as many as fit this battle's
     // requisition budget — carrying the whole (pre-casualty) force pool over unconditionally
-    // could put the roster over budget before the player touches anything, showing negative
-    // requisition points remaining.
+    // could put the roster over budget before the player touches anything.
     let spent = 0;
     const startRosterIds: string[] = [];
     for (const f of op.forcePool) {
@@ -119,19 +114,19 @@ export class OperationScreen implements Screen {
       spent += cost;
       startRosterIds.push(f.defId);
     }
-    this.picker = new ForcePicker(op.playerSide, battleDef.year, op.requisition, startRosterIds, mapDef.season === 'winter');
+    this.picker = new ForcePicker(op.playerSide, battleDef.year, op.requisition, startRosterIds);
   }
 
   update(_dt: number, input: InputState): void {
     const m = toMenuInput(input);
+    this.mouse = m.mouse;
 
     if (this.mode === 'new') {
       for (const c of m.clicks) {
         if (c.button !== 0) continue;
-        const p = { x: c.x, y: c.y };
-        if (pointInRect(p, this.sideGerR)) this.newSide = 'german';
-        else if (pointInRect(p, this.sideSovR)) this.newSide = 'soviet';
-        else if (pointInRect(p, this.startR)) {
+        if (pointInRect(c, this.sideGerR)) this.newSide = 'german';
+        else if (pointInRect(c, this.sideSovR)) this.newSide = 'soviet';
+        else if (pointInRect(c, this.startR)) {
           const op: OperationState = {
             index: 0,
             playerSide: this.newSide,
@@ -141,27 +136,24 @@ export class OperationScreen implements Screen {
           };
           game.operation = op;
           saveOperation(op);
-          this.mode = 'briefing';
-          this.strip = new BottomStrip({ showBack: true, nextLabel: 'Next →' });
-          this.initPicker();
-        } else if (this.hasSaved && pointInRect(p, this.continueR)) {
+          this.enterBriefing();
+          return;
+        } else if (this.hasSaved && pointInRect(c, this.continueR)) {
           const saved = loadOperation();
           if (saved) {
             game.operation = saved;
-            this.mode = saved.index >= OPERATION.length ? 'complete' : 'briefing';
-            this.strip = new BottomStrip({ showBack: true, nextLabel: this.mode === 'briefing' ? 'Next →' : undefined, nextEnabled: this.mode === 'briefing' });
-            if (this.mode === 'briefing') this.initPicker();
+            if (saved.index >= OPERATION.length) this.mode = 'complete';
+            else this.enterBriefing();
+            return;
           }
         }
       }
-      const result = this.strip.update(m);
-      if (result.quitOrBack || result.main) game.setScreen(new MainMenuScreen());
+      if (this.strip.update(m).back) game.setScreen(new MainMenuScreen());
       return;
     }
 
     if (this.mode === 'complete') {
-      const result = this.strip.update(m);
-      if (result.quitOrBack || result.main) {
+      if (this.strip.update(m).back) {
         game.operation = null;
         try {
           localStorage.removeItem(OPERATION_KEY);
@@ -177,13 +169,11 @@ export class OperationScreen implements Screen {
     const op = game.operation;
     if (!op || !this.picker) return;
     this.picker.update(m);
-
+    this.strip.nextEnabled = this.picker.rosterIds.length > 0;
     const result = this.strip.update(m);
-    if (result.quitOrBack || result.main) {
+    if (result.back) {
       game.setScreen(new MainMenuScreen());
-      return;
-    }
-    if (result.next && this.picker.rosterIds.length > 0) {
+    } else if (result.next) {
       const battleDef = OPERATION[op.index];
       const enemy = otherSide(op.playerSide);
       const cfg: BattleConfig = {
@@ -202,60 +192,40 @@ export class OperationScreen implements Screen {
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
-    beginMenuFrame(ctx);
-    drawLogo(ctx);
-    drawScreenTitle(ctx, 'OPERATION');
-
-    if (this.mode === 'new') {
-      drawDarkPanel(ctx, { x: 200, y: 160, w: 400, h: 200 });
-      drawShadowText(ctx, 'NEW OPERATION — CHOOSE YOUR SIDE', 220, 194, 'bold 15px Arial, Helvetica, sans-serif', '#f0d840');
-      drawSmallMetalButton(ctx, this.sideGerR, 'German', { hot: this.newSide === 'german' });
-      drawSmallMetalButton(ctx, this.sideSovR, 'Soviet', { hot: this.newSide === 'soviet' });
-      drawSmallMetalButton(ctx, this.startR, 'Start');
-      if (this.hasSaved) drawSmallMetalButton(ctx, this.continueR, 'Continue Operation');
+    drawMenuFrame(ctx, 'OPERATION', () => {
+      if (this.mode === 'new') this.drawNew(ctx);
+      else if (this.mode === 'complete') drawShadowText(ctx, 'OPERATION COMPLETE', 400, 270, UI.title, UI.gold, 'rgba(0,0,0,0.8)', 'center');
+      else this.drawBriefing(ctx);
       this.strip.draw(ctx);
-      ctx.restore();
-      return;
-    }
+    });
+  }
 
-    if (this.mode === 'complete') {
-      ctx.font = 'bold 28px Arial, Helvetica, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillStyle = '#f0d840';
-      ctx.fillText('OPERATION COMPLETE', 400, 260);
-      this.strip.draw(ctx);
-      ctx.restore();
-      return;
-    }
+  private drawNew(ctx: CanvasRenderingContext2D): void {
+    const hot = (r: Rect) => pointInRect(this.mouse, r);
+    drawHeading(ctx, 'NEW OPERATION', NEW_PANEL.x + 4, NEW_PANEL.y - 12);
+    drawDarkPanel(ctx, { ...NEW_PANEL, h: this.hasSaved ? NEW_PANEL.h : NEW_PANEL.h - 40 });
+    drawLabel(ctx, `${OPERATION.length} linked battles; your survivors carry over to the next.`, NEW_PANEL.x + 24, NEW_PANEL.y + 34, UI.body, UI.text);
+    drawLabel(ctx, 'Fight as', NEW_PANEL.x + 24, this.sideGerR.y + 17, UI.label, UI.text);
+    drawSmallMetalButton(ctx, this.sideGerR, 'German', { active: this.newSide === 'german', hot: hot(this.sideGerR) });
+    drawSmallMetalButton(ctx, this.sideSovR, 'Soviet', { active: this.newSide === 'soviet', hot: hot(this.sideSovR) });
+    drawSmallMetalButton(ctx, this.startR, 'Start New Operation', { hot: hot(this.startR) });
+    if (this.hasSaved) drawSmallMetalButton(ctx, this.continueR, 'Continue Saved Operation', { hot: hot(this.continueR) });
+  }
 
+  private drawBriefing(ctx: CanvasRenderingContext2D): void {
     const op = game.operation;
-    if (!op || !this.picker) {
-      ctx.restore();
-      return;
-    }
+    if (!op || !this.picker) return;
     const battleDef = OPERATION[op.index];
     const mapDef = getMap(battleDef.mapId);
-    drawDarkPanel(ctx, { x: 16, y: 46, w: 768, h: 42 });
-    ctx.font = 'bold 13px Arial, Helvetica, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#f0d840';
-    ctx.fillText(`BATTLE ${op.index + 1} OF ${OPERATION.length}: ${battleDef.title}`, 24, 62);
+    drawDarkPanel(ctx, { x: 16, y: 44, w: 768, h: 42 });
+    drawLabel(ctx, `BATTLE ${op.index + 1} OF ${OPERATION.length}: ${battleDef.title}`, 26, 61, UI.label, UI.gold);
     if (op.results.length > 0) {
-      ctx.font = '11px Arial, Helvetica, sans-serif';
-      ctx.fillStyle = '#e8e8e0';
-      ctx.textAlign = 'right';
-      ctx.fillText(`Past results: ${op.results.map((r) => RESULT_SHORT[r]).join(', ')}`, 776, 62);
-      ctx.textAlign = 'left';
+      drawLabel(ctx, `Past results: ${op.results.map((r) => RESULT_SHORT[r]).join(', ')}`, 774, 61, UI.note, UI.dim, 'right');
     }
-    ctx.font = '11px Arial, Helvetica, sans-serif';
-    ctx.fillStyle = '#e8e8e0';
-    const desc = wordWrap(`${mapDef.name} — ${mapDef.description}`, 740, 'small').slice(0, 1).join(' ');
-    ctx.fillText(desc, 24, 78);
-
+    ctx.font = UI.body;
+    ctx.fillStyle = UI.text;
+    ctx.fillText(truncateText(ctx, `${mapDef.name} — ${mapDef.description}`, 748), 26, 78);
     this.picker.draw(ctx);
-
-    this.strip.draw(ctx);
-    ctx.restore();
   }
 
   cursor(): CursorKind {

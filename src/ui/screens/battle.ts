@@ -37,7 +37,7 @@ import { PALETTE } from '@/render/palette';
 import {
   updateCameraEdgeScrollAndKeys, makeEdgeScrollState, pickFriendlyTeamScreen,
   makeDragPanState, updateModernDragPan, type EdgeScrollState, type DragPanState,
-} from './common';
+} from './battleInput';
 import { DebriefScreen } from './debrief';
 import { OverviewScreen } from './overview';
 import { OptionsScreen } from './options';
@@ -139,7 +139,13 @@ export class BattleScreen implements Screen {
     this.terrain = terrain ?? new TerrainRenderer(battle.state.map);
   }
 
+  /** onEnter runs again when Options / the overview map hand control back: only the
+   * first entry centres the camera on the deployment zone. */
+  private entered = false;
+
   onEnter(): void {
+    if (this.entered) return;
+    this.entered = true;
     const map = this.battle.state.map;
     const zone = map.def.deployZones[this.battle.playerSide()];
     centerCamera(game.cam, { x: zone.x + zone.w / 2, y: zone.y + zone.h / 2 });
@@ -515,7 +521,7 @@ export class BattleScreen implements Screen {
     } else if (action === 'map') {
       this.showMinimap = !this.showMinimap;
     } else if (action === 'options') {
-      game.setScreen(new OptionsScreen(this));
+      game.setScreen(new OptionsScreen(this, true));
       return;
     } else if (action === 'zoomIn') {
       zoomIn(cam, state.map.width, state.map.height);
@@ -531,7 +537,7 @@ export class BattleScreen implements Screen {
     if (input.keysPressed.has('f5')) this.showTeamGrid = !this.showTeamGrid;
     if (input.keysPressed.has('f6')) this.showMinimap = !this.showMinimap;
     if (input.keysPressed.has('f7')) this.showSoldierMonitor = !this.showSoldierMonitor;
-    if (input.keysPressed.has('f8')) { game.setScreen(new OptionsScreen(this)); return; }
+    if (input.keysPressed.has('f8')) { game.setScreen(new OptionsScreen(this, true)); return; }
     if (input.keysDown.has('control') && input.keysPressed.has('k')) this.showDead = !this.showDead;
 
     if (input.keysPressed.has(' ')) this.paused = !this.paused;

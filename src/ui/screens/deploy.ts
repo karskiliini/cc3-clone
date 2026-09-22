@@ -24,10 +24,11 @@ import { PALETTE } from '@/render/palette';
 import {
   updateCameraEdgeScrollAndKeys, makeDragPanState, makeEdgeScrollState, updateRightDragPan,
   updateModernDragPan, pickFriendlyTeamScreen, type EdgeScrollState, type DragPanState,
-} from './common';
+} from './battleInput';
 import { isPassable } from '@/sim/path';
 import { pointInRect } from '@/shared/math';
 import { BattleScreen } from './battle';
+import { OptionsScreen } from './options';
 
 const DRAG_THRESHOLD_PX = 5;
 
@@ -63,7 +64,13 @@ export class DeployScreen implements Screen {
     this.terrain = new TerrainRenderer(battle.state.map);
   }
 
+  /** onEnter runs again when Options / the overview map hand control back: only the
+   * first entry centres the camera on the deployment zone. */
+  private entered = false;
+
   onEnter(): void {
+    if (this.entered) return;
+    this.entered = true;
     const map = this.battle.state.map;
     const zone = map.def.deployZones[this.battle.playerSide()];
     centerCamera(game.cam, { x: zone.x + zone.w / 2, y: zone.y + zone.h / 2 });
@@ -199,6 +206,9 @@ export class DeployScreen implements Screen {
       game.setScreen(new BattleScreen(this.battle, this.terrain));
     } else if (action === 'map') {
       this.showMinimap = !this.showMinimap;
+    } else if (action === 'options') {
+      game.setScreen(new OptionsScreen(this, true));
+      return;
     } else if (action === 'zoomIn') {
       zoomIn(cam, map.width, map.height);
     } else if (action === 'zoomOut') {

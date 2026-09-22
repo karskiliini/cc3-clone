@@ -12,6 +12,7 @@ following the atlas contract in `docs/superpowers/specs/2026-09-17-soldier-anima
 | `items.py` | ground items atlas (`items_<scale>`). |
 | `contact_sheet.py` | contact sheets over the game's painted grass/snow (plain python3 + Pillow). |
 | `vehicles.py`, `weapons.py` | vehicles / crew weapons (other agent). |
+| `menu.py` | the menu poster backdrops `public/menu/poster.png` (Soviet rifleman pointing, burning town) and `poster_plain.png` (the town alone, behind the working screens): perspective Cycles render, metaball figure, graded to one maroon-to-flame palette in numpy. `npm run sprites:menu` (~25 s, 4 threads). |
 
 ## Commands
 

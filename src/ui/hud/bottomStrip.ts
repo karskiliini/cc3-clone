@@ -1,6 +1,6 @@
 // ============================================================================
 // bottomStrip.ts — the bottom 40px band of the panel (y 728..768, x 0..~615):
-// Chat/Options, zoom +/-, Map button, the selected-team box (icon, name bar,
+// Options, zoom +/-, Map button, the selected-team box (icon, name bar,
 // status, soldier health squares), Anti-Pers/Anti-Tank ammo bars, and the
 // right-hand action buttons (Truce/Flee in battle, Begin/Auto in deploy).
 // ============================================================================
@@ -11,13 +11,9 @@ import { getTeamIcon } from '@/render/sprites';
 import { WEAPONS } from '@/data/weapons';
 import { drawHudBevel, drawHudButton, setHudFont, clipTextToWidth, teamBarColor, teamStatusLabel, teamStatusTextColor, tintedTeamIcon } from './hudChrome';
 
-export type BottomStripAction = 'chat' | 'options' | 'zoomIn' | 'zoomOut' | 'map' | 'truce' | 'flee' | 'begin' | 'auto';
+export type BottomStripAction = 'options' | 'zoomIn' | 'zoomOut' | 'map' | 'truce' | 'flee' | 'begin' | 'auto';
 
-const STRIP_Y = 728;
-const STRIP_H = 40;
-
-const CHAT_R: Rect = { x: 2, y: 729, w: 48, h: 17 };
-const OPTIONS_R: Rect = { x: 2, y: 748, w: 48, h: 17 };
+const OPTIONS_R: Rect = { x: 2, y: 738, w: 48, h: 20 };
 const ZOOM_IN_C = { x: 68, y: 748, r: 9 };
 const MAP_R: Rect = { x: 82, y: 733, w: 50, h: 30 };
 const ZOOM_OUT_C = { x: 148, y: 748, r: 9 };
@@ -119,11 +115,7 @@ export class BottomStrip {
   update(input: InputState): BottomStripAction | null {
     this.hover.clear();
     const p = input.mouse;
-    if (p.y < STRIP_Y || p.y >= STRIP_Y + STRIP_H) {
-      // still allow hover/clicks even if pointer slightly above (rects cover exact band)
-    }
     const inRect = (r: Rect) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
-    if (inRect(CHAT_R)) this.hover.add('chat');
     if (inRect(OPTIONS_R)) this.hover.add('options');
     if (inRect(MAP_R)) this.hover.add('map');
     if (circleHit(p, ZOOM_IN_C)) this.hover.add('zoomIn');
@@ -134,7 +126,6 @@ export class BottomStrip {
     for (const c of input.clicks) {
       if (c.button !== 0) continue;
       const cp = { x: c.x, y: c.y };
-      if (inRect(CHAT_R)) return 'chat';
       if (inRect(OPTIONS_R)) return 'options';
       if (inRect(MAP_R)) return 'map';
       if (circleHit(cp, ZOOM_IN_C)) return 'zoomIn';
@@ -146,7 +137,6 @@ export class BottomStrip {
   }
 
   draw(ctx: CanvasRenderingContext2D, state: BattleState, selectedTeam: Team | null): void {
-    drawHudButton(ctx, CHAT_R, 'Chat', { hot: this.hover.has('chat') });
     drawHudButton(ctx, OPTIONS_R, 'Options', { hot: this.hover.has('options') });
     drawCircleButton(ctx, ZOOM_IN_C, '+', this.hover.has('zoomIn'));
     drawHudButton(ctx, MAP_R, 'Map', { hot: this.hover.has('map'), fontKind: 'map' });
