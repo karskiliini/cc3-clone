@@ -558,6 +558,7 @@ def t34_76_turret(k, d, ko, zr, proxy):
     for s in (-1, 1):
         k.hatch((0.52, 0.52), (s * 0.36, -0.5, zr + h), "paint", open_deg=95 if ko else 0, hinge="front", round_seg=12)
     k.hatch((0.26, 0.26), (0, 0.15, zr + h), "paint", round_seg=8)
+    k.star(0.36, (0, 0.12, zr + h + 0.045))
     if proxy:
         return
     k.box((0.85, 0.5, 0.5), (0, l / 2 - 0.05, zr + 0.34), "paint", top=(0.7, 0.8))
@@ -578,6 +579,7 @@ def t34_85_turret(k, d, ko, zr, proxy):
     k.hatch((0.5, 0.5), (0.45, -0.3, zr + h), "paint", open_deg=95 if ko else 0, hinge="front", round_seg=12)
     for y in (-1.0, -1.35):
         k.cyl(0.13, 0.1, (0, y, zr + h - 0.03), "paint", axis="Z", seg=10)          # twin ventilator domes
+    k.star(0.42, (0, 0.42, zr + h + 0.005))
     if proxy:
         return
     k.cyl(0.33, 0.9, (0, l / 2 - 0.42, zr + 0.36), "paint", axis="X", seg=12)
@@ -600,6 +602,7 @@ def su85(k, d, ko):
     cupola(k, 0.62, 0.35, zc - 0.02, 0.3, 0.2, ko)
     k.hatch((0.5, 0.6), (-0.4, y0 + 0.55, zc), "paint", open_deg=80 if ko else 0, hinge="left")
     k.box((0.22, 0.22, 0.1), (-0.3, 0.6, zc + 0.05), "paint")
+    k.star(0.4, (-0.12, 1.02, zc + 0.105))
     # gun: ball mantlet right of centre, long tube
     gx, gy, gz = 0.28, y1 + 0.35, 1.5
     k.cyl(0.42, 0.5, (gx, gy, gz), "paint", axis="Y", seg=12, r2=0.3, rot=(-90 + 8, 0, 0))
@@ -643,6 +646,7 @@ def kv1_turret(k, d, ko, zr, proxy):
     k.hatch((0.6, 0.6), (0, -0.55, zr + h), "paint", open_deg=95 if ko else 0, hinge="front", round_seg=12)
     k.hatch((0.22, 0.22), (0.55, 0.45, zr + h), "paint", round_seg=8)
     k.hatch((0.22, 0.22), (-0.55, 0.45, zr + h), "paint", round_seg=8)
+    k.star(0.42, (0, 0.32, zr + h + 0.005))
     k.cyl(0.12, 0.2, (0, -l / 2 - 0.22, zr + 0.5), "paint", axis="Y", seg=8)            # rear MG ball
     if proxy:
         return
@@ -686,6 +690,7 @@ def is2_turret(k, d, ko, zr, proxy):
     cupola(k, -0.48, -0.5, zr + h - 0.03, 0.42, 0.24, ko, hinge="front")
     k.hatch((0.5, 0.5), (0.45, -0.6, zr + h - 0.01), "paint", open_deg=95 if ko else 0, hinge="front", round_seg=12)
     k.cyl(0.13, 0.08, (0.2, 0.35, zr + h), "paint", axis="Z", seg=8)
+    k.star(0.42, (0, 0.45, zr + h + 0.045))
     k.cyl(0.1, 0.25, (0.35, -l / 2 - 0.4, zr + 0.5), "paint", axis="Y", seg=8)           # rear MG
     if proxy:
         return
@@ -723,6 +728,7 @@ def t26_turret(k, d, ko, zr, proxy):
     k.box((0.95, 0.75, 0.5), (0, -0.78, zr + 0.36), "paint", top=(0.92, 0.95))
     for s in (-1, 1):
         k.hatch((0.42, 0.5), (s * 0.26, -0.25, zr + 0.62), "paint", open_deg=95 if ko else 0, hinge="front")
+    k.star(0.36, (0, 0.12, zr + 0.62 + 0.045))
     if proxy:
         return
     k.box((0.62, 0.22, 0.42), (0, 0.62, zr + 0.34), "paint")
@@ -759,6 +765,7 @@ def bt7_turret(k, d, ko, zr, proxy):
     k.extrude(ellipse_fp(1.4, 1.85, 16, cy=-0.2), zr + 0.02, zr + 0.6, "paint", scale=(0.68, 0.74), shift=(0, -0.02), smooth=True, centre=(0, -0.2))
     for s in (-1, 1):
         k.hatch((0.4, 0.46), (s * 0.24, -0.3, zr + 0.6), "paint", open_deg=95 if ko else 0, hinge="front", round_seg=10)
+    k.star(0.36, (0, 0.12, zr + 0.6 + 0.045))
     if proxy:
         return
     k.box((0.6, 0.25, 0.4), (0, 0.62, zr + 0.32), "paint", top=(0.85, 0.8))
@@ -797,6 +804,7 @@ def t70_turret(k, d, ko, zr, proxy):
     fp = [(-0.35, -0.72), (0.35, -0.72), (0.62, -0.3), (0.62, 0.22), (0.35, 0.6), (-0.35, 0.6), (-0.62, 0.22), (-0.62, -0.3)]
     k.extrude(fp, zr + 0.02, zr + 0.55, "paint", scale=(0.68, 0.75), shift=(0, -0.03), centre=(0, -0.06))
     k.hatch((0.5, 0.5), (0, -0.2, zr + 0.55), "paint", open_deg=95 if ko else 0, hinge="front", round_seg=10)
+    k.star(0.32, (0, 0.18, zr + 0.55 + 0.005))
     if proxy:
         return
     k.box((0.6, 0.3, 0.36), (0, 0.55, zr + 0.28), "paint", top=(0.85, 0.7))
@@ -807,6 +815,7 @@ def su76(k, d, ko):
     L, W = d["L"], d["W"]
     zr, wb, top = t70_hull(k, d, ko, n=6, su76=True)
     k.grille((0.5, 1.0), (0.55, 0.55, zr), "paint")
+    k.star(0.34, (-0.5, 0.8, zr + 0.005))
     k.cyl(0.07, 0.8, (W / 2 - 0.4, 0.4, top + 0.2), "rust", axis="Y", seg=8)
     # open-topped rear casemate: floor, front plate, leaning sides, low rear
     y0, y1 = -L / 2 + 0.02, 0.0

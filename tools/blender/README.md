@@ -176,6 +176,11 @@ python3 tools/blender/vehicles_common.py sheet-vehicles --scale 1 --zoom 3 --onl
   Dunkelgelb with Olivgruen / Rotbraun bands (1943+), Soviet 4BO; bevel-shader rounded edges with lighter
   worn paint, cavity AO, mottling, rain streaks, dust on the lower hull; winter lime wash (patchy, worn off the
   edges). Burnt finish + sooty engine deck for ko / blown.
+* Markings (`Kit.star`, `Kit.cross`): decals with a white border so they separate from any paint or wash.
+  Soviet: one red star on the turret roof (on the casemate roof / front deck of SU-85 / SU-76), drawn
+  oversized (0.64-0.84 m tip to tip, ~9 px at 1x) so the five points survive the downsample: from the
+  12-degree camera, side markings project to a pixel or two and read as specks. German: black crosses on the
+  hull / superstructure sides and the turret bin, as the vehicles carried them (no roof marking).
 * Render: Cycles (GPU when available), 3x supersample, 1 px pixel filter; pack-time `clean_cell` sharpens
   the colour a little and darkens the silhouette rim (`OUTLINE`) so each part reads on any ground.
 * The turret is rendered with the shadow catcher at deck height: it brings its own shadow (gun tube

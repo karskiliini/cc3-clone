@@ -62,6 +62,16 @@ def ellipse_fp(w, l, seg=16, cy=0.0, cx=0.0):
             for i in range(seg)]
 
 
+def star_fp(r, inner=0.46, cx=0.0, cy=0.0):
+    """Five-point star, one point to +Y; a fat inner radius keeps the arms at 10 px/m."""
+    pts = []
+    for i in range(10):
+        a = math.pi / 2 + i * math.pi / 5
+        rr = r if i % 2 == 0 else r * inner
+        pts.append((cx + rr * math.cos(a), cy + rr * math.sin(a)))
+    return pts
+
+
 # ------------------------------------------------------------------------- kit
 class Kit:
     """Collects primitives into one mesh.  All rotations are XYZ euler DEGREES."""
@@ -208,6 +218,19 @@ class Kit:
         self.box((s * 0.36, s, 0.006), (0, 0, 0.003), "white")
         self.box((s * 0.9, s * 0.2, 0.006), (0, 0, 0.008), "black")
         self.box((s * 0.2, s * 0.9, 0.006), (0, 0, 0.008), "black")
+        self.xform = old
+
+    def star(self, r, loc, rot=(0, 0, 0), border=0.09):
+        """Red star with a white border lying in the local XY plane (on a roof: rot 0).  Drawn larger
+        than life (r = tip radius) so the five points survive the downsample: ~9 px across at 10 px/m."""
+        M = Matrix.Translation(Vector(loc)) @ Euler([math.radians(a) for a in rot], "XYZ").to_matrix().to_4x4()
+        old = self.xform
+        self.xform = (old @ M) if old is not None else M
+        for rr, z, mat in ((r + border, 0.006, "white"), (r, 0.014, "red")):
+            fp = star_fp(rr)
+            n = len(fp)
+            vs = [(p[0], p[1], z) for p in fp] + [(0, 0, z)]
+            self.add(vs, [(i, (i + 1) % n, n) for i in range(n)], mat)
         self.xform = old
 
     # ---- finish
@@ -457,6 +480,7 @@ def common_materials(mats, burnt=False):
     mats["grille"] = flat_material("grille" + sfx, "#15140f" if not burnt else "#070706", 0.9)
     mats["black"] = flat_material("blackm" + sfx, "#121212", 0.7)
     mats["white"] = flat_material("whitem" + sfx, sc("#e6e4da"), 0.8)
+    mats["red"] = flat_material("redm" + sfx, sc("#b8261c"), 0.75)
     mats["steel"] = flat_material("steel" + sfx, sc("#3a3c38"), 0.45, 0.6)
     mats["gunmetal"] = flat_material("gunmetal" + sfx, sc("#2a2b28"), 0.4, 0.7)
     mats["rubber"] = flat_material("rubber" + sfx, "#191917", 0.9)
@@ -636,7 +660,8 @@ class Atlas:
         from PIL import Image
         with open(base + ".json") as fh:
             self.meta = json.load(fh)
-        self.img = Image.open(base + ".png").convert("RGBA")
+        img = self.meta.get("image") or (os.path.basename(base) + ".png")
+        self.img = Image.open(os.path.join(os.path.dirname(base), img)).convert("RGBA")
         self.cw, self.ch = self.meta["cell"]["w"], self.meta["cell"]["h"]
         self.ax, self.ay = self.meta["anchor"]["x"], self.meta["anchor"]["y"]
 
