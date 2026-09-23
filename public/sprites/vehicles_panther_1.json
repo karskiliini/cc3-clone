@@ -1,7 +1,7 @@
 {
  "scale": 1,
  "cell": {
-  "w": 122,
+  "w": 124,
   "h": 122
  },
  "anchor": {
@@ -62,11 +62,13 @@
  },
  "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
  "vehicle": "panther",
+ "season": "summer",
  "hasTurret": true,
  "lengthM": 6.9,
  "widthM": 3.4,
  "turretPivotM": {
   "x": 0.0,
   "y": 0.3
- }
+ },
+ "image": "vehicles_panther_1.webp"
 }

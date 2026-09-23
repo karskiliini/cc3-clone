@@ -7,7 +7,8 @@
 import type { BattleState, Camera, Vehicle } from '@/shared/types';
 import { FLASH_LIFE, TRACER_LIFE, EXPLOSION_LIFE_HE, EXPLOSION_LIFE_SMALL, EXPLOSION_LIFE_SMOKE } from '@/shared/types';
 import { drawEffects } from '@/render/effects';
-import { getVehicleSprite } from '@/render/sprites';
+import { drawVehicleSprite } from '@/render/unitRender';
+import { loadAtlas } from '@/render/spriteAtlas';
 
 const canvas = document.getElementById('c') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d')!;
@@ -76,9 +77,8 @@ function makeVehicle(pos: { x: number; y: number }, state: Vehicle['state'], bur
 }
 
 function drawVehicleHull(pos: { x: number; y: number }): void {
-  const sprite = getVehicleSprite('pz3j', 'hull', 'knockedOut');
-  const sx = pos.x * TILE_PX, sy = pos.y * TILE_PX;
-  ctx.drawImage(sprite, Math.round(sx - sprite.width / 2), Math.round(sy - sprite.height / 2));
+  // the Blender atlas (loaded before main runs)
+  drawVehicleSprite(ctx, 'pz3j', 'knockedOut', pos.x * TILE_PX, pos.y * TILE_PX, 0, 0, 1);
 }
 
 function main(): void {
@@ -183,4 +183,4 @@ function main(): void {
     'Extra vehicle bottom-right is knocked-out (thin wisp, not burning).';
 }
 
-main();
+void loadAtlas('vehicles_pz3j_1').then(main);

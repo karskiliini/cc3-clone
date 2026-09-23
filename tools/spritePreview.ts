@@ -2,7 +2,6 @@
 // a human can eyeball them. Not part of the shipped game bundle.
 import type { CursorKind, Season } from '@/shared/types';
 import {
-  getVehicleSprite,
   getFlagSprite,
   getTeamIcon,
   getCursorSprite,
@@ -10,6 +9,7 @@ import {
   getTreeSprite,
 } from '@/render/sprites';
 import { drawVehicleSprite } from '@/render/unitRender';
+import { loadAtlas, vehicleDefAtlasName } from '@/render/spriteAtlas';
 import { drawText, textWidth, FONT_SMALL_H, FONT_BIG_H } from '@/render/pixelfont';
 import { PALETTE, TERRAIN_COLORS, SIDE_COLOR, ORDER_COLOR } from '@/render/palette';
 
@@ -100,23 +100,7 @@ function board(row: HTMLElement, id: string, label: string, cv: HTMLCanvasElemen
   cell(row, `${label} x3`, cv, 3);
 }
 // Soldiers and crew-served weapons come from the Blender atlases: see tools/animPreview.html.
-for (const scale of [1, 2] as const) {
-  for (const [gname, rgb] of WF19_GROUNDS.slice(0, 2)) {
-    const row = section(`wf19 legibility — vehicles at ${scale}x on ${gname} ground, facings N / NE / E / S`);
-    const ids = ['pz3j', 'pz4f1', 'tiger', 'panther', 'stug3g', 'sdkfz251', 't34_76', 'kv1', 'su76'];
-    const step = 92 * scale;
-    const cv = groundBackdrop(step * ids.length, step * 4, rgb);
-    const ctx = cv.getContext('2d')!;
-    ctx.imageSmoothingEnabled = false;
-    ids.forEach((id, i) => {
-      [0, Math.PI / 4, Math.PI / 2, Math.PI].forEach((rad, r) => {
-        const cx = i * step + step / 2, cy = r * step + step / 2;
-        drawVehicleSprite(ctx, id, 'ok', cx, cy, rad, rad + (r === 2 ? 0.6 : 0), scale, scale);
-      });
-    });
-    board(row, `wf19-vehicles-${scale}x-${gname}`, `${gname}`, cv);
-  }
-}
+// Vehicles: see the Blender atlas section below.
 
 /** In-game zoom-2 comparison: the 1x sprite blown up 2x with nearest-
  * neighbour (how zoom 2 used to look) beside the genuine 2x sprite drawn
@@ -148,58 +132,48 @@ function zoomCompareCell(row: HTMLElement, label: string, s1: HTMLCanvasElement,
 }
 
 // --------------------------------------------------------------- vehicles --
+// Blender atlases (tools/blender/vehicles.py), drawn exactly as in battle by drawVehicleSprite:
+// every vehicle at 1x and 2x, facings N / NE / E / S / SW (turret slewed on E), ok, ko, thrown
+// track and blown turret, summer and winter (whitewash).
 const VEHICLE_IDS = [
   'pz3j', 'pz4f1', 'pz4gh', 'stug3g', 'panther', 'tiger', 'sdkfz251', 'marder3',
   't26', 'bt7', 't34_76', 't34_85', 'kv1', 'is2', 't70', 'su76', 'su85',
 ];
-const vehRow = section('Vehicles — hull + turret (ok)');
-for (const id of VEHICLE_IDS) {
-  const hull = getVehicleSprite(id, 'hull', 'ok');
-  cellPair(vehRow, `${id} hull`, hull);
-  const turret = getVehicleSprite(id, 'turret', 'ok');
-  cellPair(vehRow, `${id} turret`, turret);
+/** a scale-2 atlas decodes to ~100 MB: only a few vehicles at 2x here */
+const VEHICLE_IDS_2X = ['pz4gh', 'panther', 'sdkfz251', 't34_85', 'kv1', 'su76'];
+async function vehicleSections(): Promise<void> {
+  const names: string[] = [];
+  for (const se of ['summer', 'winter'] as const) {
+    for (const id of VEHICLE_IDS) names.push(vehicleDefAtlasName(id, 1, se));
+    for (const id of VEHICLE_IDS_2X) names.push(vehicleDefAtlasName(id, 2, se));
+  }
+  await Promise.all(names.map((n) => loadAtlas(n)));
+  const looks: { name: string; state: 'ok' | 'knockedOut'; blown?: boolean; track?: 'L' | 'R' }[] = [
+    { name: 'ok', state: 'ok' }, { name: 'thrown track', state: 'ok', track: 'L' },
+    { name: 'knocked out', state: 'knockedOut' }, { name: 'turret blown', state: 'knockedOut', blown: true },
+  ];
+  const facings = [0, Math.PI / 4, Math.PI / 2, Math.PI, Math.PI * 1.25];
+  for (const scale of [1, 2] as const) {
+    for (const [gname, rgb] of [WF19_GROUNDS[0], WF19_GROUNDS[2]]) {
+      const season: Season = gname === 'snow' ? 'winter' : 'summer';
+      for (const look of looks) {
+        if (look.name !== 'ok' && gname === 'snow' && scale === 2) continue;
+        const row = section(`vehicles ${look.name} at ${scale}x on ${gname} (${season}) — facings N / NE / E (turret +35°) / S / SW`);
+        const ids = scale === 2 ? VEHICLE_IDS_2X : VEHICLE_IDS;
+        const step = 92 * scale;
+        const cv = groundBackdrop(step * facings.length, step * ids.length, rgb);
+        const ctx = cv.getContext('2d')!;
+        ctx.imageSmoothingEnabled = false;
+        ids.forEach((id, i) => facings.forEach((rad, r) => {
+          const cx = r * step + step / 2, cy = i * step + step / 2;
+          drawVehicleSprite(ctx, id, look.state, cx, cy, rad, rad + (r === 2 ? 0.6 : 0), scale, !!look.blown, look.track ?? null, undefined, season);
+        }));
+        board(row, `vehicles-${look.name.replace(' ', '-')}-${scale}x-${gname}`, `${gname}`, cv);
+      }
+    }
+  }
 }
-const vehKoRow = section('Vehicles — knocked out');
-for (const id of VEHICLE_IDS) {
-  cellPair(vehKoRow, `${id} hull KO`, getVehicleSprite(id, 'hull', 'knockedOut'));
-}
-
-/** Compose hull + turret onto one canvas the way unitRender does: both
- * centred on the same pivot point (their own canvas centre), turret drawn
- * on top of the hull, no rotation (north-facing). */
-function composeVehicle(hull: HTMLCanvasElement, turret: HTMLCanvasElement | null): HTMLCanvasElement {
-  const w = Math.max(hull.width, turret ? turret.width : 0);
-  const h = Math.max(hull.height, turret ? turret.height : 0);
-  const c = document.createElement('canvas');
-  c.width = w; c.height = h;
-  const ctx = c.getContext('2d')!;
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(hull, (w - hull.width) / 2, (h - hull.height) / 2);
-  if (turret && turret.width > 1) ctx.drawImage(turret, (w - turret.width) / 2, (h - turret.height) / 2);
-  return c;
-}
-
-const vehComposedRow = section('Vehicles — composed hull+turret (ok)');
-for (const id of VEHICLE_IDS) {
-  const hull = getVehicleSprite(id, 'hull', 'ok');
-  const turret = getVehicleSprite(id, 'turret', 'ok');
-  cellPair(vehComposedRow, `${id}`, composeVehicle(hull, turret));
-}
-const vehComposedKoRow = section('Vehicles — composed hull+turret (knocked out)');
-for (const id of VEHICLE_IDS) {
-  const hull = getVehicleSprite(id, 'hull', 'knockedOut');
-  const turret = getVehicleSprite(id, 'turret', 'knockedOut');
-  cellPair(vehComposedKoRow, `${id} KO`, composeVehicle(hull, turret));
-}
-
-// ------------------------------------------------------ wf5: 2x vehicles --
-function composeVehicleAt(id: string, state: 'ok' | 'knockedOut', scale: number): HTMLCanvasElement {
-  return composeVehicle(getVehicleSprite(id, 'hull', state, scale), getVehicleSprite(id, 'turret', state, scale));
-}
-const veh2Row = section('2x (zoom 2) vehicles — composed hull+turret (old 1x@2 | 2x | 2x@3)');
-for (const id of VEHICLE_IDS) zoomCompareCell(veh2Row, id, composeVehicleAt(id, 'ok', 1), composeVehicleAt(id, 'ok', 2), '#6f7a45');
-const veh2KoRow = section('2x (zoom 2) vehicles — knocked out / burning');
-for (const id of VEHICLE_IDS) zoomCompareCell(veh2KoRow, `${id} KO`, composeVehicleAt(id, 'knockedOut', 1), composeVehicleAt(id, 'knockedOut', 2), '#6f7a45');
+void vehicleSections();
 
 // ------------------------------------------------------------------ flags --
 const flagRow = section('Flags');

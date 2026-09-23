@@ -1911,21 +1911,6 @@ def soldier_light(ctx):
     bg.inputs[1].default_value = C.SKY_STRENGTH * 0.55
 
 
-def to_webp(base):
-    """Re-encode <base>.png as LOSSLESS WebP (about 40 % of the PNG: the scale-2 soldier sheet goes
-    from ~22 MB to ~9 MB) with the system python's Pillow (Blender's python has none), then drop the
-    PNG. The JSON's `image` field names the file; loaders fall back to <base>.png without it."""
-    code = ("import sys; from PIL import Image; "
-            "Image.open(sys.argv[1]).save(sys.argv[2], 'WEBP', lossless=True, quality=100, method=5)")
-    try:
-        subprocess.run(["python3", "-c", code, base + ".png", base + ".webp"], check=True, timeout=600)
-    except Exception as ex:          # no Pillow / no webp support: keep the PNG
-        print(f"webp conversion skipped for {base}: {ex}", flush=True)
-        return False
-    os.remove(base + ".png")
-    return True
-
-
 def atlas_name(side, season, scale, kind="soldiers"):
     return f"{kind}_{side}_{season}_{scale}"
 
@@ -2045,7 +2030,7 @@ def render_atlas(side, season, scale, only, force, pack_only, samples, kind="sol
         for al, k in aliases.items():        # aliases share the target entry's cells
             if al not in meta["entries"] and k in meta["entries"]:
                 meta["entries"][al] = dict(meta["entries"][k], alias=k)
-        if to_webp(base):
+        if C.to_webp(base):
             meta["image"] = os.path.basename(base) + ".webp"
         with open(base + ".json", "w") as fh:
             json.dump(meta, fh, indent=1)

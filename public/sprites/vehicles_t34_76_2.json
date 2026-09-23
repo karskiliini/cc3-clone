@@ -62,11 +62,13 @@
  },
  "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
  "vehicle": "t34_76",
+ "season": "summer",
  "hasTurret": true,
  "lengthM": 6.7,
  "widthM": 3.0,
  "turretPivotM": {
   "x": 0.0,
   "y": 0.62
- }
+ },
+ "image": "vehicles_t34_76_2.webp"
 }

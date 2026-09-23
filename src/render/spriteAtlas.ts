@@ -121,13 +121,25 @@ export function turretPivotM(meta: AtlasMeta, defId: string): { x: number; y: nu
   return meta.vehicles?.[defId]?.turretPivotM ?? map?.[defId] ?? { x: 0, y: 0 };
 }
 
-/** One atlas per vehicle type (a single sheet of all of them would be ~600 MB decoded). */
-export function vehicleDefAtlasName(defId: string, scale: 1 | 2): string { return `vehicles_${defId}_${scale}`; }
+/** One atlas per vehicle type (a single sheet of all of them would be ~600 MB decoded). Winter
+ * battles add `vehicles_<def>_winter_<scale>`: the whitewashed live looks (hull ok / trackL / trackR,
+ * turret ok); wrecks come from the summer atlas (a fire burns the wash off). */
+export function vehicleDefAtlasName(defId: string, scale: 1 | 2, season: Season = 'summer'): string {
+  return `vehicles_${defId}${seasonKey(season) === 'winter' ? '_winter' : ''}_${scale}`;
+}
 
-/** The atlas holding this vehicle at this zoom: its own per-vehicle atlas, fetched on first use
- * (so a battle only ever loads the vehicles present), else a combined `vehicles_<scale>` atlas. */
-function vehicleAtlasFor(defId: string, zoom: number): Atlas | null {
-  return atlasForZoom((sc) => vehicleDefAtlasName(defId, sc), zoom) ?? getAtlas(vehicleAtlasName(atlasScaleForZoom(zoom))) ?? getAtlas(vehicleAtlasName(1));
+/** The atlases that may hold this vehicle at this zoom, preferred first: its winter atlas in a
+ * winter battle, its own per-vehicle atlas (both fetched on first use, so a battle only loads the
+ * vehicles present), else a combined `vehicles_<scale>` atlas. */
+function vehicleAtlasesFor(defId: string, zoom: number, season: Season): Atlas[] {
+  const out: Atlas[] = [];
+  if (seasonKey(season) === 'winter') {
+    const w = atlasForZoom((sc) => vehicleDefAtlasName(defId, sc, 'winter'), zoom);
+    if (w) out.push(w);
+  }
+  const own = atlasForZoom((sc) => vehicleDefAtlasName(defId, sc), zoom) ?? getAtlas(vehicleAtlasName(atlasScaleForZoom(zoom))) ?? getAtlas(vehicleAtlasName(1));
+  if (own) out.push(own);
+  return out;
 }
 
 // ------------------------------------------------------------------ registry / loading ---
@@ -190,8 +202,16 @@ export function loadAtlas(name: string): Promise<Atlas | null> {
 
 /** Start loading everything a battle needs and free soldier atlases of other sides / seasons.
  * Idempotent; resolves when every atlas is ready or known missing. `onProgress` gets 0..1. */
-export function requestBattleAtlases(sides: readonly Side[], season: Season, onProgress?: (p: number) => void): Promise<void> {
+export function requestBattleAtlases(
+  sides: readonly Side[], season: Season, onProgress?: (p: number) => void,
+  /** vehicle types on the map: their scale-1 atlases load with the rest (no pop-in on first sight) */
+  vehicleDefs: readonly string[] = [],
+): Promise<void> {
   const names = battleAtlasNames(sides, season);
+  for (const def of vehicleDefs) {
+    names.push(vehicleDefAtlasName(def, 1));
+    if (seasonKey(season) === 'winter') names.push(vehicleDefAtlasName(def, 1, 'winter'));
+  }
   // Only the scale-1 set is fetched up front. The scale-2 images are several times larger (a
   // soldier atlas decodes to ~170 MB) and are fetched by `atlasForZoom` the first time the player
   // zooms in; until they arrive the scale-1 frames are drawn enlarged.
@@ -282,7 +302,7 @@ export function drawSoldier(
 }
 
 /** Hull or turret from the 64 pre-rendered directions. The turret is placed on its ring:
- * `turretPivotM` (hull-local metres) rotated by the hull heading. */
+ * `turretPivotM` (hull-local metres) rotated by the hull heading. False while its atlas loads. */
 export function drawVehiclePart(
   ctx: CanvasRenderingContext2D, defId: string, part: 'hull' | 'turret', state: 'ok' | 'knockedOut',
   partRad: number, hullRad: number, x: number, y: number, zoom: number,
@@ -290,33 +310,27 @@ export function drawVehiclePart(
    * under its own centre) or 'trackL' / 'trackR' (hull with that track thrown); falls back to the
    * plain ok / ko entry when the atlas lacks it */
   variant?: 'blown' | 'trackL' | 'trackR',
+  season: Season = 'summer',
 ): boolean {
-  const atlas = vehicleAtlasFor(defId, zoom);
-  if (!atlas) return false;
-  let key = `${defId}.${part}.${state === 'ok' ? 'ok' : 'ko'}`;
-  const vkey = variant ? `${defId}.${part}.${variant}` : null;
-  const useVariant = !!vkey && !!atlas.meta.entries[vkey];
-  if (useVariant) key = vkey!;
-  if (!atlas.meta.entries[key]) return false;
-  let px = x, py = y;
-  if (part === 'turret' && !(useVariant && variant === 'blown')) {
-    const pv = turretPivotM(atlas.meta, defId);
-    const c = Math.cos(hullRad), s = Math.sin(hullRad), pxPerM = 10 * zoom;
-    px += (pv.x * c - pv.y * s) * pxPerM;
-    py += (pv.x * s + pv.y * c) * pxPerM;
+  const atlases = vehicleAtlasesFor(defId, zoom, season);
+  const base = `${defId}.${part}.${state === 'ok' ? 'ok' : 'ko'}`;
+  const keys = variant ? [`${defId}.${part}.${variant}`, base] : [base];
+  for (const key of keys) {
+    const atlas = atlases.find((a) => !!a.meta.entries[key]);
+    if (!atlas) continue;
+    let px = x, py = y;
+    if (part === 'turret' && !(key !== base && variant === 'blown')) {
+      const pv = turretPivotM(atlas.meta, defId);
+      const c = Math.cos(hullRad), s = Math.sin(hullRad), pxPerM = 10 * zoom;
+      // whole-pixel offset: the turret never shimmers against its hull while the vehicle drives
+      px += Math.round((pv.x * c - pv.y * s) * pxPerM);
+      py += Math.round((pv.x * s + pv.y * c) * pxPerM);
+    }
+    const dirs = atlas.meta.dirs;
+    const dir = ((Math.round((partRad / (Math.PI * 2)) * dirs) % dirs) + dirs) % dirs;
+    return drawAtlasFrame(ctx, atlas, key, dir, 0, px, py, zoom);
   }
-  const dirs = atlas.meta.dirs;
-  const dir = ((Math.round((partRad / (Math.PI * 2)) * dirs) % dirs) + dirs) % dirs;
-  return drawAtlasFrame(ctx, atlas, key, dir, 0, px, py, zoom);
-}
-
-/** True when the vehicles atlas can draw every part this vehicle needs (so hull and turret never
- * mix atlas and code-made art). */
-export function vehicleAtlasHas(defId: string, state: 'ok' | 'knockedOut', hasTurret: boolean, zoom: number): boolean {
-  const atlas = vehicleAtlasFor(defId, zoom);
-  if (!atlas || !atlas.image) return false;
-  const st = state === 'ok' ? 'ok' : 'ko';
-  return !!atlas.meta.entries[`${defId}.hull.${st}`] && (!hasTurret || !!atlas.meta.entries[`${defId}.turret.${st}`]);
+  return false;
 }
 
 export function drawWeapon(

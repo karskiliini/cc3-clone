@@ -1,0 +1,50 @@
+{
+ "scale": 1,
+ "cell": {
+  "w": 98,
+  "h": 96
+ },
+ "anchor": {
+  "x": 48,
+  "y": 48
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "bt7.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "bt7.hull.trackL": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "bt7.hull.trackR": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "bt7.turret.ok": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "bt7",
+ "season": "winter",
+ "hasTurret": true,
+ "lengthM": 5.7,
+ "widthM": 2.3,
+ "turretPivotM": {
+  "x": 0.0,
+  "y": 0.62
+ },
+ "image": "vehicles_bt7_winter_1.webp"
+}

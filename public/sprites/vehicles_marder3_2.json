@@ -38,7 +38,9 @@
  },
  "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
  "vehicle": "marder3",
+ "season": "summer",
  "hasTurret": false,
  "lengthM": 4.65,
- "widthM": 2.95
+ "widthM": 2.95,
+ "image": "vehicles_marder3_2.webp"
 }

@@ -6,7 +6,7 @@
  },
  "anchor": {
   "x": 81,
-  "y": 80
+  "y": 79
  },
  "columns": 16,
  "dirs": 64,
@@ -62,11 +62,13 @@
  },
  "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
  "vehicle": "t26",
+ "season": "summer",
  "hasTurret": true,
  "lengthM": 4.6,
  "widthM": 2.4,
  "turretPivotM": {
   "x": 0.0,
   "y": 0.42
- }
+ },
+ "image": "vehicles_t26_2.webp"
 }

@@ -5,7 +5,7 @@
   "h": 96
  },
  "anchor": {
-  "x": 49,
+  "x": 48,
   "y": 48
  },
  "columns": 16,
@@ -62,11 +62,13 @@
  },
  "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
  "vehicle": "bt7",
+ "season": "summer",
  "hasTurret": true,
  "lengthM": 5.7,
  "widthM": 2.3,
  "turretPivotM": {
   "x": 0.0,
   "y": 0.62
- }
+ },
+ "image": "vehicles_bt7_1.webp"
 }

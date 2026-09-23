@@ -38,7 +38,9 @@
  },
  "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
  "vehicle": "su76",
+ "season": "summer",
  "hasTurret": false,
  "lengthM": 5.0,
- "widthM": 2.7
+ "widthM": 2.7,
+ "image": "vehicles_su76_2.webp"
 }

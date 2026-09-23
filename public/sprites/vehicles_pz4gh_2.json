@@ -1,7 +1,7 @@
 {
  "scale": 2,
  "cell": {
-  "w": 208,
+  "w": 206,
   "h": 202
  },
  "anchor": {
@@ -62,11 +62,13 @@
  },
  "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
  "vehicle": "pz4gh",
+ "season": "summer",
  "hasTurret": true,
  "lengthM": 5.9,
  "widthM": 2.9,
  "turretPivotM": {
   "x": 0.0,
   "y": 0.18
- }
+ },
+ "image": "vehicles_pz4gh_2.webp"
 }

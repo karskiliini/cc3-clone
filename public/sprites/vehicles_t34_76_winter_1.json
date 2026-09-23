@@ -1,0 +1,50 @@
+{
+ "scale": 1,
+ "cell": {
+  "w": 116,
+  "h": 114
+ },
+ "anchor": {
+  "x": 58,
+  "y": 57
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "t34_76.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "t34_76.hull.trackL": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "t34_76.hull.trackR": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "t34_76.turret.ok": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "t34_76",
+ "season": "winter",
+ "hasTurret": true,
+ "lengthM": 6.7,
+ "widthM": 3.0,
+ "turretPivotM": {
+  "x": 0.0,
+  "y": 0.62
+ },
+ "image": "vehicles_t34_76_winter_1.webp"
+}

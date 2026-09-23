@@ -9,7 +9,7 @@ import { VIEW_W, VIEW_H } from '@/shared/types';
 import { facingAngle } from '@/shared/math';
 import { worldToScreen } from '@/engine/camera';
 import { PALETTE, SIDE_COLOR } from '@/render/palette';
-import { getVehicleFrame, getFlagSprite, unitSpriteScale } from '@/render/sprites';
+import { getFlagSprite, unitSpriteScale } from '@/render/sprites';
 import { drawText, textWidth } from '@/render/pixelfont';
 import { VEHICLE_DEFS } from '@/data/units';
 import { teamBarColor } from '@/ui/hud/hudChrome';
@@ -22,7 +22,7 @@ import { hatchWorld, isServiceable } from '@/sim/vehicleCrew';
 import { dist, facingFromAngle } from '@/shared/math';
 import {
   drawSoldier as drawAtlasSoldier, drawVehiclePart, drawWeapon as drawAtlasWeapon, drawWeaponState, requestBattleAtlases,
-  soldierAtlas, vehicleAtlasHas, itemAtlas, partsAtlas, drawAtlasFrame, weaponMuzzleM, type Atlas,
+  soldierAtlas, itemAtlas, partsAtlas, drawAtlasFrame, weaponMuzzleM, type Atlas,
 } from '@/render/spriteAtlas';
 import {
   frameFor, moodFor, pickAnimation, postureFor, transitionPosture, trembleOffset, entryKeyChain,
@@ -42,7 +42,9 @@ function ensureAtlases(state: BattleState): void {
   atlasRequested.add(state);
   const sides = new Set<Side>();
   for (const t of state.teams.values()) sides.add(t.side);
-  void requestBattleAtlases(Array.from(sides), state.map.def.season);
+  const defs = new Set<string>();
+  for (const v of state.vehicles.values()) defs.add(v.defId);
+  void requestBattleAtlases(Array.from(sides), state.map.def.season, undefined, Array.from(defs));
 }
 
 /** Render-side memory per soldier: measured ground speed (for gait cadence) and the last posture
@@ -377,21 +379,41 @@ function drawCorpses(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
   }
 }
 
-/** One whole vehicle at screen (cx,cy): soft ground shadow thrown to the screen SE (length by
- * vehicle height), hull lit from the NW whatever its facing, the turret's short shadow on the
- * deck, lit turret — two unrotated blits of pre-rendered frames (sprites.ts getVehicleFrame).
+/** How far (m) the shot throws a gun back, and for how long (s) the kick eases out. */
+const RECOIL_M = 0.26;
+const RECOIL_S = 0.4;
+function recoilOf(veh: Vehicle, time: number): number {
+  if (veh.lastMainShotAt == null) return 0;
+  const t = (time - veh.lastMainShotAt) / RECOIL_S;
+  return t >= 0 && t < 1 ? (1 - t) * (1 - t) : 0;
+}
+
+/** One whole vehicle at screen (cx,cy) from its Blender atlas (64 directions; light, the soft
+ * ground shadow and the turret's shadow on the deck are baked per direction): hull, then the turret
+ * on its ring. Nothing is drawn until the vehicle's atlas has loaded (battles preload them).
  * Exported for the sprite preview so it cannot drift from the battle view. */
 export function drawVehicleSprite(
   ctx: CanvasRenderingContext2D, defId: string, state: 'ok' | 'knockedOut', cx: number, cy: number,
-  hullRad: number, turretRad: number, zoom: number, scale: number, turretBlown = false,
+  hullRad: number, turretRad: number, zoom: number, turretBlown = false,
   brokenTrack: 'L' | 'R' | 'both' | null = null,
   /** where the sim threw the blown-off turret (screen px) and how it lies; absent = beside the hull */
   turretLanding?: { x: number; y: number; dirRad: number },
+  season: Season = 'summer',
+  /** 0..1 main-gun recoil (1 = the instant of the shot): the vehicle rocks back and the turret
+   * (the whole vehicle for a casemate gun) kicks back along the gun line */
+  recoil = 0,
 ): void {
   const vdef = VEHICLE_DEFS[defId];
-  // `turret.blown` (vehicleDamageView): the turret lies beside the hull. Until the vehicle atlas
-  // has a `<def>.turret.blown` entry this falls back to the knocked-out turret, thrown clear.
+  if (recoil > 0) {
+    const gunRad = vdef?.hasTurret ? turretRad : hullRad, m = RECOIL_M * recoil * 10 * zoom;
+    cx -= Math.sin(hullRad) * m * 0.5; cy += Math.cos(hullRad) * m * 0.5;
+    if (!vdef?.hasTurret) { cx -= Math.sin(gunRad) * m * 0.5; cy += Math.cos(gunRad) * m * 0.5; }
+  }
   let tcx = cx, tcy = cy;
+  if (recoil > 0 && vdef?.hasTurret) {
+    const m = RECOIL_M * recoil * 10 * zoom * 0.5;
+    tcx -= Math.sin(turretRad) * m; tcy += Math.cos(turretRad) * m;
+  }
   if (turretBlown && turretLanding) {
     tcx = turretLanding.x; tcy = turretLanding.y; turretRad = turretLanding.dirRad;
   } else if (turretBlown) {
@@ -400,24 +422,11 @@ export function drawVehicleSprite(
     tcy += (2.2 * s + 1.0 * -c) * pxPerM * 0.9;
     turretRad += 2.3;
   }
-  if (vehicleAtlasHas(defId, state, !!vdef?.hasTurret, zoom)) {
-    // pre-rendered (Blender) frames: 64 directions, light and shadow baked per direction
-    // damage looks from the atlas: `hull.blown` (open turret ring) with `turret.blown` lying beside
-    // it, `hull.trackL|R` for a thrown track (a live hull only; wrecks keep their burnt look)
-    const hullVariant = turretBlown ? 'blown' : state === 'ok' && brokenTrack ? (brokenTrack === 'R' ? 'trackR' : 'trackL') : undefined;
-    drawVehiclePart(ctx, defId, 'hull', state, hullRad, hullRad, cx, cy, zoom, hullVariant);
-    if (vdef?.hasTurret) drawVehiclePart(ctx, defId, 'turret', state, turretRad, hullRad, tcx, tcy, zoom, turretBlown ? 'blown' : undefined);
-    return;
-  }
-  const hull = getVehicleFrame(defId, 'hull', state, hullRad, scale);
-  const hs = spriteDrawSize(hull, zoom, scale);
-  ctx.drawImage(hull, Math.round(cx - hs.dw / 2), Math.round(cy - hs.dh / 2), hs.dw, hs.dh);
-  const def = VEHICLE_DEFS[defId];
-  if (def && def.hasTurret) {
-    const turret = getVehicleFrame(defId, 'turret', state, turretRad, scale);
-    const ts = spriteDrawSize(turret, zoom, scale);
-    ctx.drawImage(turret, Math.round(tcx - ts.dw / 2), Math.round(tcy - ts.dh / 2), ts.dw, ts.dh);
-  }
+  // damage looks: `hull.blown` (open turret ring) with `turret.blown` lying beside it,
+  // `hull.trackL|R` for a thrown track (a live hull only; wrecks keep their burnt look)
+  const hullVariant = turretBlown ? 'blown' : state === 'ok' && brokenTrack ? (brokenTrack === 'R' ? 'trackR' : 'trackL') : undefined;
+  drawVehiclePart(ctx, defId, 'hull', state, hullRad, hullRad, cx, cy, zoom, hullVariant, season);
+  if (vdef?.hasTurret) drawVehiclePart(ctx, defId, 'turret', state, turretRad, hullRad, tcx, tcy, zoom, turretBlown ? 'blown' : undefined, season);
 }
 
 /** Thin grey smoke trailing from the engine deck of a vehicle with a damaged engine. */
@@ -466,7 +475,6 @@ function drawOpenHatches(ctx: CanvasRenderingContext2D, cam: Camera, state: Batt
 }
 
 function drawVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side): void {
-  const scale = unitSpriteScale(cam.zoom);
   for (const veh of state.vehicles.values()) {
     if (!isEnemyVisible(state, playerSide, veh.side, veh.id, true)) continue;
     if (!visible(veh.pos, cam)) continue;
@@ -476,8 +484,9 @@ function drawVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
     const p = worldToScreen(cam, veh.pos);
     const dmg = vehicleDamageView(veh);
     const tl = veh.turretLanding ? worldToScreen(cam, veh.turretLanding) : null;
-    drawVehicleSprite(ctx, veh.defId, koLike ? 'knockedOut' : 'ok', p.x, p.y, veh.hullFacing, veh.turretFacing, cam.zoom, scale, dmg.turretBlown, dmg.brokenTrack,
-      tl ? { x: tl.x, y: tl.y, dirRad: veh.turretLandingDir ?? veh.turretFacing + 2.3 } : undefined);
+    drawVehicleSprite(ctx, veh.defId, koLike ? 'knockedOut' : 'ok', p.x, p.y, veh.hullFacing, veh.turretFacing, cam.zoom, dmg.turretBlown, dmg.brokenTrack,
+      tl ? { x: tl.x, y: tl.y, dirRad: veh.turretLandingDir ?? veh.turretFacing + 2.3 } : undefined, state.map.def.season,
+      koLike ? 0 : recoilOf(veh, state.time));
     if ((left || veh.exiting) && cam.zoom > 0.5) drawOpenHatches(ctx, cam, state, veh);
     if (dmg.engineSmoke) drawEngineSmoke(ctx, veh, p, state.time, cam.zoom, VEHICLE_DEFS[veh.defId]?.lengthM ?? 6);
   }

@@ -11,7 +11,7 @@ following the atlas contract in `docs/superpowers/specs/2026-09-17-soldier-anima
 | `soldiers.py` | the infantryman rig, all poses/animations, soldier atlases and body-part atlases. |
 | `items.py` | ground items atlas (`items_<scale>`). |
 | `contact_sheet.py` | contact sheets over the game's painted grass/snow (plain python3 + Pillow). |
-| `vehicles.py`, `weapons.py` | vehicles / crew weapons (other agent). |
+| `vehicles.py`, `vehicles_common.py` | tanks and vehicles (per-vehicle atlases, see below); `vehicles_common.py` also serves `weapons.py` (crew weapons). |
 | `menu.py` | the menu poster backdrops `public/menu/poster.png` (Soviet rifleman pointing, burning town) and `poster_plain.png` (the town alone, behind the working screens): perspective Cycles render, metaball figure, graded to one maroon-to-flame palette in numpy. `npm run sprites:menu` (~25 s, 4 threads). |
 
 ## Commands
@@ -122,3 +122,31 @@ the offset (±4 px over a 6-row grid at scale 2, i.e. a 1.6 px step between anim
 `cell_origin(..., exact=True)` now compensates; soldiers.py and items.py use it and all their atlases
 were re-rendered. The default (`exact=False`) is unchanged for vehicles_common.py, which measures and
 applies its own `ground_y_factor`. Within a cell, ground-y is 0.978 × px_per_m (2 % short), by design now.
+
+## Vehicle atlases (`vehicles_<def>_<1|2>`, `vehicles_<def>_winter_<1|2>`)
+
+```sh
+npm run sprites:vehicles                                        # all vehicles, both scales, summer
+blender -b -P tools/blender/vehicles.py -- --season winter      # whitewashed live looks
+blender -b -P tools/blender/vehicles.py -- --only t34_76,kv1 --scale 1 --force
+VEH_OUT=/tmp/look blender -b -P tools/blender/vehicles.py -- --only pz4gh --scale 1 --dirs 16 --states ok --force
+python3 tools/blender/vehicles_common.py sheet-vehicles --scale 1 --zoom 3 --only t34_76,pz4gh
+```
+
+* 64 facings; entries `<def>.hull.{ok,ko,blown,trackL,trackR}` and `<def>.turret.{ok,ko,blown}` (blown only
+  for turreted vehicles); `turretPivotM` (+y forward) places the turret on its ring. The winter atlas holds
+  only `hull.{ok,trackL,trackR}` + `turret.ok`; the game takes the burnt wreck looks from the summer atlas. The 1941 Dunkelgrau vehicles (Pz III J, Pz IV F1, SdKfz 251)
+  get no winter atlas: they fought the Moscow winter unwashed.
+* Paint (`vehicles_common.paint_material`): Dunkelgrau (1941-42: Pz III J, Pz IV F1, SdKfz 251) or
+  Dunkelgelb with Olivgruen / Rotbraun bands (1943+), Soviet 4BO; bevel-shader rounded edges with lighter
+  worn paint, cavity AO, mottling, rain streaks, dust on the lower hull; winter lime wash (patchy, worn off the
+  edges). Burnt finish + sooty engine deck for ko / blown.
+* Render: Cycles (GPU when available), 3x supersample, 1 px pixel filter; pack-time `clean_cell` sharpens
+  the colour a little and darkens the silhouette rim (`OUTLINE`) so each part reads on any ground.
+* The turret is rendered with the shadow catcher at deck height: it brings its own shadow (gun tube
+  included) onto the hull. The hull carries a shadow-less ring drum under the turret.
+* `VEH_OUT` redirects atlases + cache (look-dev); `--states` renders only some states. Cache:
+  `tools/blender/.cache/vehicles[_winter]_<scale>/` (pass `--force` after changing a model).
+* Runtime: `spriteAtlas.drawVehiclePart` / `unitRender.drawVehicleSprite` (no code-drawn fallback; a battle
+  preloads the scale-1 atlases of the vehicle types present). The main-gun recoil kick is a render-time
+  offset (`lastMainShotAt`).

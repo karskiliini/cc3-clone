@@ -32,14 +32,21 @@ import vehicles_common as VC  # noqa: E402
 from vehicles_common import Kit, rect_fp, rounded_fp, ellipse_fp  # noqa: E402
 from mathutils import Matrix, Euler, Vector  # noqa: E402
 
-GREY = "#4f565b"
-DYEL = "#9e8a52"
-SOVG = "#3f4c2b"
+GREY = "#3e4548"      # Dunkelgrau RAL 7021 (1940-42), as it renders under the game's sun
+DYEL = "#8e7a48"      # Dunkelgelb RAL 7028 (1943-45)
+SOVG = "#3a4727"      # Soviet 4BO protective green
 BARREL_K = 1.6       # gun tubes are drawn a little fat so they survive at 10 px/m
-CAMO_A = [("#56613a", 0.52, 0.60, 0.0), ("#70452f", 0.56, 0.64, 7.3)]
-CAMO_B = [("#56613a", 0.50, 0.58, 3.1)]
-CAMO_C = [("#70452f", 0.50, 0.58, 5.2), ("#56613a", 0.58, 0.66, 1.4)]
+OLIV = "#46502d"      # Olivgruen RAL 6003
+RBRN = "#5a3424"      # Rotbraun RAL 8017
+CAMO_A = [(OLIV, 0.52, 0.58, 0.0), (RBRN, 0.57, 0.63, 7.3)]
+CAMO_B = [(OLIV, 0.50, 0.56, 3.1)]
+CAMO_C = [(RBRN, 0.50, 0.56, 5.2), (OLIV, 0.58, 0.64, 1.4)]
 
+
+SUPERSAMPLE = 3      # 3x3 rays-per-pixel grid, box-downsampled: clean plate edges without mush
+FILTER_W = 1.0       # Cycles pixel filter width (px of the supersampled image)
+OUTLINE = 0.3        # darken the silhouette pixels by this much (see VC.clean_cell)
+SHARPEN = 0.35       # unsharp mask on the object colour after the downsample
 
 FRAME = "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor"
 
@@ -429,7 +436,7 @@ def marder3(k, d, ko):
     gz = zd + 0.95
     k.box((0.3, 0.75, 0.3), (0, -0.25, gz), "gunmetal")
     k.box((0.22, 1.0, 0.18), (0, 0.45, gz - 0.12), "paint")
-    k.box((1.15, 0.04, 0.6), (0, 0.72, gz + 0.02), wall, rot=(-14, 0, 0))
+    k.box((0.8, 0.04, 0.5), (0, 0.66, gz - 0.08), wall, rot=(-24, 0, 0))
     barrel(k, 0.1, 3.3, 0.072, gz, brake=(0.38, 0.13), sleeve=(0.9, 0.1))
     k.box((0.5, 0.35, 0.3), (-(W / 2 - 0.3), -L / 2 + 0.5, top + 0.22), "paint")
     k.cyl(0.09, 0.9, (W / 2 - 0.25, -L / 2 + 0.55, top + 0.18), "rust", axis="Y", seg=8)
@@ -452,8 +459,9 @@ def sdkfz251(k, d, ko):
     for s in (-1, 1):
         k.cyl(0.42, 0.22, (s * (W / 2 - 0.13), L / 2 - 0.95, 0.42), "rubber", axis="X", seg=16)
         k.cyl(0.24, 0.24, (s * (W / 2 - 0.13), L / 2 - 0.95, 0.42), "paint", axis="X", seg=10)
-        k.box((0.3, 1.1, 0.03), (s * (W / 2 - 0.16), L / 2 - 0.95, 0.92), "paint", rot=(0, 0, 0))   # mudguard
-        k.box((0.3, 0.35, 0.03), (s * (W / 2 - 0.16), L / 2 - 0.28, 0.82), "paint", rot=(-38, 0, 0))
+        k.box((0.34, 1.45, 0.03), (s * (W / 2 - 0.17), L / 2 - 1.3, 0.9), "paint")                # mudguard
+        k.box((0.34, 0.42, 0.03), (s * (W / 2 - 0.17), L / 2 - 0.42, 0.78), "paint", rot=(-32, 0, 0))
+        k.box((0.3, 0.03, 0.2), (s * (W / 2 - 0.17), L / 2 - 2.0, 0.8), "paint")                  # fender web to the bay
         k.box((0.34, Lt - 0.2, 0.03), (s * (W / 2 - 0.19), -L / 2 + Lt / 2 + 0.3, top + 0.08), "paint")
     k.cyl(0.05, W - 0.4, (0, L / 2 - 0.95, 0.42), "steel", axis="X", seg=6)
     # bonnet: narrow, sloped nose
@@ -550,8 +558,6 @@ def t34_76_turret(k, d, ko, zr, proxy):
     for s in (-1, 1):
         k.hatch((0.52, 0.52), (s * 0.36, -0.5, zr + h), "paint", open_deg=95 if ko else 0, hinge="front", round_seg=12)
     k.hatch((0.26, 0.26), (0, 0.15, zr + h), "paint", round_seg=8)
-    k.star(0.3, (w * 0.4 + 0.0, -0.45, zr + 0.33), rot=(90 - 20, 0, 90 + 12))
-    k.star(0.3, (-w * 0.4 - 0.0, -0.45, zr + 0.33), rot=(90 - 20, 0, -90 - 12))
     if proxy:
         return
     k.box((0.85, 0.5, 0.5), (0, l / 2 - 0.05, zr + 0.34), "paint", top=(0.7, 0.8))
@@ -572,8 +578,6 @@ def t34_85_turret(k, d, ko, zr, proxy):
     k.hatch((0.5, 0.5), (0.45, -0.3, zr + h), "paint", open_deg=95 if ko else 0, hinge="front", round_seg=12)
     for y in (-1.0, -1.35):
         k.cyl(0.13, 0.1, (0, y, zr + h - 0.03), "paint", axis="Z", seg=10)          # twin ventilator domes
-    k.star(0.32, (w * 0.415, -0.5, zr + 0.36), rot=(90 - 17, 0, 90))
-    k.star(0.32, (-w * 0.415, -0.5, zr + 0.36), rot=(90 - 17, 0, -90))
     if proxy:
         return
     k.cyl(0.33, 0.9, (0, l / 2 - 0.42, zr + 0.36), "paint", axis="X", seg=12)
@@ -601,8 +605,6 @@ def su85(k, d, ko):
     k.cyl(0.42, 0.5, (gx, gy, gz), "paint", axis="Y", seg=12, r2=0.3, rot=(-90 + 8, 0, 0))
     k.cyl(0.24, 0.8, (gx, gy + 0.55, gz), "paint", axis="Y", seg=10, r2=0.17)
     barrel(k, gy + 0.4, 3.6, 0.078, gz, x=gx)
-    k.star(0.34, ((W - 0.06) / 2 * 0.87 + 0.0, 0.2, 1.47), rot=(90 - 22, 0, 90))
-    k.star(0.34, (-(W - 0.06) / 2 * 0.87 - 0.0, 0.2, 1.47), rot=(90 - 22, 0, -90))
     return None, zc
 
 
@@ -642,8 +644,6 @@ def kv1_turret(k, d, ko, zr, proxy):
     k.hatch((0.22, 0.22), (0.55, 0.45, zr + h), "paint", round_seg=8)
     k.hatch((0.22, 0.22), (-0.55, 0.45, zr + h), "paint", round_seg=8)
     k.cyl(0.12, 0.2, (0, -l / 2 - 0.22, zr + 0.5), "paint", axis="Y", seg=8)            # rear MG ball
-    k.star(0.36, (w / 2 * 0.95 + 0.01, -0.4, zr + 0.45), rot=(90 - 4, 0, 90))
-    k.star(0.36, (-w / 2 * 0.95 - 0.01, -0.4, zr + 0.45), rot=(90 - 4, 0, -90))
     if proxy:
         return
     k.box((1.0, 0.4, 0.6), (0, l / 2 - 0.3, zr + 0.42), "paint", top=(0.85, 0.8))
@@ -687,8 +687,6 @@ def is2_turret(k, d, ko, zr, proxy):
     k.hatch((0.5, 0.5), (0.45, -0.6, zr + h - 0.01), "paint", open_deg=95 if ko else 0, hinge="front", round_seg=12)
     k.cyl(0.13, 0.08, (0.2, 0.35, zr + h), "paint", axis="Z", seg=8)
     k.cyl(0.1, 0.25, (0.35, -l / 2 - 0.4, zr + 0.5), "paint", axis="Y", seg=8)           # rear MG
-    k.star(0.34, (w * 0.425, -0.5, zr + 0.4), rot=(90 - 15, 0, 90))
-    k.star(0.34, (-w * 0.425, -0.5, zr + 0.4), rot=(90 - 15, 0, -90))
     if proxy:
         return
     k.cyl(0.4, 1.15, (0, l / 2 - 0.62, zr + 0.4), "paint", axis="X", seg=12)
@@ -725,8 +723,6 @@ def t26_turret(k, d, ko, zr, proxy):
     k.box((0.95, 0.75, 0.5), (0, -0.78, zr + 0.36), "paint", top=(0.92, 0.95))
     for s in (-1, 1):
         k.hatch((0.42, 0.5), (s * 0.26, -0.25, zr + 0.62), "paint", open_deg=95 if ko else 0, hinge="front")
-    k.star(0.22, (0.475 + 0.012, -0.8, zr + 0.36), rot=(90 - 3, 0, 90))
-    k.star(0.22, (-0.475 - 0.012, -0.8, zr + 0.36), rot=(90 - 3, 0, -90))
     if proxy:
         return
     k.box((0.62, 0.22, 0.42), (0, 0.62, zr + 0.34), "paint")
@@ -763,8 +759,6 @@ def bt7_turret(k, d, ko, zr, proxy):
     k.extrude(ellipse_fp(1.4, 1.85, 16, cy=-0.2), zr + 0.02, zr + 0.6, "paint", scale=(0.68, 0.74), shift=(0, -0.02), smooth=True, centre=(0, -0.2))
     for s in (-1, 1):
         k.hatch((0.4, 0.46), (s * 0.24, -0.3, zr + 0.6), "paint", open_deg=95 if ko else 0, hinge="front", round_seg=10)
-    k.star(0.22, (0.57, -0.25, zr + 0.3), rot=(90 - 21, 0, 90))
-    k.star(0.22, (-0.57, -0.25, zr + 0.3), rot=(90 - 21, 0, -90))
     if proxy:
         return
     k.box((0.6, 0.25, 0.4), (0, 0.62, zr + 0.32), "paint", top=(0.85, 0.8))
@@ -803,8 +797,6 @@ def t70_turret(k, d, ko, zr, proxy):
     fp = [(-0.35, -0.72), (0.35, -0.72), (0.62, -0.3), (0.62, 0.22), (0.35, 0.6), (-0.35, 0.6), (-0.62, 0.22), (-0.62, -0.3)]
     k.extrude(fp, zr + 0.02, zr + 0.55, "paint", scale=(0.68, 0.75), shift=(0, -0.03), centre=(0, -0.06))
     k.hatch((0.5, 0.5), (0, -0.2, zr + 0.55), "paint", open_deg=95 if ko else 0, hinge="front", round_seg=10)
-    k.star(0.18, (0.53, -0.05, zr + 0.28), rot=(90 - 20, 0, 90))
-    k.star(0.18, (-0.53, -0.05, zr + 0.28), rot=(90 - 20, 0, -90))
     if proxy:
         return
     k.box((0.6, 0.3, 0.36), (0, 0.55, zr + 0.28), "paint", top=(0.85, 0.7))
@@ -834,8 +826,6 @@ def su76(k, d, ko):
     k.box((0.7, 0.35, 0.5), (gx, 0.32, gz), "paint", top=(0.8, 0.7))
     k.box((0.24, 1.1, 0.2), (gx, 0.85, gz - 0.12), "paint")
     barrel(k, 0.2, 2.75, 0.07, gz, x=gx, brake=(0.36, 0.125))
-    k.star(0.3, ((W / 2 - 0.3) + 0.11, cy, zc), rot=(90 - 11, 0, 90))
-    k.star(0.3, (-(W / 2 - 0.3) - 0.11, cy, zc), rot=(90 - 11, 0, -90))
     return None, zr
 
 
@@ -861,7 +851,18 @@ VEHICLES = {
 }
 
 
-def materials(vid, d, ko):
+WASH = "#b4b2a8"          # winter lime wash
+WINTER_STATES = ("ok", "trackL", "trackR")   # a burnt-out wreck has lost its wash: winter reuses the summer ko / blown
+# the Dunkelgrau 1941 vehicles fought the first winter (Moscow) unwashed: no winter atlas, the game
+# draws them grey on the snow
+NO_WASH = ("pz3j", "pz4f1", "sdkfz251")
+
+
+def atlas_name(vid, scale, season="summer"):
+    return "vehicles_%s%s_%d" % (vid, "_winter" if season == "winter" else "", scale)
+
+
+def materials(vid, d, ko, season="summer"):
     base, camo, soot = VEHICLES[vid][2:5]
     mats = {}
     VC.common_materials(mats, burnt=ko)
@@ -871,8 +872,10 @@ def materials(vid, d, ko):
             mats[nm] = VC.paint_material(nm + "_ko", base, camo=camo, scorch=("#2a2622", "#4d3526"),
                                          soot_at=(0.0, soot * d["L"], d["L"] * 0.42), mottle=0.35, gain=g)
     else:
-        mats["paint"] = VC.paint_material("paint", base, camo=camo)
-        mats["paint2"] = VC.paint_material("paint2", base, camo=camo, gain=0.78)
+        wash = WASH if season == "winter" else None
+        dust = "#6e685c" if season == "winter" else "#8a7d60"
+        mats["paint"] = VC.paint_material("paint", base, camo=camo, whitewash=wash, dust=dust)
+        mats["paint2"] = VC.paint_material("paint2", base, camo=camo, gain=0.78, whitewash=wash, dust=dust)
     return mats
 
 
@@ -880,13 +883,13 @@ HULL_STATES = ("ok", "ko", "blown", "trackL", "trackR")     # blown only for tur
 TURRET_STATES = ("ok", "ko", "blown")
 
 
-def build(vid, d, state, part):
+def build(vid, d, state, part, season="summer"):
     """One sprite subject.  hull: ok / ko / blown (burnt, turret ring an open hole) / trackL, trackR
     (intact paint, the vehicle's own left/right track thrown).  turret: ok / ko (askew) / blown (the
     burnt turret lying on the ground, rendered with its own ground shadow)."""
     hull_fn, turret_fn = VEHICLES[vid][0:2]
     ko = state in ("ko", "blown")
-    mats = materials(vid, d, ko)
+    mats = materials(vid, d, ko, season)
     k = Kit(vid + "_hull")
     k.broken = {"trackL": -1, "trackR": 1}.get(state, 0)
     pivot, zr = hull_fn(k, d, ko)
@@ -904,7 +907,12 @@ def build(vid, d, state, part):
             else:
                 # turret ring drum: always covered by the turret sprite whatever its facing; gives the
                 # hull sprite the turret's short shadow on the deck
-                k.cyl(rr, (ztop - zr) * 0.6, (pivot[0], pivot[1], zr + (ztop - zr) * 0.3), "paint", axis="Z", seg=20)
+                # (it casts no shadow of its own: the turret sprite brings its shadow along)
+                drum = Kit(vid + "_drum")
+                drum.cyl(rr, (ztop - zr) * 0.6, (pivot[0], pivot[1], zr + (ztop - zr) * 0.3), "paint", axis="Z", seg=20)
+                ob = drum.build(mats)
+                ob.visible_shadow = False
+                return [(k.build(mats), True), (ob, True)], pivot, k
         return [(k.build(mats), True)], pivot, k
     kt = Kit(vid + "_turret")
     if state == "blown":
@@ -914,6 +922,12 @@ def build(vid, d, state, part):
         ko_xform(kt, ko)
     turret_fn(kt, d, ko, zr, False)
     return [(kt.build(mats), True)], pivot, kt
+
+
+def deck_z(vid, d):
+    """Height of the turret ring (the hull roof the turret's shadow falls on)."""
+    k = Kit("probe_z")
+    return VEHICLES[vid][0](k, d, False)[1]
 
 
 def extent(vid, d):
@@ -942,7 +956,12 @@ def render_vehicle(vid, d, scale, args, log):
     todo = [("hull", st) for st in HULL_STATES if turreted or st != "blown"]
     if turreted:
         todo += [("turret", st) for st in TURRET_STATES]
-    cdir = os.path.join(VC.ROOT, "node_modules", ".cache", "sprites", "vehicles_%d" % scale)
+    if args.season == "winter":
+        todo = [(p, st) for (p, st) in todo if st in WINTER_STATES]
+    if args.states:
+        todo = [(p, st) for (p, st) in todo if st in args.states.split(",")]
+    cdir = os.path.join(os.environ.get("VEH_OUT") or os.path.join(VC.ROOT, "tools", "blender"), ".cache",
+                        "vehicles_%s%d" % ("winter_" if args.season == "winter" else "", scale))
     os.makedirs(cdir, exist_ok=True)
     for part, st in todo:
         key = "%s.%s.%s" % (vid, part, st)
@@ -952,23 +971,25 @@ def render_vehicle(vid, d, scale, args, log):
             log("  %s  (cached)" % key)
             continue
         t0 = time.time()
-        frames = VC.render_dirs(lambda ctx: build(vid, d, st, part)[0], args.dirs, ppm, cell, anchor,
-                                shadow=(part == "hull" or st == "blown"), engine=args.engine,
-                                samples=args.samples, device=args.device)
+        # the turret throws its shadow (gun tube included) onto the deck it sits on
+        frames = VC.render_dirs(lambda ctx: build(vid, d, st, part, args.season)[0], args.dirs, ppm, cell, anchor,
+                                shadow=True, engine=args.engine, samples=args.samples, device=args.device,
+                                supersample=SUPERSAMPLE, filter_width=FILTER_W,
+                                catcher_z=0.0 if (part == "hull" or st == "blown") else deck_z(vid, d))
         np.savez_compressed(path, f=np.stack(frames))
         entries[key] = frames
         log("  %s  %.1fs" % (key, time.time() - t0))
-    entries, (cw, ch), anc = VC.crop_union(entries, anchor)
+    entries, (cw, ch), anc = VC.crop_union(entries, anchor, outline=OUTLINE, sharpen=SHARPEN)
     columns = 16
     packer = C.AtlasPacker(scale, cw, ch, anc, args.dirs, columns=columns)
     for key, frames in entries.items():
         packer.add(key, [[f] for f in frames], fps=0, loop=False)
-    base = os.path.join(VC.SPRITES, "vehicles_%s_%d" % (vid, scale))
+    base = os.path.join(VC.SPRITES, atlas_name(vid, scale, args.season))
     piv = {"x": round(pivot[0], 3), "y": round(pivot[1], 3)} if pivot else None
-    extra = {"frame": FRAME, "vehicle": vid, "hasTurret": bool(VEHICLES[vid][1]), "lengthM": d["L"], "widthM": d["W"]}
+    extra = {"frame": FRAME, "vehicle": vid, "season": args.season, "hasTurret": bool(VEHICLES[vid][1]), "lengthM": d["L"], "widthM": d["W"]}
     if piv:
         extra["turretPivotM"] = piv
-    packer.save(base, extra=extra)
+    packer.save(base, extra=extra, webp="lossy")
     return base
 
 
@@ -998,11 +1019,16 @@ def main():
     ap.add_argument("--engine", default="CYCLES")
     ap.add_argument("--device", default="GPU")
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--season", default="summer", choices=["summer", "winter"],
+                    help="winter: whitewashed ok / trackL / trackR entries in vehicles_<id>_winter_<scale>")
+    ap.add_argument("--states", default="", help="look-dev: only these states (e.g. ok); the atlas holds just them")
     args = ap.parse_args(argv)
     defs = read_defs()
     missing = [v for v in defs if v not in VEHICLES]
     assert not missing, "no model for %s" % missing
     ids = [i for i in args.only.split(",") if i] or list(VEHICLES.keys())
+    if args.season == "winter":
+        ids = [i for i in ids if i not in NO_WASH]
     scales = [args.scale] if args.scale else [1, 2]
 
     def log(s):
@@ -1010,12 +1036,12 @@ def main():
     t_all = time.time()
     for scale in scales:
         for vid in ids:
-            base = os.path.join(VC.SPRITES, "vehicles_%s_%d" % (vid, scale))
             t0 = time.time()
             log("%s scale %d" % (vid, scale))
             render_vehicle(vid, defs[vid], scale, args, log)
             log("%s scale %d done in %.1fs" % (vid, scale, time.time() - t0))
-        write_index(scale, args.dirs)
+        if args.season == "summer":
+            write_index(scale, args.dirs)
     log("all done in %.1fs" % (time.time() - t_all))
 
 

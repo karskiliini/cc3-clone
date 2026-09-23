@@ -73,7 +73,7 @@
   "pz4f1": {
    "file": "vehicles_pz4f1_2",
    "cell": {
-    "w": 208,
+    "w": 206,
     "h": 202
    },
    "anchor": {
@@ -140,7 +140,7 @@
   "pz4gh": {
    "file": "vehicles_pz4gh_2",
    "cell": {
-    "w": 208,
+    "w": 206,
     "h": 202
    },
    "anchor": {
@@ -247,7 +247,7 @@
   "panther": {
    "file": "vehicles_panther_2",
    "cell": {
-    "w": 244,
+    "w": 246,
     "h": 242
    },
    "anchor": {
@@ -314,7 +314,7 @@
   "tiger": {
    "file": "vehicles_tiger_2",
    "cell": {
-    "w": 228,
+    "w": 230,
     "h": 226
    },
    "anchor": {
@@ -466,7 +466,7 @@
    },
    "anchor": {
     "x": 81,
-    "y": 80
+    "y": 79
    },
    "columns": 16,
    "hasTurret": true,
@@ -863,12 +863,12 @@
   "is2": {
    "file": "vehicles_is2_2",
    "cell": {
-    "w": 268,
-    "h": 266
+    "w": 272,
+    "h": 268
    },
    "anchor": {
     "x": 133,
-    "y": 134
+    "y": 136
    },
    "columns": 16,
    "hasTurret": true,

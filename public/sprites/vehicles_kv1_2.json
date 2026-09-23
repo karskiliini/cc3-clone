@@ -62,11 +62,13 @@
  },
  "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
  "vehicle": "kv1",
+ "season": "summer",
  "hasTurret": true,
  "lengthM": 6.8,
  "widthM": 3.3,
  "turretPivotM": {
   "x": 0.0,
   "y": 0.75
- }
+ },
+ "image": "vehicles_kv1_2.webp"
 }
