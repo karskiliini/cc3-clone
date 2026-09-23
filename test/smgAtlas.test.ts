@@ -21,7 +21,7 @@ describe('generated SMG sprite assets', () => {
   for (const side of ['german', 'soviet']) for (const season of ['summer', 'winter']) {
     for (const scale of [1, 2]) {
       const name = `smg_${side}_${season}_${scale}`;
-      it(`${name} contains every planted pose, twist and recoil frame in a complete PNG`, () => {
+      it(`${name} contains every planted pose, twist and recoil frame in a complete lossless WebP sheet`, () => {
         const base = `public/sprites/${name}`;
         const meta = JSON.parse(fs.readFileSync(`${base}.json`, 'utf8')) as SmgMeta;
         expect(validateAtlasMeta(meta)).toBeNull();
@@ -57,11 +57,17 @@ describe('generated SMG sprite assets', () => {
         expect(Object.keys(meta.entries)).toEqual(expectedKeys);
         expect(atlasCellCount(meta)).toBe(1680);
 
-        const png = fs.readFileSync(`${base}.png`);
-        expect(Array.from(png.slice(0, 8))).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
-        const ihdr = new DataView(png.buffer, png.byteOffset, png.byteLength);
-        expect(ihdr.getUint32(16)).toBe(meta.columns * meta.cell.w);
-        expect(ihdr.getUint32(20)).toBe(Math.ceil(start / meta.columns) * meta.cell.h);
+        // the sheet is lossless WebP (VP8L), named by the JSON's `image` field
+        expect(meta.image).toBe(`${name}.webp`);
+        const img = fs.readFileSync(`public/sprites/${meta.image}`);
+        const ascii = (from: number, to: number) => String.fromCharCode(...Array.from(img.slice(from, to)));
+        expect(ascii(0, 4)).toBe('RIFF');
+        expect(ascii(8, 16)).toBe('WEBPVP8L');
+        const b = Array.from(img.slice(21, 25));
+        const width = 1 + (((b[1] & 0x3f) << 8) | b[0]);
+        const height = 1 + (((b[3] & 0x0f) << 10) | (b[2] << 2) | ((b[1] & 0xc0) >> 6));
+        expect(width).toBe(meta.columns * meta.cell.w);
+        expect(height).toBe(Math.ceil(start / meta.columns) * meta.cell.h);
       });
     }
   }

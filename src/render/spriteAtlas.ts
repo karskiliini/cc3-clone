@@ -287,7 +287,7 @@ export function soldierAtlas(side: Side, season: Season, zoom: number): Atlas | 
   return atlasForZoom((sc) => soldierAtlasName(side, season, sc), soldierScaleZoom(zoom));
 }
 export function smgAtlas(side: Side, season: Season, zoom: number): Atlas | null {
-  return atlasForZoom((sc) => smgAtlasName(side, season, sc), zoom);
+  return atlasForZoom((sc) => smgAtlasName(side, season, sc), soldierScaleZoom(zoom));
 }
 export function itemAtlas(zoom: number): Atlas | null { return atlasForZoom(itemAtlasName, zoom); }
 export function partsAtlas(side: Side, season: Season, zoom: number): Atlas | null {

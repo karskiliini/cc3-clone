@@ -1911,6 +1911,17 @@ def soldier_light(ctx):
     bg.inputs[1].default_value = C.SKY_STRENGTH * 0.55
 
 
+def soldier_look(ctx, side, season):
+    """Lights and materials of every soldier-figure render (soldiers.py and smg.py share it):
+    soldier_light() plus the palette as matt cloth and paint."""
+    soldier_light(ctx)
+    for role, (col, rough) in PALETTES[(side, season)].items():
+        m = C.make_material("sol_" + role, col, roughness=rough, metallic=0.6 if role == "metal" else 0.0)
+        spec = m.node_tree.nodes["Principled BSDF"].inputs.get("Specular IOR Level")
+        if spec is not None and role not in ("metal", "brass"):
+            spec.default_value = 0.12          # cloth and paint: no sheen washing out the tops
+
+
 def atlas_name(side, season, scale, kind="soldiers"):
     return f"{kind}_{side}_{season}_{scale}"
 
@@ -1942,12 +1953,7 @@ def render_atlas(side, season, scale, only, force, pack_only, samples, kind="sol
     t0 = time.time()
     if todo:
         ctx = C.setup_scene(10 * scale, cell, cell, anchor=anchor, grid=(DIRS, MAX_FRAMES), samples=samples)
-        soldier_light(ctx)
-        for role, (col, rough) in PALETTES[(side, season)].items():
-            m = C.make_material("sol_" + role, col, roughness=rough, metallic=0.6 if role == "metal" else 0.0)
-            spec = m.node_tree.nodes["Principled BSDF"].inputs.get("Specular IOR Level")
-            if spec is not None and role not in ("metal", "brass"):
-                spec.default_value = 0.12          # cloth and paint: no sheen washing out the tops
+        soldier_look(ctx, side, season)
         meshes = build_meshes(side)
         coll = bpy.data.collections.new("rigs")
         ctx.scene.collection.children.link(coll)

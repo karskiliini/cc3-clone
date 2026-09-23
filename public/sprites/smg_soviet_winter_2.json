@@ -915,5 +915,6 @@
   "kick",
   "recovery"
  ],
- "muzzleCoordinateFrame": "body-local: x right, y forward, z up; figureScale already applied"
+ "muzzleCoordinateFrame": "body-local: x right, y forward, z up; figureScale already applied",
+ "image": "smg_soviet_winter_2.webp"
 }

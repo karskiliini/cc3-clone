@@ -89,7 +89,9 @@ Sheets go to `ref/wf21/`. Backdrops: `ref/wf18/full_steppe_grass_z1.png`, `ref/w
 
 ## SMG firing atlases (`smg_<german|soviet>_<summer|winter>_<1|2>`)
 
-These reuse the soldier models, palettes, lighting, figure size, cell size and anchor. Each atlas
+These reuse the soldier models, palettes, lighting and materials (`soldiers.soldier_look`), the pack
+grade with its per-palette gain and edge darkening, figure size, cell size and anchor, and are packed as
+lossless WebP like the soldier sheets (8 sheets: 17.8 MB PNG -> 6.3 MB). Each atlas
 contains 35 complete-figure entries: `<posture>.<aimed|hip>.twist<0..4>`. Standing, crouched and
 kneeling support both modes; prone supports aimed fire only. Full figures keep the waist free of
 sprite layering seams.

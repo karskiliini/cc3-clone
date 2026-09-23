@@ -127,8 +127,7 @@ def render_atlas(side, season, scale, only, force, pack_only, samples):
     t0 = time.monotonic()
     if todo:
         ctx = C.setup_scene(10 * scale, cell, cell, anchor=anchor, grid=(S.DIRS, 3), samples=samples)
-        for role, (color, roughness) in S.PALETTES[(side, season)].items():
-            C.make_material("sol_" + role, color, roughness=roughness, metallic=0.6 if role == "metal" else 0)
+        S.soldier_look(ctx, side, season)          # same lights, uniforms and matt cloth as the soldier atlases
         meshes = S.build_meshes(side)
         coll = bpy.data.collections.new("smg_rigs")
         ctx.scene.collection.children.link(coll)
@@ -160,7 +159,7 @@ def render_atlas(side, season, scale, only, force, pack_only, samples):
         if not os.path.exists(path):
             missing.append(key)
             continue
-        strip = S.grade(C.load_png(path), scale)
+        strip = S.grade(C.load_png(path), scale, S.PALETTE_GAIN.get((side, season), 1.0))
         cells = [[strip[f * cell:(f + 1) * cell, d * cell:(d + 1) * cell]
                   for f in range(3)] for d in range(S.DIRS)]
         packer.add(key, cells, fps=20, loop=False, twistDegrees=angle, fireMode=mode,
@@ -170,7 +169,8 @@ def render_atlas(side, season, scale, only, force, pack_only, samples):
             side=side, season=season, pxPerM=10 * scale, figureScale=S.FIG, tiltDeg=C.TILT_DEG,
             weapons=["smg"], bodyHeading=True, twistDegrees=list(TWISTS),
             proneTwistDegrees=list(PRONE_TWISTS), recoilFrames=list(FRAMES),
-            muzzleCoordinateFrame="body-local: x right, y forward, z up; figureScale already applied"))
+            muzzleCoordinateFrame="body-local: x right, y forward, z up; figureScale already applied"),
+            webp="lossless")
     print(f"[{name}] rendered {len(todo)} entries in {render_seconds:.1f}s; packed {len(packer.entries)}"
           + (f"; MISSING {len(missing)} entries" if missing else ""), flush=True)
     with open(os.path.join(cache, "_timing.json"), "w") as fh:
