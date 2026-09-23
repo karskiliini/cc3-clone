@@ -2,7 +2,8 @@
 import { describe, it, expect } from 'vitest';
 import { Battle } from '@/sim/battle';
 import { applyOrder } from '@/sim/orders';
-import { stepMedic, MEDIC_TREAT_S } from '@/sim/medic';
+import { stepMedic, MEDIC_TREAT_S, DRAG_M } from '@/sim/medic';
+import { TILE_M } from '@/shared/types';
 import { SIM_DT } from '@/shared/types';
 import type { BattleState, Soldier } from '@/shared/types';
 import { Rng } from '@/shared/rng';
@@ -84,16 +85,56 @@ describe('medic (B8)', () => {
       // drive the medic's walk manually (movement is not stepped here)
       const t = st.time + SIM_DT;
       (st as BattleState & { time: number }).time = t;
-      const task = medic;
-      if (task.path.length > 0) {
-        task.pos = task.path[task.path.length - 1];
-        task.path = [];
+      // (whoever took the task: the nearest able man walks up to kneel beside the patient)
+      for (const m of men) {
+        if (m.path.length > 0) {
+          m.pos = m.path[m.path.length - 1];
+          m.path = [];
+        }
       }
       stepMedic(st, b.rng, SIM_DT);
       if ((patient as Soldier).health === 'healthy') healed = true;
     }
     expect(healed).toBe(true);
     expect(MEDIC_TREAT_S).toBeGreaterThan(0);
+  });
+});
+
+describe('casualty drag (B8)', () => {
+  it('an incapacitated man is dragged DRAG_M behind the medic, who faces him walking backwards', () => {
+    const b = battle();
+    const st = b.state;
+    const team = b.selectableTeams('german')[0];
+    const men = team.soldierIds.map((id) => st.soldiers.get(id)!).filter((s) => s && s.health === 'healthy');
+    if (men.length < 2) return;
+    const patient = men[1];
+    patient.health = 'incapacitated';
+    // a spotted enemy close by: the casualty has to be dragged a good way back to cover
+    const enemy = [...st.teams.values()].find((t) => t.side !== team.side)!;
+    const foe = st.soldiers.get(enemy.soldierIds[0])!;
+    foe.pos = { x: patient.pos.x + 1.5, y: patient.pos.y };
+    st.spotted.german.add(foe.id);
+    let medic: Soldier | undefined;
+    let maxGap = 0, samples = 0;
+    for (let i = 0; i < Math.ceil(60 / SIM_DT); i++) {
+      (st as BattleState & { time: number }).time = st.time + SIM_DT;
+      // a crude walker: 1 m/s along the path, like the movement step
+      for (const m of men) {
+        const next = m.path[0];
+        if (!next) continue;
+        const dx = next.x - m.pos.x, dy = next.y - m.pos.y, d = Math.hypot(dx, dy), stp = (1 / TILE_M) * SIM_DT;
+        if (d <= stp) { m.pos = { ...next }; m.path.shift(); } else m.pos = { x: m.pos.x + (dx / d) * stp, y: m.pos.y + (dy / d) * stp };
+      }
+      stepMedic(st, b.rng, SIM_DT);
+      medic = men.find((m) => m.carrying?.patientId === patient.id) ?? medic;
+      if (medic?.carrying && medic.path.length > 0 && st.time - medic.carrying.since > 0.6) {
+        maxGap = Math.max(maxGap, Math.abs(Math.hypot(patient.pos.x - medic.pos.x, patient.pos.y - medic.pos.y) * TILE_M - DRAG_M));
+        samples++;
+      }
+    }
+    expect(medic).toBeDefined();
+    expect(samples).toBeGreaterThan(3);
+    expect(maxGap).toBeLessThan(0.3); // metres off the drag distance while he is on the move
   });
 });
 

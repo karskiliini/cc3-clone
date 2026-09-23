@@ -34,38 +34,38 @@ OUT_DIR = os.path.join(ROOT, "public", "sprites")
 CACHE_DIR = os.path.join(HERE, ".cache")
 
 DIRS = 16
-MAX_FRAMES = 6
+MAX_FRAMES = 8             # grid rows per render (gaits use all 8)
 CELL = 36                  # px at scale 1 (3.6 m); scale 2 -> 72
 ANCHOR = (18, 19)          # px at scale 1
 COLUMNS = 96
 FIG = 1.30                 # sprite-art enlargement of the whole figure (reads at ~17 px, like the old sprites)
 HEAD = 1.15                # extra head/helmet enlargement
-OUTLINE_ALPHA = 0.38       # dark 1px rim for legibility on the painted ground (0 = off)
+OUTLINE_ALPHA = 0.5        # dark 1px rim for legibility on the painted ground (0 = off)
 
 # ------------------------------------------------------------------------------------------
 # palettes (sRGB)
 # ------------------------------------------------------------------------------------------
 PALETTES = {
     ("german", "summer"): dict(
-        tunic=("#929a86", 0.85), trousers=("#80897a", 0.9), helmet=("#4c5850", 0.28),
+        tunic=("#72775f", 0.92), trousers=("#696c5a", 0.95), helmet=("#434a42", 0.6),
         skin=("#e2b08c", 0.6), leather=("#2a2522", 0.5), boots=("#1f1c1a", 0.45),
-        wood=("#7a5230", 0.55), metal=("#3a3d42", 0.35), pack=("#8a8468", 0.9),
-        roll=("#5f6a58", 0.9), glove=("#e2b08c", 0.6), gear=("#4b5350", 0.6), brass=("#b89040", 0.35), hair=("#4a3a2a", 0.8), blood=("#5a1a16", 0.45), tread=("#2b1614", 0.8)),
+        wood=("#6a4628", 0.6), metal=("#34373b", 0.4), pack=("#6c6750", 0.92),
+        roll=("#4a5244", 0.92), glove=("#d0a07e", 0.7), gear=("#3a403d", 0.7), brass=("#b89040", 0.35), hair=("#4a3a2a", 0.8), blood=("#5a1a16", 0.45), tread=("#2b1614", 0.8)),
     ("german", "winter"): dict(
-        tunic=("#b4bbc3", 0.9), trousers=("#a9b1ba", 0.9), helmet=("#bfc5cc", 0.45),
+        tunic=("#a3a8ac", 0.95), trousers=("#969ca1", 0.95), helmet=("#aab0b3", 0.65),
         skin=("#e2b08c", 0.6), leather=("#2a2522", 0.5), boots=("#262220", 0.45),
-        wood=("#7a5230", 0.55), metal=("#3a3d42", 0.35), pack=("#6f7a74", 0.9),
-        roll=("#5b655f", 0.9), glove=("#59625d", 0.8), gear=("#4b5350", 0.6), brass=("#b89040", 0.35), hair=("#4a3a2a", 0.8), blood=("#5a1a16", 0.45), tread=("#2b1614", 0.8)),
+        wood=("#6a4628", 0.6), metal=("#34373b", 0.4), pack=("#4f5751", 0.92),
+        roll=("#46504a", 0.92), glove=("#4a524d", 0.85), gear=("#3a403d", 0.7), brass=("#b89040", 0.35), hair=("#4a3a2a", 0.8), blood=("#5a1a16", 0.45), tread=("#2b1614", 0.8)),
     ("soviet", "summer"): dict(
-        tunic=("#b39a5c", 0.85), trousers=("#a08a55", 0.9), helmet=("#6c7a3e", 0.34),
+        tunic=("#8c7a4c", 0.92), trousers=("#7b6b45", 0.95), helmet=("#4f5a30", 0.6),
         skin=("#e2b08c", 0.6), leather=("#6b4424", 0.5), boots=("#2b231d", 0.5),
-        wood=("#8a5a2c", 0.55), metal=("#3d3d3f", 0.35), pack=("#9a8e5e", 0.9),
-        roll=("#8b8272", 0.9), glove=("#e2b08c", 0.6), gear=("#4f5a35", 0.6), brass=("#b89040", 0.35), hair=("#4a3a2a", 0.8), blood=("#5a1a16", 0.45), tread=("#2b1614", 0.8)),
+        wood=("#7a4e26", 0.6), metal=("#363638", 0.4), pack=("#786d48", 0.92),
+        roll=("#6c6456", 0.92), glove=("#d0a07e", 0.7), gear=("#3e4629", 0.7), brass=("#b89040", 0.35), hair=("#4a3a2a", 0.8), blood=("#5a1a16", 0.45), tread=("#2b1614", 0.8)),
     ("soviet", "winter"): dict(
-        tunic=("#c6c0ae", 0.9), trousers=("#bcb5a2", 0.9), helmet=("#cbc5b3", 0.5),
+        tunic=("#afa895", 0.95), trousers=("#a39c89", 0.95), helmet=("#b3ad9a", 0.65),
         skin=("#e2b08c", 0.6), leather=("#6b4424", 0.5), boots=("#4a4136", 0.7),
-        wood=("#8a5a2c", 0.55), metal=("#3d3d3f", 0.35), pack=("#a3935c", 0.9),
-        roll=("#8b8272", 0.9), glove=("#7a5a38", 0.8), gear=("#4f5a35", 0.6), brass=("#b89040", 0.35), hair=("#4a3a2a", 0.8), blood=("#5a1a16", 0.45), tread=("#2b1614", 0.8)),
+        wood=("#7a4e26", 0.6), metal=("#363638", 0.4), pack=("#6f6443", 0.92),
+        roll=("#5e574b", 0.92), glove=("#5e4630", 0.85), gear=("#3e4629", 0.7), brass=("#b89040", 0.35), hair=("#4a3a2a", 0.8), blood=("#5a1a16", 0.45), tread=("#2b1614", 0.8)),
 }
 
 import kit as K  # noqa: E402
@@ -243,6 +243,9 @@ def build_meshes(side):
     for nm, fn in (("bomb", K.w_mortar_bomb), ("shell", K.w_shell), ("tube", K.w_mortar_tube),
                    ("plate", K.w_baseplate), ("tripod", K.w_tripod), ("box", K.w_belt_box)):
         b = MeshB(nm); fn(b); M[nm] = b.finish()
+    b = MeshB("grenade")            # the grenade in the throwing hand (a little oversized to read)
+    (K.w_stick_grenade if g else K.w_egg_grenade)(b)
+    M["grenade"] = b.finish(scale=1.4)
 
     # overrun stain: blood pool, tread print along +Y (travel direction), smear carried forward
     b = MeshB("stain")
@@ -281,8 +284,8 @@ WEAPON_POINTS = {"grip": (0, -0.02, -0.045), "butt_top": (0, -0.28, 0.03), "bolt
 
 PART_NAMES = ["pelvis", "chest", "head", "uarmL", "uarmR", "farmL", "farmR", "handL", "handR",
               "thighL", "thighR", "shinL", "shinR", "footL", "footR", "rifle", "smg", "lmg",
-              "bomb", "shell", "tube", "plate", "mgun", "tripod", "box", "stain", "blot", "headbare"] + list(DEBRIS)
-PROPS = ("bomb", "shell", "tube", "plate", "mgun", "tripod", "box", "stain", "blot", "headbare") + DEBRIS
+              "bomb", "shell", "tube", "plate", "mgun", "tripod", "box", "stain", "blot", "headbare", "grenade"] + list(DEBRIS)
+PROPS = ("bomb", "shell", "tube", "plate", "mgun", "tripod", "box", "stain", "blot", "headbare", "grenade") + DEBRIS
 
 
 class Rig:
@@ -501,8 +504,8 @@ def base(posture, w, t=0.0):
         z = WEAPON_INFO[w]["prone_z"] if w else 0.2
         wy = 0.33 if w == "lmg" else 0.40
         p = dict(pelvis_pos=(0, -0.25, 0.125), pelvis_rot=(90, 0, -6, 0), chest_rot=(-16, 0, -4), head_rot=(-52, 0, 8),
-                 footL=foot(-0.22, -1.08, z=0.07, yaw=40, pitch=35, pole=(-1, 0, 0.25)),
-                 footR=foot(0.27, -1.06, z=0.07, yaw=-45, pitch=35, pole=(1, 0, 0.25)),
+                 footL=foot(-0.25, -1.14, z=0.07, yaw=34, pitch=38, pole=(-1, 0.2, 0.25)),     # legs straight,
+                 footR=foot(0.29, -1.12, z=0.07, yaw=-38, pitch=38, pole=(1, 0.2, 0.25)),     # spread, toes out
                  weapon=dict(frame="root", pos=(0.13, wy, z), rot=(0, 10, 0)))
         p.update(handR=dict(frame="w", pos="grip", pole=(1, -0.3, -0.6), pole_frame="root"),
                  handL=dict(frame="w", pos="fore", pole=(-1, -0.2, -0.6), pole_frame="root"))
@@ -648,6 +651,9 @@ def a_hide(posture):
     return f
 
 
+WALK_AMP, RUN_AMP, SNEAK_AMP = 0.30, 0.50, 0.22     # foot travel (m, before FIG) either side of centre
+
+
 def gait_feet(t, amp, lift, xoff=0.12, y0=0.0, z0=ANKLE, toe=12):
     out = []
     for sx, ph in ((-1, 0.0), (1, 0.5)):
@@ -661,14 +667,25 @@ def gait_feet(t, amp, lift, xoff=0.12, y0=0.0, z0=ANKLE, toe=12):
 def a_walk(mood=None):
     def f(t, w):
         p = base("standing", w)
-        amp = 0.26 if mood != "shaken" else 0.17
-        p["footL"], p["footR"] = gait_feet(t, amp, 0.09)
-        bob = 0.02 * abs(cs(t))
+        amp = WALK_AMP if mood != "shaken" else 0.19
+        p["footL"], p["footR"] = gait_feet(t, amp, 0.11)
+        bob = 0.025 * abs(cs(t))
         p["pelvis_pos"] = (0, 0, 0.945 - bob)
-        p["pelvis_rot"] = (6, 0, 5 * cs(t), 0)
-        p["chest_rot"] = (6, 0, -10 * cs(t) - 6)
+        p["pelvis_rot"] = (6, 0, 7 * cs(t), 0)
+        p["chest_rot"] = (6, 0, -14 * cs(t) - 6)
         W = p["weapon"]
         W["rot"] = (12 + 3 * sn(t * 2), 38, 0)
+        if mood is None:
+            # arms swing against the legs so the step reads from above: the rifle / SMG is carried
+            # in the right hand at the balance, the left arm swings free (an LMG stays two-handed)
+            sw = -cs(t)                                   # left arm back while the left leg is forward
+            if w in ("rifle", "smg"):
+                p["weapon"] = dict(frame="chest", pos=(0.25, 0.10 - 0.07 * sw, -0.05), rot=(24, 6 - 6 * sw, 0))
+                p["handR"] = dict(frame="w", pos="grip", pole=(1, -0.3, -0.5))
+            elif w is None:
+                p["handR"] = dict(frame="chest", pos=(0.28, 0.06 - 0.22 * sw, -0.11 + 0.05 * abs(sw)), pole=(1, -0.3, -0.4))
+            if w != "lmg":
+                p["handL"] = dict(frame="chest", pos=(-0.28, 0.06 + 0.24 * sw, -0.11 + 0.05 * abs(sw)), pole=(-1, -0.3, -0.4))
         if mood == "shaken":
             p["pelvis_pos"] = (0, -0.03, 0.89 - bob)
             p["pelvis_rot"] = (14, 0, 4 * cs(t), 0)
@@ -686,7 +703,7 @@ def a_walk(mood=None):
 def a_run(mood=None):
     def f(t, w):
         p = base("standing", w)
-        amp, lift = 0.44, 0.24
+        amp, lift = RUN_AMP, 0.26
         if mood == "berserk":
             p["footL"], p["footR"] = gait_feet(t, amp, lift, toe=20)
             p["pelvis_pos"] = (0, 0.02, 0.93 - 0.035 * abs(cs(t)))
@@ -719,7 +736,7 @@ def a_run(mood=None):
 def a_sneak(mood=None):
     def f(t, w):
         p = base("crouched", w)
-        p["footL"], p["footR"] = gait_feet(t, 0.18, 0.07, xoff=0.15, y0=-0.12)
+        p["footL"], p["footR"] = gait_feet(t, SNEAK_AMP, 0.08, xoff=0.15, y0=-0.12)
         p["pelvis_pos"] = (0, -0.18, 0.63 - 0.02 * abs(cs(t)))
         p["pelvis_rot"] = (24, 0, 5 * cs(t), 0)
         p["chest_rot"] = (26, 0, -8 * cs(t) - 6)
@@ -746,18 +763,27 @@ def a_crawl(mood=None):
             p["footL"] = foot(-0.30 - 0.1 * c, -0.92 + 0.18 * c, z=0.08, yaw=35, pitch=30, pole=(-1, 0.2, 0.6))
             p["footR"] = foot(0.30 - 0.1 * c, -0.92 - 0.18 * c, z=0.08, yaw=-35, pitch=30, pole=(1, 0.2, 0.6))
             return p
-        p["pelvis_pos"] = (0.02 * s_, -0.25, 0.13)
-        p["pelvis_rot"] = (90, 0, -9 * c, 6 * c)
-        p["chest_rot"] = (-10, 0, 14 * c)
-        p["head_rot"] = (-48, 0, -6 * c)
-        z = (WEAPON_INFO[w]["prone_z"] if w else 0.2) - 0.06
-        p["weapon"] = dict(frame="root", pos=(0.24, 0.30 - 0.15 * c, z), rot=(4, 6, 25))
-        p["handR"] = dict(frame="w", pos="grip", pole=(1, -0.5, 0.2), pole_frame="root") if w else dict(frame="root", pos=(0.26, 0.52 - 0.17 * c, 0.05), pole=(1, -0.5, 0.2), pole_frame="root")
-        p["handL"] = dict(frame="root", pos=(-0.26, 0.52 + 0.17 * c, 0.05), pole=(-1, -0.5, 0.2), pole_frame="root")
-        p["footL"] = foot(-0.22 - 0.16 * max(0, -c), -0.93 + 0.24 * max(0, -c) - 0.06 * c, z=0.07, yaw=45, pitch=35,
-                          pole=(-1, 0.3, 0.1))
-        p["footR"] = foot(0.24 + 0.16 * max(0, c), -0.93 + 0.24 * max(0, c) + 0.06 * c, z=0.07, yaw=-45, pitch=35,
-                          pole=(1, 0.3, 0.1))
+        # army crawl: body flat, legs trailing nearly straight; one knee at a time is drawn up to the
+        # side and pushes while the opposite elbow reaches forward (contralateral), weight shifting
+        # onto the pushing side.  Smooth (cosine) phases so 8 frames read as one continuous motion.
+        dl, dr = max(0.0, c), max(0.0, -c)              # 1 = that knee fully drawn up, 0 = leg straight
+        dl, dr = dl * dl * (3 - 2 * dl), dr * dr * (3 - 2 * dr)
+        p["pelvis_pos"] = (0.025 * c, -0.25 + 0.02 * s_, 0.125)
+        p["pelvis_rot"] = (90, 0, -7 * c, 7 * c)
+        p["chest_rot"] = (-12, 0, 10 * c)
+        p["head_rot"] = (-50, 0, -4 * c)
+        z = (WEAPON_INFO[w]["prone_z"] if w else 0.2) - 0.07
+        p["weapon"] = dict(frame="root", pos=(0.20 + 0.02 * c, 0.34 + 0.10 * s_, z), rot=(3, 8, 22))
+        # a forearm reaches forward past the helmet and pulls back beside the shoulder (clear of the
+        # head, so it never reads as hands clasped over the helmet)
+        def hand(sx, d):
+            return dict(frame="root", pos=(sx * (0.34 - 0.12 * d), 0.34 + 0.46 * d, 0.05), pole=(sx * 0.8, -0.5, 0.2), pole_frame="root")
+        p["handR"] = dict(frame="w", pos="grip", pole=(0.7, -0.6, 0.2), pole_frame="root") if w else hand(1, dl)
+        p["handL"] = hand(-1, dr)
+        p["footL"] = foot(-0.13 - 0.24 * dl, -1.15 + 0.38 * dl, z=0.07, yaw=12 + 36 * dl, pitch=40,
+                          pole=(-1, 0.15 * dl, 0.15))
+        p["footR"] = foot(0.13 + 0.24 * dr, -1.15 + 0.38 * dr, z=0.07, yaw=-12 - 36 * dr, pitch=40,
+                          pole=(1, 0.15 * dr, 0.15))
         return p
     return f
 
@@ -778,31 +804,37 @@ def a_wounded_crawl(t, w):
 
 
 def a_throw(posture):
+    """6 frames over the 0.9 s throw: cock, full wind-up, release, follow-through, recover x2.
+    The grenade is in the hand for the first two frames."""
     def f(t, w):
         p = base(posture, w)
-        prone = posture == "prone"
-        # weapon parked in the left hand
-        if prone:
+        i = min(5, int(round(t * 5)))
+        if posture == "prone":
             p["weapon"] = dict(frame="root", pos=(-0.26, 0.30, 0.07), rot=(0, 8, -80))
             p["handL"] = dict(frame="w", pos="fore", pole=(-1, -0.3, 0.2), pole_frame="root")
-            p["pelvis_rot"] = (90, 0, key(t, -20, -28, 10, 0), key(t, 25, 35, -10, 0))
-            p["chest_rot"] = (key(t, -30, -38, -26, -18), 0, key(t, -25, -35, 25, 5))
-            hp = key(t, (0.35, -0.25, 0.30), (0.40, -0.40, 0.42), (0.15, 0.62, 0.40), (0.25, 0.45, 0.10))
+            p["pelvis_rot"] = (90, 0, key(t, -20, -28, 10, 5, 2, 0), key(t, 25, 35, -10, -5, -2, 0))
+            p["chest_rot"] = (key(t, -30, -40, -26, -22, -20, -18), 0, key(t, -25, -35, 25, 15, 8, 5))
+            hp = key(t, (0.35, -0.25, 0.30), (0.40, -0.40, 0.46), (0.15, 0.62, 0.42), (0.22, 0.56, 0.20),
+                     (0.25, 0.46, 0.10), (0.25, 0.40, 0.07))
             p["handR"] = dict(frame="root", pos=hp, pole=(1, -0.5, 0.5), pole_frame="root")
+            if i < 2:
+                p["props"] = {"grenade": ("root", hp, (60, 0, 20))}
             return p
         p["weapon"] = dict(frame="chest", pos=(-0.20, 0.16, 0.06), rot=(55, 10, 0))
         p["handL"] = dict(frame="w", pos="fore")
-        p["handR"] = None
         cr = p["chest_rot"]
-        p["chest_rot"] = (cr[0] + key(t, -10, -16, 18, 8), 0, key(t, -40, -55, 35, 10))
+        p["chest_rot"] = (cr[0] + key(t, -10, -18, 18, 12, 6, 2), 0, key(t, -40, -58, 35, 22, 8, 0))
         pr = p["pelvis_rot"]
-        p["pelvis_rot"] = (pr[0], 0, key(t, -20, -28, 15, 0), 0)
-        p["head_rot"] = (p["head_rot"][0], 0, key(t, 40, 52, -25, -5))
-        hp = key(t, (0.40, -0.30, 0.30), (0.34, -0.45, 0.52), (0.10, 0.50, 0.66), (0.22, 0.42, 0.10))
+        p["pelvis_rot"] = (pr[0], 0, key(t, -20, -30, 15, 8, 3, 0), 0)
+        p["head_rot"] = (p["head_rot"][0], 0, key(t, 40, 54, -25, -12, -5, 0))
+        hp = key(t, (0.40, -0.30, 0.32), (0.34, -0.46, 0.56), (0.12, 0.50, 0.68), (0.18, 0.50, 0.30),
+                 (0.24, 0.36, 0.12), (0.24, 0.24, 0.02))
         p["handR"] = dict(frame="chest", pos=hp, pole=(1, -0.6, -0.2))
+        if i < 2:
+            p["props"] = {"grenade": ("chest", hp, (70, 0, 30))}
         if posture == "standing":
-            p["footL"] = foot(-0.12, key(t, 0.10, 0.12, 0.30, 0.22), yaw=5)
-            p["footR"] = foot(0.15, key(t, -0.22, -0.26, -0.20, -0.14), yaw=-35)
+            p["footL"] = foot(-0.12, key(t, 0.10, 0.12, 0.30, 0.28, 0.24, 0.20), yaw=5)
+            p["footR"] = foot(0.15, key(t, -0.22, -0.26, -0.20, -0.18, -0.16, -0.14), yaw=-35)
         return p
     return f
 
@@ -1536,11 +1568,124 @@ def a_flight(n):
     return f
 
 
+# ---- getting down / getting up ---------------------------------------------------------------
+def a_drop(t, w):
+    """Standing -> prone in 6 frames (the game plays it backwards to get up): step forward and
+    crouch, drop onto the right knee, both knees with the weapon hand going down, hands on the
+    ground, body stretched out, flat.  Frame = progress."""
+    i = min(5, int(round(t * 5)))
+    if i == 0:
+        p = base("standing", w)
+        p["pelvis_pos"] = (0, -0.02, 0.90)
+        p["pelvis_rot"] = (10, 0, -8, 0)
+        p["chest_rot"] = (12, 0, -6)
+        p["footL"] = foot(-0.12, 0.26, yaw=8)
+        return p
+    if i == 1:
+        p = base("crouched", w)
+        p["pelvis_pos"] = (0, -0.08, 0.62)
+        p["footL"] = foot(-0.13, 0.36, yaw=6, pole=(-0.1, 1, 0.4))
+        p["footR"] = foot(0.15, -0.30, z=0.10, yaw=-12, pitch=35)
+        return p
+    if i == 2:
+        p = base("kneeling", w)
+        p["pelvis_pos"] = (0, 0.0, 0.46)
+        p["pelvis_rot"] = (22, 0, -6, 0)
+        p["chest_rot"] = (30, 0, -4)
+        p["footL"] = foot(-0.13, 0.34, yaw=5, pole=(-0.1, 1, 0.5))
+        return p
+    # weapon laid ahead as he goes down (kept inside the cell: an LMG sits further back)
+    wp = dict(frame="root", pos=(0.22, 0.28 if w == "lmg" else 0.42, 0.06), rot=(0, 8, 70)) if w else None
+    if i == 3:      # both knees down, weapon hand to the ground ahead
+        p = base("kneeling", None)
+        p.update(pelvis_pos=(0, 0.02, 0.40), pelvis_rot=(42, 0, -4, 0), chest_rot=(34, 0, 0), head_rot=(-24, 0, 0),
+                 footL=foot(-0.14, -0.46, z=0.07, yaw=6, pitch=62, pole=(-0.05, 0.4, -1)),
+                 footR=foot(0.14, -0.46, z=0.07, yaw=-6, pitch=62, pole=(0.05, 0.4, -1)))
+        p["weapon"] = wp
+        p["handR"] = dict(frame="w", pos="grip", pole=(1, -0.3, 0.2), pole_frame="root") if w else \
+            dict(frame="root", pos=(0.22, 0.60, 0.05), pole=(1, -0.3, 0.2), pole_frame="root")
+        p["handL"] = dict(frame="root", pos=(-0.20, 0.66, 0.05), pole=(-1, -0.3, 0.2), pole_frame="root")
+        return p
+    if i == 4:      # on the hands, legs going out behind
+        p = base("prone", w)
+        p.update(pelvis_pos=(0, -0.18, 0.30), pelvis_rot=(70, 0, -4, 0), chest_rot=(-6, 0, 0), head_rot=(-40, 0, 0),
+                 footL=foot(-0.20, -0.98, z=0.08, yaw=20, pitch=45, pole=(-0.3, 0.2, -1)),
+                 footR=foot(0.22, -0.96, z=0.08, yaw=-20, pitch=45, pole=(0.3, 0.2, -1)))
+        p["weapon"] = wp
+        p["handR"] = dict(frame="w", pos="grip", pole=(1, -0.3, 0.2), pole_frame="root") if w else \
+            dict(frame="root", pos=(0.24, 0.62, 0.05), pole=(1, -0.3, 0.2), pole_frame="root")
+        p["handL"] = dict(frame="root", pos=(-0.24, 0.62, 0.05), pole=(-1, -0.3, 0.2), pole_frame="root")
+        return p
+    return base("prone", w)
+
+
+# ---- first aid (sim/medic.ts): bandaging a comrade, dragging him to cover ------------------
+def a_bandage(t, w):
+    """Kneeling over a man lying in front of him, both hands working a dressing; the rifle laid
+    down beside him.  Loops (4 frames): reach in, wrap, pull tight, glance up."""
+    p = base("kneeling", None)
+    p["pelvis_pos"] = (0, -0.10, 0.46)
+    p["pelvis_rot"] = (24, 0, -4, 0)
+    p["chest_rot"] = (key(t, 48, 54, 50, 40, 48), 0, key(t, 0, 6, -4, 0, 0))
+    p["head_rot"] = (key(t, 26, 30, 28, -4, 26), 0, key(t, 0, 4, -4, 18, 0))
+    a = 2 * math.pi * t
+    p["handL"] = dict(frame="root", pos=(-0.10 + 0.05 * math.cos(a), 0.64 + 0.05 * math.sin(a), 0.10 + 0.03 * math.sin(a)),
+                      pole=(-1, -0.2, 0.3), pole_frame="root")
+    p["handR"] = dict(frame="root", pos=(0.12 - 0.05 * math.cos(a), 0.62 - 0.05 * math.sin(a), 0.10 + 0.03 * math.cos(a)),
+                      pole=(1, -0.2, 0.3), pole_frame="root")
+    p["weapon"] = dict(frame="root", pos=(0.46, -0.18, 0.05), rot=(0, 20, 85))
+    return p
+
+
+DRAG_M = 1.3      # medic anchor -> dragged man's anchor (true metres); sim/medic.ts DRAG_M must match
+
+
+def a_drag(t, w):
+    """Dragging a casualty by his shoulder straps: bent low, facing him, stepping backwards.
+    The man himself is `prone.dragged`, placed DRAG_M in front of this figure by the game."""
+    p = base("standing", None)
+    p["footL"], p["footR"] = gait_feet(1.0 - t, 0.16, 0.07, xoff=0.16, y0=-0.18)
+    p["pelvis_pos"] = (0, -0.20, 0.74 - 0.02 * abs(cs(t)))
+    p["pelvis_rot"] = (34, 0, 4 * cs(t), 0)
+    p["chest_rot"] = (22, 0, -5 * cs(t))
+    p["head_rot"] = (-28, 0, 0)
+    p["weapon"] = dict(frame="chest", pos=(0.0, -0.19, 0.24), rot=(22, -90, 0))    # slung across the back
+    gy = 0.54
+    p["handL"] = dict(frame="root", pos=(-0.14, gy, 0.26), pole=(-1, -0.3, 0.3), pole_frame="root")
+    p["handR"] = dict(frame="root", pos=(0.14, gy, 0.26), pole=(1, -0.3, 0.3), pole_frame="root")
+    return p
+
+
+def a_dragged(t, w):
+    """A casualty on his back being dragged head first toward +Y (the man pulling him)."""
+    p = dict(pelvis_pos=(0, 0.0, 0.14), pelvis_rot=(-90, 0, 180, 0), chest_rot=(-6, 0, 4), head_rot=(-24, 0, 14),
+             footL=foot(-0.14, -0.86, z=0.08, yaw=190, pitch=-80, pole=(-0.4, 0, 1)),
+             footR=foot(0.16, -0.84, z=0.08, yaw=170, pitch=-80, pole=(0.4, 0, 1)))
+    # arms dragged up past the shoulders by the pull
+    p["handL"] = dict(frame="chest", pos=(-0.44, 0.02, 0.62), pole=(-1, 0.3, 0))
+    p["handR"] = dict(frame="chest", pos=(0.46, 0.04, 0.58), pole=(1, 0.3, 0))
+    p["weapon"] = None
+    return p
+
+
+def a_wounded(t, w):
+    """A man who is down but alive (incapacitated), lying on his back: one knee drawn up, a hand
+    pressed to his chest, head turned aside.  Distinct from the face-down sprawl of the dead.
+    Same orientation as `prone.dragged` (head toward +Y) so a drag begins and ends without a pop."""
+    p = dict(pelvis_pos=(0, 0.0, 0.14), pelvis_rot=(-90, 0, 180, 0), chest_rot=(-4, 0, 6), head_rot=(-10, 0, 28),
+             footL=foot(-0.15, -0.86, z=0.08, yaw=195, pitch=-80, pole=(-0.4, 0, 1)),
+             footR=foot(0.16, -0.56, z=ANKLE, yaw=180, pitch=0, pole=(0.25, 0, 1)))
+    p["handL"] = dict(frame="chest", pos=(-0.06, 0.13, 0.26), pole=(-1, 0.2, 0))
+    p["handR"] = dict(frame="chest", pos=(0.52, 0.02, 0.18), pole=(1, 0.3, 0))
+    p["weapon"] = None
+    return p
+
+
 # ------------------------------------------------------------------------------------------
 # entry table
 # ------------------------------------------------------------------------------------------
 POSTURES = ["standing", "crouched", "kneeling", "prone"]
-STRIDE = {"walk": 4 * 0.26, "run": 4 * 0.44, "sneak": 4 * 0.18, "crawl": 0.34 * 2, "woundedCrawl": 0.44}
+STRIDE = {"walk": 4 * WALK_AMP, "run": 4 * RUN_AMP, "sneak": 4 * SNEAK_AMP, "crawl": 0.38 * 2, "woundedCrawl": 0.44}
 
 
 def build_entries():
@@ -1560,13 +1705,13 @@ def build_entries():
         add(f"{po}.reload", a_reload(po), 4, 3, loop=False, sample="step")
         add(f"{po}.hide", a_hide(po), 2, 1.5, weapons=("rifle", "none"))
         add(f"{po}.pickup", a_pickup(po), 3 if po == "prone" else 4, 2, loop=False, sample="step", weapons=("rifle", "none"), progress=True)
-        add(f"{po}.throw", a_throw(po), 4, 8, loop=False, sample="once")
+        add(f"{po}.throw", a_throw(po), 6, 6.7, loop=False, sample="once")
         add(f"{po}.hit", a_hit(po), 3, 7, loop=False, sample="step")
-    add("standing.walk", a_walk(), 4, 6, weapons=ALLN, strideM=STRIDE["walk"] * FIG)
-    add("standing.run", a_run(), 6, 12, weapons=ALLN, strideM=STRIDE["run"] * FIG)
-    add("crouched.sneak", a_sneak(), 4, 5, weapons=ALLN, strideM=STRIDE["sneak"] * FIG)
-    add("prone.crawl", a_crawl(), 4, 4, weapons=ALLN, strideM=STRIDE["crawl"] * FIG)
-    add("prone.woundedCrawl", a_wounded_crawl, 4, 2.5, strideM=STRIDE["woundedCrawl"] * FIG)
+    add("standing.walk", a_walk(), 8, 8, weapons=ALLN, strideM=STRIDE["walk"] * FIG)
+    add("standing.run", a_run(), 8, 13, weapons=ALLN, strideM=STRIDE["run"] * FIG)
+    add("crouched.sneak", a_sneak(), 8, 7, weapons=ALLN, strideM=STRIDE["sneak"] * FIG)
+    add("prone.crawl", a_crawl(), 8, 5, weapons=ALLN, strideM=STRIDE["crawl"] * FIG)
+    add("prone.woundedCrawl", a_wounded_crawl, 6, 3, strideM=STRIDE["woundedCrawl"] * FIG)
     # moods
     for po in POSTURES:
         add(f"{po}.idle.alert", a_alert(po), 4, 2.5)
@@ -1574,18 +1719,18 @@ def build_entries():
         add(f"{po}.idle.pinned", a_pinned(po), 2, 3)
         add(f"{po}.idle.cowering", a_cower(po), 2, 6)
         add(f"{po}.idle.panicked", a_panic_idle(po), 4, 7)
-    add("standing.walk.shaken", a_walk("shaken"), 4, 5, strideM=4 * 0.17 * FIG)
-    add("crouched.sneak.shaken", a_sneak("shaken"), 4, 4, strideM=STRIDE["sneak"] * FIG)
-    add("standing.run.panicked", a_run("panicked"), 6, 13, strideM=4 * 0.40 * FIG)
-    add("prone.crawl.panicked", a_crawl("panicked"), 4, 7, strideM=0.5)
+    add("standing.walk.shaken", a_walk("shaken"), 8, 7, strideM=4 * 0.19 * FIG)
+    add("crouched.sneak.shaken", a_sneak("shaken"), 8, 6, strideM=STRIDE["sneak"] * FIG)
+    add("standing.run.panicked", a_run("panicked"), 8, 14, strideM=4 * 0.40 * FIG)
+    add("prone.crawl.panicked", a_crawl("panicked"), 6, 8, strideM=0.5)
     add("standing.idle.berserk", a_berserk_idle, 4, 6)
-    add("standing.run.berserk", a_run("berserk"), 6, 12, strideM=STRIDE["run"] * FIG)
+    add("standing.run.berserk", a_run("berserk"), 8, 13, strideM=STRIDE["run"] * FIG)
     add("standing.fire.berserk", a_berserk_fire, 3, 12, loop=False, sample="once")
     add("standing.idle.surrendered", a_surrender("standing"), 2, 1.5)
     add("kneeling.idle.surrendered", a_surrender("kneeling"), 2, 1.5)
-    add("standing.walk.surrendered", a_walk("surrendered"), 4, 5, strideM=STRIDE["walk"] * FIG)
+    add("standing.walk.surrendered", a_walk("surrendered"), 8, 7, strideM=STRIDE["walk"] * FIG)
     W = STRIDE["walk"] * FIG
-    add("crew.haul", a_crew_haul, 4, 5, strideM=4 * 0.20 * FIG)
+    add("crew.haul", a_crew_haul, 8, 7, strideM=4 * 0.20 * FIG)
     add("crew.trail", a_crew_trail, 5, 2, loop=False, sample="step", progress=True)
     add("crew.dig", a_crew_dig, 4, 3, loop=False, sample="step", progress=True)
     add("crew.load.gun", a_crew_load_gun, 5, 2, loop=False, sample="step", progress=True)
@@ -1600,10 +1745,10 @@ def build_entries():
     add("crew.belt", a_crew_belt, 4, 3, loop=False, sample="step", progress=True)
     add("crew.mg", a_crew_mg(False), 2, 1.5)
     add("crew.mg.fire", a_crew_mg(True), 2, 14)
-    add("crew.carry.tube", a_crew_carry("tube"), 4, 6, strideM=W)
-    add("crew.carry.plate", a_crew_carry("plate"), 4, 6, strideM=W)
-    add("crew.carry.mg", a_crew_carry("mg"), 4, 6, strideM=W)
-    add("crew.carry.tripod", a_crew_carry("tripod"), 4, 6, strideM=W)
+    add("crew.carry.tube", a_crew_carry("tube"), 8, 8, strideM=W)
+    add("crew.carry.plate", a_crew_carry("plate"), 8, 8, strideM=W)
+    add("crew.carry.mg", a_crew_carry("mg"), 8, 8, strideM=W)
+    add("crew.carry.tripod", a_crew_carry("tripod"), 8, 8, strideM=W)
     for i in range(len(CRUSHED)):
         add(f"corpse.crushed{i}", a_crushed(i), 1, 1, loop=False)
     for i, spec in enumerate(CORPSES):
@@ -1617,6 +1762,11 @@ def build_entries():
         shadow_rows={3: 0.45, 4: 0.75, 5: 1.0})
     add("crew.mount", a_bailout(True), 6, 5, loop=False, sample="step", progress=True, hullHeightM=1.5,
         shadow_rows={0: 1.0, 1: 0.75, 2: 0.45})
+    add("kneeling.bandage", a_bandage, 4, 3, weapons=("rifle",))
+    add("crew.drag", a_drag, 8, 7, strideM=4 * 0.16 * FIG, dragM=DRAG_M)
+    add("prone.dragged", a_dragged, 1, 1, loop=False)
+    add("prone.wounded", a_wounded, 1, 1, loop=False)
+    add("standing.drop", a_drop, 6, 12, loop=False, weapons=ALLN, sample="once", progress=True)
     return E
 
 
@@ -1642,7 +1792,7 @@ for _po in POSTURES:
 
 
 NO_WEAPON = {"standing.run.panicked", "standing.idle.surrendered", "kneeling.idle.surrendered", "standing.walk.surrendered",
-             "prone.woundedCrawl"}
+             "prone.woundedCrawl", "kneeling.bandage", "prone.dragged", "prone.wounded"}
 
 
 def sample_t(e, i):
@@ -1712,15 +1862,28 @@ def add_outline(img, alpha):
 PART_CELL, PART_ANCHOR, PART_COLUMNS = 18, (9, 9), 48
 
 
-GRADE = {1: (1.18, 16.0), 2: (1.08, 6.0)}      # pack-time (contrast, lift) on figure pixels, per scale
+GRADE = {1: (1.12, -2.0), 2: (1.06, -2.0)}      # pack-time (contrast, lift) on figure pixels, per scale
 
 
-def grade(img, scale):
+EDGE_DARKEN = 0.84
+# pack-time value gain per palette (summer uniforms were tuned darker at render time; this lifts them
+# back to a mid value that still sits below the terrain, without re-rendering)
+PALETTE_GAIN = {("german", "summer"): 1.2, ("soviet", "summer"): 1.36}
+
+
+def grade(img, scale, gain=1.0):
     """Pack-time punch-up so the small sprites separate from the painted ground (not cached)."""
     c, lift = GRADE.get(scale, (1.0, 0.0))
     rgb = img[..., :3].astype(np.float32)
     fig = (rgb.max(axis=2) > 46) & (img[..., 3] > 0)
-    out = np.clip((rgb - 110.0) * c + 110.0 + lift, 0, 255)
+    out = np.clip(((rgb * gain) - 110.0) * c + 110.0 + lift, 0, 255)
+    # a slightly darker last row of figure pixels (inside the outer rim) keeps a crisp silhouette
+    # edge after the downsample, without a cartoon outline
+    solid = fig & (img[..., 3] > 160)
+    open_ = ~solid
+    nb = np.zeros_like(solid)
+    nb[1:, :] |= open_[:-1, :]; nb[:-1, :] |= open_[1:, :]; nb[:, 1:] |= open_[:, :-1]; nb[:, :-1] |= open_[:, 1:]
+    out[solid & nb] *= EDGE_DARKEN
     res = img.copy()
     res[..., :3][fig] = (out[fig].astype(np.uint8) >> 2 << 2) | 2          # 6-bit colour: far smaller PNGs
     # shadows: render noise makes PNGs huge, so smooth the alpha (3x3) and quantise it; one flat tint
@@ -1736,6 +1899,31 @@ def grade(img, scale):
     res[..., :3][sh] = C.SHADOW_RGB
     res[res[..., 3] == 0] = 0
     return res
+
+
+def soldier_light(ctx):
+    """The shared scene lights the men a little softer than vehicles: less blue sky fill on the top
+    surfaces (which read as pale, washed-out shoulders and helmets) and a slightly weaker sun, so
+    figures stay darker than the terrain like the original's."""
+    ctx.sun.data.energy = C.SUN_STRENGTH * 0.9
+    bg = ctx.scene.world.node_tree.nodes.get("Background")
+    bg.inputs[0].default_value = (0.86, 0.88, 0.9, 1.0)
+    bg.inputs[1].default_value = C.SKY_STRENGTH * 0.55
+
+
+def to_webp(base):
+    """Re-encode <base>.png as LOSSLESS WebP (about 40 % of the PNG: the scale-2 soldier sheet goes
+    from ~22 MB to ~9 MB) with the system python's Pillow (Blender's python has none), then drop the
+    PNG. The JSON's `image` field names the file; loaders fall back to <base>.png without it."""
+    code = ("import sys; from PIL import Image; "
+            "Image.open(sys.argv[1]).save(sys.argv[2], 'WEBP', lossless=True, quality=100, method=5)")
+    try:
+        subprocess.run(["python3", "-c", code, base + ".png", base + ".webp"], check=True, timeout=600)
+    except Exception as ex:          # no Pillow / no webp support: keep the PNG
+        print(f"webp conversion skipped for {base}: {ex}", flush=True)
+        return False
+    os.remove(base + ".png")
+    return True
 
 
 def atlas_name(side, season, scale, kind="soldiers"):
@@ -1769,8 +1957,12 @@ def render_atlas(side, season, scale, only, force, pack_only, samples, kind="sol
     t0 = time.time()
     if todo:
         ctx = C.setup_scene(10 * scale, cell, cell, anchor=anchor, grid=(DIRS, MAX_FRAMES), samples=samples)
+        soldier_light(ctx)
         for role, (col, rough) in PALETTES[(side, season)].items():
-            C.make_material("sol_" + role, col, roughness=rough, metallic=0.6 if role == "metal" else 0.0)
+            m = C.make_material("sol_" + role, col, roughness=rough, metallic=0.6 if role == "metal" else 0.0)
+            spec = m.node_tree.nodes["Principled BSDF"].inputs.get("Specular IOR Level")
+            if spec is not None and role not in ("metal", "brass"):
+                spec.default_value = 0.12          # cloth and paint: no sheen washing out the tops
         meshes = build_meshes(side)
         coll = bpy.data.collections.new("rigs")
         ctx.scene.collection.children.link(coll)
@@ -1828,7 +2020,7 @@ def render_atlas(side, season, scale, only, force, pack_only, samples, kind="sol
             missing.append(ak)
             continue
         e = E[ek]
-        strip = grade(C.load_png(path), scale)
+        strip = grade(C.load_png(path), scale, 1.0 if parts and E[ek]["extra"].get("debris") else PALETTE_GAIN.get((side, season), 1.0))
         fbd = [[strip[r * cell:(r + 1) * cell, d * cell:(d + 1) * cell] for r in range(e["frames"])] for d in range(DIRS)]
         packer.add(ak, fbd, fps=e["fps"], loop=e["loop"], **e["extra"])
         if "@" not in ak and len(e["weapons"]) > 1:
@@ -1853,6 +2045,8 @@ def render_atlas(side, season, scale, only, force, pack_only, samples, kind="sol
         for al, k in aliases.items():        # aliases share the target entry's cells
             if al not in meta["entries"] and k in meta["entries"]:
                 meta["entries"][al] = dict(meta["entries"][k], alias=k)
+        if to_webp(base):
+            meta["image"] = os.path.basename(base) + ".webp"
         with open(base + ".json", "w") as fh:
             json.dump(meta, fh, indent=1)
     print(f"[{name}] rendered {len(todo)} entries in {render_s:.1f}s; packed {len(packer.entries)} entries"

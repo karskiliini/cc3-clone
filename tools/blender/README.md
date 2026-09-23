@@ -54,6 +54,23 @@ Sheets go to `ref/wf21/`. Backdrops: `ref/wf18/full_steppe_grass_z1.png`, `ref/w
   the ground on the hull frames (≈4 px up-screen at scale 1), no shadow on the hull frames, a growing ground
   shadow on the three ground-side frames (`shadow_rows` in soldiers.py renders the entry twice and mixes rows).
 * New entries are appended at the END of `build_entries()` so existing `start` indices never move.
+* Gaits (`standing.walk`, `standing.run`, `crouched.sneak`, `prone.crawl`, their mood variants, `crew.carry.*`,
+  `crew.haul`, `crew.drag`) have 8 frames (render grid 16 x 8, `MAX_FRAMES`); the game steps them by
+  ground speed / the entry's own `strideM`, so the feet do not slide. `*.throw` has 6 frames (cock, wind-up,
+  release, follow-through, recover x2; the grenade is in the hand for the first two) over the game's 0.9 s.
+* First aid (sim/medic.ts): `kneeling.bandage` (4-frame loop, kneeling over a man in front of him, rifle laid
+  down), `crew.drag` (stepping backwards, bent, hands on the casualty's straps; `dragM` = 1.3 m) and
+  `prone.dragged` (the casualty on his back, head toward +Y, i.e. toward the man pulling him). The game
+  places the casualty `dragM` in front of the dragging figure.
+* `standing.drop` (6 frames, `progress`, all weapon variants): standing -> step and crouch -> right knee ->
+  both knees, hand down -> on the hands -> flat. The game plays it forwards to go prone and backwards to
+  get up (soldierAnim `postureDropProgress`, 0.45 s; from/to a knee only the lower part).
+* Soldier and parts sheets are written as LOSSLESS WebP (`to_webp`, system python + Pillow; the JSON's
+  `image` field names the file, loaders fall back to `<name>.png`). Scale-2 soldier sheet ~22 MB PNG -> ~9 MB.
+* Look: soldiers are lit softer than vehicles (`soldier_light`: less blue sky fill, sun x0.9), cloth has
+  almost no specular, uniforms and helmets are mid/low value so squads read darker than the terrain;
+  a 1 px dark rim (render time, `OUTLINE_ALPHA`) plus a slightly darker last row of figure pixels
+  (pack time, `EDGE_DARKEN`) keep the silhouette crisp at 1:1.
 * cell 36×36 px at scale 1 (72 at scale 2), anchor (18,19) (×2), 16 dirs, 96 columns.
 * The figure is drawn **1.3× life size** (`figureScale` in the JSON; head/helmet a further 1.15×) so a
   standing man with rifle reads at about 17 px like the old code-drawn sprites; ground scale stays
@@ -86,7 +103,7 @@ idle machine. (The first full build here took ~57 min because other render jobs 
 load 26.) Keep `--jobs` ≤ cores/4: each Cycles process is itself multi-threaded.
 
 Pack-time post-processing (`grade()` in soldiers.py, applied when packing, not cached): contrast/lift on
-figure pixels per scale, 6-bit colour, smoothed + quantised shadow alpha (cuts the PNGs from 57 MB to 22 MB).
+figure pixels per scale (`GRADE`), 6-bit colour, smoothed + quantised shadow alpha (cuts the PNGs from 57 MB to 22 MB).
 Render-time: 1 px dark rim around the figure (`OUTLINE_ALPHA`).
 
 ## Contact sheets delivered (ref/wf21/)

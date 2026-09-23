@@ -35,6 +35,8 @@ export interface AtlasMeta {
   /** Either a top-level map defId -> pivot (+y aft), or, in a per-vehicle atlas, that vehicle's own
    * pivot in the Blender frame (+y FORWARD, see `frame`). */
   turretPivotM?: Record<string, { x: number; y: number }> | { x: number; y: number };
+  /** image file next to the JSON when it is not `<name>.png` (e.g. the lossless WebP soldier sheets) */
+  image?: string;
   /** per-vehicle atlas: the vehicle it holds, and the coordinate frame note of the render scripts */
   vehicle?: string;
   frame?: string;
@@ -171,7 +173,7 @@ export function loadAtlas(name: string): Promise<Atlas | null> {
         const img = new Image();
         img.onload = () => resolve(img);
         img.onerror = () => reject(new Error('image'));
-        img.src = urlOf(`${name}.png`);
+        img.src = urlOf(typeof meta.image === 'string' && meta.image ? meta.image : `${name}.png`);
       });
       if (slots.get(name) !== slot) return null; // freed while loading
       slot.atlas = { name, meta, image };
@@ -221,14 +223,25 @@ export function loadedAtlasNames(): string[] {
 export function freeAllAtlases(): void { slots.clear(); wanted = []; }
 
 // ------------------------------------------------------------------ drawing ---
-/** Blit one frame with its anchor on (x, y). False = entry missing / atlas has no image. */
-export function drawAtlasFrame(ctx: CanvasRenderingContext2D, atlas: Atlas | null, key: string, dir: number, frame: number, x: number, y: number, zoom: number): boolean {
+/** Blit one frame with its anchor on (x, y). False = entry missing / atlas has no image.
+ * `smooth`: at a zoom that is not a whole multiple of the atlas scale (the continuous zoom steps
+ * 0.8, 1.25, 1.56 ...) resample with filtering instead of dropping / doubling uneven pixel rows. */
+export function drawAtlasFrame(ctx: CanvasRenderingContext2D, atlas: Atlas | null, key: string, dir: number, frame: number, x: number, y: number, zoom: number, smooth = false): boolean {
   if (!atlas || !atlas.image) return false;
   const entry = atlas.meta.entries[key];
   if (!entry) return false;
   const r = atlasCellRect(atlas.meta, atlasFrameIndex(entry, atlas.meta.dirs, dir, frame));
   const d = atlasDestRect(atlas.meta, x, y, zoom);
-  ctx.drawImage(atlas.image, r.sx, r.sy, r.sw, r.sh, d.dx, d.dy, d.dw, d.dh);
+  const k = zoom / atlas.meta.scale;
+  if (smooth && Math.abs(k - Math.round(k)) > 0.01) {
+    const was = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(atlas.image, r.sx, r.sy, r.sw, r.sh, d.dx, d.dy, d.dw, d.dh);
+    ctx.imageSmoothingEnabled = was;
+  } else {
+    ctx.drawImage(atlas.image, r.sx, r.sy, r.sw, r.sh, d.dx, d.dy, d.dw, d.dh);
+  }
   return true;
 }
 
@@ -243,12 +256,15 @@ export function atlasForZoom(nameOf: (scale: 1 | 2) => string, zoom: number): At
   return getAtlas(nameOf(scale === 2 ? 1 : 2));
 }
 
+/** Soldiers (and their body parts) use the scale-2 art for every zoom above 1: filtered down
+ * from 2x (drawSoldier smooths) keeps the small figures crisp at the in-between zoom steps. */
+const soldierScaleZoom = (zoom: number): number => (zoom > 1.01 ? Math.max(2, zoom) : zoom);
 export function soldierAtlas(side: Side, season: Season, zoom: number): Atlas | null {
-  return atlasForZoom((sc) => soldierAtlasName(side, season, sc), zoom);
+  return atlasForZoom((sc) => soldierAtlasName(side, season, sc), soldierScaleZoom(zoom));
 }
 export function itemAtlas(zoom: number): Atlas | null { return atlasForZoom(itemAtlasName, zoom); }
 export function partsAtlas(side: Side, season: Season, zoom: number): Atlas | null {
-  return atlasForZoom((sc) => partsAtlasName(side, season, sc), zoom);
+  return atlasForZoom((sc) => partsAtlasName(side, season, sc), soldierScaleZoom(zoom));
 }
 
 /** Draw a soldier frame from the first key of `keys` the atlas carries (see
@@ -262,7 +278,7 @@ export function drawSoldier(
   if (!key) return null;
   const dirs = atlas.meta.dirs;
   const dir = ((Math.round((dirRad / (Math.PI * 2)) * dirs) % dirs) + dirs) % dirs;
-  return drawAtlasFrame(ctx, atlas, key, dir, frameOf(atlas.meta.entries[key], key), x, y, zoom) ? key : null;
+  return drawAtlasFrame(ctx, atlas, key, dir, frameOf(atlas.meta.entries[key], key), x, y, zoom, true) ? key : null;
 }
 
 /** Hull or turret from the 64 pre-rendered directions. The turret is placed on its ring:
@@ -313,6 +329,22 @@ export function drawWeapon(
   const dirs = atlas.meta.dirs;
   const dir = ((Math.round((rad / (Math.PI * 2)) * dirs) % dirs) + dirs) % dirs;
   return drawAtlasFrame(ctx, atlas, key, dir, 0, x, y, zoom);
+}
+
+/** Muzzle of a crew-served weapon in weapon-frame metres (x right, y AFT, so forward is -y) —
+ * where flashes, tracers and the mortar puff start. Read from the weapons atlas (tools/blender/
+ * weapons.py writes `weapons.<id>.muzzleM` with y forward); the table mirrors it for the moments
+ * before the atlas has loaded. */
+const MUZZLE_FWD_M: Record<string, number> = {
+  mortar81: 0.99, mortar82: 0.99, mg34_hmg: 1.425, mg42_hmg: 1.425, maxim: 1.296,
+  pak38: 2.71, pak40: 3.31, m1937_45mm: 2.0, zis3: 3.19, ptrd: 1.86,
+};
+export function weaponMuzzleM(weaponId: string): { x: number; y: number } {
+  const meta = (getAtlas(weaponAtlasName(1)) ?? getAtlas(weaponAtlasName(2)))?.meta as
+    (AtlasMeta & { weapons?: Record<string, { muzzleM?: { x: number; y: number } }> }) | undefined;
+  const m = meta?.weapons?.[weaponId]?.muzzleM;
+  if (m) return { x: m.x, y: -m.y };
+  return { x: 0, y: -(MUZZLE_FWD_M[weaponId] ?? 1) };
 }
 
 /** Draw a crew-served weapon in the first of `states` its atlas carries (drill-step looks such as

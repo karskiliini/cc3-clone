@@ -372,7 +372,6 @@ describe('crew tasks: determinism', () => {
 });
 
 import { crewTaskAnim, progressFrame, weaponStateChain } from '@/render/soldierAnim';
-import { legacyVariant, trailVariant } from '@/render/weaponArt';
 
 describe('crew tasks: what the renderer is told', () => {
   it('a working crewman gets his task pose with the frame from the task progress; packing plays it backwards', () => {
@@ -410,12 +409,9 @@ describe('crew tasks: what the renderer is told', () => {
 
   it('weapon sprite states fall back to setup / half / packed when the atlas lacks the drill steps', () => {
     expect(weaponStateChain('limbered')).toEqual(['limbered', 'packed']);
-    expect(weaponStateChain('trailLeftOpen')).toEqual(['trailLeftOpen']); // else the code-drawn swinging leg
+    expect(weaponStateChain('trailLeftOpen')).toEqual(['trailLeftOpen']);
     expect(weaponStateChain('emplaced')).toEqual(['emplaced', 'setup']);
     expect(weaponStateChain('recoil')).toEqual(['recoil', 'emplaced', 'setup']);
-    expect(legacyVariant('trailsClosed')).toBe('packed');
-    expect(legacyVariant(trailVariant(0.5, 0))).toBe('half');
-    expect(trailVariant(0.49, 1)).toBe('trail:2:4');
   });
 });
 

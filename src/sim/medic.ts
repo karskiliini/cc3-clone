@@ -9,6 +9,7 @@ import { TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { dist } from '@/shared/math';
 import { hasLOS } from './los';
+import { isPassable } from './path';
 import { addMessage } from './messages';
 
 /** Seconds the bandage/stabilize anim runs (drives render/soldierAnim markBandage). */
@@ -18,8 +19,13 @@ import { markBandage } from '@/render/soldierAnim';
 const RETRY_COOLDOWN_S = 10;
 /** Heavy fire: suppression above this and nobody stops to play medic. */
 const MAX_SUPPRESSION = 40;
-/** Walk-to-patient reach (tiles). */
-const REACH_TILES = 1.5;
+/** Walk-to-patient reach (tiles): he kneels right beside the man (the bandage pose reaches ~1 m). */
+const REACH_TILES = 0.75;
+/** He walks to a point this far short of the patient (tiles), so he kneels beside him, not on him. */
+const KNEEL_OFF_TILES = 0.45;
+/** Carry: the casualty is dragged this far behind the medic (metres). Matches the render pose
+ * pair `crew.drag` / `prone.dragged` (tools/blender/soldiers.py DRAG_M). */
+export const DRAG_M = 1.3;
 /** The carrier heads for cover at least this far from the nearest spotted enemy (tiles). */
 const SAFE_DIST_TILES = 10 / TILE_M;
 
@@ -29,6 +35,8 @@ interface MedicTask {
   /** 'walk' -> 'treat' -> 'carry' */
   phase: 'walk' | 'treat' | 'carry';
   since: number;
+  /** carry: the route to cover has been given (an empty path afterwards = arrived) */
+  routed?: boolean;
 }
 /** One task per team (per state), plus per-patient retry cooldown. */
 const tasks = new WeakMap<BattleState, Map<number, MedicTask>>();
@@ -51,11 +59,12 @@ function taskMap(state: BattleState): Map<number, MedicTask> {
 function nearestSpottedEnemyPos(state: BattleState, side: Soldier['side'], p: Vec2): Vec2 | null {
   let best: Vec2 | null = null;
   let bestD = Infinity;
-  for (const id of state.spotted[side === 'german' ? 'soviet' : 'german']) {
-    const t = state.teams.get(id);
-    if (!t || t.outOfAction) continue;
-    const d = dist(t.pos, p);
-    if (d < bestD) { bestD = d; best = t.pos; }
+  for (const id of state.spotted[side]) {
+    // (state.spotted holds SOLDIER ids)
+    const e = state.soldiers.get(id);
+    if (!e || e.health === 'dead') continue;
+    const d = dist(e.pos, p);
+    if (d < bestD) { bestD = d; best = e.pos; }
   }
   return best;
 }
@@ -110,10 +119,15 @@ export function stepMedic(state: BattleState, rng: Rng, dt: number): void {
           task.phase = 'treat';
           task.since = state.time;
           treatUntil.set(medic, state.time + MEDIC_TREAT_S);
-          markBandage(medic, state.time);
+          markBandage(medic, state.time, patient.pos);
           medic.path = [];
-        } else if (medic.path.length === 0 && medic.activity !== 'moving') {
-          medic.path = findMedicPath(state, medic.pos, patient.pos);
+        } else if (medic.path.length === 0) {
+          // (an empty path means he is standing, whatever stale 'moving' activity he carries)
+          const d = dist(medic.pos, patient.pos);
+          const k = d > KNEEL_OFF_TILES ? (d - KNEEL_OFF_TILES) / d : 0;
+          medic.path = findMedicPath(state, medic.pos, {
+            x: medic.pos.x + (patient.pos.x - medic.pos.x) * k, y: medic.pos.y + (patient.pos.y - medic.pos.y) * k,
+          });
           medic.activity = 'moving';
           if (medic.path.length === 0) { m.delete(team.id); continue; }
         }
@@ -133,8 +147,9 @@ export function stepMedic(state: BattleState, rng: Rng, dt: number): void {
           }
         }
       } else {
-        // carry: half speed toward rear cover; the patient rides (drawn by unitRender)
-        if (medic.path.length === 0 && medic.activity !== 'moving') {
+        // carry: toward rear cover, dragging the patient DRAG_M behind (drawn by unitRender)
+        if (medic.path.length === 0 && !task.routed) {
+          task.routed = true;
           const enemy = nearestSpottedEnemyPos(state, medic.side, medic.pos);
           const dest = rearCoverSpot(state, team, medic.pos, enemy);
           medic.path = findMedicPath(state, medic.pos, dest);
@@ -145,6 +160,7 @@ export function stepMedic(state: BattleState, rng: Rng, dt: number): void {
           }
           medic.activity = 'moving';
         }
+        dragBehind(state, medic, patient);
         if (medic.path.length === 0) {
           medic.carrying = undefined;
           if (patient.side === state.config.playerSide) addMessage(state, `${team.name}\n${patient.name} is in cover.`, 'good');
@@ -181,11 +197,27 @@ export function stepMedic(state: BattleState, rng: Rng, dt: number): void {
   }
 }
 
+/** The casualty slides along DRAG_M behind the medic, on the far side from where he is heading
+ * (a trailing drag, not a teleport). Never into impassable ground: then he stays put this step. */
+function dragBehind(state: BattleState, medic: Soldier, patient: Soldier): void {
+  const next = medic.path[0];
+  const ahead = next ? { x: next.x - medic.pos.x, y: next.y - medic.pos.y } : { x: medic.pos.x - patient.pos.x, y: medic.pos.y - patient.pos.y };
+  const len = Math.hypot(ahead.x, ahead.y);
+  if (len < 1e-4) return;
+  const r = DRAG_M / TILE_M;
+  const p = { x: medic.pos.x - (ahead.x / len) * r, y: medic.pos.y - (ahead.y / len) * r };
+  // blend toward the trailing spot so turns swing him round instead of snapping
+  const q = { x: patient.pos.x + (p.x - patient.pos.x) * 0.35, y: patient.pos.y + (p.y - patient.pos.y) * 0.35 };
+  if (!isPassable(state.map, Math.floor(q.x), Math.floor(q.y), 'infantry')) return;
+  patient.pos = q;
+  patient.path = [];
+}
+
 /** Straight-line path (the sim's movement code handles collisions); a LOS-free fallback is fine
  * because the walker re-paths each time the queue empties. */
 function findMedicPath(state: BattleState, from: Vec2, to: Vec2): Vec2[] {
   const d = dist(from, to);
-  if (d < 0.5) return [];
+  if (d < 0.05) return [];
   const steps = Math.max(1, Math.ceil(d));
   const path: Vec2[] = [];
   for (let i = 1; i <= steps; i++) {

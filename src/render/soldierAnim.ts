@@ -29,21 +29,26 @@ export type Mood = 'calm' | 'alert' | 'shaken' | 'pinned' | 'cowering' | 'panick
 export type WeaponSuffix = 'rifle' | 'smg' | 'lmg' | 'none';
 
 /** What an atlas says about one entry (subset of spriteAtlas.AtlasEntry this module needs). */
-export interface AnimEntryInfo { frames: number; fps: number; loop: boolean }
+export interface AnimEntryInfo {
+  frames: number; fps: number; loop: boolean;
+  /** gaits: ground covered by one cycle as rendered (the atlas's own stride, so feet do not slide) */
+  strideM?: number;
+}
 
 export const FIRE_KICK_S = 0.25;
 export const FLINCH_S = 0.35;
-/** B1: full grenade-throw animation (wind-up -> release -> follow-through). */
+/** B1: full grenade-throw animation (cock, wind-up, release, follow-through, recover x2: the
+ * atlas `*.throw` entries have 6 frames, progress-indexed over this time). */
 export const THROW_S = 0.9;
 /** B8: how long a bandage / stabilise animation plays. */
 export const BANDAGE_S = 3;
-const bandageStarts = new WeakMap<Soldier, number>();
+const bandageStarts = new WeakMap<Soldier, { at: number; face?: Vec2 }>();
 /** B8: sim calls this when a treatment starts; the renderer plays the bandage pose until
- * `at + BANDAGE_S`. */
-export function markBandage(s: Soldier, at: number): void { bandageStarts.set(s, at); }
+ * `at + BANDAGE_S`, kneeling toward `face` (the patient) when given. */
+export function markBandage(s: Soldier, at: number, face?: Vec2): void { bandageStarts.set(s, { at, face: face ? { ...face } : undefined }); }
 export function isBandaging(s: Soldier, time: number): boolean {
-  const at = bandageStarts.get(s);
-  return at != null && time >= at && time - at < BANDAGE_S;
+  const b = bandageStarts.get(s);
+  return b != null && time >= b.at && time - b.at < BANDAGE_S;
 }
 
 
@@ -55,8 +60,10 @@ export function reloadProgress(s: Soldier, time: number): number {
   return total > 0 ? 1 - Math.max(0, Math.min(total, s.reloadTimer)) / total : 1;
 }
 /** Ground covered by one full gait cycle (two steps / one elbow-knee cycle), metres. */
+/** Fallbacks only: the atlas entries carry their own rendered `strideM` (tools/blender/soldiers.py
+ * STRIDE x figure scale), which frameFor prefers. */
 export const STRIDE_M: Record<'walk' | 'run' | 'sneak' | 'crawl' | 'woundedCrawl', number> = {
-  walk: 1.5, run: 2.4, sneak: 1.0, crawl: 0.8, woundedCrawl: 0.5,
+  walk: 1.35, run: 2.29, sneak: 0.94, crawl: 0.88, woundedCrawl: 0.57,
 };
 /** Speed assumed when the caller cannot measure one (m/s). */
 const DEFAULT_SPEED: Record<keyof typeof STRIDE_M, number> = { walk: 1.4, run: 3.6, sneak: 0.8, crawl: 0.5, woundedCrawl: 0.25 };
@@ -134,6 +141,25 @@ export function transitionPosture(prev: Posture, next: Posture, since: number): 
   if (since >= POSTURE_TRANSITION_S || prev === next) return next;
   const tall = (p: Posture) => (p === 'standing' ? 2 : p === 'prone' ? 0 : 1);
   return Math.abs(tall(prev) - tall(next)) === 2 ? 'kneeling' : next;
+}
+
+/** Getting down / getting up (`standing.drop`, 6 frames: standing -> step and crouch -> knee ->
+ * both knees, hand down -> on the hands -> flat; played backwards to get up). Returns the progress
+ * through that entry (0 = standing, 1 = flat) for a man who changed posture `since` seconds ago,
+ * or null when no drop / rise is playing. From or to a crouch or a knee only the lower part plays.
+ * A man already moving off at speed skips it (his feet would slide). */
+export const DROP_S = 0.45;
+const DROP_KNEE = 0.4;               // progress at which the drop passes the kneeling frame
+export function postureDropProgress(prev: Posture, next: Posture, since: number, speedMps = 0): number | null {
+  if (prev === next || since < 0 || speedMps > 1) return null;
+  const tall = (p: Posture) => (p === 'standing' ? 2 : p === 'prone' ? 0 : 1);
+  const a = tall(prev), b = tall(next);
+  if (a !== 0 && b !== 0) return null;                 // standing <-> crouched / kneeling: no drop
+  const from = a === 2 ? 0 : a === 1 ? DROP_KNEE : 1;
+  const to = b === 2 ? 0 : b === 1 ? DROP_KNEE : 1;
+  const dur = DROP_S * Math.abs(to - from);
+  if (since >= dur) return null;
+  return from + (to - from) * (since / dur);
 }
 
 export function actionFor(s: Soldier, time: number, posture: Posture = postureFor(s, time), speedMps?: number): AnimAction {
@@ -225,12 +251,24 @@ export function headingFor(s: Soldier, targetPos?: Vec2 | null, speedMps?: numbe
   return (s.facing * Math.PI) / 4;
 }
 
+/** How fast a drawn figure turns (rad/s): a man about-facing passes through the in-between
+ * facings over ~0.25 s instead of popping 180 degrees in one frame. */
+export const TURN_RATE = 4 * Math.PI;
+/** `current` turned toward `target` by at most `maxStep` radians, the short way round. */
+export function turnToward(current: number, target: number, maxStep: number): number {
+  const d = Math.atan2(Math.sin(target - current), Math.cos(target - current));
+  if (Math.abs(d) <= maxStep) return target;
+  return current + Math.sign(d) * maxStep;
+}
+
 /** Gait cycles per second so the feet keep pace with the ground: speed / stride length. Shaken
  * men step slower and hesitantly. */
-export function gaitCadence(action: AnimAction, speedMps: number, mood: Mood = 'calm'): number {
+export function gaitCadence(action: AnimAction, speedMps: number, mood: Mood = 'calm', strideM?: number): number {
   if (!GAITS.has(action)) return 0;
   const a = action as keyof typeof STRIDE_M;
   const v = speedMps > 0.05 ? speedMps : DEFAULT_SPEED[a];
+  // the atlas's rendered stride already includes a shaken man's shorter steps
+  if (strideM && strideM > 0) return v / strideM;
   return (v / STRIDE_M[a]) * (mood === 'shaken' ? 0.8 : 1);
 }
 
@@ -240,7 +278,7 @@ export function frameFor(s: Soldier, time: number, action: AnimAction, entry: An
   if (n === 1) return 0;
   const off = phaseOffset(s.id);
   if (GAITS.has(action)) {
-    const cycles = time * gaitCadence(action, speedMps, mood) + off;
+    const cycles = time * gaitCadence(action, speedMps, mood, entry.strideM) + off;
     return Math.floor((cycles - Math.floor(cycles)) * n) % n;
   }
   if (action === 'fire') {
@@ -264,9 +302,10 @@ export function frameFor(s: Soldier, time: number, action: AnimAction, entry: An
     return Math.min(n - 1, Math.floor(prog * n));
   }
   if (action === 'bandage') {
-    const at = bandageStarts.get(s);
-    const prog = at != null ? Math.max(0, Math.min(1, (time - at) / BANDAGE_S)) : 0;
-    return Math.min(n - 1, Math.floor(prog * n));
+    // a loop (reach in, wrap, pull tight, glance up) for as long as the treatment lasts
+    const at = bandageStarts.get(s)?.at ?? 0;
+    const fps = entry.fps > 0 ? entry.fps : 3;
+    return Math.floor(Math.max(0, time - at) * fps + off * n) % n;
   }
   if (action === 'hit') return n - 1;
   const fps = entry.fps > 0 ? entry.fps : n / 1.2;
@@ -300,7 +339,27 @@ export function pickAnimation(s: Soldier, time: number, targetPos?: Vec2 | null,
   const flinch = isFlinching(s, time) && !GAITS.has(action) && action !== 'fire';
   if (flinch && action !== 'hit') action = 'hide';
   const weapon = weaponSuffix(s.weaponId);
-  return { posture, action, mood, weapon, heading: headingFor(s, targetPos, speedMps), keys: entryKeyChain(posture, action, mood, weapon), flinch };
+  // bandaging: kneel over the patient, whatever the sim's posture
+  if (action === 'bandage') posture = 'kneeling';
+  const face = action === 'bandage' ? bandageStarts.get(s)?.face : undefined;
+  const heading = face ? Math.atan2(face.x - s.pos.x, -(face.y - s.pos.y)) : headingFor(s, targetPos, speedMps);
+  return { posture, action, mood, weapon, heading, keys: entryKeyChain(posture, action, mood, weapon), flinch };
+}
+
+// ------------------------------------------------------------------ casualty drag (sim/medic.ts) ---
+/** A man dragging a casualty (`s.carrying`) faces him and steps backwards: `crew.drag`
+ * (8-frame gait, its own strideM); the casualty lies on his back, head toward the man pulling
+ * him: `prone.dragged`. The sim keeps the casualty `DRAG_M` behind the medic. */
+export const DRAG_KEYS = ['crew.drag', 'crew.carry', 'standing.walk@none', 'standing.walk'] as const;
+export const DRAGGED_KEYS = ['prone.dragged', 'prone.hit'] as const;
+/** A man who is down but alive and lying still: on his back (distinct from the face-down dead),
+ * in the same orientation as the drag so being set down does not pop. */
+export const WOUNDED_KEYS = ['prone.wounded', 'prone.dragged', 'prone.hit'] as const;
+
+/** Heading from `from` to `to` (radians, 0 = north, clockwise); `fallback` when they coincide. */
+export function headingTo(from: Vec2, to: Vec2, fallback = 0): number {
+  const dx = to.x - from.x, dy = to.y - from.y;
+  return Math.abs(dx) + Math.abs(dy) > 1e-6 ? Math.atan2(dx, -dy) : fallback;
 }
 
 // ------------------------------------------------------------------ crew-served weapons (§6) ---
@@ -404,8 +463,6 @@ export function progressFrame(progress: number, frames: number): number {
 export function weaponStateChain(visual: CrewWeaponVisual): string[] {
   switch (visual) {
     case 'limbered': return ['limbered', 'packed'];
-    // (one leg out has no legacy equivalent: without the exact state the caller draws the code
-    // sprite, whose legs follow the men swinging them)
     case 'trailsClosed': return ['trailsClosed'];
     case 'trailLeftOpen': return ['trailLeftOpen'];
     case 'trailRightOpen': return ['trailRightOpen'];

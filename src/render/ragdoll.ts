@@ -7,8 +7,8 @@
 // the sim's position along an arc (ragdollSample), draws the detaching, shrinking ground shadow
 // itself (flight sprites carry none), raises landing dust / snow spray once, then holds
 // `ragdoll.landed<N>` for as long as the man is a corpse or a stunned survivor. At most
-// RAGDOLL_MAX_ACTIVE bodies fly at once; extra ones skip straight to the landed pose. Without an
-// atlas the code-drawn corpse sprite is tumbled instead. Nothing here feeds back into the sim.
+// RAGDOLL_MAX_ACTIVE bodies fly at once; extra ones skip straight to the landed pose. Nothing here
+// feeds back into the sim.
 // ============================================================================
 import type { Camera, Season, Soldier } from '@/shared/types';
 import { worldToScreen } from '@/engine/camera';
@@ -16,9 +16,7 @@ import {
   RAGDOLL_MAX_ACTIVE, metresToPx, ragdollHeading, ragdollSample, ragdollVariants, type RagdollSample,
 } from '@/render/soldierAnim';
 import { drawAtlasFrame, soldierAtlas } from '@/render/spriteAtlas';
-import { getSoldierSprite, unitSpriteScale } from '@/render/sprites';
 import { spawnLandingDust } from '@/render/effects';
-import type { Facing8 } from '@/shared/types';
 
 /** soldier id -> blast.time of the flight being played. */
 const flying = new Map<number, number>();
@@ -79,21 +77,10 @@ export function drawRagdollFlight(ctx: CanvasRenderingContext2D, cam: Camera, s:
   const atlas = soldierAtlas(s.side, season, zoom);
   const key = `ragdoll.flight${v.flight}`;
   const entry = atlas?.meta.entries[key];
-  if (atlas && entry) {
-    const dirs = atlas.meta.dirs;
-    const dir = Math.round((heading / (Math.PI * 2)) * dirs);
-    if (drawAtlasFrame(ctx, atlas, key, dir, Math.min(entry.frames - 1, Math.floor(sample.t * entry.frames)), g.x, g.y - lift, zoom)) return;
-  }
-  // fallback: tumble the code-drawn sprawled figure
-  const scale = unitSpriteScale(zoom);
-  const sprite = getSoldierSprite(s.side, season, s.health === 'dead' ? 'dead' : 'woundedCrawl', 0, 0, 'enemy', scale);
-  const spin = heading + sample.t * Math.PI * 2 * (0.75 + 0.5 * Math.min(1.5, b.force)) * (v.flight % 2 === 0 ? 1 : -1);
-  const k = (zoom / scale) * (1 + sample.heightM * 0.06);
-  ctx.save();
-  ctx.translate(g.x, g.y - lift);
-  ctx.rotate(spin);
-  ctx.drawImage(sprite, (-sprite.width / 2) * k, (-sprite.height / 2) * k, sprite.width * k, sprite.height * k);
-  ctx.restore();
+  if (!atlas || !entry) return;
+  const dirs = atlas.meta.dirs;
+  const dir = Math.round((heading / (Math.PI * 2)) * dirs);
+  drawAtlasFrame(ctx, atlas, key, dir, Math.min(entry.frames - 1, Math.floor(sample.t * entry.frames)), g.x, g.y - lift, zoom, true);
 }
 
 /** Draw the pose he landed in (corpse or stunned survivor). False = caller draws its usual sprite. */
@@ -107,13 +94,5 @@ export function drawRagdollLanded(ctx: CanvasRenderingContext2D, cam: Camera, s:
   const p = worldToScreen(cam, s.pos);
   const dirs = atlas.meta.dirs;
   const dir = Math.round((ragdollHeading(b, s.pos) / (Math.PI * 2)) * dirs) + v.landed * 3;
-  return drawAtlasFrame(ctx, atlas, key, dir, 0, p.x, p.y, cam.zoom);
-}
-
-/** Facing for the code-drawn fallback of a landed body: thrown heading, varied per man. */
-export function landedFacing8(s: Soldier): Facing8 {
-  const b = s.blast!;
-  const v = ragdollVariants(s.id, b.time);
-  const f = Math.round(ragdollHeading(b, s.pos) / (Math.PI / 4)) + (v.landed % 3) - 1;
-  return (((f % 8) + 8) % 8) as Facing8;
+  return drawAtlasFrame(ctx, atlas, key, dir, 0, p.x, p.y, cam.zoom, true);
 }

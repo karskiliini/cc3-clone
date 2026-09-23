@@ -8,10 +8,8 @@ import {
   drawAtlasFrame, getAtlas, loadAtlas, setAtlasBasePath, soldierAtlasName, vehicleAtlasName, weaponAtlasName, type Atlas,
 } from '@/render/spriteAtlas';
 import { frameFor, type AnimAction } from '@/render/soldierAnim';
-import { drawRagdollFlight, drawRagdollLanded, landedFacing8, ragdollBeginFrame, ragdollPhase } from '@/render/ragdoll';
+import { drawRagdollFlight, drawRagdollLanded, ragdollBeginFrame, ragdollPhase } from '@/render/ragdoll';
 import { drawEffects } from '@/render/effects';
-import { getSoldierSprite } from '@/render/sprites';
-import type { SoldierPose } from '@/render/soldierArt';
 import { applyBlastKnockback } from '@/sim/combat';
 import { createMind } from '@/sim/mind';
 import { Rng } from '@/shared/rng';
@@ -85,12 +83,9 @@ function drawAnim(a: Anim, t: number): void {
   ctx.restore();
 }
 
-const FALLBACK_POSES: SoldierPose[] = ['standing', 'crouching', 'prone', 'wary', 'cowering', 'pinned', 'panicked', 'berserk', 'surrendered', 'woundedCrawl', 'dead'];
-interface FallbackAnim { canvas: HTMLCanvasElement; side: Side; season: Season; pose: SoldierPose; zoom: number }
-const fallbackAnims: FallbackAnim[] = [];
 
 async function rebuild(): Promise<void> {
-  anims.length = 0; fallbackAnims.length = 0; root.innerHTML = '';
+  anims.length = 0; root.innerHTML = '';
   setAtlasBasePath(srcSel.value);
   const side = sideSel.value as Side, season = seasonSel.value as Season;
   const bg = GROUND[season === 'winter' ? 'winter' : 'summer'];
@@ -103,18 +98,7 @@ async function rebuild(): Promise<void> {
     const row = section(`${atlas.name} — scale ${atlas.meta.scale}, ${atlas.meta.dirs} dirs, cell ${atlas.meta.cell.w}x${atlas.meta.cell.h} (1x | 3x)`);
     for (const key of Object.keys(atlas.meta.entries)) addEntryCell(row, atlas, key, bg);
   }
-  if (!loaded[0]) {
-    const row = section(`no soldier atlas at ${srcSel.value} — the game draws these code-made fallback poses (2 frames, 8 facings)`);
-    for (const pose of FALLBACK_POSES) {
-      const cell = document.createElement('div'); cell.className = 'cell';
-      for (const zoom of [1, 3]) {
-        const c = document.createElement('canvas'); c.width = 40 * zoom; c.height = 40 * zoom;
-        c.style.display = 'inline-block'; c.style.margin = '0 2px 3px'; cell.appendChild(c);
-        fallbackAnims.push({ canvas: c, side, season, pose, zoom });
-      }
-      const span = document.createElement('span'); span.textContent = pose; cell.appendChild(span); row.appendChild(cell);
-    }
-  }
+  if (!loaded[0]) section(`no soldier atlas at ${srcSel.value}: run npm run sprites:soldiers`);
 }
 
 // ------------------------------------------------------------------ ragdoll demo ---
@@ -130,6 +114,7 @@ function demoState(season: Season): BattleState {
     sides: { german: { side: 'german', morale: 80, truceOffered: false, truceAccepted: false, kills: 0, losses: 0, score: 0 }, soviet: { side: 'soviet', morale: 80, truceOffered: false, truceAccepted: false, kills: 0, losses: 0, score: 0 } },
     spotted: { german: new Set(), soviet: new Set() }, spottedVehicles: { german: new Set(), soviet: new Set() },
     messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [], result: null, events: [], nextId: 100,
+    projectiles: [], sparks: [], pendingBursts: [], structureFx: [],
   } as BattleState;
 }
 let demo = demoState('summer');
@@ -170,13 +155,10 @@ function drawDemo(canvas: HTMLCanvasElement, time: number): void {
     const rp = ragdollPhase(s, time);
     if (rp.phase === 'flight' && rp.sample) { drawRagdollFlight(ctx, demoCam, s, rp.sample, season); continue; }
     if (rp.phase === 'landed' && drawRagdollLanded(ctx, demoCam, s, season)) continue;
-    const pose: SoldierPose = s.health === 'dead' ? 'dead' : rp.phase === 'landed' ? 'pinned' : s.blast && time < (s.stunnedUntil ?? 0) + 0.4 ? 'crouching' : 'standing';
-    const facing = s.blast && (s.health === 'dead' || rp.phase === 'landed') ? landedFacing8(s) : s.facing;
     const atlas = getAtlas(soldierAtlasName(s.side, season, 2));
     const px = s.pos.x * 40, py = s.pos.y * 40;
-    if (atlas && s.health !== 'dead' && drawAtlasFrame(ctx, atlas, pose === 'pinned' ? 'prone.hide' : pose === 'crouching' ? 'kneeling.idle' : 'standing.idle', facing * 2, frameAt('standing.idle', atlas, time, s.id), px, py, 2)) continue;
-    const sp = getSoldierSprite(s.side, season, pose, facing, 0, 'friendly', 2);
-    ctx.drawImage(sp, Math.round(px - sp.width / 2), Math.round(py - sp.height / 2));
+    const key = s.health === 'dead' ? `corpse${s.id % 8}` : s.blast && time < (s.stunnedUntil ?? 0) + 0.4 ? 'kneeling.idle' : 'standing.idle';
+    if (atlas) drawAtlasFrame(ctx, atlas, key, s.facing * 2, s.health === 'dead' ? 0 : frameAt('standing.idle', atlas, time, s.id), px, py, 2);
   }
   drawEffects(ctx, demoCam, demo);
 }
@@ -291,13 +273,6 @@ for (const sel of [srcSel, sideSel, seasonSel]) sel.addEventListener('change', (
 function tick(): void {
   const t = now();
   for (const a of anims) drawAnim(a, t);
-  for (const f of fallbackAnims) {
-    const ctx = f.canvas.getContext('2d')!; ctx.imageSmoothingEnabled = false;
-    ctx.fillStyle = GROUND[f.season === 'winter' ? 'winter' : 'summer']; ctx.fillRect(0, 0, f.canvas.width, f.canvas.height);
-    const sp = getSoldierSprite(f.side, f.season, f.pose, (Math.floor(t / 1.6) % 8) as Facing8, (Math.floor(t / 0.3) % 2) as 0 | 1, 'friendly', f.zoom >= 2 ? 2 : 1);
-    const k = f.zoom >= 2 ? f.zoom / 2 : 1;
-    ctx.drawImage(sp, Math.round(f.canvas.width / 2 - (sp.width * k) / 2), Math.round(f.canvas.height / 2 - (sp.height * k) / 2), sp.width * k, sp.height * k);
-  }
   drawDemo($<HTMLCanvasElement>('ragdollCanvas'), t - demoT0);
   const want = (t - drillT0);
   let guard = 0;

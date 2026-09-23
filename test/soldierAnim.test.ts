@@ -116,8 +116,20 @@ describe('frames', () => {
     // frames advanced over one second = cadence * frames
     const s = sol({ id: 1, activity: 'movingFast', path: [{ x: 1, y: 1 }] });
     const count = (speed: number) => { let changes = 0, prev = -1; for (let i = 0; i <= 1000; i++) { const f = frameFor(s, i / 1000, 'run', RUN6, speed); if (f !== prev && prev >= 0) changes++; prev = f; } return changes; };
-    expect(count(4.8)).toBe(Math.round(gaitCadence('run', 4.8) * 6));
-    expect(count(2.4)).toBe(Math.round(gaitCadence('run', 2.4) * 6));
+    // speeds of exactly 2 and 1 strides per second: 12 and 6 frame changes
+    expect(count(2 * STRIDE_M.run)).toBe(12);
+    expect(count(STRIDE_M.run)).toBe(6);
+  });
+
+  it('gait cadence follows the atlas entry\'s own rendered stride when it has one', () => {
+    expect(gaitCadence('walk', 1.4, 'calm', 0.7)).toBeCloseTo(2, 9);
+    // the rendered stride already includes the shaken man's short steps: no extra slow-down
+    expect(gaitCadence('walk', 1.4, 'shaken', 0.7)).toBeCloseTo(2, 9);
+    const s = sol({ id: 3, path: [{ x: 1, y: 1 }] });
+    const walk8 = { frames: 8, fps: 8, loop: true, strideM: 1.0 };
+    let changes = 0, prev = -1;
+    for (let i = 0; i <= 1000; i++) { const f = frameFor(s, i / 1000, 'walk', walk8, 1.0); if (f !== prev && prev >= 0) changes++; prev = f; }
+    expect(changes).toBe(8); // 1 m/s over a 1 m stride: one cycle = 8 frames per second
   });
   it('fire kick runs once from lastFiredAt; reload follows the reload timer', () => {
     const s = sol({ lastFiredAt: 10 });
@@ -247,5 +259,36 @@ describe('hatch climb sprites', () => {
         expect(hatchClimbFrame(key, 6, 1, 4)).toBe(5);
       }
     }
+  });
+});
+
+describe('turning', () => {
+  it('turns the short way round at a bounded rate and snaps when close', async () => {
+    const { turnToward, TURN_RATE } = await import('@/render/soldierAnim');
+    expect(turnToward(0, 0.1, 0.5)).toBeCloseTo(0.1, 9);
+    expect(turnToward(0, Math.PI / 2, 0.5)).toBeCloseTo(0.5, 9);
+    // from just west of north to just east of north: across north, not the long way
+    expect(turnToward(-0.2, 0.2, 0.1)).toBeCloseTo(-0.1, 9);
+    expect(turnToward(3.0, -3.0, 0.1)).toBeCloseTo(3.1, 9);
+    // an about-face takes a quarter of a second
+    expect(Math.PI / TURN_RATE).toBeCloseTo(0.25, 9);
+  });
+});
+
+describe('getting down and up', () => {
+  it('plays standing.drop forwards to go prone, backwards to rise, only the lower part from a knee', async () => {
+    const { postureDropProgress, DROP_S } = await import('@/render/soldierAnim');
+    expect(postureDropProgress('standing', 'prone', 0)).toBe(0);
+    expect(postureDropProgress('standing', 'prone', DROP_S / 2)).toBeCloseTo(0.5, 9);
+    expect(postureDropProgress('standing', 'prone', DROP_S)).toBeNull();
+    expect(postureDropProgress('prone', 'standing', 0)).toBe(1);
+    expect(postureDropProgress('prone', 'standing', DROP_S * 0.75)).toBeCloseTo(0.25, 9);
+    // kneeling -> prone starts at the kneeling frame and takes less time
+    expect(postureDropProgress('kneeling', 'prone', 0)).toBeCloseTo(0.4, 9);
+    expect(postureDropProgress('kneeling', 'prone', DROP_S * 0.6)).toBeNull();
+    expect(postureDropProgress('prone', 'crouched', DROP_S * 0.3)).toBeCloseTo(0.7, 9);
+    // no drop between the upright postures, none when he is already running off
+    expect(postureDropProgress('standing', 'kneeling', 0.1)).toBeNull();
+    expect(postureDropProgress('prone', 'standing', 0.1, 3)).toBeNull();
   });
 });

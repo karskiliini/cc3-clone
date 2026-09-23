@@ -3,14 +3,12 @@
 // Everything here is generated in code (pixel strings + canvas drawing ops).
 // Nothing is copied from any existing game.
 // ============================================================================
-import type { Side, Season, Stance, Facing8, CursorKind } from '@/shared/types';
+import type { Side, Season, CursorKind } from '@/shared/types';
 import { TILE_PX, TILE_M } from '@/shared/types';
 import { hash2 } from '@/shared/rng';
 import { createCanvas, ctx2d } from '@/render/pixelUtil';
 import { buildVehiclePart, composeVehicleFrame, VEHICLE_FACINGS, type VehiclePartArt } from '@/render/vehicleArt';
-import { buildSoldierSprite, type SoldierOutline, type SoldierPose } from '@/render/soldierArt';
 import { buildTeamIcon } from '@/render/teamIconArt';
-import { buildWeaponSprite, WEAPON_FACINGS, type WeaponVariant } from '@/render/weaponArt';
 
 const PX_PER_M = TILE_PX / TILE_M; // 5 px/m
 
@@ -26,7 +24,7 @@ function cached(key: string, build: () => HTMLCanvasElement): HTMLCanvasElement 
 }
 
 // ============================================================================
-// SOLDIERS
+// UNIT SPRITE SCALES (soldiers and crew weapons come from the Blender atlases, spriteAtlas.ts)
 // ============================================================================
 const OUTLINE = '#1a1a14';
 
@@ -58,38 +56,11 @@ class LruCache {
   }
   get size(): number { return this.map.size; }
 }
-// round5-battle.md fix #4 added 6 mental-state/health poses (cowering, panicked, pinned, wary,
-// berserk, surrendered, woundedCrawl) on top of the 4 calm stances, growing the per-scale key
-// space (pose x frame x facing x outline, one season/side pair active per battle) to a few
-// hundred entries. Bumped from 900 so a battle visiting every pose/facing on both sides doesn't
-// thrash the LRU; still a small, fixed bound (tiny canvases, no measurable memory impact).
-const SOLDIER_CACHE_CAP = 1400;
 const VEHICLE_CACHE_CAP = 160;
-const soldierCaches: Record<UnitSpriteScale, LruCache> = { 1: new LruCache(SOLDIER_CACHE_CAP), 2: new LruCache(SOLDIER_CACHE_CAP) };
 
 /** Current unit-sprite cache sizes (for the preview page / perf checks). */
 export function unitSpriteCacheStats(): Record<string, number> {
-  return { soldier1: soldierCaches[1].size, soldier2: soldierCaches[2].size, vehicle1: vehicleArtCaches[1].size, vehicle2: vehicleArtCaches[2].size };
-}
-
-/** Oriented soldier sprite, square, centred on the soldier. Authored at
- * `scale` px per 1x px: draw at `width * zoom / scale`. */
-const SOLDIER_STILL_POSES = new Set<Stance | SoldierPose>(['dead', 'prone', 'pinned', 'cowering', 'surrendered', 'woundedCrawl']);
-
-export function getSoldierSprite(
-  side: Side,
-  season: Season,
-  stance: SoldierPose,
-  facing: Facing8,
-  frame: 0 | 1,
-  outline: SoldierOutline = 'enemy',
-  scale: number = 1,
-): HTMLCanvasElement {
-  const sc = unitSpriteScale(scale);
-  const fr = SOLDIER_STILL_POSES.has(stance) ? 0 : frame;
-  const ol = stance === 'dead' ? 'enemy' : outline;
-  const key = `${side}|${season === 'winter' ? 'winter' : 'summer'}|${stance}|${facing}|${fr}|${ol}`;
-  return soldierCaches[sc].get(key, () => buildSoldierSprite(side, season, stance, facing, fr, ol, sc));
+  return { vehicle1: vehicleArtCaches[1].size, vehicle2: vehicleArtCaches[2].size };
 }
 
 // ============================================================================
@@ -162,24 +133,6 @@ export function getVehicleFrame(defId: string, part: 'hull' | 'turret', state: '
   const step = ((Math.round((rad / (Math.PI * 2)) * VEHICLE_FACINGS) % VEHICLE_FACINGS) + VEHICLE_FACINGS) % VEHICLE_FACINGS;
   return vehicleFrameCaches[sc].get(`${defId}|${part}|${state}|${step}`, () =>
     composeVehicleFrame(getVehicleArt(defId, part, state, sc), step, sc, part === 'turret' ? 0.75 : 1));
-}
-
-// ============================================================================
-// CREW-SERVED WEAPONS (mortars, HMGs, AT guns, AT rifles) — art in weaponArt.ts
-// ============================================================================
-const WEAPON_CACHE_CAP = 240;
-const weaponCaches: Record<UnitSpriteScale, LruCache> = { 1: new LruCache(WEAPON_CACHE_CAP), 2: new LruCache(WEAPON_CACHE_CAP) };
-
-/** Weapon sprite rotated to `facingRad` (0 = muzzle north, clockwise; quantised to 16 steps),
- * pivot at the canvas centre, authored at `scale` px per 1x px: draw at `width * zoom / scale`. */
-export function getWeaponSprite(
-  weaponId: string, variant: WeaponVariant, facingRad: number, side: Side, season: Season, scale: number = 1,
-): HTMLCanvasElement {
-  const sc = unitSpriteScale(scale);
-  const f = ((Math.round((facingRad / (Math.PI * 2)) * WEAPON_FACINGS) % WEAPON_FACINGS) + WEAPON_FACINGS) % WEAPON_FACINGS;
-  const winter = season === 'winter';
-  const key = `${weaponId}|${variant}|${f}|${side}|${winter ? 'w' : 's'}`;
-  return weaponCaches[sc].get(key, () => buildWeaponSprite(weaponId, variant, f, side, winter ? 'winter' : 'summer', sc));
 }
 
 // ============================================================================
