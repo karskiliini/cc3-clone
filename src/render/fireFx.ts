@@ -1,141 +1,124 @@
 // ============================================================================
-// fireFx.ts — staged vehicle burn timeline (A3) and building destruction FX
-// (B3). Both are pure functions of the sim clock: no per-frame sim cost, all
-// flicker/wobble from hash2 so the visuals stay deterministic.
+// fireFx.ts — fires and building destruction, drawn from pre-rendered sprites (fxSprites.ts):
+//  * burning vehicles: the staged burn timeline (spec A3) driven by `veh.fire.t0` — smoke only,
+//    small flames on the engine deck, the fierce fire with a black column, dying down, then a
+//    smouldering wisp; wrecks knocked out without fire only smoke thinly;
+//  * burning trees (sim/trees.ts treeFires);
+//  * building breach / cave-in / collapse dust (spec B3).
+// Pure functions of the battle clock; flicker and scatter from hash2 (never the sim RNG).
 // ============================================================================
 import type { Camera, BattleState } from '@/shared/types';
 import { VIEW_W, VIEW_H } from '@/shared/types';
 import { clamp } from '@/shared/math';
 import { hash2 } from '@/shared/rng';
 import { worldToScreen } from '@/engine/camera';
-import { getSmokePuff } from '@/render/sprites';
+import { isServiceable } from '@/sim/vehicleCrew';
+import { treeFires } from '@/sim/trees';
+import { drawFxAt, drawFxFrame, drawGlow } from '@/render/fxSprites';
 
-/** A3 burn timeline (seconds since `fire.t0`). After `burnt` the parent
- * switches the sprite to the blown variant; we only keep thin smoke beyond. */
+/** Burn timeline (s). The flames follow the SIM: they burn while the vehicle is in the 'burning'
+ * state (burnTimer counts those seconds) and are out the moment the sim ends the fire; the wreck
+ * then smoulders, thick at first, and keeps a thin wisp for good. */
 export const FIRE_STAGES_S = {
-  smokeStart: 0,
-  flameStart: 5,
-  intenseStart: 20,
-  dieDown: 90,
-  burnt: 150,
+  /** thick smoke pours out before the flames show */
+  flameStart: 2,
+  /** flames reach full size */
+  fullFlame: 8,
+  /** after the fire is out: the smoke thins to a wisp over this long */
+  smoulder: 60,
 } as const;
 
-function fillCircle(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string, alpha: number): void {
-  if (alpha <= 0 || r <= 0) return;
-  ctx.save();
-  ctx.globalAlpha = clamp(alpha, 0, 1);
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(x, y, r, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
+/** Flame size (0..1) and smoke strength (0..1) `age` s after the fire started; `burning` = the sim
+ * still has the vehicle on fire, `burntS` = how long it burned (veh.burnTimer). Pure (tested). */
+export function burnStage(age: number, burning: boolean, burntS: number): { flame: number; smoke: number } {
+  const S = FIRE_STAGES_S;
+  if (age < 0) return { flame: 0, smoke: 0 };
+  if (burning) {
+    const flame = clamp((age - S.flameStart) / (S.fullFlame - S.flameStart), 0, 1);
+    return { flame: age < S.flameStart ? 0 : 0.35 + 0.65 * flame, smoke: 0.7 + 0.3 * flame };
+  }
+  const since = Math.max(0, age - burntS);
+  return { flame: 0, smoke: 0.25 + 0.45 * Math.max(0, 1 - since / S.smoulder) };
 }
 
-function drawPuff(ctx: CanvasRenderingContext2D, x: number, y: number, diameterPx: number, alpha: number): void {
-  if (alpha <= 0 || diameterPx <= 0) return;
-  const size = Math.max(2, Math.round(diameterPx));
-  const sprite = getSmokePuff(size);
-  ctx.save();
-  ctx.globalAlpha = clamp(alpha, 0, 1);
-  ctx.drawImage(sprite, Math.round(x - diameterPx / 2), Math.round(y - diameterPx / 2), diameterPx, diameterPx);
-  ctx.restore();
+const PUFF_PX = 28; // diameter of the rendered puff at scale 1
+
+/** A rising, wind-drifted column of smoke puffs born at `rate` per second at (x, y). Stateless:
+ * puff k was born at k / rate; everything follows from `age`. */
+export function drawSmokeColumn(
+  ctx: CanvasRenderingContext2D, x: number, y: number, age: number, z: number,
+  o: { seed: number; rate: number; life: number; size: number; grow: number; alpha: number; dark: boolean; rise?: number },
+): void {
+  const key = o.dark ? 'puff.dark' : 'puff.light';
+  const newest = Math.floor(age * o.rate);
+  const n = Math.ceil(o.life * o.rate);
+  const rise = o.rise ?? 1;
+  for (let j = n; j >= 0; j--) {
+    const k = newest - j;
+    if (k < 0) continue;
+    const pa = age - k / o.rate;
+    if (pa < 0 || pa > o.life) continue;
+    const f = pa / o.life;
+    const jx = (hash2(o.seed, k, 1) - 0.5) * 6, jy = (hash2(o.seed, k, 2) - 0.5) * 4;
+    // wind from the south-west: drifts north-east, slowly spreading; rising reads as up-screen
+    const px = x + (jx * (0.4 + f) + pa * 3 + f * f * 22) * z;
+    const py = y + (jy * (0.4 + f) - (pa * 4.2 + f * 14) * rise) * z;
+    const d = (o.size + o.grow * f) * z;
+    const a = o.alpha * Math.min(1, pa / 0.6) * (1 - f) ** 1.5;
+    drawFxFrame(ctx, key, Math.floor(hash2(o.seed, k, 3) * 6), px, py, d / PUFF_PX, a);
+  }
 }
 
-function flameLayer(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string, alpha: number): void {
-  if (alpha <= 0 || w <= 0 || h <= 0) return;
-  ctx.save();
-  ctx.globalAlpha = clamp(alpha, 0, 1);
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.ellipse(x, y, w / 2, h / 2, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
+function onScreen(x: number, y: number, m: number): boolean {
+  return x > -m && y > -m * 2 && x < VIEW_W + m && y < VIEW_H + m;
 }
 
-/** A3: staged vehicle fire. `veh.fire.t0` drives everything from the sim clock. */
-export function drawVehicleFire(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(0, 0, VIEW_W, VIEW_H);
-  ctx.clip();
+/** Burning / burnt-out vehicles and burning trees. */
+export function drawFires(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
   const z = cam.zoom;
+  const t = state.time;
   for (const veh of state.vehicles.values()) {
-    if (!veh.fire) continue;
-    const age = state.time - veh.fire.t0;
-    if (age < 0) continue;
     const p = worldToScreen(cam, veh.pos);
-    const flickStep = Math.floor(age * 4); // ~4 Hz flicker
-
-    // ---- smoke column (all stages; density/height scale with the stage) ----
-    let puffAlpha = 0.3, puffScale = 0.7, puffCount = 6;
-    if (age >= FIRE_STAGES_S.intenseStart && age < FIRE_STAGES_S.dieDown) {
-      puffAlpha = 0.95; puffScale = 1.4; puffCount = 12;
-    } else if (age >= FIRE_STAGES_S.dieDown) {
-      const k = clamp(1 - (age - FIRE_STAGES_S.dieDown) / (FIRE_STAGES_S.burnt - FIRE_STAGES_S.dieDown), 0.2, 1);
-      puffAlpha = 0.6 * k; puffScale = 1.0 * k; puffCount = 8;
-    }
-    for (let i = 0; i < puffCount; i++) {
-      const phase = ((age * 0.25) + i / puffCount) % 1;
-      const alpha = clamp(1 - phase, 0, 1) * puffAlpha;
-      if (alpha <= 0) continue;
-      const rise = phase * 90 * puffScale;
-      const drift = phase * 34; // wind offset toward NE
-      const jitter = (hash2(veh.id, i, 99) - 0.5) * 10;
-      const diam = (26 + phase * 18) * puffScale * z;
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = '#1e1b18';
-      ctx.beginPath();
-      ctx.arc(p.x + (drift + jitter) * z, p.y - rise * z, diam / 2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-
-    if (age < FIRE_STAGES_S.flameStart) {
-      // 0-5 s: thin gray wisps from the engine deck only
-      const phase = ((age * 0.5) + hash2(veh.id, 1, 2)) % 1;
-      const alpha = clamp(1 - phase, 0, 1) * 0.4;
-      if (alpha > 0) {
-        const sx = p.x + (hash2(veh.id, 2, 3) - 0.5) * 4 * z;
-        const sy = p.y - phase * 22 * z;
-        drawPuff(ctx, sx, sy, 9 * z, alpha);
+    if (!onScreen(p.x, p.y, 140 * z)) continue;
+    const fireT0 = veh.fire?.t0 ?? (veh.state === 'burning' ? t - veh.burnTimer : null);
+    if (fireT0 == null) {
+      if (veh.state === 'knockedOut' || (veh.state === 'abandoned' && !isServiceable(veh))) {
+        // knocked out without fire: a thin slow wisp
+        drawSmokeColumn(ctx, p.x, p.y - 2 * z, t + hash2(veh.id, 1, 2) * 20, z, { seed: veh.id, rate: 1.1, life: 6, size: 7, grow: 16, alpha: 0.5, dark: true, rise: 0.9 });
       }
       continue;
     }
-
-    // ---- flames ----
-    let flameScale = 1;
-    if (age >= FIRE_STAGES_S.dieDown) {
-      flameScale = clamp(1 - (age - FIRE_STAGES_S.dieDown) / (FIRE_STAGES_S.burnt - FIRE_STAGES_S.dieDown), 0, 1);
-      if (flameScale <= 0) continue;
+    const age = t - fireT0;
+    const st = burnStage(age, veh.state === 'burning', veh.burnTimer);
+    // the fire sits on the engine deck, toward the rear of the hull
+    const bx = p.x - Math.sin(veh.hullFacing) * 12 * z, by = p.y + Math.cos(veh.hullFacing) * 12 * z;
+    if (st.flame > 0.02) {
+      const flick = 0.85 + 0.15 * hash2(veh.id, Math.floor(t * 12), 9);
+      drawGlow(ctx, bx, by, (26 + 22 * st.flame) * z * flick, 0.5 * st.flame * flick);
+      drawFxAt(ctx, 'fire', t + veh.id * 0.37, bx, by, z * (0.5 + 0.5 * st.flame));
+      if (st.flame > 0.7) {
+        // a second tongue through the turret / fighting compartment when it really goes
+        drawFxAt(ctx, 'fire', t * 1.13 + veh.id, bx + Math.sin(veh.hullFacing) * 9 * z + 2 * z, by - Math.cos(veh.hullFacing) * 9 * z, z * 0.55 * st.flame);
+      }
     }
-    const intense = age >= FIRE_STAGES_S.intenseStart && age < FIRE_STAGES_S.dieDown;
-    // heat bloom under the flames
-    fillCircle(ctx, p.x, p.y - 1 * z, (intense ? 16 : 12) * flameScale * z, '#8a4a20', 0.4);
-    // layered noisy ellipses: dark red base -> orange -> yellow -> white core,
-    // flicker phase from hash2 so it is deterministic per vehicle.
-    const layers: { color: string; w: number; h: number; ox: number; oy: number; seed: number }[] = intense
-      ? [
-          { color: '#7a1a0a', w: 22, h: 26, ox: 0, oy: 0, seed: 41 },
-          { color: '#ff8a3c', w: 16, h: 22, ox: 3, oy: -5, seed: 53 },
-          { color: '#ffe27a', w: 9, h: 15, ox: 4, oy: -8, seed: 67 },
-          { color: '#ffffff', w: 4, h: 7, ox: 4, oy: -10, seed: 71 },
-        ]
-      : [
-          { color: '#7a1a0a', w: 14, h: 11, ox: 0, oy: 0, seed: 41 },
-          { color: '#ff8a3c', w: 10, h: 9, ox: 3, oy: -3, seed: 53 },
-          { color: '#ffe27a', w: 6, h: 5, ox: 4, oy: -4, seed: 67 },
-        ];
-    for (const L of layers) {
-      const jx = (hash2(veh.id, L.seed + 3, flickStep) - 0.5) * 8;
-      const jy = (hash2(veh.id, L.seed + 4, flickStep) - 0.5) * 8;
-      const flicker = (0.8 + hash2(veh.id, L.seed + 2, Math.floor(age * 14)) * 0.2) * flameScale;
-      const cx = clamp(L.ox + jx * 0.5, -4, 5);
-      const cy = clamp(L.oy + jy * 0.5, -10, 4);
-      flameLayer(ctx, p.x + cx * z, p.y + (cy - 2) * z, L.w * flameScale * z, L.h * flameScale * z, L.color, flicker);
+    if (st.smoke > 0) {
+      drawSmokeColumn(ctx, bx, by - 2 * z, age, z, {
+        seed: veh.id * 7 + 1, rate: 1.5 + 2.5 * st.smoke, life: 5 + 5 * st.smoke,
+        size: 7 + 7 * st.smoke, grow: 20 + 30 * st.smoke, alpha: 0.3 + 0.45 * st.smoke, dark: true,
+      });
     }
   }
-  ctx.restore();
+  const trees = treeFires(state.map);
+  for (let i = 0; i < trees.length; i++) {
+    const tr = trees[i];
+    const p = worldToScreen(cam, tr);
+    if (!onScreen(p.x, p.y, 100 * z)) continue;
+    const seed = Math.floor(tr.x) * 131 + Math.floor(tr.y);
+    const flick = 0.85 + 0.15 * hash2(seed, Math.floor(t * 12), 5);
+    drawGlow(ctx, p.x, p.y, 24 * z * flick, 0.4 * flick);
+    drawFxAt(ctx, 'fire', t + hash2(seed, 1, 1) * 4, p.x, p.y, z * 0.75);
+    drawSmokeColumn(ctx, p.x, p.y - 3 * z, t + hash2(seed, 2, 2) * 30, z, { seed, rate: 1.8, life: 7, size: 7, grow: 24, alpha: 0.45, dark: true });
+  }
 }
 
 // ------------------------------------------------------------ structure FX
@@ -165,8 +148,8 @@ export function drawStructureFx(ctx: CanvasRenderingContext2D, cam: Camera, stat
       const fade = clamp(1 - (t - BREACH_BURST_S) / (BREACH_DUST_S - BREACH_BURST_S), 0, 1);
       if (fade > 0) {
         // outward dust burst
-        drawPuff(ctx, p.x, p.y - 8 * z * burst, (16 + burst * 30) * z, (1 - burst * 0.4) * fade * 0.85);
-        drawPuff(ctx, p.x + 6 * z, p.y - 12 * z * burst, (12 + burst * 22) * z, fade * 0.7);
+        drawDust(ctx, p.x, p.y - 8 * z * burst, (16 + burst * 30) * z, (1 - burst * 0.4) * fade * 0.85);
+        drawDust(ctx, p.x + 6 * z, p.y - 12 * z * burst, (12 + burst * 22) * z, fade * 0.7, 3);
         // material chips flying outward with small ballistic arcs
         ctx.save();
         ctx.fillStyle = CHIP_COLORS[mat];
@@ -204,8 +187,7 @@ export function drawStructureFx(ctx: CanvasRenderingContext2D, cam: Camera, stat
         ctx.save();
         ctx.fillStyle = fx.stone ? '#6d6a66' : '#6b5230';
         for (const tileIdx of fx.extentTiles) {
-          const tx = (tileIdx % 64) * 20, ty = Math.floor(tileIdx / 64) * 20; // TILE_PX world grid
-          const sp = worldToScreen(cam, { x: tx / 20, y: ty / 20 });
+          const sp = worldToScreen(cam, { x: tileIdx % state.map.width, y: Math.floor(tileIdx / state.map.width) });
           const h = 20 * z * (1 - wallPhase);
           if (h <= 0.5) continue;
           ctx.globalAlpha = clamp(1 - wallPhase * 0.5, 0, 1);
@@ -217,11 +199,10 @@ export function drawStructureFx(ctx: CanvasRenderingContext2D, cam: Camera, stat
       if (fade > 0) {
         for (let i = 0; i < fx.extentTiles.length && i < 8; i++) {
           const tileIdx = fx.extentTiles[i];
-          const tx = (tileIdx % 64) * 20, ty = Math.floor(tileIdx / 64) * 20;
-          const sp = worldToScreen(cam, { x: tx / 20, y: ty / 20 });
+          const sp = worldToScreen(cam, { x: tileIdx % state.map.width, y: Math.floor(tileIdx / state.map.width) });
           const phase = clamp(t / COLLAPSE_DUST_S + hash2(i, 3, 81) * 0.2, 0, 1);
-          drawPuff(ctx, sp.x + (hash2(i, 5, 83) - 0.5) * 10 * z, sp.y - phase * 26 * z,
-            (14 + phase * 26) * z, fade * 0.8);
+          drawDust(ctx, sp.x + (hash2(i, 5, 83) - 0.5) * 10 * z, sp.y - phase * 26 * z,
+            (14 + phase * 26) * z, fade * 0.8, i);
         }
         // bouncing debris chunks
         if (t < COLLAPSE_WALL_S + 1) {
@@ -246,3 +227,9 @@ export function drawStructureFx(ctx: CanvasRenderingContext2D, cam: Camera, stat
 }
 
 
+
+/** A dust puff (building dust): the lit light smoke puff at diameter `d` px. */
+function drawDust(ctx: CanvasRenderingContext2D, x: number, y: number, d: number, alpha: number, variant = 0): void {
+  if (alpha <= 0 || d <= 0) return;
+  drawFxFrame(ctx, 'puff.light', variant % 6, x, y, d / PUFF_PX, clamp(alpha, 0, 1));
+}

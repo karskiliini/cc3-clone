@@ -502,6 +502,7 @@ export interface Projectile {
 /** Short-lived impact sparks/puffs (A2): capped list, drawn by drawSparks. */
 export interface Spark {
   pos: Vec2;
+  /** battle time the spark shows (may lie a little in the future: a shell still in flight) */
   t: number;
   kind: 'armor' | 'dust' | 'wood' | 'stone' | 'brick' | 'body' | 'pen' | 'backblast';
 }
@@ -952,7 +953,8 @@ export interface BattleMessage {
   kind: 'info' | 'warn' | 'bad' | 'good';
 }
 
-export interface Explosion { pos: Vec2; radiusM: number; t: number; kind: 'he' | 'smoke' | 'small' }
+/** `weaponId` (optional, render only) picks the burst art: grenade, shell, ammunition blast. */
+export interface Explosion { pos: Vec2; radiusM: number; t: number; kind: 'he' | 'smoke' | 'small'; weaponId?: string }
 export interface Tracer { from: Vec2; to: Vec2; t: number; hit: boolean; kind: 'bullet' | 'mg' | 'shell' | 'mortar' }
 /** `kind: 'shell'` marks a vehicle main-gun flash, drawn larger than the default infantry flash. */
 export interface Flash { pos: Vec2; facing: number; t: number; kind?: 'shell' }

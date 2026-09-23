@@ -13,6 +13,7 @@ following the atlas contract in `docs/superpowers/specs/2026-09-17-soldier-anima
 | `contact_sheet.py` | contact sheets over the game's painted grass/snow (plain python3 + Pillow). |
 | `vehicles.py`, `vehicles_common.py` | tanks and vehicles (per-vehicle atlases, see below); `vehicles_common.py` also serves `weapons.py` (crew weapons). |
 | `menu.py` | the menu poster backdrops `public/menu/poster.png` (Soviet rifleman pointing, burning town) and `poster_plain.png` (the town alone, behind the working screens): perspective Cycles render, metaball figure, graded to one maroon-to-flame palette in numpy. `npm run sprites:menu` (~25 s, 4 threads). |
+| `fx.py` | combat FX flipbooks (`fx_s` / `fx_m` / `fx_l`): bursts, fire loop, smoke puffs, impact kicks. |
 
 ## Commands
 
@@ -150,3 +151,17 @@ python3 tools/blender/vehicles_common.py sheet-vehicles --scale 1 --zoom 3 --onl
 * Runtime: `spriteAtlas.drawVehiclePart` / `unitRender.drawVehicleSprite` (no code-drawn fallback; a battle
   preloads the scale-1 atlases of the vehicle types present). The main-gun recoil kick is a render-time
   offset (`lastMainShotAt`).
+
+## FX atlases (`fx_s` 64 px, `fx_m` 128 px, `fx_l` 256 px cells; 10 px/m, anchor = cell centre, dirs 1)
+
+`npm run sprites:fx` (or `blender -b -P tools/blender/fx.py -- --only he,he.w`; `--pack-only`; `--threads 5`).
+Shader-driven Cycles volumes (4D noise over a shaped density field, emission ramp for the fireball), lit
+by the common NW sun, plus mesh clods for the thrown earth; no shadow catcher. A burst is built from
+lobes, each in its own small domain: fireball, earth (winter: snow) fountain that falls back, several
+offset smoke lobes that roll out, rise, drift with the wind and break up by noise erosion. Entries:
+`grenade`, `he` (shell / mortar), `he.big` (ammunition blast), `impact` (bullet kick) — each with a
+`.w` winter variant (snow thrown, white dust ring) —, `smoke` (smoke round), `fire` (16-frame loop),
+`puff.dark` / `puff.light` (6 variants each, frame = variant; the game builds smoke columns, trails
+and building dust from them). Burst entries carry `times`: the seconds after detonation each frame
+shows (frames are eased, dense around the flash); `src/render/fxSprites.ts` picks frames by time.
+Render cost (5 threads, shared machine): 64 px entries 2-9 min, `he` ~17 min, `he.big` ~17-20 min per variant.

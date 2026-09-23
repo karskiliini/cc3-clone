@@ -1,183 +1,64 @@
 // ============================================================================
-// effects.ts — muzzle flashes, tracers, explosions, smoke and burning-vehicle
-// flicker/smoke. Kept cheap: no shadows/blur, just flat fills and cached
-// smoke-puff sprites. Sized boldly (per direct comparison against
-// ref/ref_cc3_1482..1485.png) so effects read clearly even at 1x zoom.
+// effects.ts — everything short-lived on the battlefield: bursts (pre-rendered flipbooks from
+// tools/blender/fx.py via fxSprites.ts), impact sparks, rounds in flight, tracers, muzzle flashes,
+// movement / landing dust; fires and building dust come from fireFx.ts. Rendering only: reads
+// the sim state and the battle clock, never the sim RNG.
 // ============================================================================
-import type { Camera, BattleState, Vec2 } from '@/shared/types';
-import {
-  VIEW_W, VIEW_H, FLASH_LIFE, TRACER_LIFE, EXPLOSION_LIFE_HE, EXPLOSION_LIFE_SMALL, EXPLOSION_LIFE_SMOKE,
-} from '@/shared/types';
+import type { Camera, BattleState, Vec2, Explosion, Spark } from '@/shared/types';
+import { VIEW_W, VIEW_H, FLASH_LIFE, TRACER_LIFE } from '@/shared/types';
 import { clamp } from '@/shared/math';
 import { hash2 } from '@/shared/rng';
 import { worldToScreen } from '@/engine/camera';
-import { getSmokePuff } from '@/render/sprites';
+import { WEAPONS } from '@/data/weapons';
+import { drawFxAt, drawFxFrame, drawGlow, fxDuration, fxSeasonKey } from '@/render/fxSprites';
+import { drawFires, drawStructureFx } from '@/render/fireFx';
 import { tileAt } from '@/sim/map';
-import { isServiceable } from '@/sim/vehicleCrew';
 import type { Terrain } from '@/shared/types';
 
-function hex(n: number): number { return clamp(Math.round(n), 0, 255); }
-
-/** Linear-interpolate two '#rrggbb' colors by `t` (0..1). */
-function lerpColor(a: string, b: string, t: number): string {
-  const ar = parseInt(a.slice(1, 3), 16), ag = parseInt(a.slice(3, 5), 16), ab = parseInt(a.slice(5, 7), 16);
-  const br = parseInt(b.slice(1, 3), 16), bg = parseInt(b.slice(3, 5), 16), bb = parseInt(b.slice(5, 7), 16);
-  const r = hex(ar + (br - ar) * t), g = hex(ag + (bg - ag) * t), bl = hex(ab + (bb - ab) * t);
-  return `rgb(${r},${g},${bl})`;
-}
-
-function fillCircle(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string, alpha: number): void {
-  if (alpha <= 0 || r <= 0) return;
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(x, y, r, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-}
-
-// Dark burning-vehicle smoke puff. Kept local (cache keyed `smokeDark|size`)
-// so the shared light getSmokePuff used by muzzle/explosion/terrain smoke is
-// untouched.
-const darkPuffCache = new Map<string, HTMLCanvasElement>();
-function getDarkSmokePuff(size: number): HTMLCanvasElement {
-  const key = `smokeDark|${size}`;
-  let c = darkPuffCache.get(key);
-  if (c) return c;
-  c = document.createElement('canvas');
-  c.width = size; c.height = size;
-  const g = c.getContext('2d')!;
-  const r = size / 2;
-  const grad = g.createRadialGradient(r, r, 0, r, r, r);
-  // wf19: a darker, denser core so burning-wreck and shell smoke keep their weight on the
-  // brighter ground
-  grad.addColorStop(0, 'rgba(30,27,24,0.94)');
-  grad.addColorStop(0.6, 'rgba(42,38,34,0.55)');
-  grad.addColorStop(1, 'rgba(40,38,35,0)');
-  g.fillStyle = grad;
-  g.beginPath();
-  g.arc(r, r, r, 0, Math.PI * 2);
-  g.fill();
-  darkPuffCache.set(key, c);
-  return c;
-}
-
-function drawPuff(ctx: CanvasRenderingContext2D, x: number, y: number, diameterPx: number, alpha: number, dark = false): void {
-  if (alpha <= 0 || diameterPx <= 0) return;
-  const size = Math.max(2, Math.round(diameterPx));
-  const sprite = dark ? getDarkSmokePuff(size) : getSmokePuff(size);
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.drawImage(sprite, Math.round(x - diameterPx / 2), Math.round(y - diameterPx / 2), diameterPx, diameterPx);
-  ctx.restore();
-}
-
-/** wf19 additive-looking hot core: a small white centre plus an additive ('lighter') warm bloom
- * around it. On dark ground the bloom glows; on bright ground / snow, where an additive pass
- * alone would vanish, the opaque white centre and the dark rim under it keep the flash legible. */
-function hotCore(ctx: CanvasRenderingContext2D, x: number, y: number, coreR: number, bloomR: number, alpha: number): void {
-  if (alpha <= 0) return;
-  const prev = ctx.globalCompositeOperation;
-  ctx.globalCompositeOperation = 'lighter';
-  ctx.globalAlpha = alpha * 0.55;
-  ctx.fillStyle = '#ff8a30';
-  ctx.beginPath(); ctx.arc(x, y, bloomR, 0, Math.PI * 2); ctx.fill();
-  ctx.globalAlpha = alpha * 0.7;
-  ctx.fillStyle = '#ffc860';
-  ctx.beginPath(); ctx.arc(x, y, (coreR + bloomR) / 2, 0, Math.PI * 2); ctx.fill();
-  ctx.globalCompositeOperation = prev;
-  ctx.globalAlpha = alpha;
-  ctx.fillStyle = '#ffffff';
-  ctx.beginPath(); ctx.arc(x, y, Math.max(1, coreR * 0.6), 0, Math.PI * 2); ctx.fill();
-}
-
 // ------------------------------------------------------------------- flashes
+/** Muzzle flashes: a warm additive glow on the ground plus a small opaque flame tongue along the
+ * bore (the opaque part keeps it legible on snow, where additive light alone disappears). Tank and
+ * AT guns get a bigger tongue with muzzle-brake side jets and a puff of gun smoke. */
 function drawFlashes(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
+  const z = cam.zoom;
   for (const f of state.flashes) {
     const frac = clamp(f.t / FLASH_LIFE, 0, 1);
     if (frac >= 1) continue;
     const big = f.kind === 'shell';
-    // Full brightness for the first ~0.1s of life, then fade for the rest.
-    const holdFrac = clamp(0.1 / FLASH_LIFE, 0, 1);
-    const alpha = frac < holdFrac ? 1 : clamp(1 - (frac - holdFrac) / (1 - holdFrac), 0, 1);
-    const standoff = big ? 12 : 8;
-    const dx = Math.sin(f.facing) * standoff;
-    const dy = -Math.cos(f.facing) * standoff;
+    const alpha = frac < 0.4 ? 1 : 1 - (frac - 0.4) / 0.6;
+    const ux = Math.sin(f.facing), uy = -Math.cos(f.facing);
     const p = worldToScreen(cam, f.pos);
-    const sx = p.x + dx * cam.zoom;
-    const sy = p.y + dy * cam.zoom;
+    const standoff = (big ? 13 : 7) * z;
+    const sx = p.x + ux * standoff, sy = p.y + uy * standoff;
     if (big) {
-      // tank gun: small irregular yellow-white flicker (no geometric cross)
-      const haloD = 12 * cam.zoom;
-      const coreD = 8 * cam.zoom;
-      const hx = Math.floor(f.pos.x * 4), hy = Math.floor(f.pos.y * 4);
-      ctx.save();
-      ctx.globalAlpha = alpha * 0.7;
-      ctx.fillStyle = '#ff9a3c';
-      ctx.beginPath();
-      ctx.arc(sx, sy, haloD / 2, 0, Math.PI * 2);
-      ctx.fill();
-      // 5-7 short spokes fanned roughly along the firing direction
-      const nSpokes = 5 + Math.floor(hash2(hx, hy, 31) * 3);
-      ctx.strokeStyle = '#ffd070';
-      ctx.lineWidth = 1; // screen-space width
-      ctx.globalAlpha = alpha * 0.9;
-      ctx.beginPath();
-      for (let i = 0; i < nSpokes; i++) {
-        const ang = f.facing + (hash2(hx, hy, i) - 0.5) * (Math.PI * 2 / 3);
-        const ux = Math.sin(ang), uy = -Math.cos(ang);
-        const start = coreD / 2 * 0.6;
-        const len = (2 + hash2(hy, hx, i + 11) * 4) * cam.zoom + haloD / 2 - start;
-        ctx.moveTo(sx + ux * start, sy + uy * start);
-        ctx.lineTo(sx + ux * (start + len), sy + uy * (start + len));
-      }
-      ctx.stroke();
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = '#fff2b0';
-      ctx.beginPath();
-      ctx.arc(sx, sy, coreD / 2, 0, Math.PI * 2);
-      ctx.fill();
-      hotCore(ctx, sx, sy, coreD / 2, haloD * 0.9, alpha);
-      ctx.restore();
-    } else {
-      // infantry: 10px star
-      const haloD = 10 * cam.zoom;
-      const coreD = 5 * cam.zoom;
-      ctx.save();
-      ctx.globalAlpha = alpha * 0.95;
-      ctx.fillStyle = '#ff9a3c';
-      ctx.beginPath();
-      ctx.arc(sx, sy, haloD / 2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#ff9a3c';
-      ctx.lineWidth = 1.5; // screen-space width — not scaled with zoom
-      const spike = haloD / 2 + 4 * cam.zoom;
-      ctx.beginPath();
-      ctx.moveTo(sx - spike, sy); ctx.lineTo(sx + spike, sy);
-      ctx.moveTo(sx, sy - spike); ctx.lineTo(sx, sy + spike);
-      ctx.stroke();
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = '#fff2b0';
-      ctx.beginPath();
-      ctx.arc(sx, sy, coreD / 2, 0, Math.PI * 2);
-      ctx.fill();
-      hotCore(ctx, sx, sy, coreD / 2, haloD * 0.8, alpha);
-      ctx.restore();
+      drawFxFrame(ctx, 'puff.light', Math.floor(f.pos.x * 7) % 6, sx + ux * 6 * z, sy + uy * 6 * z, 0.45 * z * (0.8 + frac * 0.8), (1 - frac) * 0.6);
     }
-
+    drawGlow(ctx, sx, sy, (big ? 22 : 8) * z, alpha * (big ? 0.8 : 0.55), '255,190,90');
+    if (frac > 0.5) continue; // the flame itself is over in an instant; the glow and smoke linger
+    const len = (big ? 7 : 3.2) * z * (1 - frac), wid = (big ? 2.6 : 1.3) * z;
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.rotate(f.facing);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#ffb040';
+    ctx.beginPath(); ctx.ellipse(0, -len * 0.5, wid, len, 0, 0, Math.PI * 2); ctx.fill();
     if (big) {
-      // a small puff of muzzle smoke lingers a bit longer than the flash itself
-      const smokeAlpha = clamp(1 - frac, 0, 1) * 0.5;
-      drawPuff(ctx, sx + Math.sin(f.facing) * 6 * cam.zoom, sy - Math.cos(f.facing) * 6 * cam.zoom, 14 * cam.zoom, smokeAlpha);
+      ctx.beginPath(); ctx.ellipse(-3 * z, -1 * z, 2.4 * z, 1.1 * z, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(3 * z, -1 * z, 2.4 * z, 1.1 * z, 0, 0, Math.PI * 2); ctx.fill();
     }
+    ctx.fillStyle = '#fff6d8';
+    ctx.beginPath(); ctx.ellipse(0, -len * 0.35, wid * 0.55, len * 0.6, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
   }
 }
 
 // ------------------------------------------------------------------- tracers
 function drawTracers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
+  const rockets = state.projectiles.filter((p) => p.kind === 'atrocket');
   for (const t of state.tracers) {
     if (t.kind === 'mortar') continue;
+    // a rocket is drawn as itself (drawProjectiles), not as a shell streak
+    if (t.kind === 'shell' && rockets.some((r) => r.from.x === t.from.x && r.from.y === t.from.y)) continue;
     const lifeFrac = clamp(t.t / TRACER_LIFE, 0, 1);
     if (lifeFrac >= 1) continue;
     const from = worldToScreen(cam, t.from);
@@ -240,188 +121,204 @@ function drawTracers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
 }
 
 // ---------------------------------------------------------------- explosions
-function drawExplosions(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
+// Every explosion record the sim pushes starts a flipbook instance here (the sim drops its record
+// after EXPLOSION_LIFE_*, the burst's smoke plays on). Pure function of the battle clock: paused
+// bursts freeze, a new battle (clock running backwards / another state) clears the list.
+interface Burst { key: string; x: number; y: number; t0: number; scale: number; glow: number; dur: number }
+let bursts: Burst[] = [];
+let burstOwner: BattleState | null = null;
+let lastTime = 0;
+const seenExplosions = new WeakSet<object>();
+
+/** Which flipbook and how large (×native) a burst is drawn. Pure (tested). */
+export function burstArt(e: Explosion): { key: string; scale: number; glow: number } | null {
+  const w = e.weaponId ? WEAPONS[e.weaponId] : undefined;
+  if (e.kind === 'smoke') return { key: 'smoke', scale: clamp(e.radiusM / 3, 0.7, 1.4), glow: 0 };
+  if (e.kind === 'small' && e.radiusM <= 0) return { key: 'impact', scale: 1.5, glow: 0 };
+  if (w?.cls === 'grenade') return { key: 'grenade', scale: e.radiusM >= 5 ? 1.6 : 1.25, glow: 1 };
+  if (w?.cls === 'atrocket') return { key: 'grenade', scale: 1.1, glow: 0.9 };
+  if (e.radiusM >= 8) return { key: 'he.big', scale: clamp(e.radiusM / 16, 0.6, 1.1), glow: 1 };
+  if (e.radiusM < 3) return { key: 'grenade', scale: clamp(e.radiusM / 2.2, 0.6, 1.1), glow: 0.6 };
+  return { key: 'he', scale: clamp(e.radiusM / 5, 0.8, 1.25), glow: 1 };
+}
+
+function syncBursts(state: BattleState): void {
+  if (burstOwner !== state || state.time < lastTime - 0.01) { bursts = []; burstOwner = state; }
+  lastTime = state.time;
+  const winter = state.map.def.season === 'winter';
   for (const e of state.explosions) {
-    const p = worldToScreen(cam, e.pos);
-    if (e.kind === 'he') {
-      const frac = clamp(e.t / EXPLOSION_LIFE_HE, 0, 1);
-      if (frac >= 1) continue;
-      // Peak fireball radius, reached around frac≈0.25 (t≈0.25s on a 0.9s life).
-      const maxR = Math.max(16, e.radiusM * 6) * cam.zoom;
+    if (seenExplosions.has(e)) continue;
+    seenExplosions.add(e);
+    const art = burstArt(e);
+    if (!art) continue;
+    const key = fxSeasonKey(art.key, winter);
+    let t0 = state.time - e.t;
+    // a burst on the target of a round still in flight goes off when the round gets there
+    for (const p of state.projectiles) {
+      if (p.preResolved && Math.abs(p.to.x - e.pos.x) < 0.05 && Math.abs(p.to.y - e.pos.y) < 0.05) t0 = Math.max(t0, p.t0 + p.flightS);
+    }
+    bursts.push({ key, x: e.pos.x, y: e.pos.y, t0, scale: art.scale, glow: art.glow, dur: fxDuration(key) || 2 });
+  }
+  if (bursts.length > 0) bursts = bursts.filter((b) => state.time - b.t0 < b.dur + 0.05);
+  if (bursts.length > 160) bursts.splice(0, bursts.length - 160);
+}
 
-      // brief 40px flash ring right at detonation
-      if (frac < 0.12) {
-        const ff = frac / 0.12;
-        const ringR = (10 + ff * 30) * cam.zoom;
-        ctx.save();
-        ctx.globalAlpha = clamp(1 - ff, 0, 1) * 0.9;
-        ctx.strokeStyle = '#fff6d8';
-        ctx.lineWidth = 2; // screen-space width — not scaled with zoom
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, ringR, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.globalAlpha = clamp(1 - ff, 0, 1) * 0.6;
-        ctx.fillStyle = '#fff6d8';
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, ringR * 0.4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      }
-
-      // irregular fireball: overlapping jittered blobs (dark -> orange -> a
-      // little yellow), never concentric, handing over to smoke by frac 0.3.
-      if (frac < 0.45) {
-        const bf = clamp(frac / 0.28, 0, 1); // reaches full size by frac≈0.28
-        const r = maxR * bf;
-        const fireAlpha = clamp(1 - Math.max(0, frac - 0.28) / 0.17, 0.15, 1) * (frac < 0.3 ? 1 : clamp(1 - (frac - 0.3) / 0.15, 0, 1));
-        const kx = Math.floor(e.pos.x * 4), ky = Math.floor(e.pos.y * 4);
-        const blob = (i: number, color: string, sMin: number, sMax: number, spread: number): void => {
-          const ox = (hash2(kx, ky, i * 3 + 1) - 0.5) * 2 * spread * r;
-          const oy = (hash2(ky, kx, i * 3 + 2) - 0.5) * 2 * spread * r;
-          const br = r * (sMin + hash2(kx + i, ky, 17) * (sMax - sMin));
-          fillCircle(ctx, p.x + ox, p.y + oy, br, color, 0.8 * fireAlpha);
-        };
-        const nDark = 3 + Math.floor(hash2(kx, ky, 41) * 2); // 3-4
-        const nOrange = 2 + Math.floor(hash2(ky, kx, 43) * 2); // 2-3
-        const nYellow = 1 + Math.floor(hash2(kx, ky, 47) * 2); // 1-2
-        let idx = 0;
-        for (let i = 0; i < nDark; i++) blob(idx++, '#6a2a14', 0.45, 0.6, 0.35);
-        for (let i = 0; i < nOrange; i++) blob(idx++, '#d86a2c', 0.35, 0.5, 0.35);
-        for (let i = 0; i < nYellow; i++) blob(idx++, '#ffd070', 0.15, 0.25, 0.25);
-        if (frac < 0.3) hotCore(ctx, p.x, p.y, r * 0.16, r * 0.55, fireAlpha * 0.9);
-
-        // 6-8 short dark debris streaks
-        const n = 6 + Math.floor(hash2(kx, ky, 53) * 3);
-        ctx.save();
-        ctx.strokeStyle = '#241f1c';
-        ctx.lineWidth = 1; // screen-space width — not scaled with zoom
-        ctx.globalAlpha = fireAlpha;
-        ctx.beginPath();
-        for (let i = 0; i < n; i++) {
-          const a = hash2(kx, ky, i + 60) * Math.PI * 2;
-          const dr = r * (0.6 + hash2(i, kx, 7) * 0.6);
-          const len = (2 + hash2(i, 3, ky) * 3) * cam.zoom;
-          const ex = p.x + Math.cos(a) * dr, ey = p.y + Math.sin(a) * dr;
-          ctx.moveTo(ex, ey);
-          ctx.lineTo(ex + Math.cos(a) * len, ey + Math.sin(a) * len);
-        }
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      // black-grey smoke ball: follows the fireball, expands to 1.6x maxR and
-      // lingers at high opacity for the rest of the explosion's life.
-      {
-        const sf = clamp((frac - 0.1) / 0.9, 0, 1);
-        if (sf > 0) {
-          const smokeR = maxR * (0.5 + sf * 1.1); // grows toward ~1.6x maxR
-          const smokeAlpha = (frac > 0.8 ? clamp(1 - (frac - 0.8) / 0.2, 0, 1) : 1) * 0.85;
-          const puffCount = 4;
-          for (let i = 0; i < puffCount; i++) {
-            const jitter = (hash2(Math.floor(e.pos.x * 4), i, 3) - 0.5) * smokeR * 0.5;
-            const jitterY = (hash2(Math.floor(e.pos.y * 4), i, 9) - 0.5) * smokeR * 0.5 - sf * 10 * cam.zoom;
-            drawPuff(ctx, p.x + jitter, p.y + jitterY, smokeR * (0.8 + i * 0.12), smokeAlpha * (1 - i * 0.08));
-            // grey-brown tint: a darker puff under the first two light ones
-            if (i < 3) drawPuff(ctx, p.x + jitter, p.y + jitterY, smokeR * 0.7, smokeAlpha * 0.5, true);
-          }
-        }
-      }
-    } else if (e.kind === 'small') {
-      // small-arms bullet impact: a brief dust puff
-      const frac = clamp(e.t / EXPLOSION_LIFE_SMALL, 0, 1);
-      if (frac >= 1) continue;
-      const alpha = clamp(1 - frac, 0, 1) * 0.8;
-      const d = (3 + frac * 3) * 2 * cam.zoom; // ~6px diameter
-      fillCircle(ctx, p.x, p.y, d / 2 + 1, '#4a3f30', alpha * 0.45);
-      fillCircle(ctx, p.x, p.y, d / 2, '#c2b394', alpha);
-    } else if (e.kind === 'smoke') {
-      // smoke round: an initial white burst, then several overlapping puffs
-      // building an 80px cloud over the ~2s life.
-      const frac = clamp(e.t / EXPLOSION_LIFE_SMOKE, 0, 1);
-      if (frac >= 1) continue;
-      if (frac < 0.15) {
-        const bf = frac / 0.15;
-        fillCircle(ctx, p.x, p.y, (15 + bf * 10) * cam.zoom, '#e8e8e2', clamp(1 - bf, 0, 1) * 0.9);
-      }
-      const puffCount = 6;
-      for (let i = 0; i < puffCount; i++) {
-        const phase = clamp(frac - i * 0.08, 0, 1);
-        if (phase <= 0) continue;
-        const alpha = clamp(0.85 * (frac > 0.85 ? clamp(1 - (frac - 0.85) / 0.15, 0, 1) : 1), 0, 0.85);
-        if (alpha <= 0) continue;
-        const spread = 10 + phase * 30; // builds toward an 80px-wide cloud
-        const jitterX = (hash2(Math.floor(e.pos.x * 4), Math.floor(e.pos.y * 4), i) - 0.5) * spread;
-        const jitterY = (hash2(i, Math.floor(e.pos.x * 4), 5) - 0.5) * spread * 0.6 - phase * 10;
-        const diam = (30 + hash2(i, 9, Math.floor(e.pos.y * 4)) * 20) * cam.zoom;
-        drawPuff(ctx, p.x + jitterX * cam.zoom, p.y + jitterY * cam.zoom, diam, alpha);
-      }
+function drawExplosions(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
+  syncBursts(state);
+  const z = cam.zoom;
+  for (const b of bursts) {
+    const age = state.time - b.t0;
+    if (age < 0) continue;
+    const p = worldToScreen(cam, b);
+    const r = 130 * b.scale * z;
+    if (p.x < -r || p.y < -r || p.x > VIEW_W + r || p.y > VIEW_H + r) continue;
+    drawFxAt(ctx, b.key, age, p.x, p.y, z * b.scale);
+    // the flash lights the ground around it for a moment
+    if (b.glow > 0 && age < 0.3) {
+      const k = 1 - age / 0.3;
+      const big = b.key.startsWith('he.big') ? 2.2 : b.key.startsWith('he') ? 1 : 0.55;
+      drawGlow(ctx, p.x, p.y, (24 + 26 * (1 - k)) * big * b.scale * z, 0.6 * k * k * b.glow);
+      // the detonation itself: a hard white pop for the first couple of frames
+      if (age < 0.08) drawGlow(ctx, p.x, p.y, (big < 1 ? 12 : 16) * b.scale * z, 1 - age / 0.08, '255,245,225');
     }
   }
 }
 
-// ------------------------------------------------------------ vehicle fires
-function drawBurningVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
-  for (const veh of state.vehicles.values()) {
-    const p = worldToScreen(cam, veh.pos);
-    if (veh.state === 'burning') {
-      const t = veh.burnTimer;
-      const z = cam.zoom;
-      // translucent heat bloom under the flames
+// ------------------------------------------------------------------- sparks
+const SPARK_S: Record<Spark['kind'], number> = { armor: 0.35, pen: 0.5, dust: 0.55, wood: 0.5, stone: 0.5, brick: 0.5, body: 0.35, backblast: 0.8 };
+const CHIP: Partial<Record<Spark['kind'], string>> = { wood: '#7a5a34', stone: '#77736c', brick: '#8a4a36', body: '#6a1c14' };
+
+/** Impact sparks and puffs (A2): hot streaks off armour, a flash through a pierced plate, dirt,
+ * splinters and chips, the dust cone behind a rocket launcher. `t` is when the strike shows. */
+function drawSparks(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
+  if (state.sparks.length === 0) return;
+  const z = cam.zoom;
+  const winter = state.map.def.season === 'winter';
+  for (let i = 0; i < state.sparks.length; i++) {
+    const s = state.sparks[i];
+    const age = state.time - s.t;
+    const life = SPARK_S[s.kind];
+    if (age < 0 || age >= life) continue;
+    const p = worldToScreen(cam, s.pos);
+    if (p.x < -40 || p.y < -40 || p.x > VIEW_W + 40 || p.y > VIEW_H + 40) continue;
+    const f = age / life;
+    const seed = Math.floor(s.pos.x * 97 + s.pos.y * 13 + s.t * 50);
+    if (s.kind === 'armor' || s.kind === 'pen') {
+      const pen = s.kind === 'pen';
+      if (pen) drawFxAt(ctx, 'puff.dark', 0, p.x, p.y - age * 12 * z, z * (0.35 + f * 0.5), 0.7 * (1 - f));
+      drawGlow(ctx, p.x, p.y, (pen ? 26 : 14) * z, (pen ? 1 : 0.8) * (1 - f) ** 2, pen ? '255,150,60' : '255,230,170');
+      // hot fragments flying off the plate
       ctx.save();
-      ctx.globalAlpha = 0.5;
-      ctx.fillStyle = '#8a4a20';
-      ctx.beginPath();
-      ctx.ellipse(p.x, p.y - 1 * z, 15 * z, 12 * z, 0, 0, Math.PI * 2);
-      ctx.fill();
-      // 3 non-concentric flickering flame layers (<=18px across): dark-red
-      // base ellipse, orange tongue offset toward the plume (NE), small yellow core.
-      const layers: { color: string; w: number; h: number; ox: number; oy: number; seed: number }[] = [
-        { color: '#7a1a0a', w: 16, h: 12, ox: 0, oy: 0, seed: 41 },
-        { color: '#ff8a3c', w: 12, h: 10, ox: 3, oy: -3, seed: 53 },
-        { color: '#ffe27a', w: 7, h: 6, ox: 4, oy: -4, seed: 67 },
-      ];
-      for (const L of layers) {
-        const step = Math.floor(t * 8);
-        const jx = (hash2(veh.id, L.seed + 3, step) - 0.5) * 8;
-        const jy = (hash2(veh.id, L.seed + 4, step) - 0.5) * 8;
-        const flicker = 0.8 + hash2(veh.id, L.seed + 2, Math.floor(t * 14)) * 0.2;
-        const clampX = clamp(L.ox + jx * 0.5, -4, 5);
-        const clampY = clamp(L.oy + jy * 0.5, -5, 4);
-        ctx.globalAlpha = flicker;
-        ctx.fillStyle = L.color;
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.lineCap = 'round';
+      ctx.lineWidth = Math.max(1, z);
+      const n = pen ? 9 : 6;
+      for (let k = 0; k < n; k++) {
+        const a = hash2(seed, k, 3) * Math.PI * 2;
+        const v = (18 + hash2(seed, k, 5) * 30) * (pen ? 1.2 : 1);
+        const d0 = v * age * z, d1 = v * Math.max(0, age - 0.04) * z;
+        ctx.globalAlpha = (1 - f) * (0.6 + 0.4 * hash2(seed, k, 7));
+        ctx.strokeStyle = k % 3 === 0 ? '#fff6d8' : '#ffc060';
         ctx.beginPath();
-        ctx.ellipse(p.x + clampX * z, p.y + (clampY - 2) * z, (L.w / 2) * z, (L.h / 2) * z, 0, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.moveTo(p.x + Math.cos(a) * d1, p.y + Math.sin(a) * d1);
+        ctx.lineTo(p.x + Math.cos(a) * d0, p.y + Math.sin(a) * d0);
+        ctx.stroke();
       }
       ctx.restore();
-
-      // a dense column of 10-12 dark smoke puffs (24-40px), drifting NE and
-      // rising up to 90px, reading clearly as a burning-vehicle plume.
-      const puffCount = 11;
-      for (let i = 0; i < puffCount; i++) {
-        const phase = ((t * 0.3) + i / puffCount) % 1;
-        const alpha = clamp(1 - phase, 0, 1) * 0.9;
-        if (alpha <= 0) continue;
-        const rise = phase * 90;
-        const drift = phase * 34;
-        const jitter = (hash2(veh.id, i, 99) - 0.5) * 10;
-        const diam = (30 + phase * 18) * cam.zoom;
-        const sx = p.x + (drift + jitter) * cam.zoom;
-        const sy = p.y - rise * cam.zoom;
-        drawPuff(ctx, sx, sy, diam, alpha, true);
+    } else if (s.kind === 'backblast') {
+      // a cone of dust and propellant smoke behind the launcher, and a flash at the tube
+      if (age < 0.12) drawGlow(ctx, p.x, p.y, 16 * z, 0.9 * (1 - age / 0.12));
+      for (let k = 0; k < 4; k++) {
+        const a = hash2(seed, k, 11) * Math.PI * 2;
+        const d = (2 + k * 3) * f * z * 3;
+        drawFxAt(ctx, 'puff.light', 0, p.x + Math.cos(a) * d, p.y + Math.sin(a) * d, z * (0.35 + 0.35 * f + k * 0.05), 0.75 * (1 - f));
       }
-    } else if (veh.state === 'knockedOut' || (veh.state === 'abandoned' && !isServiceable(veh))) {
-      // knocked-out (not burning): a thin, slow wisp of smoke
-      const phase = (state.time * 0.15 + hash2(veh.id, 1, 2)) % 1;
-      const alpha = clamp(1 - phase, 0, 1) * 0.35;
-      if (alpha > 0) {
-        const sx = p.x + (hash2(veh.id, 2, 3) - 0.5) * 4 * cam.zoom;
-        const sy = p.y - phase * 20 * cam.zoom;
-        drawPuff(ctx, sx, sy, 10 * cam.zoom, alpha);
+    } else if (s.kind === 'dust') {
+      drawFxAt(ctx, fxSeasonKey('impact', winter), age, p.x, p.y, z * 1.8);
+    } else {
+      // splinters / chips / blood mist: a small puff and a few specks thrown out
+      if (s.kind !== 'body') drawFxAt(ctx, fxSeasonKey('impact', winter), age, p.x, p.y, z * 1.2);
+      ctx.save();
+      ctx.fillStyle = CHIP[s.kind] ?? '#6a6a64';
+      for (let k = 0; k < 5; k++) {
+        const a = hash2(seed, k, 13) * Math.PI * 2;
+        const d = (3 + hash2(seed, k, 17) * 6) * f * z * (s.kind === 'body' ? 0.6 : 1);
+        ctx.globalAlpha = 1 - f;
+        const sz = Math.max(1, Math.round(z));
+        ctx.fillRect(Math.round(p.x + Math.cos(a) * d), Math.round(p.y + Math.sin(a) * d - Math.sin(Math.PI * f) * 3 * z), sz, sz);
       }
+      ctx.restore();
     }
   }
 }
+
+// ---------------------------------------------------------------- projectiles
+/** Rounds in flight (A1). Shells and mortar bombs are carried by their tracer / burst; what is drawn
+ * here is the slow, visible stuff: an AT rocket with its flame and smoke trail, and a grenade or
+ * satchel tumbling along its lob with a ground shadow. */
+function drawProjectiles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
+  if (state.projectiles.length === 0) return;
+  const z = cam.zoom;
+  for (const pr of state.projectiles) {
+    const age = state.time - pr.t0;
+    if (age < 0 || age > pr.flightS) continue;
+    const k = age / pr.flightS;
+    const from = worldToScreen(cam, pr.from), to = worldToScreen(cam, pr.to);
+    const x = from.x + (to.x - from.x) * k, y = from.y + (to.y - from.y) * k;
+    if (pr.kind === 'atrocket') {
+      const dx = to.x - from.x, dy = to.y - from.y, len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len, uy = dy / len;
+      // smoke trail: a soft grey streak, each stretch fading and widening from when the rocket
+      // passed it
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = '#d8d6d0';
+      const segs = 12, trailLen = Math.min(len * k, 90 * z);
+      for (let i = 0; i < segs; i++) {
+        const d0 = len * k - trailLen * (i + 1) / segs, d1 = len * k - trailLen * i / segs;
+        if (d1 <= 0) break;
+        const pa = ((len * k - (d0 + d1) / 2) / len) * pr.flightS;
+        const f = clamp(pa / 1.2, 0, 1);
+        ctx.globalAlpha = 0.55 * (1 - f) ** 1.3;
+        ctx.lineWidth = (1 + 4 * f) * z;
+        ctx.beginPath();
+        ctx.moveTo(from.x + ux * Math.max(0, d0), from.y + uy * Math.max(0, d0) - pa * 3 * z);
+        ctx.lineTo(from.x + ux * d1, from.y + uy * d1 - pa * 3 * z * 0.9);
+        ctx.stroke();
+      }
+      ctx.restore();
+      drawGlow(ctx, x - ux * 3 * z, y - uy * 3 * z, 8 * z, 0.9);
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = '#ffd070';
+      ctx.lineWidth = 2 * z;
+      ctx.beginPath(); ctx.moveTo(x - ux * 7 * z, y - uy * 7 * z); ctx.lineTo(x - ux * 2 * z, y - uy * 2 * z); ctx.stroke();
+      ctx.strokeStyle = '#2a2a24';
+      ctx.lineWidth = 2 * z;
+      ctx.beginPath(); ctx.moveTo(x - ux * 2 * z, y - uy * 2 * z); ctx.lineTo(x + ux * 3 * z, y + uy * 3 * z); ctx.stroke();
+      ctx.restore();
+    } else if (pr.kind === 'grenade' || pr.kind === 'satchel') {
+      // lob: seen from almost straight above the arc barely shifts it, so it is shown by the
+      // shadow drifting away from the grenade and the grenade itself growing a little
+      const h = Math.sin(Math.PI * k) * pr.arcM;
+      const sh = h * 1.6 * z;
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = '#10120c';
+      ctx.beginPath(); ctx.ellipse(x + sh * 0.7, y + sh * 0.7, 1.5 * z, 1 * z, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.translate(x, y - h * 0.8 * z);
+      ctx.rotate(age * 14);
+      const s = (pr.kind === 'satchel' ? 1.6 : 1.2) * (1 + h * 0.1) * z;
+      ctx.fillStyle = '#2c2c24';
+      ctx.fillRect(-1.5 * s, -1 * s, 3 * s, 2 * s);
+      ctx.fillStyle = '#6a6a58';
+      ctx.fillRect(-1.5 * s, -1 * s, 1.5 * s, 1 * s);
+      ctx.restore();
+    }
+  }
+}
+
 
 // ------------------------------------------------------------- movement dust
 const NO_DUST = new Set<Terrain>(['water', 'bridge', 'pavedroad', 'floor', 'buildingWood', 'buildingStone', 'mud', 'woods']);
@@ -547,8 +444,11 @@ export function drawEffects(ctx: CanvasRenderingContext2D, cam: Camera, state: B
 
   drawMovementDust(ctx, cam, state);
   drawLandingDust(ctx, cam, state);
-  drawBurningVehicles(ctx, cam, state);
+  drawStructureFx(ctx, cam, state);
   drawExplosions(ctx, cam, state);
+  drawFires(ctx, cam, state);
+  drawSparks(ctx, cam, state);
+  drawProjectiles(ctx, cam, state);
   drawTracers(ctx, cam, state);
   drawFlashes(ctx, cam, state);
 

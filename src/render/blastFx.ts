@@ -1,16 +1,16 @@
 // ============================================================================
 // blastFx.ts — render-side extras for a vehicle blowing up (sim event 'vehicleExplosion') and
-// for rounds cooking off in a burning hull ('cookOffPop'): a white flash, a camera shake that
-// falls off with distance from the view centre, and a tall smoke column that stands for a while.
-// The blast, crater, casualties and the ordinary HE fireball come from the sim; nothing here
-// feeds back into it. Time base is the battle clock, so the column freezes when paused.
+// for rounds cooking off in a burning hull ('cookOffPop'): a white flash, a ground glow and a
+// camera shake that falls off with distance from the view centre. The fireball flipbook comes
+// from the sim's explosion record (effects.ts), the smoke column from the burning wreck (fireFx.ts);
+// nothing here feeds back into the sim. Time base is the battle clock.
 // ============================================================================
 import type { BattleEvent, Camera, Vec2 } from '@/shared/types';
 import { TILE_PX, VIEW_H, VIEW_W } from '@/shared/types';
 import { worldToScreen } from '@/engine/camera';
 import { hash2 } from '@/shared/rng';
+import { drawGlow } from '@/render/fxSprites';
 
-export const COLUMN_LIFE_S = 40;
 export const SHAKE_LIFE_S = 0.9;
 interface Blast { pos: Vec2; radiusM: number; t0: number; seed: number; small: boolean }
 
@@ -38,7 +38,7 @@ export class BlastFx {
 
   private prune(time: number): void {
     if (this.blasts.length && time < this.blasts[0].t0 - 1) this.blasts = []; // a new battle
-    this.blasts = this.blasts.filter((b) => time - b.t0 < (b.small ? 1.2 : COLUMN_LIFE_S));
+    this.blasts = this.blasts.filter((b) => time - b.t0 < 1.2);
   }
 
   /** Camera offset in screen px for this frame. */
@@ -53,7 +53,7 @@ export class BlastFx {
     return { x: Math.round((hash2(k, 1, 91) - 0.5) * 2 * amp), y: Math.round((hash2(k, 2, 93) - 0.5) * 2 * amp) };
   }
 
-  /** Flash and smoke column; draw after the ordinary effects, inside the map clip. */
+  /** Flash and glow; draw after the ordinary effects, inside the map clip. */
   draw(ctx: CanvasRenderingContext2D, cam: Camera, time: number): void {
     this.prune(time);
     for (const b of this.blasts) {
@@ -74,6 +74,7 @@ export class BlastFx {
         }
         ctx.stroke();
         ctx.restore();
+        drawGlow(ctx, p.x, p.y, 14 * z, 0.8 * Math.max(0, 1 - f * 3));
         continue;
       }
       if (p.x < -300 || p.y < -500 || p.x > VIEW_W + 300 || p.y > VIEW_H + 300) continue;
@@ -85,38 +86,9 @@ export class BlastFx {
         ctx.fillRect(0, 0, VIEW_W, VIEW_H);
         ctx.restore();
       }
-      if (age < 1.2) {
-        const r = b.radiusM * 10 * z * (0.5 + age * 0.6);
-        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
-        const a = 0.55 * (1 - age / 1.2);
-        g.addColorStop(0, `rgba(255,220,140,${a})`);
-        g.addColorStop(0.5, `rgba(240,120,40,${a * 0.5})`);
-        g.addColorStop(1, 'rgba(240,120,40,0)');
-        ctx.fillStyle = g;
-        ctx.fillRect(p.x - r, p.y - r, r * 2, r * 2);
-      }
-      // smoke column: puffs born at the hull for the first ~25 s, rising (up-screen) and drifting
-      // with the wind to the north-east, growing and thinning as they go
-      const born = Math.min(age, 25), puffs = Math.floor(born * 2.2);
-      const fadeAll = age > COLUMN_LIFE_S - 8 ? (COLUMN_LIFE_S - age) / 8 : 1;
-      ctx.save();
-      for (let i = 0; i < puffs; i++) {
-        const pa = age - i / 2.2; // this puff's own age
-        if (pa < 0 || pa > 16) continue;
-        const k = pa / 16;
-        const jx = (hash2(i, b.seed, 11) - 0.5) * 10, jy = (hash2(i, b.seed, 12) - 0.5) * 6;
-        const x = p.x + (jx + pa * 2.6 + k * k * 22) * z;
-        const y = p.y + (jy - pa * 5.5 - k * 18) * z;
-        const r = (5 + pa * 1.9 + hash2(i, b.seed, 13) * 4) * z;
-        const hot = pa < 1.2 ? 1 - pa / 1.2 : 0;
-        const shade = Math.round(28 + k * 70 + hash2(i, b.seed, 14) * 18);
-        ctx.globalAlpha = Math.max(0, (0.5 - k * 0.42)) * fadeAll;
-        ctx.fillStyle = hot > 0 ? `rgb(${Math.round(shade + 150 * hot)},${Math.round(shade + 60 * hot)},${shade})` : `rgb(${shade},${shade},${shade + 3})`;
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
+      // the fireball lights the ground around it (the burst itself is the he.big flipbook, the
+      // smoke column the burning wreck's, fireFx.ts)
+      if (age < 1.2) drawGlow(ctx, p.x, p.y, b.radiusM * 10 * z * (0.6 + age * 0.6), 0.9 * (1 - age / 1.2) ** 1.5);
     }
   }
 }

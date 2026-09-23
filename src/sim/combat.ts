@@ -557,7 +557,7 @@ export function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: W
   }
 
   const kind = weapon.heRadiusM >= 3 ? 'he' : 'small';
-  state.explosions.push({ pos: { ...pos }, radiusM: weapon.heRadiusM, t: 0, kind });
+  state.explosions.push({ pos: { ...pos }, radiusM: weapon.heRadiusM, t: 0, kind, weaponId: weapon.id });
   state.events.push({ kind: 'explosion', pos: { ...pos }, side: shooterSide, weaponId: weapon.id });
   leaveCrater(state, pos, weapon);
   applyBlastDamage(state, pos, weapon, { side: shooterSide, from });
@@ -571,7 +571,7 @@ export function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: W
  * from the vehicle, mortar and grenade paths. */
 function heBurstAt(state: BattleState, rng: Rng, pos: Vec2, weapon: WeaponDef, shooter: Soldier): void {
   if (weapon.heRadiusM <= 0 || weapon.cls === 'flamethrower' || weapon.cls === 'grenade') return;
-  state.explosions.push({ pos: { ...pos }, radiusM: weapon.heRadiusM, t: 0, kind: weapon.heRadiusM >= 3 ? 'he' : 'small' });
+  state.explosions.push({ pos: { ...pos }, radiusM: weapon.heRadiusM, t: 0, kind: weapon.heRadiusM >= 3 ? 'he' : 'small', weaponId: weapon.id });
   state.events.push({ kind: 'explosion', pos: { ...pos }, side: shooter.side, weaponId: weapon.id });
   leaveCrater(state, pos, weapon);
   treesInBlast(state, rng, pos, weapon);
@@ -693,14 +693,16 @@ function fireAtVehicle(
   // resolved at once (the visual catches up); the renderer plays the arrival on landing.
   const projKind: 'shell' | 'atrocket' = weapon.cls === 'atrocket' ? 'atrocket' : 'shell';
   const speed = projKind === 'atrocket' ? 80 : 600;
+  const flightS = Math.max(0.08, distM / speed);
+  const arrive = state.time + flightS; // the strike shows when the round gets there
   state.projectiles.push({
     kind: projKind, weaponId: weapon.id, from: { ...shooterPos }, to: { ...vehicle.pos },
-    t0: state.time, flightS: Math.max(0.08, distM / speed), dirRad: angleTo(shooterPos, vehicle.pos),
+    t0: state.time, flightS, dirRad: angleTo(shooterPos, vehicle.pos),
     arcM: 0, hitKind: r >= pAny ? 'ricochet' : 'impact', preResolved: true,
   });
   if (r >= pAny) {
     if (wantTracer) state.tracers.push({ from: { ...shooterPos }, to: { ...vehicle.pos }, t: 0, hit: false, kind });
-    state.sparks.push({ pos: { ...vehicle.pos }, t: 0, kind: 'dust' });
+    state.sparks.push({ pos: { ...vehicle.pos }, t: arrive, kind: 'dust' });
     onVehicleNearMiss(state, vehicle, weapon, shooterPos);
     return false;
   }
@@ -712,10 +714,10 @@ function fireAtVehicle(
   });
   if (!res.penetrated) {
     state.events.push({ kind: 'armorClank', pos: { ...vehicle.pos }, side: shooterSide });
-    state.sparks.push({ pos: { ...vehicle.pos }, t: 0, kind: 'armor' });
+    state.sparks.push({ pos: { ...vehicle.pos }, t: arrive, kind: 'armor' });
   } else {
     state.events.push({ kind: 'penHit', pos: { ...vehicle.pos }, side: shooterSide });
-    state.sparks.push({ pos: { ...vehicle.pos }, t: 0, kind: 'pen' });
+    state.sparks.push({ pos: { ...vehicle.pos }, t: arrive, kind: 'pen' });
   }
   if (vehicle.state !== 'knockedOut' && vehicle.state !== 'burning') {
     onVehicleHit(state, vehicle, weapon, res.penetrated, { ...shooterPos });
@@ -808,7 +810,7 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
     if (wantTracer) state.tracers.push({ from: { ...shooter.pos }, to: { ...victim.pos }, t: 0, hit: true, kind: tracerKindFor(weapon) });
     onIncomingFire(state, rng, victim, shooter, victim.pos, weapon.cls, false);
     applyHit(state, victim, weapon, rng, shooter.side, shooter);
-    state.sparks.push({ pos: { ...victim.pos }, t: 0, kind: 'body' });
+    state.sparks.push({ pos: { ...victim.pos }, t: state.time, kind: 'body' });
     heBurstAt(state, rng, victim.pos, weapon, shooter);
   } else {
     const spread = 0.5 + distM / 200;
