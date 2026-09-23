@@ -73,15 +73,12 @@ export function updateCameraEdgeScrollAndKeys(
   let dx = (rightSpd - leftSpd) * dt;
   let dy = (bottomSpd - topSpd) * dt;
 
-  // WASD panning is suppressed while Ctrl/Cmd is held so Ctrl+A ("select
-  // all") doesn't also nudge the camera.
-  const wasdOk = !input.keysDown.has('control') && !input.keysDown.has('meta');
   let kx = 0;
   let ky = 0;
-  if (input.keysDown.has('arrowleft') || (wasdOk && input.keysDown.has('a'))) kx -= 1;
-  if (input.keysDown.has('arrowright') || (wasdOk && input.keysDown.has('d'))) kx += 1;
-  if (input.keysDown.has('arrowup') || (wasdOk && input.keysDown.has('w'))) ky -= 1;
-  if (input.keysDown.has('arrowdown') || (wasdOk && input.keysDown.has('s'))) ky += 1;
+  if (input.keysDown.has('arrowleft')) kx -= 1;
+  if (input.keysDown.has('arrowright')) kx += 1;
+  if (input.keysDown.has('arrowup')) ky -= 1;
+  if (input.keysDown.has('arrowdown')) ky += 1;
   dx += kx * KEY_SPEED * dt;
   dy += ky * KEY_SPEED * dt;
 

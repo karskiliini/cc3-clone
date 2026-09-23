@@ -169,7 +169,7 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
     state.keysDown.delete(key);
     if (key === 'meta') {
       // macOS Chrome swallows keyup for keys released while Cmd is held; drop
-      // every non-modifier key so none stays stuck (e.g. 'a' drifting WASD pan).
+      // every non-modifier key so none stays stuck (e.g. an arrow key drifting the pan).
       for (const k of [...state.keysDown]) if (!MODIFIER_KEYS.has(k)) state.keysDown.delete(k);
     }
   });

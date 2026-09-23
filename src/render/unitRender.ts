@@ -681,6 +681,9 @@ function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, state: Batt
       for (const t of state.tracers) {
         if (t.t < 0.1 && dist(t.from, gunner!.pos) < 0.02) t.from = { ...muzzle };
       }
+      for (const pr of state.projectiles) {
+        if (pr.kind === 'mortar' && state.time - pr.t0 < 0.1 && dist(pr.from, gunner!.pos) < 0.02) pr.from = { ...muzzle };
+      }
     }
     if (!crewTeamVisible(state, team, playerSide) || !visible(cw.pos, cam)) continue;
     const dir = { x: Math.sin(cw.facing), y: -Math.cos(cw.facing) };
@@ -704,21 +707,7 @@ function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, state: Batt
     const pos = cw.pos;
     const rot = cw.facing;
     const p = worldToScreen(cam, pos);
-    const since = gunnerOk ? state.time - gunner!.lastFiredAt : 99;
     drawWeaponState(ctx, cw.weaponId, weaponStateChain(crewWeaponVisual(state, cw)), rot, p.x, p.y, cam.zoom);
-    if (cls === 'mortar' && since >= 0 && since < 0.8) {
-      // muzzle puff drifting off the tube
-      const m = worldToScreen(cam, muzzle);
-      const t = since / 0.8;
-      ctx.save();
-      for (let i = 0; i < 3; i++) {
-        ctx.fillStyle = `rgba(214,210,196,${(0.55 * (1 - t) * (1 - i * 0.25)).toFixed(3)})`;
-        ctx.beginPath();
-        ctx.arc(m.x + dir.x * px(0.3 + i * 0.25) * t + i * px(0.1), m.y + dir.y * px(0.3 + i * 0.25) * t - i * px(0.1), px(0.25 + 0.35 * t) * (1 - i * 0.2), 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
-    }
   }
   // PTRD rifles on their bipods in front of their prone gunners
   if (cam.zoom > 0.5) {

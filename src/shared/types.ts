@@ -506,13 +506,15 @@ export interface Spark {
   t: number;
   kind: 'armor' | 'dust' | 'wood' | 'stone' | 'brick' | 'body' | 'pen' | 'backblast';
 }
-/** Delayed grenade/satchel burst (A1): the HE splash fires when `state.time >= at`. */
+/** Delayed burst (A1): a thrown grenade/satchel or a mortar bomb in flight; the HE splash (or, for
+ * a smoke bomb, the smoke cloud) happens when `state.time >= at`. */
 export interface PendingBurst {
   at: number;
   pos: Vec2;
   weaponId: string;
   side: Side;
   shooterId?: number;
+  smoke?: boolean;
 }
 /** Building destruction visuals (B3): dust, chips, settling rubble over `extentTiles`. */
 export interface StructureFx {

@@ -256,6 +256,9 @@ function drawSparks(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSta
 /** Rounds in flight (A1). Shells and mortar bombs are carried by their tracer / burst; what is drawn
  * here is the slow, visible stuff: an AT rocket with its flame and smoke trail, and a grenade or
  * satchel tumbling along its lob with a ground shadow. */
+/** How long the propellant smoke hangs over a mortar tube after a round (s). */
+const MORTAR_PUFF_S = 2.4;
+
 function drawProjectiles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
   if (state.projectiles.length === 0) return;
   const z = cam.zoom;
@@ -296,6 +299,51 @@ function drawProjectiles(ctx: CanvasRenderingContext2D, cam: Camera, state: Batt
       ctx.strokeStyle = '#2a2a24';
       ctx.lineWidth = 2 * z;
       ctx.beginPath(); ctx.moveTo(x - ux * 2 * z, y - uy * 2 * z); ctx.lineTo(x + ux * 3 * z, y + uy * 3 * z); ctx.stroke();
+      ctx.restore();
+    } else if (pr.kind === 'mortar') {
+      // a high lob seen from above: the bomb climbs up-screen (the camera's tilt), hangs at the top
+      // of its arc and drops onto its ground shadow, which firms up where it is going to land
+      const dx = to.x - from.x, dy = to.y - from.y;
+      const top = Math.min(70, 24 + Math.hypot(dx, dy) * 0.2) * z;
+      const up = 4 * k * (1 - k);
+      const bx = x, by = y - top * up;
+      // the tube: a short flash, then a puff of propellant smoke billowing up and drifting off
+      if (age < MORTAR_PUFF_S) {
+        if (age < 0.12) drawGlow(ctx, from.x, from.y, 12 * z, 0.85 * (1 - age / 0.12), '255,200,120');
+        const t = age / MORTAR_PUFF_S;
+        const variant = Math.abs(Math.floor(pr.from.x * 13 + pr.from.y * 7)) % 6;
+        for (let i = 0; i < 2; i++) {
+          const q = Math.min(1, t * (1.2 - i * 0.35));
+          drawFxFrame(ctx, 'puff.light', (variant + i * 3) % 6,
+            from.x + (4 + i * 3) * q * z, from.y - (5 + i * 5) * q * z,
+            (0.35 + 0.6 * Math.sqrt(q)) * (1 - i * 0.25) * z, 0.85 * (1 - q) ** 1.3 * (1 - i * 0.3));
+        }
+      }
+      ctx.save();
+      ctx.globalAlpha = 0.15 + 0.4 * k * k;
+      ctx.fillStyle = '#10120c';
+      ctx.beginPath(); ctx.ellipse(x, y, (1.6 + 1.6 * k) * z, (1.1 + 1.1 * k) * z, 0, 0, Math.PI * 2); ctx.fill();
+      // heading along the screen arc: up-screen while climbing, straight down-screen at the end
+      const vx = dx, vy = dy - top * 4 * (1 - 2 * k);
+      const vl = Math.hypot(vx, vy) || 1;
+      const ux = vx / vl, uy = vy / vl;
+      // drawn about twice life size (a real bomb is ~3 px long at zoom 1) so the eye can follow it
+      const s = (1.7 + 1.0 * up) * z;
+      ctx.globalAlpha = 0.5;
+      ctx.strokeStyle = '#eeeae0';
+      ctx.lineWidth = s * 0.9;
+      ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(bx - ux * 9 * s, by - uy * 9 * s); ctx.lineTo(bx - ux * 2.5 * s, by - uy * 2.5 * s); ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.translate(bx, by);
+      ctx.rotate(Math.atan2(uy, ux));
+      ctx.fillStyle = 'rgba(245,240,225,0.55)'; // thin light rim: the bomb keeps its edge on dark ground
+      ctx.beginPath(); ctx.ellipse(0, 0, 2.6 * s, 1.35 * s, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#23241e';
+      ctx.beginPath(); ctx.ellipse(0, 0, 2.2 * s, 1 * s, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillRect(-3.4 * s, -0.9 * s, 1.4 * s, 1.8 * s);
+      ctx.fillStyle = '#6d7060';
+      ctx.fillRect(-0.4 * s, -0.8 * s, 1.6 * s, 0.6 * s);
       ctx.restore();
     } else if (pr.kind === 'grenade' || pr.kind === 'satchel') {
       // lob: seen from almost straight above the arc barely shifts it, so it is shown by the

@@ -1010,17 +1010,24 @@ function stepGrenades(state: BattleState, rng: Rng, dt: number, track: CombatTra
   }
 }
 
-/** Delayed grenade/satchel bursts (A1): the HE splash fires at `at`, not at throw time. */
+/** Delayed bursts (A1): grenades, satchels and mortar bombs burst when they land, not when thrown
+ * or fired. */
 export function stepPendingBursts(state: BattleState, rng: Rng): void {
   if (state.pendingBursts.length === 0) return;
   const due: number[] = [];
   for (let i = 0; i < state.pendingBursts.length; i++) {
     const b = state.pendingBursts[i];
     if (state.time < b.at) continue;
+    due.push(i);
+    if (b.smoke) {
+      addSmoke(state.map, b.pos, 3, 1.0);
+      state.explosions.push({ pos: { ...b.pos }, radiusM: 3, t: 0, kind: 'smoke' });
+      state.events.push({ kind: 'explosion', pos: { ...b.pos }, side: b.side, weaponId: b.weaponId });
+      continue;
+    }
     const w = WEAPONS[b.weaponId];
     const shooter = b.shooterId != null ? state.soldiers.get(b.shooterId) : undefined;
     applyHESplash(state, rng, b.pos, w ?? WEAPONS.grenade, b.side, shooter?.pos);
-    due.push(i);
   }
   for (let i = due.length - 1; i >= 0; i--) state.pendingBursts.splice(due[i], 1);
 }
@@ -1292,19 +1299,19 @@ function stepMortarTeam(state: BattleState, rng: Rng, dt: number, team: Team, tr
   const impact = { x: target.x + rng.gauss() * errTiles, y: target.y + rng.gauss() * errTiles };
   impact.x = clamp(impact.x, 0.01, state.map.width - 0.01);
   impact.y = clamp(impact.y, 0.01, state.map.height - 0.01);
+  // the bomb is in the air for a few seconds: it bursts (or makes its smoke) when it lands
+  const flightS = mortarFlightS(dist(gunner.pos, impact) * TILE_M);
   state.projectiles.push({
     kind: 'mortar', weaponId: weapon.id, from: { ...gunner.pos }, to: { ...impact },
-    t0: state.time, flightS: 3 + dist(gunner.pos, impact) * TILE_M / 60,
+    t0: state.time, flightS,
     dirRad: angleTo(gunner.pos, impact), arcM: 10, hitKind: 'impact', preResolved: false,
   });
+  state.pendingBursts.push({ at: state.time + flightS, pos: { ...impact }, weaponId: weapon.id, side: gunner.side, shooterId: gunner.id, smoke: isSmokeOrder || undefined });
 
   if (isSmokeOrder) {
     const order = team.order!;
     const rec = track.smokeRounds.get(team.id) ?? { count: 0, lastAt: -Infinity };
     state.tracers.push({ from: { ...gunner.pos }, to: impact, t: 0, hit: true, kind: 'mortar' });
-    addSmoke(state.map, impact, 3, 1.0);
-    state.explosions.push({ pos: { ...impact }, radiusM: 3, t: 0, kind: 'smoke' });
-    state.events.push({ kind: 'explosion', pos: { ...impact }, side: gunner.side, weaponId: weapon.id });
     rec.count++;
     rec.lastAt = state.time;
     track.smokeRounds.set(team.id, rec);
@@ -1317,7 +1324,11 @@ function stepMortarTeam(state: BattleState, rng: Rng, dt: number, team: Team, tr
   state.tracers.push({ from: { ...gunner.pos }, to: impact, t: 0, hit: true, kind: 'mortar' });
   track.mortarRoundsFiredBySide[gunner.side]++;
   addShots(state, gunner.side, 1);
-  applyHESplash(state, rng, impact, weapon, gunner.side);
+}
+
+/** Seconds a mortar bomb is in the air over `distM` metres (a high lob: 3 s plus 1 s per 60 m). */
+export function mortarFlightS(distM: number): number {
+  return 3 + distM / 60;
 }
 
 // ------------------------------------------------------------------- smoke

@@ -207,7 +207,8 @@ export function requestBattleAtlases(
   /** vehicle types on the map: their scale-1 atlases load with the rest (no pop-in on first sight) */
   vehicleDefs: readonly string[] = [],
 ): Promise<void> {
-  const names = battleAtlasNames(sides, season);
+  // the combat-FX flipbooks too, so the first muzzle puff or burst of the battle is not skipped
+  const names = [...battleAtlasNames(sides, season), 'fx_s', 'fx_m', 'fx_l'];
   for (const def of vehicleDefs) {
     names.push(vehicleDefAtlasName(def, 1));
     if (seasonKey(season) === 'winter') names.push(vehicleDefAtlasName(def, 1, 'winter'));
