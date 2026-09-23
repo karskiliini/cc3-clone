@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { BattleConfig, BattleState, GameMap, MapDef, Soldier, Terrain, Vehicle } from '@/shared/types';
+import type { BattleConfig, BattleState, GameMap, GameSettings, MapDef, Soldier, Terrain, Vehicle } from '@/shared/types';
 import { Rng } from '@/shared/rng';
 import { MapPainter } from '@/sim/mapdsl';
 import { buildMap, idx } from '@/sim/map';
@@ -13,7 +13,7 @@ import { isPassable } from '@/sim/path';
 import { stepVehicles } from '@/sim/vehicle';
 import { TERRAIN_PROPS } from '@/sim/terrain';
 import { contourBand, depthColor, rasterizeDepth } from '@/render/depthOverlay';
-import { cycleTeamKey, handleDepthMapKey, offsetOrderPoints } from '@/ui/screens/viewKeys';
+import { cycleTeamKey, handleDepthMapKey, handleSpeedKey, offsetOrderPoints } from '@/ui/screens/viewKeys';
 
 function mapFrom(paint: (p: MapPainter) => void, w = 40, h = 40, season: MapDef['season'] = 'summer'): GameMap {
   let painter: MapPainter | null = null;
@@ -292,13 +292,18 @@ describe('depth view', () => {
 });
 
 describe('view keys', () => {
-  it('Tab toggles the depth map; . and , cycle teams', () => {
-    const settings = { volume: 1, unitLabels: false, losLines: true, speed: 1 as const };
-    expect(handleDepthMapKey(new Set(['tab']), settings)).toBe(true);
+  it('§ toggles the depth map; Tab steps the speed; . and , cycle teams', () => {
+    const settings: GameSettings = { volume: 1, unitLabels: false, losLines: true, speed: 1 };
+    expect(handleDepthMapKey(new Set(['§']), settings)).toBe(true);
     expect(settings).toMatchObject({ showDepthMap: true });
-    handleDepthMapKey(new Set(['tab']), settings);
+    handleDepthMapKey(new Set(['§']), settings);
     expect(settings).toMatchObject({ showDepthMap: false });
+    expect(handleDepthMapKey(new Set(['tab']), settings)).toBe(false);
     expect(handleDepthMapKey(new Set(['.']), settings)).toBe(false);
+    const speeds: number[] = [];
+    for (let i = 0; i < 4; i++) { expect(handleSpeedKey(new Set(['tab']), settings)).toBe(true); speeds.push(settings.speed); }
+    expect(speeds).toEqual([2, 4, 1, 2]);
+    expect(handleSpeedKey(new Set(['§']), settings)).toBe(false);
     const ids = [3, 7, 9];
     expect(cycleTeamKey(new Set(['.']), ids, 7)).toBe(9);
     expect(cycleTeamKey(new Set(['.']), ids, 9)).toBe(3);

@@ -6,7 +6,7 @@ import { idx, inBounds, setTile, tileAt } from './map';
 import { TERRAIN_PROPS } from './terrain';
 import { VEHICLE_DEFS } from '@/data/units';
 import { WEAPONS } from '@/data/weapons';
-import { hasLOS, losTrace } from './los';
+import { EYE_VEHICLE_M, hasLOS, hasLineOfFire, losTrace } from './los';
 import { gradeSpeedMul, GRADE_UPHILL_VEHICLE } from './movement';
 import { findPath, isPassable } from './path';
 import { addStress, addOrMergeBelief } from './mind';
@@ -340,6 +340,14 @@ function stepOneVehicleMind(state: BattleState, rng: Rng, dt: number, v: Vehicle
   }
   // a tank whose main gun is gone has no business in front of anything that can hurt it
   if (top && def.mainWeaponId && !mainGunUsable(v) && topDanger > 0.02) shouldFlee = true;
+  // An order is carried out: a crew still driving to where it was sent, or told to fire, does not
+  // break off to hide (it may still fire on the move). Only a crew whose nerve has gone, or whose
+  // gun can no longer answer a fire order, looks after itself first.
+  const order = team.order;
+  const driving = !!order && (order.type === 'move' || order.type === 'moveFast' || order.type === 'sneak' || order.type === 'assault')
+    && (v.path.length > 0 || state.time - order.issuedAt < 3);
+  const firing = order?.type === 'fire' && (!def.mainWeaponId || mainGunUsable(v));
+  if (driving || firing) shouldFlee = false;
   // panicked crews flee regardless (driver bails/reverses blind, spec §10.2).
   if (mind.state === 'panicked') shouldFlee = true;
 
@@ -432,6 +440,7 @@ function driveToCover(state: BattleState, rng: Rng, dt: number, v: Vehicle, def:
     stepOverrun(state, rng, v, direction);
     if (v.holdUntil != null && state.time < v.holdUntil) { v.speed = 0; return; }
   }
+  if (vehicleBlockingAt(state, v, next)) { v.speed = 0; return; } // another hull: it stands
   v.pos = next;
   if (props.crushable) crushTile(state.map, tx, ty);
   treeCrushByVehicle(state.map, tx, ty, def.lengthM);
@@ -442,6 +451,108 @@ function driveToCover(state: BattleState, rng: Rng, dt: number, v: Vehicle, def:
 /** Is the crew manoeuvring into cover right now? Kept for combat's no-short-halt escape gate. */
 export function isVehicleReversing(state: BattleState, v: Vehicle): boolean {
   return !!reverseTracks.get(state)?.get(v.id)?.target;
+}
+
+// ------------------------------------------------------------------ hulls keep apart
+/** Radius (tiles) of the ground a hull takes up: a circle between its half-width and half-length. */
+function hullRadiusTiles(v: Vehicle): number {
+  const def = VEHICLE_DEFS[v.defId];
+  return def ? (def.lengthM + def.widthM) / 4 / TILE_M : 1.2;
+}
+
+/** Another vehicle (running or a wreck) whose hull `v` would run into standing at `p`, moving on
+ * from where it is now: one it already overlaps (they started too close) only blocks it from
+ * closing in further, so the two can always drive apart. */
+export function vehicleBlockingAt(state: BattleState, v: Vehicle, p: Vec2): Vehicle | null {
+  const r = hullRadiusTiles(v);
+  for (const o of state.vehicles.values()) {
+    if (o === v) continue;
+    const gap = r + hullRadiusTiles(o);
+    const dNext = dist(o.pos, p);
+    if (dNext < gap && dNext < dist(o.pos, v.pos) - 1e-6) return o;
+  }
+  return null;
+}
+
+/** How long a vehicle waits behind another hull before it looks for a way round (s). */
+const HULL_WAIT_S = 0.8;
+const HULL_WAIT_MOVING_S = 2.5;
+const blockedSince = new WeakMap<Vehicle, number>();
+
+/** `v` cannot go on: `blocker` is in the way. If it stands where `v` was going, `v` has arrived
+ * (as near as two hulls can be); a vehicle on the move is given time to clear; otherwise, after a
+ * moment, `v` routes round every other hull to where it was going. */
+function onHullBlocked(state: BattleState, v: Vehicle, blocker: Vehicle): void {
+  v.speed = 0;
+  const goal = v.path[v.path.length - 1];
+  if (!goal) return;
+  const gap = hullRadiusTiles(v) + hullRadiusTiles(blocker);
+  if (Math.abs(blocker.speed) < 0.3 && dist(blocker.pos, goal) < gap + 0.5) {
+    v.path = [];
+    blockedSince.delete(v);
+    return;
+  }
+  const since = blockedSince.get(v);
+  if (since == null) { blockedSince.set(v, state.time); return; }
+  if (state.time - since < (Math.abs(blocker.speed) > 0.3 ? HULL_WAIT_MOVING_S : HULL_WAIT_S)) return;
+  blockedSince.delete(v);
+  const r = hullRadiusTiles(v);
+  const others = [...state.vehicles.values()].filter((o) => o !== v);
+  const aroundHulls = (x: number, y: number): number => {
+    const c = { x: x + 0.5, y: y + 0.5 };
+    return others.some((o) => dist(o.pos, c) < r + hullRadiusTiles(o)) ? 40 : 0;
+  };
+  const route = findPath(state.map, v.pos, goal, 'vehicle', 6000, aroundHulls);
+  if (route.length > 0) v.path = route;
+}
+
+// ------------------------------------------------------------------ a place to shoot from
+/** How far (tiles) a crew looks for a spot with a line of fire to the target it was told to shoot. */
+const FIRE_SPOT_SEARCH_TILES = 25;
+/** It looks again this often (s) while it still has no shot, or when the target moves on. */
+const FIRE_SPOT_RETRY_S = 3;
+const fireSpotLooks = new WeakMap<Vehicle, { at: number; target: Vec2 }>();
+
+/** Told to fire at something it cannot hit from here (a hill, a wall, a wood in between), the crew
+ * drives to the nearest reachable spot within gun range that has a clear line of fire to it. */
+function seekFiringSpot(state: BattleState, v: Vehicle, def: VehicleDef): void {
+  const order = state.teams.get(v.teamId)?.order;
+  if (!order || order.type !== 'fire' || !def.mainWeaponId) return;
+  const target = order.target;
+  const eye = { eyeM: EYE_VEHICLE_M };
+  if (hasLineOfFire(state.map, v.pos, target, eye)) return;
+  const last = fireSpotLooks.get(v);
+  if (last && state.time - last.at < FIRE_SPOT_RETRY_S && dist(last.target, target) < 2) return;
+  fireSpotLooks.set(v, { at: state.time, target: { ...target } });
+  const rangeTiles = (WEAPONS[def.mainWeaponId]?.rangeM ?? 1000) / TILE_M;
+  for (let r = 2; r <= FIRE_SPOT_SEARCH_TILES; r += 1.5) {
+    // nearest ring first; on a ring, the spot that stays closest to the target's range
+    let best: Vec2 | null = null, bestScore = Infinity;
+    const n = Math.max(8, Math.round(Math.PI * r));
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * Math.PI * 2;
+      const c = { x: Math.floor(v.pos.x + Math.sin(a) * r) + 0.5, y: Math.floor(v.pos.y - Math.cos(a) * r) + 0.5 };
+      if (!isPassable(state.map, Math.floor(c.x), Math.floor(c.y), 'vehicle')) continue;
+      const toTarget = dist(c, target);
+      if (toTarget > rangeTiles || vehicleBlockingAt(state, v, c)) continue;
+      const score = toTarget;
+      if (score >= bestScore || !hasLineOfFire(state.map, c, target, eye)) continue;
+      best = c; bestScore = score;
+    }
+    if (best) {
+      const route = findPath(state.map, v.pos, best, 'vehicle', 4000);
+      if (route.length > 0 && dist(route[route.length - 1], best) <= 1) { v.path = route; return; }
+    }
+  }
+}
+
+/** Moves `v` to `next` unless another hull is in the way (then see onHullBlocked). */
+function driveTo(state: BattleState, v: Vehicle, next: Vec2): boolean {
+  const blocker = vehicleBlockingAt(state, v, next);
+  if (blocker) { onHullBlocked(state, v, blocker); return false; }
+  blockedSince.delete(v);
+  v.pos = next;
+  return true;
 }
 
 
@@ -571,6 +682,7 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     // a short halt for an aimed shot (sim/combat.ts): the vehicle stands, keeps its route, and
     // drives on when the round is away
     const fireHalt = v.fireHaltUntil != null && state.time < v.fireHaltUntil;
+    if (canDrive && v.path.length === 0 && !fireHalt) seekFiringSpot(state, v, def);
     if (v.path.length === 0 || !canDrive || fireHalt) {
       v.speed = 0;
       // standing: the crew decides between turning the HULL and only the turret toward the target
@@ -593,7 +705,10 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
           && (hullErr / hullTurnRad(def) < turretErr / turretTraverseRad(def, v, gunnerExp)
             || (turretErr < COARSE_LAY_RAD && hullErr > COARSE_LAY_RAD));
         const threat = bearing != null && targetPos == null && layPos == null; // from the commander's threat sense only
-        if (bearing != null && (worthHull || (threat && wantsHullTurn(def, v, bearing, gunnerExp)))) turnHull(state, v, def, bearing, dt);
+        // a casemate gun (StuG, Marder, SU-76/85) swings only a few degrees either way: to bring it
+        // onto a target outside that arc the driver turns the whole vehicle, whatever the order
+        const casemate = !def.hasTurret;
+        if (bearing != null && (worthHull || ((threat || casemate) && wantsHullTurn(def, v, bearing, gunnerExp)))) turnHull(state, v, def, bearing, dt);
       }
       continue;
     }
@@ -652,18 +767,19 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     // an arc never lands exactly on a waypoint: an intermediate one counts as passed from close by
     const reach = v.path.length > 1 ? Math.max(distTiles, WAYPOINT_REACH_TILES) : distTiles;
     if (d <= reach || d < 1e-4) {
-      if (v.path.length === 1) v.pos = { x: wp.x, y: wp.y };
+      if (v.path.length === 1 && !driveTo(state, v, { x: wp.x, y: wp.y })) continue;
       v.path.shift();
     } else if (headingErr <= TRACK_STRAIGHT_RAD) {
       // lined up: drive at the waypoint (the residual error is turned out as it goes)
       const dir = vnorm(vsub(wp, v.pos));
-      v.pos = vadd(v.pos, vscale(dir, distTiles));
+      if (!driveTo(state, v, vadd(v.pos, vscale(dir, distTiles)))) continue;
     } else {
       const fwd = { x: Math.sin(v.hullFacing), y: -Math.cos(v.hullFacing) };
       const next = vadd(v.pos, vscale(fwd, distTiles));
       const nt = tileAt(map, Math.floor(next.x), Math.floor(next.y));
       // never cut a corner into something a vehicle cannot enter: turn on the spot instead
-      if (Number.isFinite(TERRAIN_PROPS[nt].vehicleCost)) v.pos = next; else v.speed = 0;
+      if (!Number.isFinite(TERRAIN_PROPS[nt].vehicleCost)) v.speed = 0;
+      else if (!driveTo(state, v, next)) continue;
     }
 
     if (props.crushable) crushTile(map, tx, ty);
@@ -693,7 +809,7 @@ function stepWheeledDrive(state: BattleState, rng: Rng, dt: number, v: Vehicle, 
   // close enough to a waypoint that is not the last: on to the next (an arc never hits it exactly)
   const reach = v.path.length > 1 ? Math.max(stepTiles, 1.5) : stepTiles;
   if (!backing && (d <= reach || d < 1e-4)) {
-    if (v.path.length === 1) v.pos = { x: wp.x, y: wp.y };
+    if (v.path.length === 1 && !driveTo(state, v, { x: wp.x, y: wp.y })) return false;
     v.path.shift();
     v.speed = speedMs;
     return true;
@@ -710,7 +826,7 @@ function stepWheeledDrive(state: BattleState, rng: Rng, dt: number, v: Vehicle, 
   } else {
     next = vadd(v.pos, vscale(vnorm(vsub(wp, v.pos)), Math.min(d, stepTiles)));
   }
-  v.pos = next;
+  if (!driveTo(state, v, next)) return false;
   v.speed = backing ? -speedMs : speedMs;
   stepOverrun(state, rng, v, backing ? wrapAngle(v.hullFacing + Math.PI) : v.hullFacing);
   return true;

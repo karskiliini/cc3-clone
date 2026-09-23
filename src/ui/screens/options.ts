@@ -40,7 +40,7 @@ export class OptionsScreen implements Screen {
         { label: 'Unit Labels', value: () => onOff(s.unitLabels), click: () => (s.unitLabels = !s.unitLabels) },
         { label: 'Line Of Sight Lines', value: () => onOff(s.losLines), click: () => (s.losLines = !s.losLines) },
         { label: 'Unit Vision (L)', value: () => onOff(s.showUnitVision ?? true), click: () => (s.showUnitVision = !(s.showUnitVision ?? true)) },
-        { label: 'Depth Map (Tab)', value: () => onOff(s.showDepthMap), click: () => (s.showDepthMap = !s.showDepthMap) },
+        { label: 'Depth Map (§)', value: () => onOff(s.showDepthMap), click: () => (s.showDepthMap = !s.showDepthMap) },
         { label: 'Game Speed', value: () => `x${s.speed}`, click: () => (s.speed = SPEEDS[(SPEEDS.indexOf(s.speed) + 1) % SPEEDS.length]) },
       ],
       [

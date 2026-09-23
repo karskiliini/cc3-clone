@@ -14,7 +14,7 @@ import { drawEffects } from '@/render/effects';
 import { VisibilityOverlay } from '@/render/visibilityOverlay';
 import { DepthOverlay } from '@/render/depthOverlay';
 import { pickOrderMarker } from '@/render/orderMarkers';
-import { cycleTeamKey, handleDepthMapKey, offsetOrderPoints } from './viewKeys';
+import { GAME_SPEEDS, cycleTeamKey, handleDepthMapKey, handleSpeedKey, offsetOrderPoints } from './viewKeys';
 import { hitRect } from '@/ui/hud/hudChrome';
 import { drawLOSLine } from '@/ui/losTool';
 import { drawElevationReadout } from '@/ui/elevationReadout';
@@ -44,7 +44,6 @@ import { DebriefScreen } from './debrief';
 import { OverviewScreen } from './overview';
 import { OptionsScreen } from './options';
 
-const SPEEDS: (1 | 2 | 4)[] = [1, 2, 4];
 const MOVE_TYPES: OrderType[] = ['move', 'moveFast', 'sneak'];
 const DRAG_THRESHOLD_PX = 5;
 const RIGHT_GESTURE_PX = 5;
@@ -429,7 +428,8 @@ export class BattleScreen implements Screen {
       this.leftDrag.active = false;
     }
 
-    // Tab: depth map view. '.' / ',' cycle teams (Tab did this before the depth map).
+    // Tab: game speed; '§': depth map view. '.' / ',' cycle teams.
+    if (handleSpeedKey(input.keysPressed, game.settings)) addMessage(state, `Speed ${game.settings.speed}x`, 'info');
     if (handleDepthMapKey(input.keysPressed, game.settings)) {
       addMessage(state, `Depth map ${game.settings.showDepthMap ? 'on' : 'off'}`, 'info');
     }
@@ -588,12 +588,12 @@ export class BattleScreen implements Screen {
 
     if (input.keysPressed.has(' ')) this.paused = !this.paused;
     if (input.keysPressed.has('+') || input.keysPressed.has('=')) {
-      const idx = SPEEDS.indexOf(game.settings.speed);
-      game.settings.speed = SPEEDS[Math.min(SPEEDS.length - 1, idx + 1)];
+      const idx = GAME_SPEEDS.indexOf(game.settings.speed);
+      game.settings.speed = GAME_SPEEDS[Math.min(GAME_SPEEDS.length - 1, idx + 1)];
     }
     if (input.keysPressed.has('-')) {
-      const idx = SPEEDS.indexOf(game.settings.speed);
-      game.settings.speed = SPEEDS[Math.max(0, idx - 1)];
+      const idx = GAME_SPEEDS.indexOf(game.settings.speed);
+      game.settings.speed = GAME_SPEEDS[Math.max(0, idx - 1)];
     }
     if (input.keysPressed.has('l')) {
       if (input.keysDown.has('shift')) {

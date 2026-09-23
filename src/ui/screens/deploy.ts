@@ -224,7 +224,7 @@ export class DeployScreen implements Screen {
       }
       game.saveSettings();
     }
-    // Tab: depth map view (hides the vision overlay while on). '.' / ',' cycle teams.
+    // '§': depth map view (hides the vision overlay while on). '.' / ',' cycle teams.
     if (handleDepthMapKey(input.keysPressed, game.settings)) {
       addMessage(state, `Depth map ${game.settings.showDepthMap ? 'on' : 'off'}`, 'info');
     }

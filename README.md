@@ -79,7 +79,8 @@ order first (hotkey, order bar, or right-click menu), then click the target.
 - Tall grass and crops stand about a metre high and limit sight by that height. Vehicles press them down as
   they drive: ground level under the tracks, a little higher between them; blasts flatten them too. The lanes
   open lines of sight, and show in the depth map and the pointer's elevation.
-- **Tab** depth map: the battlefield's surface height as a relief map. The colour ramp spans about
+- **Tab** steps the game speed: 1x, 2x, 4x, back to 1x.
+- **§** depth map: the battlefield's surface height as a relief map. The colour ramp spans about
   0-30 m above the datum (blue-violet for holes below ground, through greens and yellows for low ground,
   to orange and red on hilltops and tall buildings), with a green hatch for tree crowns and contours every
   0.5 m below ground and 2 m above. Hills, ridges, valleys and river beds show as broad bands. Craters, foxholes and trenches show as depressions; blasts breach walls,
