@@ -1,7 +1,8 @@
-# Module APIs (contract for parallel implementation)
+# Module APIs (historical: the 2026-09-12 contract for the first parallel build)
+
+The code is the authority now; many signatures below have since changed or been removed (e.g. the code-drawn sprite builders, the 800×600 input space). Read the module itself before relying on anything here.
 
 All types come from `src/shared/types.ts` (import with `@/shared/types`). Path alias `@/` = `src/`.
-Every module below MUST export exactly these signatures (extra exports are fine).
 Do not import from a module you are not told you depend on, except `@/shared/*`.
 Tests live in `test/<module>.test.ts` (vitest, node environment — no DOM in tests).
 Run `npx tsc --noEmit` and `npx vitest run` before you finish; fix what you own.
