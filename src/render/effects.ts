@@ -16,9 +16,13 @@ import { tileAt } from '@/sim/map';
 import type { Terrain } from '@/shared/types';
 
 // ------------------------------------------------------------------- flashes
+/** Soldier atlases are viewed twelve degrees away from vertical, at ten pixels per metre. */
+const MUZZLE_HEIGHT_PX_PER_M = Math.sin(12 * Math.PI / 180) * 10;
+
 /** Muzzle flashes: a warm additive glow on the ground plus a small opaque flame tongue along the
  * bore (the opaque part keeps it legible on snow, where additive light alone disappears). Tank and
- * AT guns get a bigger tongue with muzzle-brake side jets and a puff of gun smoke. */
+ * AT guns get a bigger tongue with muzzle-brake side jets and a puff of gun smoke. A flash placed
+ * `atMuzzle` sits exactly there, lifted by the muzzle's height (`heightM`) above the ground. */
 function drawFlashes(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
   const z = cam.zoom;
   for (const f of state.flashes) {
@@ -28,8 +32,8 @@ function drawFlashes(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     const alpha = frac < 0.4 ? 1 : 1 - (frac - 0.4) / 0.6;
     const ux = Math.sin(f.facing), uy = -Math.cos(f.facing);
     const p = worldToScreen(cam, f.pos);
-    const standoff = (big ? 13 : 7) * z;
-    const sx = p.x + ux * standoff, sy = p.y + uy * standoff;
+    const standoff = f.atMuzzle ? 0 : (big ? 13 : 7) * z;
+    const sx = p.x + ux * standoff, sy = p.y + uy * standoff - (f.heightM ?? 0) * MUZZLE_HEIGHT_PX_PER_M * z;
     if (big) {
       drawFxFrame(ctx, 'puff.light', Math.floor(f.pos.x * 7) % 6, sx + ux * 6 * z, sy + uy * 6 * z, 0.45 * z * (0.8 + frac * 0.8), (1 - frac) * 0.6);
     }
@@ -62,6 +66,7 @@ function drawTracers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     const lifeFrac = clamp(t.t / TRACER_LIFE, 0, 1);
     if (lifeFrac >= 1) continue;
     const from = worldToScreen(cam, t.from);
+    from.y -= (t.fromHeightM ?? 0) * MUZZLE_HEIGHT_PX_PER_M * cam.zoom;
     const to = worldToScreen(cam, t.to);
     const dx = to.x - from.x, dy = to.y - from.y;
     const segLen = Math.hypot(dx, dy) || 1;
@@ -84,6 +89,7 @@ function drawTracers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     let coreColor: string | null = null;
     if (t.kind === 'mg') { color = '#ffd070'; width = 2.5; }
     else if (t.kind === 'shell') { color = '#ffb060'; width = 3; coreColor = '#fff6d0'; }
+    if (t.deflected) { color = '#ff9850'; width = 1.5; coreColor = null; }
     ctx.save();
     ctx.lineCap = 'round';
     // wf19: a thin dark under-stroke so the streak keeps its edge on bright grass and snow
@@ -115,6 +121,33 @@ function drawTracers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
       ctx.moveTo(hbx, hby);
       ctx.lineTo(hx, hy);
       ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+/** Leaves mark contact with foliage (splinters are drawSparks' `wood`); a brief hot star makes a
+ * turned round legible. Positions and lifetimes come from sim events, so pausing freezes them. */
+function drawVegetationImpacts(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
+  for (const spark of state.sparks) {
+    if (spark.kind !== 'leaf' && spark.kind !== 'ricochet') continue;
+    const age = state.time - spark.t;
+    if (age < 0 || age >= 0.8) continue;
+    const p = worldToScreen(cam, spark.pos), progress = age / 0.8;
+    const turn = spark.kind === 'ricochet';
+    ctx.save();
+    ctx.globalAlpha = 1 - progress;
+    ctx.fillStyle = spark.kind === 'leaf' ? '#91ac50' : '#c39b63';
+    ctx.strokeStyle = turn ? '#fff1bc' : '#79623d';
+    ctx.lineWidth = turn ? 1.5 : 1;
+    for (let i = 0; i < (turn ? 4 : 6); i++) {
+      const a = hash2(Math.floor(spark.pos.x * 32), i, Math.floor(spark.pos.y * 32)) * Math.PI * 2;
+      const reach = (2 + progress * (turn ? 14 : 10)) * cam.zoom;
+      const x = p.x + Math.cos(a) * reach;
+      const y = p.y + Math.sin(a) * reach - Math.sin(progress * Math.PI) * 5 * cam.zoom;
+      if (turn) {
+        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(x, y); ctx.stroke();
+      } else ctx.fillRect(x, y, 2 * cam.zoom, (i % 2 ? 1 : 2) * cam.zoom);
     }
     ctx.restore();
   }
@@ -185,7 +218,8 @@ function drawExplosions(ctx: CanvasRenderingContext2D, cam: Camera, state: Battl
 }
 
 // ------------------------------------------------------------------- sparks
-const SPARK_S: Record<Spark['kind'], number> = { armor: 0.35, pen: 0.5, dust: 0.55, wood: 0.5, stone: 0.5, brick: 0.5, body: 0.35, backblast: 0.8 };
+/** Lifetimes of the sparks drawn here; leaves and ricochets are drawVegetationImpacts'. */
+const SPARK_S: Partial<Record<Spark['kind'], number>> = { armor: 0.35, pen: 0.5, dust: 0.55, wood: 0.5, stone: 0.5, brick: 0.5, body: 0.35, backblast: 0.8 };
 const CHIP: Partial<Record<Spark['kind'], string>> = { wood: '#7a5a34', stone: '#77736c', brick: '#8a4a36', body: '#6a1c14' };
 
 /** Impact sparks and puffs (A2): hot streaks off armour, a flash through a pierced plate, dirt,
@@ -198,7 +232,7 @@ function drawSparks(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSta
     const s = state.sparks[i];
     const age = state.time - s.t;
     const life = SPARK_S[s.kind];
-    if (age < 0 || age >= life) continue;
+    if (life === undefined || age < 0 || age >= life) continue;
     const p = worldToScreen(cam, s.pos);
     if (p.x < -40 || p.y < -40 || p.x > VIEW_W + 40 || p.y > VIEW_H + 40) continue;
     const f = age / life;
@@ -411,13 +445,14 @@ function drawMovementDust(ctx: CanvasRenderingContext2D, cam: Camera, state: Bat
   }
   ctx.restore();
   for (const v of state.vehicles.values()) {
-    if (v.state !== 'ok' || v.speed <= 0.3 || v.path.length === 0) continue;
+    if (v.state !== 'ok' || Math.abs(v.speed) <= 0.3) continue;
     if (v.side !== viewer && !state.spottedVehicles[viewer].has(v.id)) continue;
     const p = worldToScreen(cam, v.pos);
     if (p.x < -60 || p.y < -60 || p.x > VIEW_W + 60 || p.y > VIEW_H + 60) continue;
     if (!dusty(v.pos.x, v.pos.y)) continue;
-    const bx = -Math.sin(v.hullFacing), by = Math.cos(v.hullFacing);
-    const k = clamp(v.speed / 6, 0.35, 1);
+    const direction = Math.sign(v.speed);
+    const bx = -Math.sin(v.hullFacing) * direction, by = Math.cos(v.hullFacing) * direction;
+    const k = clamp(Math.abs(v.speed) / 6, 0.35, 1);
     for (let i = 0; i < 8; i++) {
       const phase = (state.time * 0.9 + i / 8) % 1;
       const track = (i % 2 === 0 ? -1 : 1) * 11 * z;
@@ -498,6 +533,7 @@ export function drawEffects(ctx: CanvasRenderingContext2D, cam: Camera, state: B
   drawSparks(ctx, cam, state);
   drawProjectiles(ctx, cam, state);
   drawTracers(ctx, cam, state);
+  drawVegetationImpacts(ctx, cam, state);
   drawFlashes(ctx, cam, state);
 
   ctx.restore();

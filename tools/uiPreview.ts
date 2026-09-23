@@ -224,6 +224,7 @@ function createLocalInput(canvas: HTMLCanvasElement): { state: InputState; endFr
     releases: [],
     keysDown: new Set(),
     keysPressed: new Set(),
+    keysReleased: new Set(),
     wheel: 0,
   };
 

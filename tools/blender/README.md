@@ -9,6 +9,7 @@ following the atlas contract in `docs/superpowers/specs/2026-09-17-soldier-anima
 | `common.py` | shared scene: ortho camera tilted 12° toward screen-north, sun az 315°/el 45° + sky fill, transparent film, shadow catcher, 2× supersample + downsample, `render_cell` / `render_grid`, `AtlasPacker` (PNG + JSON). API documented in its docstring. |
 | `kit.py` | reusable kit models (weapons, helmets, packs, crew props) – the same builders feed the soldier figure and the ground items. |
 | `soldiers.py` | the infantryman rig, all poses/animations, soldier atlases and body-part atlases. |
+| `smg.py` | supplementary SMG aimed/hip firing poses, with independent upper-body aim and planted legs. |
 | `items.py` | ground items atlas (`items_<scale>`). |
 | `contact_sheet.py` | contact sheets over the game's painted grass/snow (plain python3 + Pillow). |
 | `vehicles.py`, `vehicles_common.py` | tanks and vehicles (per-vehicle atlases, see below); `vehicles_common.py` also serves `weapons.py` (crew weapons). |
@@ -27,6 +28,8 @@ blender -b -P tools/blender/soldiers.py -- --side german --season summer --scale
 blender -b -P tools/blender/soldiers.py -- --kind parts --side soviet         # only the parts atlases
 blender -b -P tools/blender/soldiers.py -- --pack-only                        # re-pack atlases from the cache
 blender -b -P tools/blender/soldiers.py -- --list                             # print entry keys + frame counts
+blender -b -P tools/blender/smg.py -- --jobs 2                                # all 8 supplementary SMG atlases
+blender -b -P tools/blender/smg.py -- --check-poses                           # verify planted legs + barrel headings
 ```
 
 `--only` takes comma separated fnmatch patterns or key prefixes and re-renders just those entries,
@@ -83,6 +86,35 @@ Sheets go to `ref/wf21/`. Backdrops: `ref/wf18/full_steppe_grass_z1.png`, `ref/w
   `landed` (ragdoll flight i ends in the orientation of `ragdoll.landed<i>`), `alias`; top level `side`,
   `season`, `pxPerM`, `figureScale`, `tiltDeg`, `weapons`.
 * Ragdoll flights carry no shadow and almost no baked height (the game adds the arc and the shadow).
+
+## SMG firing atlases (`smg_<german|soviet>_<summer|winter>_<1|2>`)
+
+These reuse the soldier models, palettes, lighting, figure size, cell size and anchor. Each atlas
+contains 35 complete-figure entries: `<posture>.<aimed|hip>.twist<0..4>`. Standing, crouched and
+kneeling support both modes; prone supports aimed fire only. Full figures keep the waist free of
+sprite layering seams.
+
+The 16 atlas directions describe the **lower body's heading**, clockwise from screen north.
+Twists 0–4 rotate the chest, head, arms and SMG by −40°, −20°, 0°, 20°, 40° relative to that heading.
+Prone uses −20°, −10°, 0°, 10°, 20°. The rotation is about world vertical at the waist, including
+for a prone body. The weapon's horizontal bearing is exactly body heading plus twist. Pelvis,
+thighs, shins and feet are identical across every twist and recoil frame of a posture.
+
+Every entry contains three frames: **0 rest, 1 kick, 2 recovery**. Aimed fire keeps the stock in the
+shoulder pocket and the head over the sights. Hip fire holds the stock below the shoulder, bends
+both elbows, leans forward and kicks more strongly. Prone recoil is smaller. The renderer selects
+frame 0 while holding aim and advances the recoil frames after each shot; `fps: 20` is descriptive.
+No muzzle flash is baked into these sprites.
+
+Extra metadata: per-entry `twistDegrees` and `fireMode`; top-level `bodyHeading: true`,
+`twistDegrees`, `proneTwistDegrees`, and `recoilFrames`. The normal atlas indexing contract applies.
+Each entry's `muzzleBodyM` contains the actual barrel endpoint `{x,y,z}` for its three frames,
+in body-local metres (+x right, +y forward, +z up), already twisted and enlarged by `figureScale`.
+Rotate XY by the body's heading, then apply the standard ground and height projection to align
+an effect with the rendered barrel. `muzzleCoordinateFrame` records this convention.
+Rendering is resumable, with the same `--only`, `--force`, `--pack-only`, `--samples`, and `--jobs`
+options as the soldier pipeline. Missing entries make a full build fail; `--only` permits a partial
+preview atlas. The generator checks lower-body stability, barrel orientation and figure clipping.
 
 ## Parts atlases (`parts_<side>_<season>_<1|2>`): cell 18 px (36), anchor centre, `part.<kind><0..2>`.
 Body parts: torso, head, arm, leg, boot (1.3× like the men). Vehicle debris (appended, TRUE scale, same pixels in every

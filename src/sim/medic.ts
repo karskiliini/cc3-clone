@@ -12,9 +12,8 @@ import { hasLOS } from './los';
 import { isPassable } from './path';
 import { addMessage } from './messages';
 
-/** Seconds the bandage/stabilize anim runs (drives render/soldierAnim markBandage). */
+/** Seconds a bandage / stabilise takes (the medic's `bandageUntil`, which the renderer plays). */
 export const MEDIC_TREAT_S = 3;
-import { markBandage } from '@/render/soldierAnim';
 /** Squad initiative cooldown per wounded man (s): one treatment attempt this often. */
 const RETRY_COOLDOWN_S = 10;
 /** Heavy fire: suppression above this and nobody stops to play medic. */
@@ -41,7 +40,7 @@ interface MedicTask {
 /** One task per team (per state), plus per-patient retry cooldown. */
 const tasks = new WeakMap<BattleState, Map<number, MedicTask>>();
 const retryAt = new WeakMap<BattleState, Map<number, number>>();
-/** Per-soldier treatment deadline, read by the renderer through markBandage. */
+/** Per-soldier treatment deadline (the sim's own copy of `bandageUntil`). */
 const treatUntil = new WeakMap<Soldier, number>();
 
 export function isTreating(s: Soldier, time: number): boolean {
@@ -108,7 +107,8 @@ export function stepMedic(state: BattleState, rng: Rng, dt: number): void {
       const order = team.order;
       if (order && state.time - order.issuedAt < 0.5 && task.phase !== 'walk') {
         // a new player order cancels the task; the patient is put down where he lies
-        markBandage(medic, state.time - MEDIC_TREAT_S);
+        medic.bandageUntil = undefined;
+        medic.bandageFace = undefined;
         patient.carrying = undefined;
         medic.carrying = undefined;
         m.delete(team.id);
@@ -119,7 +119,8 @@ export function stepMedic(state: BattleState, rng: Rng, dt: number): void {
           task.phase = 'treat';
           task.since = state.time;
           treatUntil.set(medic, state.time + MEDIC_TREAT_S);
-          markBandage(medic, state.time, patient.pos);
+          medic.bandageUntil = state.time + MEDIC_TREAT_S;
+          medic.bandageFace = { ...patient.pos };
           medic.path = [];
         } else if (medic.path.length === 0) {
           // (an empty path means he is standing, whatever stale 'moving' activity he carries)

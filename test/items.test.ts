@@ -268,7 +268,9 @@ describe('picking things up (§9)', () => {
     const s = makeSoldier({ id: 1, ammo: 0, ammoReserve: 0, activity: 'moving', path: [{ x: 25.5, y: 10.5 }] });
     makeTeam(state, 1, [s]);
     ammoItem(state, 'mosin', 12.5, 11.3, 40);
-    run(state, new Rng(1), 40);
+    const rng = new Rng(1);
+    // Picking up ammunition leaves him crouched; allow the return route at that posture's pace.
+    for (let seconds = 0; seconds < 90 && Math.hypot(s.pos.x - 25.5, s.pos.y - 10.5) >= 1; seconds++) run(state, rng, 1);
     expect(s.ammoReserve).toBeGreaterThan(0);
     expect(Math.hypot(s.pos.x - 25.5, s.pos.y - 10.5)).toBeLessThan(1);
   });

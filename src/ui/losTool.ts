@@ -9,8 +9,12 @@ import { TILE_M } from '@/shared/types';
 import { dist } from '@/shared/math';
 import { worldToScreen } from '@/engine/camera';
 import type { LosHeights } from '@/sim/los';
+import { eyeHeightM, hasLineOfFire } from '@/sim/los';
 import { aimLineProfile, aimPointClass, type AimClass } from '@/sim/losProfile';
 import { WEAPONS } from '@/data/weapons';
+import { VEHICLE_DEFS } from '@/data/units';
+import { bowGunner, bowMgUsable, coaxUsable, crewEffects, mainGunUsable, sightAccuracyMul } from '@/sim/vehicleDamage';
+import { BOW_MG_RANGE_M, inBowMgArc } from '@/sim/combat';
 
 const BRIGHT_GREEN = '#4ae04a';
 const DARK_GREEN = '#2c7a2c';
@@ -47,10 +51,43 @@ function rangeColor(distM: number, maxRangeM: number): string {
   return RED;
 }
 
+/** Capability for a pending Fire order, including an available reload/lay; never a visibility grant. */
+function teamCanEstimateFire(state: BattleState, team: Team, to: Vec2): boolean {
+  if (team.outOfAction) return false;
+  if (team.vehicleId != null) {
+    const v = state.vehicles.get(team.vehicleId);
+    const def = v && VEHICLE_DEFS[v.defId];
+    if (!v || !def || (v.state !== 'ok' && v.state !== 'immobilized')) return false;
+    const rangeM = dist(v.pos, to) * TILE_M;
+    const crew = crewEffects(state, v);
+    const main = def.mainWeaponId ? WEAPONS[def.mainWeaponId] : undefined;
+    if (main && crew.gunner && mainGunUsable(v) && (v.mainAmmo > 0 || v.loadedRound)
+      && rangeM <= main.rangeM && sightAccuracyMul(v, rangeM) > 0) return true;
+    if (def.coaxWeaponId && v.coaxAmmo > 0 && coaxUsable(v) && (crew.gunner || crew.commanderUp)
+      && rangeM <= Math.min(BOW_MG_RANGE_M, WEAPONS[def.coaxWeaponId].rangeM)) return true;
+    return !!def.bowWeaponId && (v.bowAmmo ?? 250) > 0 && bowMgUsable(v) && !!bowGunner(state, v)
+      && inBowMgArc(v, to);
+  }
+  return team.soldierIds.some((id) => {
+    const s = state.soldiers.get(id);
+    if (!s || s.health === 'dead' || s.health === 'incapacitated' || s.activity === 'surrendered' || s.activity === 'routed') return false;
+    const weapon = WEAPONS[s.weaponId];
+    if (!weapon || !['lmg', 'hmg', 'coaxmg'].includes(weapon.cls) || s.ammo + s.ammoReserve <= 0) return false;
+    if (team.crewWeapon?.abandoned || (team.crewWeapon && team.crewWeapon.gunnerId !== s.id)) return false;
+    if (s.vehicleId != null) {
+      const ride = state.vehicles.get(s.vehicleId);
+      if (s.seat !== 'passenger' || !ride || Math.abs(ride.speed) > 0.05 || !['ok', 'immobilized'].includes(ride.state)) return false;
+    }
+    return dist(s.pos, to) * TILE_M <= weapon.rangeM
+      && hasLineOfFire(state.map, s.pos, to, { eyeM: eyeHeightM(s.stance) });
+  });
+}
+
 /** Draws the aiming line from `from` to `to` (tile coords), coloured along its length by what
  * can actually be seen from `from`: bright green where the view is clear, dark green where it is
  * obscured (tall grass, hedges, smoke, wood edges), red where it is blocked (walls, buildings,
- * dense woods, ground rising in between). The line can turn green again beyond an obstacle when
+ * dense woods, ground rising in between). Fire orders for a usable MG or vehicle weapon instead
+ * mark concealment-only blocking as a dark-green guesstimate. The line can turn green again when
  * the ground there is visible. When `team`/`state` are given, the range label at the cursor is
  * coloured by how good that range is for the team's weapons. */
 export function drawLOSLine(
@@ -61,9 +98,12 @@ export function drawLOSLine(
   to: Vec2,
   context?: { state: BattleState; team: Team },
   heights?: LosHeights,
-  opts?: { label?: boolean; alpha?: number },
+  opts?: { label?: boolean; alpha?: number; fireOrder?: boolean },
 ): void {
-  const segs = aimLineProfile(map, from, to, heights);
+  let segs = aimLineProfile(map, from, to, heights);
+  const estimated = !!opts?.fireOrder && !!context && aimPointClass(segs) === 'blocked'
+    && hasLineOfFire(map, from, to, heights) && teamCanEstimateFire(context.state, context.team, to);
+  if (estimated) segs = segs.map((seg) => seg.cls === 'blocked' ? { ...seg, cls: 'obscured' } : seg);
   const fromPx = worldToScreen(cam, from);
   const toPx = worldToScreen(cam, to);
   const distM = dist(from, to) * TILE_M;
@@ -110,7 +150,7 @@ export function drawLOSLine(
   ctx.beginPath(); ctx.arc(toPx.x, toPx.y, 3, 0, Math.PI * 2); ctx.fill();
 
   if (opts?.label ?? true) {
-    const word = endCls === 'clear' ? '' : endCls === 'obscured' ? ' obscured' : ' blocked';
+    const word = estimated ? ' guesstimate' : endCls === 'clear' ? '' : endCls === 'obscured' ? ' obscured' : ' blocked';
     const distLabel = `${Math.round(distM)} m${word}`;
     const color = context ? rangeColor(distM, teamMaxRangeM(context.state, context.team)) : CLASS_COLOR[endCls];
     ctx.font = 'bold 11px Arial, Helvetica, sans-serif';
@@ -118,7 +158,7 @@ export function drawLOSLine(
     const tx = Math.round(toPx.x) + 8, ty = Math.round(toPx.y) - 14;
     ctx.fillStyle = 'rgba(0,0,0,0.75)';
     ctx.fillText(distLabel, tx + 1, ty + 1);
-    ctx.fillStyle = endCls === 'blocked' ? RED : color;
+    ctx.fillStyle = estimated ? DARK_GREEN : endCls === 'blocked' ? RED : color;
     ctx.fillText(distLabel, tx, ty);
   }
   ctx.restore();

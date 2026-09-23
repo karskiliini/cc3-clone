@@ -9,13 +9,14 @@ import { isFirstFireFrozen } from './mind';
 import { stepCrewWeapons, isHeldForPacking, isHaulingGun } from './crewWeapon';
 import { stepOrderWaypoints } from './orders';
 import { isDazed, stepDazed } from './daze';
+import { INFANTRY_PACE, infantrySpeedMs } from './infantryPace';
 
 const SPEEDS: Record<string, number> = {
-  moving: 1.4,
-  movingFast: 3.0,
-  sneaking: 0.5,
-  panicked: 3.2,
-  routed: 3.0,
+  moving: INFANTRY_PACE.walk,
+  movingFast: INFANTRY_PACE.run,
+  sneaking: INFANTRY_PACE.crouch,
+  panicked: INFANTRY_PACE.flee,
+  routed: INFANTRY_PACE.run,
 };
 
 /** Slope speed model. grade = rise/run along the direction of travel. Uphill costs
@@ -39,7 +40,7 @@ export function gradeSpeedMul(map: GameMap, a: Vec2, b: Vec2, coeff = GRADE_UPHI
 
 const REPATH_INTERVAL_S = 3;
 /** Sprint of a man throwing himself clear of a vehicle, m/s. */
-const DODGE_SPEED_MS = 4.5;
+const DODGE_SPEED_MS = INFANTRY_PACE.dodge;
 const NEAR_ENEMY_RADIUS_TILES = 15;
 
 /** Advances all soldiers along their current paths, drives panicked/routed flight behaviour,
@@ -89,6 +90,10 @@ export function stepMovement(state: BattleState, rng: Rng, dt: number): void {
       else { moveAlongPath(state, s, DODGE_SPEED_MS, dt); s.animFrame = Math.floor(state.time / 0.15) % 2; continue; }
     }
 
+    // Pause the movement order while the man raises and steadies his weapon. Keeping his path
+    // and activity lets him continue the bound after combat releases the aim.
+    if (s.aiming || (s.smgBurst && state.time < s.smgBurst.until)) { s.animFrame = 0; continue; }
+
     if (s.activity === 'panicked') handleFleeing(state, s, dt);
     else if (s.activity === 'routed') handleRouting(state, s, dt);
 
@@ -105,7 +110,7 @@ export function stepMovement(state: BattleState, rng: Rng, dt: number): void {
     else if (s.activity === 'moving') s.fatigue = Math.min(100, s.fatigue + 0.5 * dt);
     else if (s.activity === 'idle') s.fatigue = Math.max(0, s.fatigue - 1 * dt);
   }
-  separateSoldiers(state);
+  separateSoldiers(state, dt);
 }
 
 /** State effects on stance/facing (spec §3): wary crouches/sneaks near a belief and faces the
@@ -126,11 +131,9 @@ function applyMindStanceAndFacing(state: BattleState, s: Soldier): void {
 function moveAlongPath(state: BattleState, s: Soldier, speedMs: number, dt: number): void {
   const tile = tileAt(state.map, Math.floor(s.pos.x), Math.floor(s.pos.y));
   let mul = TERRAIN_PROPS[tile].speedMul;
-  if (s.fatigue > 70) mul *= 0.5;
-  if (s.health === 'wounded') mul *= 0.7;
   // slope: slower up, a touch faster down, judged on the leg currently being walked
   if (s.path.length > 0) mul *= gradeSpeedMul(state.map, s.pos, s.path[0]);
-  let remaining = (speedMs * mul * dt) / TILE_M;
+  let remaining = (infantrySpeedMs(s, speedMs) * mul * dt) / TILE_M;
 
   while (remaining > 0 && s.path.length > 0) {
     const wp = s.path[0];
@@ -216,14 +219,21 @@ function clampToMap(state: BattleState, p: { x: number; y: number }): { x: numbe
   return { x: Math.min(Math.max(p.x, 0.05), m.width - 0.05), y: Math.min(Math.max(p.y, 0.05), m.height - 0.05) };
 }
 
-function separateSoldiers(state: BattleState): void {
+function separateSoldiers(state: BattleState, dt: number): void {
   const buckets = new Map<string, Soldier[]>();
+  const budgets = new Map<number, number>();
   for (const s of state.soldiers.values()) {
     if (s.health === 'dead' || s.health === 'incapacitated' || s.vehicleId != null) continue;
     const key = `${Math.floor(s.pos.x)},${Math.floor(s.pos.y)}`;
     let arr = buckets.get(key);
     if (!arr) { arr = []; buckets.set(key, arr); }
     arr.push(s);
+    // One small sidestep budget per man and update, shared by all neighbours. Otherwise a dense
+    // group multiplies the correction, and increasing the update rate makes men slide faster.
+    const held = s.aiming || (s.smgBurst && state.time < s.smgBurst.until) || s.hatch || (s.stunnedUntil != null && state.time < s.stunnedUntil)
+      || isDazed(s, state.time) || s.pickup?.until != null || isFirstFireFrozen(state, s.id)
+      || (s.crewTask && !s.crewTask.walking) || isHaulingGun(state, s) || isHeldForPacking(state, s);
+    budgets.set(s.id, held ? 0 : infantrySpeedMs(s, 0.3) * dt / TILE_M);
   }
   for (const arr of buckets.values()) {
     for (let i = 0; i < arr.length; i++) {
@@ -232,16 +242,15 @@ function separateSoldiers(state: BattleState): void {
         const d = dist(a.pos, b.pos);
         if (d < 0.3) {
           const dir = d > 1e-4 ? vnorm(vsub(b.pos, a.pos)) : { x: 1, y: 0 };
-          // A man lying stunned after a blast is not slid along the ground by his neighbours:
-          // only the man who can move steps aside (both steps, so the pair still separates).
-          // (nor is a dazed one, sim/daze.ts)
-          const aDown = (a.stunnedUntil != null && state.time < a.stunnedUntil) || isDazed(a, state.time);
-          const bDown = (b.stunnedUntil != null && state.time < b.stunnedUntil) || isDazed(b, state.time);
-          if (aDown && bDown) continue;
-          const aStep = aDown ? 0 : bDown ? 0.1 : 0.05;
-          const bStep = bDown ? 0 : aDown ? 0.1 : 0.05;
+          const aLeft = budgets.get(a.id)!, bLeft = budgets.get(b.id)!;
+          const total = aLeft + bLeft;
+          if (total <= 0) continue;
+          const correction = Math.min(0.3 - d, total);
+          const aStep = correction * aLeft / total, bStep = correction * bLeft / total;
           if (aStep) a.pos = clampToMap(state, vsub(a.pos, vscale(dir, aStep)));
           if (bStep) b.pos = clampToMap(state, vadd(b.pos, vscale(dir, bStep)));
+          budgets.set(a.id, Math.max(0, aLeft - aStep));
+          budgets.set(b.id, Math.max(0, bLeft - bStep));
         }
       }
     }

@@ -10,7 +10,8 @@ import {
 import { frameFor, type AnimAction } from '@/render/soldierAnim';
 import { drawRagdollFlight, drawRagdollLanded, ragdollBeginFrame, ragdollPhase } from '@/render/ragdoll';
 import { drawEffects } from '@/render/effects';
-import { applyBlastKnockback } from '@/sim/combat';
+import { applyBlastKnockback, stepCombat } from '@/sim/combat';
+import { stepMovement } from '@/sim/movement';
 import { createMind } from '@/sim/mind';
 import { Rng } from '@/shared/rng';
 import { drawUnits } from '@/render/unitRender';
@@ -42,7 +43,7 @@ function frameAt(key: string, atlas: Atlas, t: number, id = 1): number {
   if (action === 'fire') s.lastFiredAt = Math.floor(t / 0.8) * 0.8;                 // fire every 0.8 s
   if (action === 'reload') { s.activity = 'reloading'; s.reloadTimer = 3 - (t % 3); }
   if (!entry.loop && action !== 'fire' && action !== 'reload') return Math.floor((t * Math.max(1, entry.fps)) % entry.frames);
-  return frameFor(s, t, action, entry, 0, 'calm');
+  return frameFor(s, t, action, entry, undefined, 'calm');
 }
 
 interface Anim { canvas: HTMLCanvasElement; atlas: Atlas; key: string; zoom: number; bg: string }
@@ -227,6 +228,54 @@ function drawDrill(canvas: HTMLCanvasElement): void {
 }
 for (const sel of [drillWeaponSel, drillCrewSel]) sel.addEventListener('change', resetDrill);
 
+// Real infantry simulation, separate from the atlas-entry loops below.
+let pace = demoState('summer'), paceRng = new Rng(17), paceAccum = 0, pacePaused = false;
+const paceLabels = ['Walk', 'Run', 'Crouch', 'Crawl', 'Acquire / aim / fire'];
+const paceCam: Camera = { x: 0, y: 0, zoom: 1 };
+function resetPace(): void {
+  pace = demoState(seasonSel.value as Season); paceRng = new Rng(17); paceAccum = 0;
+  for (let i = 0; i < paceLabels.length; i++) {
+    const y = 1.5 + i * 2;
+    const s = fakeSoldier(500 + i, sideSel.value as Side, {
+      teamId: 500 + i, pos: { x: 9, y }, facing: 2, ammo: 50,
+      weaponId: 'kar98k',
+      stance: i === 2 ? 'crouching' : i === 3 ? 'prone' : 'standing',
+      activity: i === 4 ? 'idle' : i === 1 ? 'movingFast' : i === 3 ? 'sneaking' : 'moving',
+      path: i === 4 ? [] : [{ x: 37, y }],
+    });
+    pace.soldiers.set(s.id, s);
+    pace.teams.set(s.teamId, {
+      id: s.teamId, defId: 'demo', side: s.side, name: paceLabels[i], type: 'rifle', soldierIds: [s.id],
+      leaderId: s.id, vehicleId: null, order: i === 4 ? { type: 'fire', target: { x: 34, y }, issuedAt: 0 } : null,
+      facing: 2, experience: 50, morale: 80, status: 'Idle', pos: { ...s.pos }, outOfAction: false, kills: 0, aiObjective: null,
+    });
+  }
+}
+function drawPace(dt: number): void {
+  if (!pacePaused) paceAccum += Math.min(0.1, dt);
+  while (paceAccum >= 0.05) {
+    paceAccum -= 0.05; pace.time += 0.05;
+    stepMovement(pace, paceRng, 0.05); stepCombat(pace, paceRng, 0.05);
+    pace.events.length = 0; pace.tracers.length = 0; pace.explosions.length = 0;
+    pace.flashes = pace.flashes.filter((f) => (f.t += 0.05) < 0.12);
+    if (pace.time > 24) resetPace();
+  }
+  const canvas = $<HTMLCanvasElement>('paceCanvas'), ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = GROUND[pace.map.def.season === 'winter' ? 'winter' : 'summer']; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = '#969761'; ctx.lineWidth = 1;
+  for (let x = 180; x < 780; x += 100) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 220); ctx.stroke();
+    ctx.fillStyle = '#e8e8e0'; ctx.fillText(`${(x - 180) / 10} m`, x + 3, 231);
+  }
+  drawUnits(ctx, paceCam, pace, sideSel.value as Side, [], DRILL_SETTINGS);
+  ctx.fillStyle = '#101810'; ctx.font = '12px monospace';
+  paceLabels.forEach((label, i) => ctx.fillText(label, 8, 34 + i * 40));
+  const s = pace.soldiers.get(504)!;
+  $('paceStatus').textContent = `${pace.time.toFixed(1)} s — rifle: ${s.aiming ? `aiming (${Math.max(0, s.aiming.readyAt - pace.time).toFixed(1)} s)` : s.lastFiredAt > 0 ? 'recovering' : 'ready'} — ${50 - s.ammo} shots`;
+}
+$('paceReset').addEventListener('click', resetPace);
+$('pacePause').addEventListener('click', () => { pacePaused = !pacePaused; $('pacePause').textContent = pacePaused ? 'Resume pace demo' : 'Pause pace demo'; });
+
 // deterministic strips for capture scripts
 declare global { interface Window { __drillStrip: (n?: number, dt?: number) => string; __animStrip: (atlasName: string, key: string, dir: number, n?: number, dt?: number, zoom?: number) => string | null; __ragdollStrip: (n?: number, dt?: number) => string; __ready: boolean } }
 window.__animStrip = (atlasName, key, dir, n = 8, dt = 0.1, zoom = 3) => {
@@ -268,10 +317,12 @@ window.__drillStrip = (n = 24, dt = 0.5) => {
 };
 
 $('ragdoll').addEventListener('click', () => { resetDemo(); fireBlast(now() - demoT0 + 0.0001); });
-for (const sel of [srcSel, sideSel, seasonSel]) sel.addEventListener('change', () => { void rebuild().then(() => { resetDemo(); resetDrill(); }); });
+for (const sel of [srcSel, sideSel, seasonSel]) sel.addEventListener('change', () => { void rebuild().then(() => { resetDemo(); resetDrill(); resetPace(); }); });
 
+let lastPreviewTime = now();
 function tick(): void {
   const t = now();
+  drawPace(t - lastPreviewTime); lastPreviewTime = t;
   for (const a of anims) drawAnim(a, t);
   drawDemo($<HTMLCanvasElement>('ragdollCanvas'), t - demoT0);
   const want = (t - drillT0);
@@ -283,6 +334,7 @@ function tick(): void {
 }
 resetDemo();
 resetDrill();
+resetPace();
 let drillT0 = now();
 void rebuild().then(() => { window.__ready = true; });
 requestAnimationFrame(tick);

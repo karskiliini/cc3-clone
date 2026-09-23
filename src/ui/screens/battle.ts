@@ -32,6 +32,8 @@ import { Minimap } from '@/ui/hud/minimap';
 import { drawHudBase } from '@/ui/hud/hudChrome';
 import { CommandMenu } from '@/ui/commandMenu';
 import { OrderBar } from '@/ui/hud/orderBar';
+import { ControlGroupBar } from '@/ui/hud/controlGroupBar';
+import { ControlGroups, controlGroupKeyAction } from '@/ui/controlGroups';
 import { drawTextCentered, FONT_BIG_H } from '@/render/pixelfont';
 import { PALETTE } from '@/render/palette';
 import {
@@ -96,6 +98,8 @@ export class BattleScreen implements Screen {
   private minimap = new Minimap();
   private commandMenu = new CommandMenu();
   private orderBar = new OrderBar();
+  private controlGroupBar = new ControlGroupBar();
+  private controlGroups = new ControlGroups();
   private visionOverlay = new VisibilityOverlay();
   private depthOverlay = new DepthOverlay();
   private grassFx = new GrassFx();
@@ -238,6 +242,17 @@ export class BattleScreen implements Screen {
       battle.step(dt * game.settings.speed);
     }
 
+    const selectableIds = new Set(battle.selectableTeams(battle.playerSide()).map((team) => team.id));
+    this.controlGroups.prune(selectableIds);
+    if (this.selectedTeamIds.some((id) => !selectableIds.has(id))) {
+      this.setSelection(this.selectedTeamIds.filter((id) => selectableIds.has(id)));
+      if (this.selectedTeamIds.length === 0) {
+        this.pendingOrder = null;
+        this.pendingWaypoints = [];
+        this.commandMenu.close();
+      }
+    }
+
     if (state.phase === 'ended') {
       this.endedElapsed += dt;
       if (this.endedElapsed > 2) {
@@ -362,7 +377,7 @@ export class BattleScreen implements Screen {
         continue;
       }
       const dragged = this.leftDrag.moved >= DRAG_THRESHOLD_PX;
-      const shiftHeld = input.keysDown.has('shift');
+      const shiftHeld = r.shift ?? input.keysDown.has('shift');
       if (dragged && !this.pendingOrder) {
         // Rect-select: any friendly, selectable team whose centre OR any
         // living soldier's screen position falls inside the marquee.
@@ -424,11 +439,32 @@ export class BattleScreen implements Screen {
       this.setSelection(battle.selectableTeams(battle.playerSide()).map((t) => t.id));
     }
 
-    // no order hotkeys under Ctrl/Cmd: Ctrl+A is select all, not Assault
-    const modHeld = input.keysDown.has('control') || input.keysDown.has('meta');
-    if (this.selectedTeamId != null && !this.commandMenu.isOpen && !modHeld) {
+    const clickedGroup = this.controlGroupBar.update(input);
+    const groupAction = controlGroupKeyAction(input) ?? clickedGroup;
+    if (groupAction) {
+      if (groupAction.assign) {
+        this.controlGroups.assign(groupAction.key, this.selectedTeamIds);
+        const count = this.selectedTeamIds.length;
+        addMessage(state, `Control group ${groupAction.key}\n${count ? `${count} ${count === 1 ? 'team' : 'teams'} assigned` : 'Cleared'}`, 'info');
+        game.audio?.play('click');
+      } else {
+        const ids = this.controlGroups.recall(groupAction.key);
+        if (ids) {
+          this.setSelection(ids);
+          this.pendingOrder = null;
+          this.pendingWaypoints = [];
+          this.commandMenu.close();
+          this.leftDrag.active = false;
+          this.rightDrag.active = false;
+          game.audio?.play('click');
+        }
+      }
+    }
+
+    if (this.selectedTeamId != null && !this.commandMenu.isOpen && !input.keysDown.has('control') && !input.keysDown.has('meta')) {
       for (const ot of ORDER_TYPES) {
-        if (input.keysPressed.has(ORDER_HOTKEYS[ot])) { this.pendingOrder = ot; this.pendingWaypoints = []; }
+        const key = ORDER_HOTKEYS[ot];
+        if (input.keysPressed.has(key) && !input.keysPressed.has(`mod+${key}`)) { this.pendingOrder = ot; this.pendingWaypoints = []; }
       }
     }
 
@@ -441,6 +477,15 @@ export class BattleScreen implements Screen {
     } else if (orderBarResult) {
       this.pendingOrder = orderBarResult;
       this.pendingWaypoints = [];
+    }
+
+    // Shift release commits the last placed point, after processing any final click and
+    // cancellation in this frame. The pointer's current position is not another waypoint.
+    if (input.keysReleased.has('shift') && this.pendingOrder && MOVE_TYPES.includes(this.pendingOrder)
+      && this.pendingWaypoints.length > 0) {
+      const target = this.pendingWaypoints.pop()!;
+      this.issueOrderToSelection(input, target);
+      this.leftDrag.active = false;
     }
 
     // The roster keeps out-of-action teams (greyed, status in red); TeamGrid ignores clicks on them.
@@ -503,6 +548,7 @@ export class BattleScreen implements Screen {
       this.bottomStrip['hover'].size > 0
       || (this.showTeamGrid && gridHover >= 0 && gridHover < roster.length && !roster[gridHover].outOfAction)
       || this.orderBar.isHovering()
+      || this.controlGroupBar.isHovering()
       || (this.showMinimap && m.x >= r.x && m.x < r.x + r.w && m.y >= r.y && m.y < r.y + r.h));
     if (action === 'truce') {
       battle.offerTruce(battle.playerSide());
@@ -652,7 +698,8 @@ export class BattleScreen implements Screen {
         const obs = teamObserver(state, t);
         if (!obs) continue;
         const { from, eyeM } = obs;
-        drawLOSLine(ctx, cam, state.map, from, to, { state, team: t }, { eyeM }, { label: primary, alpha: primary ? 1 : 0.6 });
+        drawLOSLine(ctx, cam, state.map, from, to, { state, team: t }, { eyeM },
+          { label: primary, alpha: primary ? 1 : 0.6, fireOrder: this.pendingOrder === 'fire' });
       }
     }
 
@@ -719,6 +766,7 @@ export class BattleScreen implements Screen {
     if (this.showTeamGrid) this.teamGrid.draw(ctx, this.rosterTeams(battle.playerSide()), state, this.selectedTeamIds);
     this.combatMessages.draw(ctx, state);
     this.bottomStrip.draw(ctx, state, selTeam);
+    this.controlGroupBar.draw(ctx, this.controlGroups.slots(this.selectedTeamIds));
     this.orderBar.draw(ctx, { enabled: this.selectedTeamIds.length > 0, pending: this.pendingOrder });
 
     if (this.commandMenu.isOpen) this.commandMenu.draw(ctx);

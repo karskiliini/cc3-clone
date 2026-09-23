@@ -273,24 +273,64 @@ describe('burning hulks as a danger source', () => {
     expect(dist(s.pos, v.pos) * TILE_M).toBeGreaterThan(FIRE_HAZARD_M);
   });
 
-  it('a crew bailing out of a burning tank runs clear of it before going to ground', () => {
-    let clear = 0, out = 0;
+  it('a crew leaving a burning tank lies shocked by the hull, then crawls toward safe cover', () => {
+    let out = 0;
     for (let seed = 1; seed <= 10; seed++) {
       const state = makeState();
       const { v, crew } = addTank(state, 'pz4gh', { x: 100, y: 100 });
       const rng = new Rng(seed);
-      v.mainAmmo = 0; // nothing to cook off: this is about where the men go
+      v.mainAmmo = 0;
       const r = resolveVehicleHit(state, rng, v, { weapon: WEAPONS.kwk42_75, round: 'ap', shooterPos: { x: 100, y: 0 }, shooterSide: 'soviet', distM: 200, location: { zone: 'engineDeck', face: 'rear' } });
       if (r.outcome !== 'fire') continue;
-      for (let i = 0; i < 25 / SIM_DT; i++) { state.time += SIM_DT; stepCoverSeeking(state, rng, SIM_DT); stepMovement(state, rng, SIM_DT); stepVehicles(state, rng, SIM_DT); }
+      // Isolate the escape from subsequent ammunition/fuel blasts, which have separate tests.
+      v.cookOff = { checkedS: 0, pops: 0, ended: 'burntOut' };
+      // Cover just outside the fire danger zone, available on either side of every hatch.
+      for (let y = 90; y <= 110; y++) for (let x = 90; x <= 110; x++) {
+        const m = dist({ x: x + 0.5, y: y + 0.5 }, v.pos) * TILE_M;
+        if (m > FIRE_HAZARD_M + 1 && m < FIRE_HAZARD_M + 4) state.map.tiles[y * state.map.width + x] = 'trench';
+      }
+      const landed = new Map<number, { x: number; y: number }>();
+      const crawled = new Set<number>();
+      for (let i = 0; i < 30 / SIM_DT; i++) {
+        const before = new Map(crew.map((c) => [c.id, { ...c.pos }]));
+        state.time += SIM_DT;
+        stepCoverSeeking(state, rng, SIM_DT);
+        stepMovement(state, rng, SIM_DT);
+        stepVehicles(state, rng, SIM_DT);
+        for (const c of crew) {
+          if (down(c) || c.vehicleId != null || c.hatch) continue;
+          if (!landed.has(c.id)) {
+            landed.set(c.id, { ...c.pos });
+            expect(c.stunnedUntil).toBeGreaterThan(state.time + 2);
+            expect(c.dazedUntil).toBeGreaterThan(c.stunnedUntil!);
+          }
+          if (state.time < c.stunnedUntil!) expect(c.pos).toEqual(landed.get(c.id));
+          if (state.time < c.dazedUntil!) {
+            expect(c.stance).toBe('prone');
+            expect(c.bailRun).toBeUndefined();
+            if (state.time >= c.stunnedUntil!) {
+              const movedM = dist(c.pos, before.get(c.id)!) * TILE_M;
+              expect(movedM).toBeLessThanOrEqual(0.5 * SIM_DT);
+              if (movedM > 0) {
+                crawled.add(c.id);
+                const destination = c.dazeCrawl!.path.at(-1)!;
+                expect(dist(destination, v.pos) * TILE_M).toBeGreaterThan(FIRE_HAZARD_M);
+              }
+            }
+          }
+        }
+      }
       for (const c of crew) {
-        if (down(c) || c.vehicleId != null) continue;
+        if (down(c)) continue;
         out++;
-        if (dist(c.pos, v.pos) * TILE_M > FIRE_HAZARD_M) clear++;
+        expect(c.vehicleId).toBeNull();
+        expect(c.hatch).toBeUndefined();
+        expect(landed.has(c.id)).toBe(true);
+        expect(crawled.has(c.id)).toBe(true);
+        expect(dist(c.pos, landed.get(c.id)!) * TILE_M).toBeGreaterThan(0.1);
       }
     }
     expect(out).toBeGreaterThan(5);
-    expect(clear / out).toBeGreaterThan(0.85);
   });
 });
 

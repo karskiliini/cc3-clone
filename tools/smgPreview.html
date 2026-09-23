@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>SMG fire handling — cc3_clone</title>
+<style>body{margin:24px;background:#202018;color:#e8e8e0;font:13px monospace}h1{font-size:18px;color:#d8b448}button,select{background:#303027;color:inherit;border:1px solid #777;padding:6px;font:inherit}canvas{display:block;margin-top:12px;image-rendering:pixelated;border:1px solid #666}.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}p{max-width:850px;line-height:1.5}</style></head>
+<body><h1>SMG fire handling</h1><p>Real combat rounds, poses, flashes and impacts at battle speed. These drills demonstrate fixed handling choices; in battle, range, posture, stress and training choose them. Faint paths retain the actual shots for inspection.</p>
+<div class="bar"><label>Weapon <select id="weapon"><option value="mp40">MP40</option><option value="ppsh41">PPSh-41</option></select></label><label>Season <select id="season"><option>summer</option><option>winter</option></select></label><button id="reset">Restart</button><button id="pause">Pause</button><button id="step">Step 0.1 s</button><label><input id="paths" type="checkbox" checked>Show shot paths</label><span id="time">Loading poses…</span></div>
+<canvas id="scene" width="940" height="600"></canvas><div id="status"></div><script type="module" src="./smgPreview.ts"></script></body></html>

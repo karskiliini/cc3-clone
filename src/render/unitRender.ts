@@ -14,7 +14,7 @@ import { drawText, textWidth } from '@/render/pixelfont';
 import { VEHICLE_DEFS } from '@/data/units';
 import { teamBarColor } from '@/ui/hud/hudChrome';
 import { drawOrderMarkers } from '@/render/orderMarkers';
-import { CREW_LAYOUT, gunHaulers, crewServedClass, crewWeaponView, crewWeaponVisual, weaponFramePoint } from '@/sim/crewWeapon';
+import { CREW_LAYOUT, gunHaulers, crewServedClass, crewWeaponView, crewWeaponVisual, separateMgMount, weaponFramePoint } from '@/sim/crewWeapon';
 import { FLASH_LIFE, TILE_M } from '@/shared/types';
 import type { Vec2, Vehicle } from '@/shared/types';
 import { vehicleDamageView, vehicleLayout } from '@/sim/vehicleDamage';
@@ -22,14 +22,15 @@ import { hatchWorld, isServiceable } from '@/sim/vehicleCrew';
 import { dist, facingFromAngle } from '@/shared/math';
 import {
   drawSoldier as drawAtlasSoldier, drawVehiclePart, drawWeapon as drawAtlasWeapon, drawWeaponState, requestBattleAtlases,
-  soldierAtlas, itemAtlas, partsAtlas, drawAtlasFrame, weaponMuzzleM, type Atlas,
+  soldierAtlas, smgAtlas, itemAtlas, partsAtlas, drawAtlasFrame, weaponMuzzleM, type Atlas,
 } from '@/render/spriteAtlas';
 import {
   frameFor, moodFor, pickAnimation, postureFor, transitionPosture, trembleOffset, entryKeyChain,
   crewTaskAnim, progressFrame, weaponStateChain, hatchClimbAnim, hatchClimbFrame, isMoving, headingTo, turnToward, TURN_RATE, postureDropProgress,
-  DRAG_KEYS, DRAGGED_KEYS, WOUNDED_KEYS, type AnimAction, type Posture,
+  DRAG_KEYS, DRAGGED_KEYS, WOUNDED_KEYS, SoldierMotion, type AnimAction, type Posture,
 } from '@/render/soldierAnim';
 import { ragdollSample, metresToPx } from '@/render/soldierAnim';
+import { smgPose } from '@/render/smgAnim';
 import type { Debris, GroundItem, Season } from '@/shared/types';
 import { drawRagdollFlight, drawRagdollLanded, ragdollBeginFrame, ragdollPhase } from '@/render/ragdoll';
 
@@ -50,12 +51,14 @@ function ensureAtlases(state: BattleState): void {
 /** Render-side memory per soldier: measured ground speed (for gait cadence) and the last posture
  * with its change time (for stand <-> prone transitions). Never read by the sim. */
 interface AnimTrack {
-  x: number; y: number; t: number; speed: number; measured: boolean; posture: Posture; since: number;
+  /** ground speed and the gait cycles walked so far (distance-driven, so the feet keep pace) */
+  motion: SoldierMotion;
+  posture: Posture; since: number; prev?: Posture;
   /** drawn heading (radians), turned smoothly toward the wanted one; hdT = battle time it was set */
   hd?: number; hdT?: number;
 }
 /** Measured ground speed, or undefined until the first measurement (the path decides then). */
-const trackSpeed = (tr: AnimTrack): number | undefined => (tr.measured ? tr.speed : undefined);
+const trackSpeed = (tr: AnimTrack): number | undefined => (tr.motion.measured ? tr.motion.speedMps : undefined);
 const animTracks = new Map<number, AnimTrack>();
 /** Which way a man who is down lies (radians): set while he is dragged, kept when he is set down. */
 const downHeading = new Map<number, number>();
@@ -64,17 +67,12 @@ function animTrackFor(s: Soldier, time: number): AnimTrack {
   if (time < animTrackTime - 0.5) { animTracks.clear(); downHeading.clear(); } // a new battle
   animTrackTime = time;
   let tr = animTracks.get(s.id);
-  if (!tr) { const posture = postureFor(s, time); tr = { x: s.pos.x, y: s.pos.y, t: time, speed: 0, measured: false, posture, since: time - 10 }; animTracks.set(s.id, tr); return tr; }
-  const dt = time - tr.t;
-  if (dt >= 0.1) {
-    const v = (Math.hypot(s.pos.x - tr.x, s.pos.y - tr.y) * TILE_M) / dt;
-    tr.speed = v > 12 ? tr.speed : tr.speed * 0.5 + v * 0.5; // ignore teleports (knockback, deploy)
-    tr.x = s.pos.x; tr.y = s.pos.y; tr.t = time; tr.measured = true;
-  }
+  if (!tr) { const posture = postureFor(s, time); tr = { motion: new SoldierMotion(s, time), posture, since: time - 10 }; animTracks.set(s.id, tr); return tr; }
+  tr.motion.update(s, time);
   const posture = postureFor(s, time, trackSpeed(tr));
   if (posture !== tr.posture) {
     // keep the old posture visible in `transitionPosture` by remembering it in `prev`
-    (tr as AnimTrack & { prev?: Posture }).prev = tr.posture;
+    tr.prev = tr.posture;
     tr.posture = posture; tr.since = time;
   }
   return tr;
@@ -123,9 +121,9 @@ function drawSoldierFromAtlas(
     // dragging him: facing the casualty, stepping backwards (still frame when halted)
     const moving = isMoving(s, trackSpeed(tr));
     return drawAtlasSoldier(ctx, atlas, DRAG_KEYS, smoothHeading(tr, headingTo(s.pos, patient.pos, (s.facing * Math.PI) / 4), time),
-      (entry) => (moving ? frameFor(s, time, 'walk', entry, tr.speed, 'calm') : 0), p.x, p.y, zoom) != null;
+      (entry) => (moving ? frameFor(s, time, 'walk', entry, trackSpeed(tr), 'calm', tr.motion.gaitCycles) : 0), p.x, p.y, zoom) != null;
   }
-  const prev = (tr as AnimTrack & { prev?: Posture }).prev ?? tr.posture;
+  const prev = tr.prev ?? tr.posture;
   const posture = transitionPosture(prev, tr.posture, time - tr.since);
   const target = s.targetSoldierId != null ? state.soldiers.get(s.targetSoldierId)?.pos : s.targetVehicleId != null ? state.vehicles.get(s.targetVehicleId)?.pos : null;
   const pick = pickAnimation(s, time, target, posture, trackSpeed(tr));
@@ -146,6 +144,20 @@ function drawSoldierFromAtlas(
       (entry) => (prog == null ? frameFor(s, time, 'idle', entry, 0, pick.mood) : progressFrame(prog, entry.frames)),
       p.x + j0.x, p.y + j0.y, zoom) != null;
   }
+  const smg = !crew && (pick.action === 'aim' || pick.action === 'fire') ? smgPose(s, time, posture) : null;
+  if (smg) {
+    if (smg.source === 'soldier') {
+      return drawAtlasSoldier(ctx, atlas, [smg.key, ...pick.keys], smg.bodyHeading, () => 0, p.x, p.y, zoom) != null;
+    }
+    const burstAtlas = smgAtlas(s.side, state.map.def.season, zoom);
+    if (drawAtlasSoldier(ctx, burstAtlas, [smg.key], smg.bodyHeading, () => smg.frame, p.x, p.y, zoom)) return true;
+    // The main sheet remains usable while the small supplementary atlas loads. Its alert
+    // low-ready frame keeps hip fire visibly lower than the shouldered aim / fire pose.
+    keys = smg.key.includes('.hip.') ? entryKeyChain(posture, 'idle', 'alert', 'smg')
+      : entryKeyChain(posture, pick.action === 'fire' ? 'fire' : 'aim', pick.mood, 'smg');
+    return drawAtlasSoldier(ctx, atlas, keys, smg.heading,
+      (entry) => Math.min(entry.frames - 1, smg.frame), p.x, p.y, zoom) != null;
+  }
   if (crew?.pose) {
     const mood = moodFor(s);
     keys = mood === 'calm' ? CREW_KEYS[crew.pose] : [...CREW_KEYS[crew.pose].map((k) => `${k}.${mood}`), ...CREW_KEYS[crew.pose]];
@@ -162,7 +174,7 @@ function drawSoldierFromAtlas(
     if (drop != null && drawAtlasSoldier(ctx, atlas, [`standing.drop@${pick.weapon}`, 'standing.drop'], smoothHeading(tr, heading, time),
       (entry) => progressFrame(drop, entry.frames), p.x + j.x, p.y + j.y, zoom) != null) return true;
   }
-  return drawAtlasSoldier(ctx, atlas, keys, smoothHeading(tr, heading, time), (entry) => frameFor(s, time, action, entry, tr.speed, pick.mood), p.x + j.x, p.y + j.y, zoom) != null;
+  return drawAtlasSoldier(ctx, atlas, keys, smoothHeading(tr, heading, time), (entry) => frameFor(s, time, action, entry, trackSpeed(tr), pick.mood, tr.motion.gaitCycles), p.x + j.x, p.y + j.y, zoom) != null;
 }
 
 
@@ -570,7 +582,7 @@ function crewFleeing(s: Soldier): boolean {
 }
 
 /** Per-frame crew pose / position overrides, keyed by soldier id. */
-function crewSoldierDraws(state: BattleState): Map<number, CrewSoldierDraw> {
+export function crewSoldierDraws(state: BattleState): Map<number, CrewSoldierDraw> {
   const out = new Map<number, CrewSoldierDraw>();
   for (const team of state.teams.values()) {
     if (team.vehicleId != null) continue;
@@ -590,10 +602,35 @@ function crewSoldierDraws(state: BattleState): Map<number, CrewSoldierDraw> {
     const gunnerOk = !!gunner && gunner.health !== 'dead' && gunner.health !== 'incapacitated' && !crewFleeing(gunner);
     const fired = gunnerOk && state.time - gunner!.lastFiredAt < 0.6;
     const f8 = facingFromAngle(cw.facing);
+    if (cls === 'hmg' && cw.mount?.state === 'carried') {
+      // The physical load chooses the carrier. A stopped carrier still holds it until his
+      // placement task begins; walking toward that task keeps the carrying silhouette.
+      const carrier = crew.find(s => s.id === cw.mount!.carrierId);
+      if (carrier && (!carrier.crewTask || carrier.crewTask.walking)) {
+        out.set(carrier.id, { pose: 'carryTripod', pos: carrier.pos, facing: carrier.facing });
+      }
+    }
+    if (cw.lightMode) {
+      // The gunner now carries an ordinary LMG. Only a man actually recovering the separate
+      // mount has a crew task; do not pull anybody back to the old emplacement's stations.
+      for (const s of crew) {
+        const anim = crewTaskAnim(s, state.time);
+        if (!anim) continue;
+        const at = cw.mount?.pos ?? cw.pos;
+        const heading = Math.atan2(at.x - s.pos.x, -(at.y - s.pos.y));
+        out.set(s.id, { pose: anim.fallbackPose, pos: s.pos, facing: facingFromAngle(heading),
+          keys: anim.keys, progress: anim.progress, heading });
+      }
+      continue;
+    }
     if (cw.abandoned) continue;
     if (cw.phase === 'packed') {
+      if (cls === 'hmg') {
+        if (gunnerOk) out.set(gunner!.id, { pose: 'carryMg', pos: gunner!.pos, facing: gunner!.facing });
+        continue;
+      }
       // on the move: carry the parts / push the gun along by its trails
-      const carry: [CrewPose, CrewPose] = cls === 'mortar' ? ['carryTube', 'carryPlate'] : cls === 'hmg' ? ['carryMg', 'carryTripod'] : ['haul', 'haul'];
+      const carry: [CrewPose, CrewPose] = cls === 'mortar' ? ['carryTube', 'carryPlate'] : ['haul', 'haul'];
       const movers = cls === 'atgun' && team.crewWeapon ? gunHaulers(state, team, cw) : gunnerOk ? [gunner!, ...crew] : crew;
       movers.slice(0, 2).forEach((s, i) => {
         if (s.path.length === 0 && i > 0) return;
@@ -663,7 +700,7 @@ function crewTeamVisible(state: BattleState, team: Team, playerSide: Side): bool
 
 /** Weapons on the ground (under the crew), their firing cues, and the zoom-0.5 weapon symbol.
  * Also moves this frame's muzzle flashes / tracer origins from the gunner to the weapon muzzle. */
-function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side): void {
+export function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side): void {
   const px = (m: number) => (m / TILE_M) * 20 * cam.zoom; // metres -> screen px
   for (const team of state.teams.values()) {
     if (team.vehicleId != null) continue;
@@ -671,6 +708,25 @@ function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, state: Batt
     if (!cw) continue;
     const cls = crewServedClass(cw.weaponId);
     if (!cls) continue;
+    const teamVisible = crewTeamVisible(state, team, playerSide);
+    if (teamVisible && separateMgMount(cw) && visible(cw.mount!.pos, cam)) {
+      // Cull the left-behind mount at its own location, even when the light gun has gone
+      // offscreen. The exact tripod entry contains no duplicate gun beside it.
+      const mount = worldToScreen(cam, cw.mount!.pos);
+      const drawn = cam.zoom > 0.5 && drawWeaponState(ctx, cw.weaponId, ['tripod'], cw.facing, mount.x, mount.y, cam.zoom);
+      if (!drawn) {
+        // A small mount-only silhouette while the atlas loads. The legacy weapon fallback's
+        // "half" image includes a gun, so it cannot represent a separate load.
+        ctx.save(); ctx.translate(mount.x, mount.y); ctx.rotate(cw.facing);
+        ctx.strokeStyle = '#343b32'; ctx.lineWidth = Math.max(1, 2 * cam.zoom);
+        ctx.beginPath();
+        ctx.moveTo(0, -2 * cam.zoom); ctx.lineTo(-5 * cam.zoom, 4 * cam.zoom);
+        ctx.moveTo(0, -2 * cam.zoom); ctx.lineTo(5 * cam.zoom, 4 * cam.zoom);
+        ctx.moveTo(0, -2 * cam.zoom); ctx.lineTo(0, 7 * cam.zoom);
+        ctx.stroke(); ctx.restore();
+      }
+    }
+    if (cw.lightMode) continue;
     const gunner = state.soldiers.get(cw.gunnerId);
     const gunnerOk = !!gunner && gunner.health !== 'dead' && gunner.health !== 'incapacitated';
     const muzzle = weaponFramePoint(cw.pos, cw.facing, weaponMuzzleM(cw.weaponId));
@@ -685,7 +741,7 @@ function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, state: Batt
         if (pr.kind === 'mortar' && state.time - pr.t0 < 0.1 && dist(pr.from, gunner!.pos) < 0.02) pr.from = { ...muzzle };
       }
     }
-    if (!crewTeamVisible(state, team, playerSide) || !visible(cw.pos, cam)) continue;
+    if (!teamVisible || !visible(cw.pos, cam)) continue;
     const dir = { x: Math.sin(cw.facing), y: -Math.cos(cw.facing) };
     if (cam.zoom <= 0.5) {
       // small distinct symbol beside the team's dot cluster: a short dark barrel with a dot
@@ -706,8 +762,11 @@ function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, state: Batt
     // of them, so it simply stands where it stopped when the drill begins)
     const pos = cw.pos;
     const rot = cw.facing;
+    const visual = crewWeaponVisual(state, cw);
+    // an MG whose mount is carried separately draws the gun and the mount with their carriers
+    if (visual === 'tripod' && separateMgMount(cw)) continue;
     const p = worldToScreen(cam, pos);
-    drawWeaponState(ctx, cw.weaponId, weaponStateChain(crewWeaponVisual(state, cw)), rot, p.x, p.y, cam.zoom);
+    drawWeaponState(ctx, cw.weaponId, weaponStateChain(visual), rot, p.x, p.y, cam.zoom);
   }
   // PTRD rifles on their bipods in front of their prone gunners
   if (cam.zoom > 0.5) {

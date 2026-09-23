@@ -7,11 +7,12 @@ import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';
 import {
   resolveVehicleHit, locateHit, isHullDown, TURRET_ZONES, seatOccupant, crewEffects, stepCrewSeats, ensureDamage,
-  vehicleDamageView, stepVehicleDamage, isImmobile, vehicleLayout, seatRoles, FIRE_BAIL_S, SEAT_SWAP_S,
+  vehicleDamageView, stepVehicleDamage, isImmobile, vehicleLayout, seatRoles, SEAT_SWAP_S,
   LOADER_DOWN_RELOAD_MUL, RADIO_OUT_ORDER_DELAY_S, sightAccuracyMul, sideShare, type HitLocation,
 } from '@/sim/vehicleDamage';
 import { applyHESplash, stepCombat } from '@/sim/combat';
 import { stepVehicles } from '@/sim/vehicle';
+import { stepVehicleCrews } from '@/sim/vehicleCrew';
 import { applyOrder, stepAttackOrders, delayedOrderOf } from '@/sim/orders';
 import { setTile } from '@/sim/map';
 import { makeState, addTank, soldier, mkTeam } from './vehicleDamageHelpers';
@@ -81,7 +82,7 @@ describe('penetrations by zone', () => {
     expect(t34).toBe(0);
   });
 
-  it('an engine-deck penetration can start a fire, and a fire forces the crew out within seconds', () => {
+  it('an engine-deck fire makes surviving crew climb out hatch by hatch and land prone in shock', () => {
     const rng = new Rng(12);
     let fires = 0, bailed = 0;
     for (let i = 0; i < 200; i++) {
@@ -92,10 +93,26 @@ describe('penetrations by zone', () => {
       fires++;
       expect(v.state).toBe('burning');
       expect(state.messages.some((m) => m.text.includes('Engine on fire — bail out!'))).toBe(v.side === state.config.playerSide);
-      state.time += FIRE_BAIL_S + 0.1;
       stepVehicleDamage(state, rng, v);
+      expect(crew.some((c) => !!c.hatch || down(c))).toBe(true);
+      const landed = new Set<number>();
+      // Damage starts the queue; the crew lifecycle advances the actual climbs. Injured men
+      // sharing a turret hatch need several seconds each instead of being teleported outside.
+      for (let n = 0; n < 18 / SIM_DT; n++) {
+        state.time += SIM_DT;
+        stepVehicleCrews(state, rng, SIM_DT);
+        for (const c of crew) {
+          if (down(c) || c.vehicleId != null || c.hatch || landed.has(c.id)) continue;
+          landed.add(c.id);
+          expect(c.stance).toBe('prone');
+          expect(c.stunnedUntil).toBeGreaterThan(state.time + 2);
+          expect(c.dazedUntil).toBeGreaterThan(c.stunnedUntil!);
+          expect(c.bailRun).toBeUndefined();
+        }
+        if (crew.every((c) => down(c) || (c.vehicleId === null && !c.hatch))) break;
+      }
       const out = crew.filter((c) => !down(c));
-      expect(out.every((c) => c.vehicleId === null && c.activity === 'panicked')).toBe(true);
+      expect(out.every((c) => c.vehicleId === null && !c.hatch && landed.has(c.id))).toBe(true);
       if (out.length > 0) bailed++;
     }
     expect(fires).toBeGreaterThan(40);

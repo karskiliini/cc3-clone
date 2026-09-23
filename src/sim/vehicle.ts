@@ -8,7 +8,7 @@ import { VEHICLE_DEFS } from '@/data/units';
 import { WEAPONS } from '@/data/weapons';
 import { hasLOS, losTrace } from './los';
 import { gradeSpeedMul, GRADE_UPHILL_VEHICLE } from './movement';
-import { isPassable } from './path';
+import { findPath, isPassable } from './path';
 import { addStress, addOrMergeBelief } from './mind';
 import { bestRoundAgainst } from './ballistics';
 import {
@@ -206,13 +206,20 @@ function gatherArmorThreats(state: BattleState, v: Vehicle): ArmorThreat[] {
 
 
 
-interface ReverseTrack { target: Vec2 | null; fleeingSince: number | null; cooldownUntil: number; searchAfter?: number }
+interface ReverseTrack {
+  target: Vec2 | null;
+  route: Vec2[];
+  backing: boolean;
+  fleeingSince: number | null;
+  cooldownUntil: number;
+  searchAfter?: number;
+}
 const reverseTracks = new WeakMap<BattleState, Map<number, ReverseTrack>>();
 function getReverseTrack(state: BattleState, vehicleId: number): ReverseTrack {
   let m = reverseTracks.get(state);
   if (!m) { m = new Map(); reverseTracks.set(state, m); }
   let t = m.get(vehicleId);
-  if (!t) { t = { target: null, fleeingSince: null, cooldownUntil: -Infinity }; m.set(vehicleId, t); }
+  if (!t) { t = { target: null, route: [], backing: false, fleeingSince: null, cooldownUntil: -Infinity }; m.set(vehicleId, t); }
   return t;
 }
 
@@ -221,11 +228,10 @@ function getReverseTrack(state: BattleState, vehicleId: number): ReverseTrack {
 /** Cover for a vehicle (spec §10): a tile within 12 tiles whose LOS toward the threat is blocked,
  * within 4 tiles, by a building/stonewall/woods. */
 const BLOCKING_TERRAIN = new Set(['buildingStone', 'buildingWood', 'stonewall', 'woods']);
-function findVehicleCoverTile(state: BattleState, v: Vehicle, threatPos: Vec2): Vec2 | null {
+function findVehicleCoverRoute(state: BattleState, v: Vehicle, threatPos: Vec2): { target: Vec2; route: Vec2[] } | null {
   const map = state.map;
   const cx = Math.floor(v.pos.x), cy = Math.floor(v.pos.y);
-  let best: Vec2 | null = null;
-  let bestD = Infinity;
+  const candidates: { target: Vec2; distance: number }[] = [];
   for (let dy = -12; dy <= 12; dy++) {
     for (let dx = -12; dx <= 12; dx++) {
       if (dx * dx + dy * dy > 144) continue;
@@ -238,11 +244,18 @@ function findVehicleCoverTile(state: BattleState, v: Vehicle, threatPos: Vec2): 
       if (!trace.blockedAt || dist(tile, trace.blockedAt) > 4) continue;
       const blockTerrain = tileAt(map, Math.floor(trace.blockedAt.x), Math.floor(trace.blockedAt.y));
       if (!BLOCKING_TERRAIN.has(blockTerrain)) continue;
-      const d = dist(v.pos, tile);
-      if (d < bestD) { bestD = d; best = tile; }
+      candidates.push({ target: tile, distance: dist(v.pos, tile) });
     }
   }
-  return best;
+  candidates.sort((a, b) => a.distance - b.distance);
+  for (const { target, distance } of candidates) {
+    if (distance < 0.5) return { target, route: [] };
+    // Cover is local: bound route work, and reject partial A* paths into unreachable pockets.
+    const route = findPath(map, v.pos, target, 'vehicle', 2000);
+    const end = route.at(-1);
+    if (end && dist(end, target) < 0.5) return { target, route };
+  }
+  return null;
 }
 
 
@@ -349,6 +362,7 @@ function stepOneVehicleMind(state: BattleState, rng: Rng, dt: number, v: Vehicle
 
   if (!shouldFlee || !top) {
     track.target = null;
+    track.route = [];
     return;
   }
 
@@ -360,48 +374,72 @@ function stepOneVehicleMind(state: BattleState, rng: Rng, dt: number, v: Vehicle
   if (!crewEffects(state, v).canDrive) { track.target = null; return; } // nobody at the controls
 
   if (!track.target && state.time >= (track.searchAfter ?? -Infinity)) {
-    track.target = findVehicleCoverTile(state, v, top.pos);
+    const found = findVehicleCoverRoute(state, v, top.pos);
+    track.target = found?.target ?? null;
+    track.route = found?.route ?? [];
+    if (track.target) {
+      const first = track.route[0];
+      // Preserve frontal armour only when cover already lies along the rearward driving line.
+      // Side cover requires a forward manoeuvre, rather than translating sideways under the hull.
+      track.backing = !!first
+        && Math.abs(wrapAngle(angleTo(v.pos, first) + Math.PI - v.hullFacing)) <= DEG30
+        && Math.abs(wrapAngle(angleTo(v.pos, top.pos) - v.hullFacing)) <= DEG30;
+    }
     // nothing to hide behind: it stands where it is, so look again in a moment, not every step
     if (!track.target) track.searchAfter = state.time + 2;
   }
   if (track.target) {
-    driveReversing(state, rng, dt, v, def.speedOffroadMs, top.pos, track.target);
-    if (dist(v.pos, track.target) < 0.5) track.target = null;
+    driveToCover(state, rng, dt, v, def, top.pos, track);
   }
 }
 
 
 function clamp01to100(x: number): number { return x < 0 ? 0 : x > 100 ? 100 : x; }
 
-/** Reverses the vehicle toward `dest` while keeping its hull within 30 deg of `threatPos` (never
- * exposing the flank to a live AT threat), at 60% of forward speed (spec §10). */
-function driveReversing(state: BattleState, rng: Rng, dt: number, v: Vehicle, speedMs: number, threatPos: Vec2, dest: Vec2): void {
-  const def = VEHICLE_DEFS[v.defId];
-  const towardDest = angleTo(v.pos, dest);
-  // a wheel-steered halftrack cannot pivot to face the threat: it just backs away, steering its
-  // tail toward the cover as fast as its speed lets it
-  const wheeled = def?.turnRadiusM != null;
-  const desiredHull = wheeled ? wrapAngle(towardDest + Math.PI) : angleTo(v.pos, threatPos);
-  if (def) turnHull(state, v, def, desiredHull, dt, wheeled ? speedMs * 0.6 * damageSpeedMul(v) : undefined);
-
-  // Reversing means the vehicle's rear (hullFacing + PI) leads toward dest; only reverse while the
-  // hull stays within 30 deg of the threat, i.e. never turn away from it to chase a better reverse
-  // heading — the vehicle simply backs up along whatever line the hull-toward-threat constraint allows.
-  const hullFacesThreat = Math.abs(wrapAngle(v.hullFacing - desiredHull)) <= DEG30;
-  if (!hullFacesThreat && !wheeled) { v.speed = 0; return; }
-
-  const revSpeed = speedMs * 0.6 * damageSpeedMul(v);
-  v.speed = revSpeed;
-  const distTiles = (revSpeed * dt) / TILE_M;
-  const dir = vnorm(vsub(dest, v.pos));
-  const remaining = dist(v.pos, dest);
-  if (remaining <= distTiles) v.pos = { ...dest };
-  else v.pos = vadd(v.pos, vscale(dir, distTiles));
-  stepOverrun(state, rng, v, towardDest);
+/** Cover uses a real route and the hull's driving axis. Large turns pivot first; smaller ones
+ * drive a tightening arc. Reverse is deliberate and signed, never a sideways vector to cover. */
+function driveToCover(state: BattleState, rng: Rng, dt: number, v: Vehicle, def: VehicleDef, threatPos: Vec2, track: ReverseTrack): void {
+  const route = track.route;
+  while (route.length > 0 && dist(v.pos, route[0]) < (route.length > 1 ? 0.55 : 0.25)) route.shift();
+  const wp = route[0];
+  if (!wp || transportHolds(state, v)) { v.speed = 0; return; }
+  const desired = angleTo(v.pos, wp);
+  const rearFacing = wrapAngle(desired + Math.PI);
+  if (track.backing && Math.abs(wrapAngle(rearFacing - angleTo(v.pos, threatPos))) > DEG30) track.backing = false;
+  const desiredHull = track.backing ? rearFacing : desired;
+  const tx = Math.floor(v.pos.x), ty = Math.floor(v.pos.y);
+  const tile = tileAt(state.map, tx, ty);
+  const props = TERRAIN_PROPS[tile];
+  const road = tile === 'dirtroad' || tile === 'pavedroad' || tile === 'bridge';
+  let speed = (road ? def.speedRoadMs : def.speedOffroadMs * props.speedMul)
+    * damageSpeedMul(v) * gradeSpeedMul(state.map, v.pos, wp, GRADE_UPHILL_VEHICLE)
+    * (track.backing ? 0.6 : 1);
+  const wheeled = def.turnRadiusM != null;
+  turnHull(state, v, def, desiredHull, dt, wheeled ? speed : undefined);
+  const error = Math.abs(wrapAngle(desiredHull - v.hullFacing));
+  if (!wheeled && error > PIVOT_RAD) { v.speed = 0; return; }
+  speed *= error > SHARP_TURN_RAD ? SHARP_TURN_SPEED_MUL : error > HEADING_ALIGN_RAD ? 0.7 : 1;
+  if (!wheeled && error > TRACK_STRAIGHT_RAD) {
+    speed = Math.min(speed, Math.max(0.15, hullTurnNow(state, v, def).rate * dist(v.pos, wp) * TILE_M * 0.6));
+  }
+  v.hullFacing = wrapAngle(v.hullFacing + trackPullRad(v) * dt);
+  const direction = track.backing ? wrapAngle(v.hullFacing + Math.PI) : v.hullFacing;
+  const advance = Math.min(dist(v.pos, wp), speed * dt / TILE_M);
+  const next = { x: v.pos.x + Math.sin(direction) * advance, y: v.pos.y - Math.cos(direction) * advance };
+  if (!isPassable(state.map, Math.floor(next.x), Math.floor(next.y), 'vehicle')) { v.speed = 0; return; }
+  v.speed = track.backing ? -speed : speed;
+  if (v.holdUntil != null && state.time < v.holdUntil) {
+    stepOverrun(state, rng, v, direction);
+    if (v.holdUntil != null && state.time < v.holdUntil) { v.speed = 0; return; }
+  }
+  v.pos = next;
+  if (props.crushable) crushTile(state.map, tx, ty);
+  treeCrushByVehicle(state.map, tx, ty, def.lengthM);
+  stepOverrun(state, rng, v, direction);
 }
 
 
-/** Is the crew backing the vehicle out to cover right now (spec §10)? It fires on the move. */
+/** Is the crew manoeuvring into cover right now? Kept for combat's no-short-halt escape gate. */
 export function isVehicleReversing(state: BattleState, v: Vehicle): boolean {
   return !!reverseTracks.get(state)?.get(v.id)?.target;
 }
@@ -527,7 +565,7 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     }
     if (frozen) v.turretFacing = wrapAngle(v.hullFacing + frozenRel.get(v)!);
 
-    if (isReversing) { if (frozen) v.turretFacing = wrapAngle(v.hullFacing + frozenRel.get(v)!); continue; } // handled by stepVehicleMinds' driveReversing this same tick
+    if (isReversing) { if (frozen) v.turretFacing = wrapAngle(v.hullFacing + frozenRel.get(v)!); continue; } // handled by stepVehicleMinds' cover drive this same tick
 
     const canDrive = !isImmobile(v) && crewEffects(state, v).canDrive;
     // a short halt for an aimed shot (sim/combat.ts): the vehicle stands, keeps its route, and

@@ -296,7 +296,7 @@ function computeTeamStatus(state: BattleState, team: Team, track: MoraleTrack): 
   const moveWord = word === 'Moving' || word === 'Moving Fast' || word === 'Sneaking';
   if (word === 'Waiting' || word === 'Defending' || word === 'Ambushing' || word === 'Firing' || moveWord) {
     const crew = crewWeaponStatus(team);
-    if (crew && (!moveWord || crew === 'Packing up')) return { status: crew, outOfAction, morale };
+    if (crew && (!moveWord || crew === 'Packing up' || crew === 'Need carrier' || crew === 'Recovering mount')) return { status: crew, outOfAction, morale };
   }
 
   // A Fire order with nobody actually firing means no one can see the target (round5 critique #9

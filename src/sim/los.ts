@@ -76,7 +76,7 @@ function chebyshevAdjacent(a: Vec2, b: Vec2): boolean {
   return Math.abs(a.x - b.x) <= 1 && Math.abs(a.y - b.y) <= 1;
 }
 
-export function losTrace(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeights): LosResult {
+export function losTrace(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeights, ignoreConcealment = false): LosResult {
   const fx = Math.floor(from.x), fy = Math.floor(from.y);
   const tx = Math.floor(to.x), ty = Math.floor(to.y);
   const startTile: Vec2 = { x: fx, y: fy };
@@ -132,6 +132,7 @@ export function losTrace(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeight
     const tp = TERRAIN_PROPS[terrain];
 
     if (terrain === 'woods') {
+      if (ignoreConcealment) continue;
       if (startIsWoods) {
         // units inside woods can see ~2 tiles out: concealment instead of hard block
         accumulated += 0.5;
@@ -151,6 +152,7 @@ export function losTrace(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeight
         return { clear: false, blockedAt: { x: t.x + 0.5, y: t.y + 0.5 }, visibility: 0 };
       }
     } else {
+      if (ignoreConcealment) continue;
       // Low growth only hides what the sight line actually passes through: a standing man or a
       // tank commander looks over a field of tall grass, while the line down to a prone man dips
       // into it near him. Holes (craters, trenches) hide their occupants, never the ground beyond.
@@ -189,4 +191,10 @@ export function losTrace(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeight
 
 export function hasLOS(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeights): boolean {
   return losTrace(map, from, to, heights).clear;
+}
+
+/** An estimated aim can pass through smoke/leaves, but never through a hill or a solid wall.
+ * Actual rounds still collide with vegetation (shotTrace.ts). This does not grant visibility. */
+export function hasLineOfFire(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeights): boolean {
+  return losTrace(map, from, to, heights, true).clear;
 }

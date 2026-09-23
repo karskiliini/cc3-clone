@@ -72,6 +72,23 @@ export function treeTileAt(map: GameMap, x: number, y: number): Terrain | null {
 
 const TREE_TILES = new Set<Terrain>(['woods', 'scatteredtrees']);
 
+const shotDamage = new WeakMap<GameMap, Map<number, number>>();
+/** Branch/trunk damage persists across bursts. Removal uses the terrain/height/render refresh
+ * path used by vehicle crushing, so a cleared lane really becomes visible and passable. */
+export function damageVegetation(map: GameMap, tx: number, ty: number, damage: number): boolean {
+  if (!inBounds(map, tx, ty)) return false;
+  const terrain = tileAt(map, tx, ty);
+  const strength = terrain === 'woods' ? 40 : terrain === 'scatteredtrees' ? 24 : terrain === 'hedge' ? 10 : 0;
+  if (!strength) return false;
+  let hits = shotDamage.get(map);
+  if (!hits) { hits = new Map(); shotDamage.set(map, hits); }
+  const i = idx(map, tx, ty), total = (hits.get(i) ?? 0) + damage;
+  if (total < strength) { hits.set(i, total); return false; }
+  hits.delete(i);
+  fires.get(map)?.delete(i);
+  return crushTile(map, tx, ty);
+}
+
 /** A vehicle of `lengthM` crossing tree tile (tx,ty): crush it (push it down
  * into brash/rubble). Dense `woods` core resists vehicles shorter than
  * TREE_CRUSH_MIN_LENGTH_M. Returns true when the tile changed. */

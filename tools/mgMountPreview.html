@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Separate MG mounts — cc3_clone</title>
+<style>
+body{margin:24px;background:#20231c;color:#e8e9de;font:13px ui-monospace,monospace}h1{font-size:20px;color:#d8bb70}p{max-width:960px;line-height:1.6}.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0}button,select{background:#34392b;color:inherit;border:1px solid #7c8668;padding:8px;font:inherit}button:disabled{opacity:.4}canvas{display:block;max-width:100%;height:auto;border:1px solid #697256;image-rendering:pixelated}#status{max-width:1000px;line-height:1.8;margin-top:12px}#hint{color:#b8c4a2}
+</style></head><body>
+<h1>Separate machine-gun mounts</h1>
+<p>Move the crew to watch the gun and its mount travel with different soldiers. Incapacitate the carrier during travel to leave the mount behind, or incapacitate the assistant after setup to check that the deployed gun stays intact. A third crewman can recover a dropped mount. Click the field to choose a destination.</p>
+<div class="bar">
+  <label>Weapon <select id="weapon"><option value="mg34_hmg">MG34</option><option value="mg42_hmg">MG42</option><option value="maxim">Maxim</option></select></label>
+  <label>Crew <select id="crew"><option value="2">Two soldiers</option><option value="3">Three soldiers</option></select></label>
+  <label>Speed <select id="speed"><option value="1">1×</option><option value="2" selected>2×</option><option value="4">4×</option></select></label>
+  <button id="reset">Reset</button><button id="pause">Pause</button><button id="step">Step 0.1 s</button><span id="time">Loading…</span>
+</div>
+<div class="bar"><button id="move">Move crew</button><button id="incapacitate">Incapacitate assistant</button><button id="stop">Stop / set up</button><button id="fire">Fire east</button></div>
+<canvas id="scene" width="1024" height="560"></canvas>
+<div id="status" role="status"></div><p id="hint">The preview uses the battle's crew, movement, combat and rendering code with existing sprites.</p>
+<script type="module" src="./mgMountPreview.ts"></script></body></html>

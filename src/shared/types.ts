@@ -204,6 +204,8 @@ export interface WeaponDef {
   id: string;
   name: string;               // display name e.g. "Kar98k", "MG42", "7.5cm KwK 40"
   cls: WeaponClass;
+  /** Portable version when a crew MG's separate mount cannot be brought along. */
+  unmountedWeaponId?: string;
   rangeM: number;             // max effective range in metres
   minRangeM?: number;         // mortars
   rate: number;               // shots per second (bursts count as shots)
@@ -294,8 +296,10 @@ export interface HatchClimb {
   to: Vec2;
   start: number;
   until: number;
-  /** a panicked bail-out: faster, sloppier, ends in a run */
+  /** A panicked crew bail-out ends in prone shock, then a slow crawl for cover. */
   panicked: boolean;
+  /** Crew bail-out: time he clears the hatch and starts dropping toward the ground. */
+  dropAt?: number;
   /** a passenger using a transport's door (`hatch` then indexes the layout's `doors`; a panicked
    * passenger goes over the side: `overSide` with `hatch` indexing `hatches`) */
   passenger?: boolean;
@@ -348,6 +352,8 @@ export interface SoldierMind {
 }
 
 export interface Soldier {
+  /** Derived each crew step: hands occupied carrying this team's MG mount. */
+  carryingMgMount?: number;
   /** gun gunners: rounds left by type (sum = ammo + ammoReserve); sim/aimPoint.ts `soldierRounds` */
   rounds?: RoundCounts;
   id: number;
@@ -374,6 +380,24 @@ export interface Soldier {
   path: Vec2[];               // remaining waypoints (tile centres)
   reloadTimer: number;
   fireTimer: number;
+  /** Infantry raising/settling the weapon; movement holds while this aim is active. */
+  aiming?: {
+    startedAt: number; readyAt: number; fromFacing: number;
+    from: Vec2; at: Vec2; targetKind: 'soldier' | 'vehicle' | 'point'; targetId?: number;
+    weaponId: string; stance: Stance; orderAt?: number; orderType?: OrderType;
+    fireMode?: 'aimed' | 'hip';
+    uncontrolled?: boolean;
+    hasty?: 'assault' | 'pressure' | 'panic';
+  };
+  /** SMG trigger hold: rounds leave at their cyclic rate, with the same bearing read by the pose. */
+  smgBurst?: {
+    mode: 'aimed' | 'hip'; uncontrolled: boolean;
+    hasty?: 'assault' | 'pressure' | 'panic';
+    start: number; until: number; interval: number; rounds: number; fired: number; nextAt: number;
+    from: Vec2; stance: Stance; aim: Vec2; bodyFacing: number; heading: number;
+    sweep: number; sweepSign: number; recoil: number; lastRoundAt: number; weaponId: string;
+    orderAt?: number; orderType?: OrderType;
+  };
   animFrame: number;
   isLeader: boolean;
   /** which vehicle this soldier crews, or null */
@@ -426,13 +450,17 @@ export interface Soldier {
   /** Riding in a transport as a passenger (sim/transport.ts): `vehicleId` is the transport, but he
    * is NOT one of its crew. */
   seat?: 'passenger';
-  /** Just out of a vehicle in a panic (§10): he runs to `to` whatever his mind says, until then. */
+  /** Passenger just out of a transport in a panic: he runs to `to` whatever his mind says. */
   bailRun?: { to: Vec2; until: number };
   /** A grenade throw (B1/A1): the throw animation plays until this battle time; the projectile
    * was spawned at release. */
   throwAt?: number;
-  /** Carrying an incapacitated comrade (B8): which man, since when. Half speed, patient hidden. */
+  /** Dragging an incapacitated comrade to cover (B8, sim/medic.ts): which man, since when. */
   carrying?: { patientId: number; since: number };
+  /** Bandaging a teammate (B8, sim/medic.ts): the treatment ends at this battle time; he kneels
+   * facing `bandageFace` (the patient) until then. Written by the sim, read by the renderer. */
+  bandageUntil?: number;
+  bandageFace?: Vec2;
 }
 
 /** Kit lying on the ground (spec 2026-09-17 §9; sim/items.ts). `weapon`: `weaponId` with the
@@ -504,7 +532,7 @@ export interface Spark {
   pos: Vec2;
   /** battle time the spark shows (may lie a little in the future: a shell still in flight) */
   t: number;
-  kind: 'armor' | 'dust' | 'wood' | 'stone' | 'brick' | 'body' | 'pen' | 'backblast';
+  kind: 'armor' | 'dust' | 'wood' | 'stone' | 'brick' | 'body' | 'pen' | 'backblast' | 'leaf' | 'ricochet';
 }
 /** Delayed burst (A1): a thrown grenade/satchel or a mortar bomb in flight; the HE splash (or, for
  * a smoke bomb, the smoke cloud) happens when `state.time >= at`. */
@@ -526,6 +554,8 @@ export interface StructureFx {
 }
 
 export interface BattleEvent {
+  /** A timed individual discharge; the audio layer must not synthesize another whole burst. */
+  singleRound?: boolean;
   kind: 'shot' | 'hit' | 'kill' | 'explosion' | 'vlCaptured' | 'teamBroken' | 'vehicleKO' | 'message' | 'truce' | 'ended'
     /** a vehicle blows up (ammunition or fuel): `pos`, `radiusM`, `turretLanding` when the turret was thrown */
     | 'vehicleExplosion'
@@ -771,6 +801,7 @@ export type TeamStatusWord =
   | 'Destroyed' | 'Surrendered' | 'Knocked Out' | 'Setting up' | 'Aiming' | 'Loading'
   // crew-served weapons follow their open task (spec 2026-09-17 §6)
   | 'Unlimbering' | 'Spreading trails' | 'Digging in' | 'Packing up'
+  | 'Need carrier' | 'Recovering mount'
   // Manual vocabulary this HUD was missing (round5 critique #9): a team with no active order or
   // that has finished one (arrived, nothing left to do) waits for orders; a team whose obedience
   // roll failed (sim/orders.ts canObey) is visibly hesitating rather than looking merely idle; a
@@ -843,6 +874,15 @@ export type CrewWeaponPhase = 'packed' | 'settingUp' | 'ready' | 'packing';
 
 export interface CrewWeaponState {
   weaponId: string;
+  /** A separate physical load: the gunner cannot carry both gun and mount. */
+  mount?: {
+    state: 'deployed' | 'carried' | 'ground'; pos: Vec2; carrierId: number | null;
+    recovery?: { soldierId: number; path: Vec2[]; worked: number };
+  };
+  /** Portable MG being used without its tripod; weaponId retains the mounted identity. */
+  lightMode?: boolean;
+  /** A nonportable MG is waiting for a capable mount carrier before it can move. */
+  mountBlocked?: boolean;
   /** weapon pivot (baseplate / tripod / gun axle), tile coords; follows the gunner while packed */
   pos: Vec2;
   /** radians, 0 = north, clockwise (muzzle direction) */
@@ -957,9 +997,15 @@ export interface BattleMessage {
 
 /** `weaponId` (optional, render only) picks the burst art: grenade, shell, ammunition blast. */
 export interface Explosion { pos: Vec2; radiusM: number; t: number; kind: 'he' | 'smoke' | 'small'; weaponId?: string }
-export interface Tracer { from: Vec2; to: Vec2; t: number; hit: boolean; kind: 'bullet' | 'mg' | 'shell' | 'mortar' }
+export interface Tracer { from: Vec2; to: Vec2; t: number; hit: boolean; kind: 'bullet' | 'mg' | 'shell' | 'mortar'; deflected?: boolean; fromHeightM?: number }
 /** `kind: 'shell'` marks a vehicle main-gun flash, drawn larger than the default infantry flash. */
-export interface Flash { pos: Vec2; facing: number; t: number; kind?: 'shell' }
+export interface Flash {
+  pos: Vec2; facing: number; t: number; kind?: 'shell';
+  /** Position already lies at the barrel tip, so no legacy screen-space standoff is needed. */
+  atMuzzle?: boolean;
+  /** Height of the barrel above its world position, projected with the soldier camera tilt. */
+  heightM?: number;
+}
 
 // ---------------------------------------------------- effect lifetimes (s)
 // Shared between src/sim/battle.ts (ageEffects, which must expire records at
@@ -1071,9 +1117,10 @@ export interface InputState {
   buttons: { left: boolean; right: boolean; middle: boolean };
   /** edge-triggered, cleared each frame by the engine */
   clicks: { x: number; y: number; button: 0 | 1 | 2 }[];
-  releases: { x: number; y: number; button: 0 | 1 | 2 }[];
+  releases: { x: number; y: number; button: 0 | 1 | 2; shift?: boolean }[];
   keysDown: Set<string>;      // KeyboardEvent.key lower-cased
   keysPressed: Set<string>;   // edge-triggered, cleared each frame
+  keysReleased: Set<string>;  // actual key-up edges, cleared each frame (not focus loss)
   wheel: number;              // accumulated ctrl/cmd+wheel (pinch-zoom) deltaY, cleared each frame
   /** accumulated plain two-finger-scroll wheel delta (screen px), cleared each frame */
   wheelDX: number;

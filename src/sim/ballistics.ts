@@ -1,6 +1,7 @@
 import type { Health, RoundType, Soldier, Stance, Vec2, Vehicle, WeaponDef } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { clamp, wrapAngle, angleTo } from '@/shared/math';
+import { hastyAccuracy } from './hastyFire';
 
 const DEG60 = (60 * Math.PI) / 180;
 const DEG135 = (135 * Math.PI) / 180;
@@ -123,7 +124,7 @@ export function hitChance(
   // (ignoring cover/stance/shooter-state reductions) so a defender in the best cover is still hittable
   // at a meaningful rate, while cover/stance/suppression still matter well above that floor.
   const closeFloor = distM <= 100 ? weapon.accuracy * rf * 0.25 : 0;
-  return clamp(Math.max(p, closeFloor), 0.02, 0.95);
+  return clamp(Math.max(p, closeFloor), 0.02, 0.95) * hastyAccuracy(shooter);
 }
 
 /** pen = roundPenetrationMm (AP: penetrationMm * max(0.4, 1 - dist/1000)); spread = gauss()*0.12;

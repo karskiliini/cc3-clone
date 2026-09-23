@@ -87,6 +87,17 @@ const rows: Row[] = [
     name: '', y: 800, ages: [0.6], xs: [985],
     put: (s, cx, cy, age) => { s.structureFx.push({ kind: 'breach', pos: w(cx, cy - 30), t0: s.time - age, stone: true, extentTiles: [] }); },
   },
+  // rounds through vegetation: clipped leaves, branch splinters, and an MG round turned by a branch
+  { name: 'leaves', y: 900, ages: [0.04, 0.28], xs: [150, 260], put: (s, cx, cy, age) => { s.sparks.push({ pos: w(cx, cy), kind: 'leaf', t: s.time - age }); } },
+  { name: '', y: 900, ages: [0.04, 0.28], xs: [400, 510], put: (s, cx, cy, age) => { s.sparks.push({ pos: w(cx, cy), kind: 'wood', t: s.time - age }); } },
+  {
+    name: '', y: 900, ages: [0.1], xs: [760],
+    put: (s, cx, cy, age) => {
+      s.sparks.push({ pos: w(cx, cy), kind: 'ricochet', t: s.time - age });
+      s.tracers.push({ from: w(cx - 85, cy + 20), to: w(cx, cy), t: 0.3 * TRACER_LIFE, hit: false, kind: 'mg' });
+      s.tracers.push({ from: w(cx, cy), to: w(cx + 75, cy + 45), t: 0.3 * TRACER_LIFE, hit: false, kind: 'mg', deflected: true });
+    },
+  },
 ];
 
 function makeState(time: number): BattleState {
