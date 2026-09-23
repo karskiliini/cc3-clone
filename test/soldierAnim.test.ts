@@ -6,7 +6,7 @@ import { createMind } from '@/sim/mind';
 import {
   FIRE_KICK_S, STRIDE_M, actionFor, entryKeyChain, frameFor, gaitCadence, headingFor, isFlinching, moodFor, phaseOffset,
   pickAnimation, postureFor, quantiseDir, ragdollDuration, ragdollHeading, ragdollSample, ragdollVariants, transitionPosture,
-  trembleOffset, weaponSuffix, RAGDOLL_FLIGHT_VARIANTS, RAGDOLL_LANDED_VARIANTS,
+  trembleOffset, weaponSuffix, RAGDOLL_FLIGHT_VARIANTS, RAGDOLL_LANDED_VARIANTS, SoldierMotion,
 } from '@/render/soldierAnim';
 
 function sol(o: Partial<Soldier> = {}, state: MentalState = 'calm'): Soldier {
@@ -20,6 +20,45 @@ function sol(o: Partial<Soldier> = {}, state: MentalState = 'calm'): Soldier {
   };
 }
 const LOOP4 = { frames: 4, fps: 4, loop: true }, RUN6 = { frames: 6, fps: 9, loop: true }, FIRE3 = { frames: 3, fps: 12, loop: false };
+
+function acquiring(o: Partial<Soldier> = {}): Soldier {
+  return sol({ aiming: { startedAt: 10, readyAt: 13, fromFacing: 0, from: { x: 10, y: 10 },
+    at: { x: 20, y: 10 }, targetKind: 'point', weaponId: 'kar98k', stance: 'standing' }, ...o });
+}
+
+describe('deliberate weapon acquisition', () => {
+  it('holds an advancing man to aim and derives a kneeling stance while acquiring', () => {
+    const s = acquiring({ activity: 'moving', stance: 'crouching', path: [{ x: 10, y: 20 }] });
+    expect(actionFor(s, 10.1, 'crouched', 1.1)).toBe('aim');
+    expect(postureFor(s, 10.1, 1.1)).toBe('kneeling');
+    expect(actionFor(acquiring({ activity: 'firing', lastFiredAt: 8 }), 10.1)).toBe('aim');
+    expect(actionFor(acquiring({ lastFiredAt: 10 }), 10.1)).toBe('fire');
+  });
+  it('raises the weapon in stages before holding a steady sight picture', () => {
+    const s = acquiring();
+    expect(pickAnimation(s, 10.1).keys[0]).toBe('standing.idle@rifle');
+    expect(pickAnimation(s, 11).keys[0]).toBe('standing.idle.alert@rifle');
+    expect(pickAnimation(s, 12).keys[0]).toBe('standing.aim@rifle');
+    expect(frameFor(s, 10, 'aim', LOOP4)).toBe(0);
+    expect(frameFor(s, 11.6, 'aim', LOOP4)).toBe(2);
+    for (const time of [13, 13.5, 14, 15]) expect(frameFor(s, time, 'aim', LOOP4)).toBe(3);
+    expect(frameFor(sol({ activity: 'firing' }), 15, 'aim', LOOP4)).toBe(3);
+  });
+  it('turns toward the intended point smoothly instead of snapping toward a leftover path', () => {
+    const s = acquiring({ path: [{ x: 10, y: 20 }] });
+    expect(pickAnimation(s, 10).heading).toBeCloseTo(0);
+    expect(pickAnimation(s, 10.6).heading).toBeCloseTo(Math.PI / 4);
+    expect(pickAnimation(s, 11.2).heading).toBeCloseTo(Math.PI / 2);
+    // Crossing north takes the short turn, never a full clockwise rotation.
+    s.aiming!.fromFacing = Math.PI * 2 - 0.2;
+    s.aiming!.at = { x: 10, y: 0 };
+    expect(pickAnimation(s, 10.6).heading).toBeCloseTo(Math.PI * 2 - 0.1);
+  });
+  it('keeps the rifle raised when settling for a follow-up shot', () => {
+    const s = acquiring({ lastFiredAt: 9.5 });
+    expect(pickAnimation(s, 10.1).keys[0]).toBe('standing.aim@rifle');
+  });
+});
 
 describe('posture', () => {
   it('kneeling is derived: crouching + stationary + firing/aiming/reloading/defending; crouching + moving or idle = crouched', () => {
@@ -96,12 +135,33 @@ describe('action and mood', () => {
 });
 
 describe('frames', () => {
+  it('keeps a stopped gait still instead of falling back to walking speed', () => {
+    const s = sol({ activity: 'moving', path: [{ x: 20, y: 10 }] });
+    const frames = Array.from({ length: 20 }, (_, i) => frameFor(s, 10 + i * 0.1, 'walk', LOOP4, 0));
+    expect(new Set(frames).size).toBe(1);
+    expect(gaitCadence('walk', 0)).toBe(0);
+  });
+  it('uses accumulated gait phase without jumping when the current speed changes', () => {
+    const s = sol({ activity: 'moving', path: [{ x: 20, y: 10 }] });
+    const entry = { frames: 16, fps: 8, loop: true };
+    const fixedPhase = 0.31;
+    const slow = frameFor(s, 1000, 'walk', entry, 0.7, 'calm', fixedPhase);
+    const fast = frameFor(s, 1000.05, 'walk', entry, 2.4, 'calm', fixedPhase);
+    expect(fast).toBe(slow);
+    expect(slow).toBe(Math.floor(((fixedPhase + phaseOffset(s.id)) % 1) * 16));
+  });
+  it('lets an idle breathing cycle take several seconds', () => {
+    const s = sol();
+    const frames = Array.from({ length: 101 }, (_, i) => frameFor(s, i / 100, 'idle', LOOP4));
+    const changes = frames.filter((frame, i) => i > 0 && frame !== frames[i - 1]).length;
+    expect(changes).toBeLessThanOrEqual(1);
+  });
   it('is a pure, stable function of the clock, with a per-soldier phase offset', () => {
     const a = sol({ id: 3 }), b = sol({ id: 4 });
     expect(frameFor(a, 12.34, 'idle', LOOP4)).toBe(frameFor(a, 12.34, 'idle', LOOP4));
     expect(phaseOffset(3)).not.toBe(phaseOffset(4));
-    const seqA = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => frameFor(a, i * 0.25, 'idle', LOOP4));
-    const seqB = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => frameFor(b, i * 0.25, 'idle', LOOP4));
+    const seqA = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => frameFor(a, i * 0.75, 'idle', LOOP4));
+    const seqB = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => frameFor(b, i * 0.75, 'idle', LOOP4));
     expect(new Set(seqA).size).toBe(4);
     void seqB;
     const distinct = new Set([1, 2, 3, 4, 5, 6, 7, 8].map((id) => [0, 1, 2, 3].map((i) => frameFor(sol({ id }), i * 0.25, 'idle', LOOP4)).join('')));
@@ -116,8 +176,20 @@ describe('frames', () => {
     // frames advanced over one second = cadence * frames
     const s = sol({ id: 1, activity: 'movingFast', path: [{ x: 1, y: 1 }] });
     const count = (speed: number) => { let changes = 0, prev = -1; for (let i = 0; i <= 1000; i++) { const f = frameFor(s, i / 1000, 'run', RUN6, speed); if (f !== prev && prev >= 0) changes++; prev = f; } return changes; };
-    expect(count(4.8)).toBe(Math.round(gaitCadence('run', 4.8) * 6));
-    expect(count(2.4)).toBe(Math.round(gaitCadence('run', 2.4) * 6));
+    // speeds of exactly 2 and 1 strides per second: 12 and 6 frame changes
+    expect(count(2 * STRIDE_M.run)).toBe(12);
+    expect(count(STRIDE_M.run)).toBe(6);
+  });
+
+  it('gait cadence follows the atlas entry\'s own rendered stride when it has one', () => {
+    expect(gaitCadence('walk', 1.4, 'calm', 0.7)).toBeCloseTo(2, 9);
+    // the rendered stride already includes the shaken man's short steps: no extra slow-down
+    expect(gaitCadence('walk', 1.4, 'shaken', 0.7)).toBeCloseTo(2, 9);
+    const s = sol({ id: 3, path: [{ x: 1, y: 1 }] });
+    const walk8 = { frames: 8, fps: 8, loop: true, strideM: 1.0 };
+    let changes = 0, prev = -1;
+    for (let i = 0; i <= 1000; i++) { const f = frameFor(s, i / 1000, 'walk', walk8, 1.0); if (f !== prev && prev >= 0) changes++; prev = f; }
+    expect(changes).toBe(8); // 1 m/s over a 1 m stride: one cycle = 8 frames per second
   });
   it('fire kick runs once from lastFiredAt; reload follows the reload timer', () => {
     const s = sol({ lastFiredAt: 10 });
@@ -142,6 +214,62 @@ describe('frames', () => {
       if (j.x !== 0 || j.y !== 0) moved++;
     }
     expect(moved).toBeGreaterThan(10);
+  });
+});
+
+describe('physical gait phase', () => {
+  it('animates a crewman carried along at a hauling station even without his own path', () => {
+    const s = sol();
+    const motion = new SoldierMotion(s, 0);
+    s.pos.x += 0.065 / 2;
+    motion.update(s, 0.1);
+    expect(motion.gaitCycles).toBeCloseTo(0.065 / STRIDE_M.walk);
+  });
+
+  it('measures fixed simulation steps once despite extra rendered frames and pauses', () => {
+    const s = sol({ activity: 'moving', path: [{ x: 20, y: 10 }] });
+    const motion = new SoldierMotion(s, 0);
+    for (let i = 1; i <= 20; i++) {
+      s.pos.x += 1.1 * 0.05 / 2;
+      motion.update(s, i * 0.05);
+      for (let frame = 0; frame < 5; frame++) motion.update(s, i * 0.05);
+    }
+    expect(motion.speedMps).toBeCloseTo(1.1);
+    expect(motion.gaitCycles).toBeCloseTo(1.1 / STRIDE_M.walk);
+    const cycles = motion.gaitCycles;
+    for (let frame = 0; frame < 120; frame++) motion.update(s, 1);
+    expect(motion.gaitCycles).toBe(cycles);
+    expect(motion.speedMps).toBeCloseTo(1.1);
+    motion.update(s, 1.05); // the sim advances but the man does not
+    expect(motion.speedMps).toBe(0);
+    expect(motion.gaitCycles).toBe(cycles);
+  });
+
+  it('keeps phase continuous across walk/run changes and resumes after standing still', () => {
+    const s = sol({ activity: 'moving', path: [{ x: 20, y: 10 }] });
+    const motion = new SoldierMotion(s, 100);
+    s.pos.x += 0.055 / 2; motion.update(s, 100.05);
+    const walked = motion.gaitCycles;
+    s.activity = 'movingFast';
+    motion.update(s, 100.1);
+    expect(motion.gaitCycles).toBe(walked);
+    s.pos.x += 0.12 / 2; motion.update(s, 100.15);
+    expect(motion.gaitCycles - walked).toBeCloseTo(0.12 / 2.4);
+    expect(motion.speedMps).toBeCloseTo(2.4);
+  });
+
+  it('does not count teleports, deployment, or a reset clock as running', () => {
+    const s = sol({ activity: 'moving', path: [{ x: 20, y: 10 }] });
+    const motion = new SoldierMotion(s, 10);
+    s.pos.x += 30; motion.update(s, 10.05);
+    expect(motion.gaitCycles).toBe(0);
+    expect(motion.speedMps).toBe(0);
+    s.pos.x += 5; motion.update(s, 10.05);
+    s.pos.x += 0.055 / 2; motion.update(s, 10.1);
+    expect(motion.speedMps).toBeCloseTo(1.1);
+    expect(motion.gaitCycles).toBeCloseTo(0.055 / 1.5);
+    motion.update(s, 0);
+    expect(motion.gaitCycles).toBe(0);
   });
 });
 
@@ -247,5 +375,36 @@ describe('hatch climb sprites', () => {
         expect(hatchClimbFrame(key, 6, 1, 4)).toBe(5);
       }
     }
+  });
+});
+
+describe('turning', () => {
+  it('turns the short way round at a bounded rate and snaps when close', async () => {
+    const { turnToward, TURN_RATE } = await import('@/render/soldierAnim');
+    expect(turnToward(0, 0.1, 0.5)).toBeCloseTo(0.1, 9);
+    expect(turnToward(0, Math.PI / 2, 0.5)).toBeCloseTo(0.5, 9);
+    // from just west of north to just east of north: across north, not the long way
+    expect(turnToward(-0.2, 0.2, 0.1)).toBeCloseTo(-0.1, 9);
+    expect(turnToward(3.0, -3.0, 0.1)).toBeCloseTo(3.1, 9);
+    // an about-face takes a quarter of a second
+    expect(Math.PI / TURN_RATE).toBeCloseTo(0.25, 9);
+  });
+});
+
+describe('getting down and up', () => {
+  it('plays standing.drop forwards to go prone, backwards to rise, only the lower part from a knee', async () => {
+    const { postureDropProgress, DROP_S } = await import('@/render/soldierAnim');
+    expect(postureDropProgress('standing', 'prone', 0)).toBe(0);
+    expect(postureDropProgress('standing', 'prone', DROP_S / 2)).toBeCloseTo(0.5, 9);
+    expect(postureDropProgress('standing', 'prone', DROP_S)).toBeNull();
+    expect(postureDropProgress('prone', 'standing', 0)).toBe(1);
+    expect(postureDropProgress('prone', 'standing', DROP_S * 0.75)).toBeCloseTo(0.25, 9);
+    // kneeling -> prone starts at the kneeling frame and takes less time
+    expect(postureDropProgress('kneeling', 'prone', 0)).toBeCloseTo(0.4, 9);
+    expect(postureDropProgress('kneeling', 'prone', DROP_S * 0.6)).toBeNull();
+    expect(postureDropProgress('prone', 'crouched', DROP_S * 0.3)).toBeCloseTo(0.7, 9);
+    // no drop between the upright postures, none when he is already running off
+    expect(postureDropProgress('standing', 'kneeling', 0.1)).toBeNull();
+    expect(postureDropProgress('prone', 'standing', 0.1, 3)).toBeNull();
   });
 });

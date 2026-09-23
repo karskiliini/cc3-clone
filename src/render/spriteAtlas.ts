@@ -35,6 +35,8 @@ export interface AtlasMeta {
   /** Either a top-level map defId -> pivot (+y aft), or, in a per-vehicle atlas, that vehicle's own
    * pivot in the Blender frame (+y FORWARD, see `frame`). */
   turretPivotM?: Record<string, { x: number; y: number }> | { x: number; y: number };
+  /** image file next to the JSON when it is not `<name>.png` (e.g. the lossless WebP soldier sheets) */
+  image?: string;
   /** per-vehicle atlas: the vehicle it holds, and the coordinate frame note of the render scripts */
   vehicle?: string;
   frame?: string;
@@ -88,6 +90,8 @@ export function validateAtlasMeta(meta: unknown): string | null {
 export function atlasScaleForZoom(zoom: number): 1 | 2 { return zoom >= 2 ? 2 : 1; }
 export function seasonKey(season: Season): 'summer' | 'winter' { return season === 'winter' ? 'winter' : 'summer'; }
 export function soldierAtlasName(side: Side, season: Season, scale: 1 | 2): string { return `soldiers_${side}_${seasonKey(season)}_${scale}`; }
+/** Planted feet, five torso angles and a per-round kick for aimed / hip SMG bursts. */
+export function smgAtlasName(side: Side, season: Season, scale: 1 | 2): string { return `smg_${side}_${seasonKey(season)}_${scale}`; }
 export function vehicleAtlasName(scale: 1 | 2): string { return `vehicles_${scale}`; }
 export function weaponAtlasName(scale: 1 | 2): string { return `weapons_${scale}`; }
 /** Kit on the ground (spec 2026-09-17 §9): entries `item.<id>`, 16 dirs, one frame each. */
@@ -101,6 +105,7 @@ export function battleAtlasNames(sides: readonly Side[], season: Season): string
   const out: string[] = [];
   for (const scale of [1, 2] as const) {
     for (const side of sides) out.push(soldierAtlasName(side, season, scale));
+    for (const side of sides) out.push(smgAtlasName(side, season, scale));
     out.push(weaponAtlasName(scale));
     out.push(itemAtlasName(scale));
     for (const side of sides) out.push(partsAtlasName(side, season, scale));
@@ -119,13 +124,25 @@ export function turretPivotM(meta: AtlasMeta, defId: string): { x: number; y: nu
   return meta.vehicles?.[defId]?.turretPivotM ?? map?.[defId] ?? { x: 0, y: 0 };
 }
 
-/** One atlas per vehicle type (a single sheet of all of them would be ~600 MB decoded). */
-export function vehicleDefAtlasName(defId: string, scale: 1 | 2): string { return `vehicles_${defId}_${scale}`; }
+/** One atlas per vehicle type (a single sheet of all of them would be ~600 MB decoded). Winter
+ * battles add `vehicles_<def>_winter_<scale>`: the whitewashed live looks (hull ok / trackL / trackR,
+ * turret ok); wrecks come from the summer atlas (a fire burns the wash off). */
+export function vehicleDefAtlasName(defId: string, scale: 1 | 2, season: Season = 'summer'): string {
+  return `vehicles_${defId}${seasonKey(season) === 'winter' ? '_winter' : ''}_${scale}`;
+}
 
-/** The atlas holding this vehicle at this zoom: its own per-vehicle atlas, fetched on first use
- * (so a battle only ever loads the vehicles present), else a combined `vehicles_<scale>` atlas. */
-function vehicleAtlasFor(defId: string, zoom: number): Atlas | null {
-  return atlasForZoom((sc) => vehicleDefAtlasName(defId, sc), zoom) ?? getAtlas(vehicleAtlasName(atlasScaleForZoom(zoom))) ?? getAtlas(vehicleAtlasName(1));
+/** The atlases that may hold this vehicle at this zoom, preferred first: its winter atlas in a
+ * winter battle, its own per-vehicle atlas (both fetched on first use, so a battle only loads the
+ * vehicles present), else a combined `vehicles_<scale>` atlas. */
+function vehicleAtlasesFor(defId: string, zoom: number, season: Season): Atlas[] {
+  const out: Atlas[] = [];
+  if (seasonKey(season) === 'winter') {
+    const w = atlasForZoom((sc) => vehicleDefAtlasName(defId, sc, 'winter'), zoom);
+    if (w) out.push(w);
+  }
+  const own = atlasForZoom((sc) => vehicleDefAtlasName(defId, sc), zoom) ?? getAtlas(vehicleAtlasName(atlasScaleForZoom(zoom))) ?? getAtlas(vehicleAtlasName(1));
+  if (own) out.push(own);
+  return out;
 }
 
 // ------------------------------------------------------------------ registry / loading ---
@@ -171,7 +188,7 @@ export function loadAtlas(name: string): Promise<Atlas | null> {
         const img = new Image();
         img.onload = () => resolve(img);
         img.onerror = () => reject(new Error('image'));
-        img.src = urlOf(`${name}.png`);
+        img.src = urlOf(typeof meta.image === 'string' && meta.image ? meta.image : `${name}.png`);
       });
       if (slots.get(name) !== slot) return null; // freed while loading
       slot.atlas = { name, meta, image };
@@ -188,15 +205,24 @@ export function loadAtlas(name: string): Promise<Atlas | null> {
 
 /** Start loading everything a battle needs and free soldier atlases of other sides / seasons.
  * Idempotent; resolves when every atlas is ready or known missing. `onProgress` gets 0..1. */
-export function requestBattleAtlases(sides: readonly Side[], season: Season, onProgress?: (p: number) => void): Promise<void> {
-  const names = battleAtlasNames(sides, season);
+export function requestBattleAtlases(
+  sides: readonly Side[], season: Season, onProgress?: (p: number) => void,
+  /** vehicle types on the map: their scale-1 atlases load with the rest (no pop-in on first sight) */
+  vehicleDefs: readonly string[] = [],
+): Promise<void> {
+  // the combat-FX flipbooks too, so the first muzzle puff or burst of the battle is not skipped
+  const names = [...battleAtlasNames(sides, season), 'fx_s', 'fx_m', 'fx_l'];
+  for (const def of vehicleDefs) {
+    names.push(vehicleDefAtlasName(def, 1));
+    if (seasonKey(season) === 'winter') names.push(vehicleDefAtlasName(def, 1, 'winter'));
+  }
   // Only the scale-1 set is fetched up front. The scale-2 images are several times larger (a
   // soldier atlas decodes to ~170 MB) and are fetched by `atlasForZoom` the first time the player
   // zooms in; until they arrive the scale-1 frames are drawn enlarged.
   const upfront = names.filter((n) => !n.endsWith('_2'));
   wanted = upfront;
   for (const name of Array.from(slots.keys())) {
-    if ((name.startsWith('soldiers_') || name.startsWith('parts_')) && !names.includes(name)) slots.delete(name);
+    if ((name.startsWith('soldiers_') || name.startsWith('smg_') || name.startsWith('parts_')) && !names.includes(name)) slots.delete(name);
   }
   let done = 0;
   return Promise.all(upfront.map((n) => loadAtlas(n).then(() => { done++; onProgress?.(done / upfront.length); }))).then(() => undefined);
@@ -221,14 +247,25 @@ export function loadedAtlasNames(): string[] {
 export function freeAllAtlases(): void { slots.clear(); wanted = []; }
 
 // ------------------------------------------------------------------ drawing ---
-/** Blit one frame with its anchor on (x, y). False = entry missing / atlas has no image. */
-export function drawAtlasFrame(ctx: CanvasRenderingContext2D, atlas: Atlas | null, key: string, dir: number, frame: number, x: number, y: number, zoom: number): boolean {
+/** Blit one frame with its anchor on (x, y). False = entry missing / atlas has no image.
+ * `smooth`: at a zoom that is not a whole multiple of the atlas scale (the continuous zoom steps
+ * 0.8, 1.25, 1.56 ...) resample with filtering instead of dropping / doubling uneven pixel rows. */
+export function drawAtlasFrame(ctx: CanvasRenderingContext2D, atlas: Atlas | null, key: string, dir: number, frame: number, x: number, y: number, zoom: number, smooth = false): boolean {
   if (!atlas || !atlas.image) return false;
   const entry = atlas.meta.entries[key];
   if (!entry) return false;
   const r = atlasCellRect(atlas.meta, atlasFrameIndex(entry, atlas.meta.dirs, dir, frame));
   const d = atlasDestRect(atlas.meta, x, y, zoom);
-  ctx.drawImage(atlas.image, r.sx, r.sy, r.sw, r.sh, d.dx, d.dy, d.dw, d.dh);
+  const k = zoom / atlas.meta.scale;
+  if (smooth && Math.abs(k - Math.round(k)) > 0.01) {
+    const was = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(atlas.image, r.sx, r.sy, r.sw, r.sh, d.dx, d.dy, d.dw, d.dh);
+    ctx.imageSmoothingEnabled = was;
+  } else {
+    ctx.drawImage(atlas.image, r.sx, r.sy, r.sw, r.sh, d.dx, d.dy, d.dw, d.dh);
+  }
   return true;
 }
 
@@ -243,12 +280,18 @@ export function atlasForZoom(nameOf: (scale: 1 | 2) => string, zoom: number): At
   return getAtlas(nameOf(scale === 2 ? 1 : 2));
 }
 
+/** Soldiers (and their body parts) use the scale-2 art for every zoom above 1: filtered down
+ * from 2x (drawSoldier smooths) keeps the small figures crisp at the in-between zoom steps. */
+const soldierScaleZoom = (zoom: number): number => (zoom > 1.01 ? Math.max(2, zoom) : zoom);
 export function soldierAtlas(side: Side, season: Season, zoom: number): Atlas | null {
-  return atlasForZoom((sc) => soldierAtlasName(side, season, sc), zoom);
+  return atlasForZoom((sc) => soldierAtlasName(side, season, sc), soldierScaleZoom(zoom));
+}
+export function smgAtlas(side: Side, season: Season, zoom: number): Atlas | null {
+  return atlasForZoom((sc) => smgAtlasName(side, season, sc), soldierScaleZoom(zoom));
 }
 export function itemAtlas(zoom: number): Atlas | null { return atlasForZoom(itemAtlasName, zoom); }
 export function partsAtlas(side: Side, season: Season, zoom: number): Atlas | null {
-  return atlasForZoom((sc) => partsAtlasName(side, season, sc), zoom);
+  return atlasForZoom((sc) => partsAtlasName(side, season, sc), soldierScaleZoom(zoom));
 }
 
 /** Draw a soldier frame from the first key of `keys` the atlas carries (see
@@ -262,11 +305,11 @@ export function drawSoldier(
   if (!key) return null;
   const dirs = atlas.meta.dirs;
   const dir = ((Math.round((dirRad / (Math.PI * 2)) * dirs) % dirs) + dirs) % dirs;
-  return drawAtlasFrame(ctx, atlas, key, dir, frameOf(atlas.meta.entries[key], key), x, y, zoom) ? key : null;
+  return drawAtlasFrame(ctx, atlas, key, dir, frameOf(atlas.meta.entries[key], key), x, y, zoom, true) ? key : null;
 }
 
 /** Hull or turret from the 64 pre-rendered directions. The turret is placed on its ring:
- * `turretPivotM` (hull-local metres) rotated by the hull heading. */
+ * `turretPivotM` (hull-local metres) rotated by the hull heading. False while its atlas loads. */
 export function drawVehiclePart(
   ctx: CanvasRenderingContext2D, defId: string, part: 'hull' | 'turret', state: 'ok' | 'knockedOut',
   partRad: number, hullRad: number, x: number, y: number, zoom: number,
@@ -274,33 +317,27 @@ export function drawVehiclePart(
    * under its own centre) or 'trackL' / 'trackR' (hull with that track thrown); falls back to the
    * plain ok / ko entry when the atlas lacks it */
   variant?: 'blown' | 'trackL' | 'trackR',
+  season: Season = 'summer',
 ): boolean {
-  const atlas = vehicleAtlasFor(defId, zoom);
-  if (!atlas) return false;
-  let key = `${defId}.${part}.${state === 'ok' ? 'ok' : 'ko'}`;
-  const vkey = variant ? `${defId}.${part}.${variant}` : null;
-  const useVariant = !!vkey && !!atlas.meta.entries[vkey];
-  if (useVariant) key = vkey!;
-  if (!atlas.meta.entries[key]) return false;
-  let px = x, py = y;
-  if (part === 'turret' && !(useVariant && variant === 'blown')) {
-    const pv = turretPivotM(atlas.meta, defId);
-    const c = Math.cos(hullRad), s = Math.sin(hullRad), pxPerM = 10 * zoom;
-    px += (pv.x * c - pv.y * s) * pxPerM;
-    py += (pv.x * s + pv.y * c) * pxPerM;
+  const atlases = vehicleAtlasesFor(defId, zoom, season);
+  const base = `${defId}.${part}.${state === 'ok' ? 'ok' : 'ko'}`;
+  const keys = variant ? [`${defId}.${part}.${variant}`, base] : [base];
+  for (const key of keys) {
+    const atlas = atlases.find((a) => !!a.meta.entries[key]);
+    if (!atlas) continue;
+    let px = x, py = y;
+    if (part === 'turret' && !(key !== base && variant === 'blown')) {
+      const pv = turretPivotM(atlas.meta, defId);
+      const c = Math.cos(hullRad), s = Math.sin(hullRad), pxPerM = 10 * zoom;
+      // whole-pixel offset: the turret never shimmers against its hull while the vehicle drives
+      px += Math.round((pv.x * c - pv.y * s) * pxPerM);
+      py += Math.round((pv.x * s + pv.y * c) * pxPerM);
+    }
+    const dirs = atlas.meta.dirs;
+    const dir = ((Math.round((partRad / (Math.PI * 2)) * dirs) % dirs) + dirs) % dirs;
+    return drawAtlasFrame(ctx, atlas, key, dir, 0, px, py, zoom);
   }
-  const dirs = atlas.meta.dirs;
-  const dir = ((Math.round((partRad / (Math.PI * 2)) * dirs) % dirs) + dirs) % dirs;
-  return drawAtlasFrame(ctx, atlas, key, dir, 0, px, py, zoom);
-}
-
-/** True when the vehicles atlas can draw every part this vehicle needs (so hull and turret never
- * mix atlas and code-made art). */
-export function vehicleAtlasHas(defId: string, state: 'ok' | 'knockedOut', hasTurret: boolean, zoom: number): boolean {
-  const atlas = vehicleAtlasFor(defId, zoom);
-  if (!atlas || !atlas.image) return false;
-  const st = state === 'ok' ? 'ok' : 'ko';
-  return !!atlas.meta.entries[`${defId}.hull.${st}`] && (!hasTurret || !!atlas.meta.entries[`${defId}.turret.${st}`]);
+  return false;
 }
 
 export function drawWeapon(
@@ -313,6 +350,22 @@ export function drawWeapon(
   const dirs = atlas.meta.dirs;
   const dir = ((Math.round((rad / (Math.PI * 2)) * dirs) % dirs) + dirs) % dirs;
   return drawAtlasFrame(ctx, atlas, key, dir, 0, x, y, zoom);
+}
+
+/** Muzzle of a crew-served weapon in weapon-frame metres (x right, y AFT, so forward is -y) —
+ * where flashes, tracers and the mortar puff start. Read from the weapons atlas (tools/blender/
+ * weapons.py writes `weapons.<id>.muzzleM` with y forward); the table mirrors it for the moments
+ * before the atlas has loaded. */
+const MUZZLE_FWD_M: Record<string, number> = {
+  mortar81: 0.99, mortar82: 0.99, mg34_hmg: 1.425, mg42_hmg: 1.425, maxim: 1.296,
+  pak38: 2.71, pak40: 3.31, m1937_45mm: 2.0, zis3: 3.19, ptrd: 1.86,
+};
+export function weaponMuzzleM(weaponId: string): { x: number; y: number } {
+  const meta = (getAtlas(weaponAtlasName(1)) ?? getAtlas(weaponAtlasName(2)))?.meta as
+    (AtlasMeta & { weapons?: Record<string, { muzzleM?: { x: number; y: number } }> }) | undefined;
+  const m = meta?.weapons?.[weaponId]?.muzzleM;
+  if (m) return { x: m.x, y: -m.y };
+  return { x: 0, y: -(MUZZLE_FWD_M[weaponId] ?? 1) };
 }
 
 /** Draw a crew-served weapon in the first of `states` its atlas carries (drill-step looks such as

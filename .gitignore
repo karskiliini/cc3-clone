@@ -9,5 +9,6 @@ tools/uiScreens_shots/
 test-results/
 .scratch/
 !public/sprites/*.png
+!public/menu/*.png
 __pycache__/
 tools/blender/.cache/

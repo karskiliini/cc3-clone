@@ -1,183 +1,29 @@
 // ============================================================================
-// chrome.ts — shared CC3-style olive chrome primitives: bevelled panels,
-// buttons, list rows, scroll arrows, title banners. All canvas, integer px.
+// chrome.ts — the CC3 "propaganda poster" menu chrome: logotype and screen
+// title, torn-metal buttons, dark panels, vertical stencil labels and one
+// small set of type styles. Everything draws in the 800x600 MENU-local space
+// (the caller has translated by MENU_X/MENU_Y, see screens/common.ts).
+// The in-battle HUD has its own olive chrome in ui/hud/hudChrome.ts.
 // ============================================================================
-import type { Rect, Vec2, InputState } from '@/shared/types';
-import { pointInRect } from '@/shared/math';
-import { PALETTE } from '@/render/palette';
-import { drawText, drawTextCentered, textWidth, FONT_SMALL_H, FONT_BIG_H } from '@/render/pixelfont';
+import type { Rect } from '@/shared/types';
 import { hash2 } from '@/shared/rng';
-import { getPosterBackground } from '@/render/menuArt';
 
-export const HOT_FACE = '#454b41';
+/** The menu type scale and colours: one heading size, one label size, one body size. */
+export const UI = {
+  title: 'bold 30px Arial, Helvetica, sans-serif',
+  heading: 'bold 14px Arial, Helvetica, sans-serif',
+  label: 'bold 12px Arial, Helvetica, sans-serif',
+  body: '12px Arial, Helvetica, sans-serif',
+  note: '10px Arial, Helvetica, sans-serif',
+  gold: '#f0d24a',
+  text: '#f0ece4',
+  dim: '#a8988c',
+  accent: '#e8a33d',
+  good: '#5ccf5c',
+  bad: '#e8402c',
+} as const;
 
-/** Point-in-rect hit test (re-export for ui modules that only import chrome). */
-export function hitRect(p: Vec2, r: Rect): boolean {
-  return pointInRect(p, r);
-}
-
-/** Fills `r` with the chrome face colour and draws a 2px bevel border.
- * sunken=false (default): light on top/left, dark on bottom/right (raised).
- * sunken=true: reversed (inset look). */
-export function drawBevelBox(ctx: CanvasRenderingContext2D, r: Rect, sunken = false, face: string = PALETTE.chromeBg): void {
-  ctx.save();
-  const x = Math.round(r.x), y = Math.round(r.y), w = Math.round(r.w), h = Math.round(r.h);
-  ctx.fillStyle = face;
-  ctx.fillRect(x, y, w, h);
-  const light = sunken ? PALETTE.bevelDark : PALETTE.bevelLight;
-  const dark = sunken ? PALETTE.bevelLight : PALETTE.bevelDark;
-  ctx.fillStyle = light;
-  ctx.fillRect(x, y, w, 2);
-  ctx.fillRect(x, y, 2, h);
-  ctx.fillStyle = dark;
-  ctx.fillRect(x, y + h - 2, w, 2);
-  ctx.fillRect(x + w - 2, y, 2, h);
-  ctx.restore();
-}
-
-/** Draws a full panel: bevel box plus an optional title strip (small gold text,
- * 12px tall, with a 1px separator below it). */
-export function drawPanel(ctx: CanvasRenderingContext2D, r: Rect, opts?: { sunken?: boolean; title?: string }): void {
-  drawBevelBox(ctx, r, opts?.sunken ?? false);
-  if (opts?.title) {
-    drawText(ctx, opts.title, Math.round(r.x) + 4, Math.round(r.y) + 3, PALETTE.gold, 'small');
-    ctx.fillStyle = PALETTE.bevelDark;
-    ctx.fillRect(Math.round(r.x) + 2, Math.round(r.y) + 12, Math.round(r.w) - 4, 1);
-  }
-}
-
-export interface ButtonDrawOpts {
-  pressed?: boolean;
-  disabled?: boolean;
-  hot?: boolean;
-}
-
-/** Draws a bevelled push-button with a centred, uppercase small-font label. */
-export function drawButton(ctx: CanvasRenderingContext2D, r: Rect, label: string, opts: ButtonDrawOpts = {}): void {
-  const { pressed = false, disabled = false, hot = false } = opts;
-  const face = pressed ? PALETTE.chromeBg : hot ? HOT_FACE : PALETTE.chromeBg;
-  drawBevelBox(ctx, r, pressed, face);
-  const color = disabled ? PALETTE.dim : PALETTE.text;
-  const shift = pressed ? 1 : 0;
-  const cx = Math.round(r.x + r.w / 2) + shift;
-  const cy = Math.round(r.y + (r.h - FONT_SMALL_H) / 2) + shift;
-  drawTextCentered(ctx, label.toUpperCase(), cx, cy, color, 'small');
-}
-
-export class Button {
-  r: Rect;
-  label: string;
-  disabled = false;
-  hot = false;
-
-  constructor(r: Rect, label: string) {
-    this.r = r;
-    this.label = label;
-  }
-
-  /** Updates hot state; returns true exactly on the frame a left click lands
-   * inside this button's rect and it is not disabled. */
-  update(input: InputState): boolean {
-    this.hot = pointInRect(input.mouse, this.r);
-    if (this.disabled) return false;
-    for (const c of input.clicks) {
-      if (c.button === 0 && pointInRect({ x: c.x, y: c.y }, this.r)) return true;
-    }
-    return false;
-  }
-
-  draw(ctx: CanvasRenderingContext2D): void {
-    drawButton(ctx, this.r, this.label, { disabled: this.disabled, hot: this.hot });
-  }
-}
-
-export interface ListRowOpts {
-  hot?: boolean;
-  selected?: boolean;
-  dim?: boolean;
-}
-
-/** Draws a selectable list row: lighter face when hot, 1px gold inset frame when selected. */
-export function drawListRow(ctx: CanvasRenderingContext2D, r: Rect, opts: ListRowOpts = {}): void {
-  const x = Math.round(r.x), y = Math.round(r.y), w = Math.round(r.w), h = Math.round(r.h);
-  if (opts.hot) {
-    ctx.fillStyle = HOT_FACE;
-    ctx.fillRect(x, y, w, h);
-  }
-  if (opts.selected) {
-    ctx.fillStyle = PALETTE.gold;
-    ctx.fillRect(x, y, w, 1);
-    ctx.fillRect(x, y + h - 1, w, 1);
-    ctx.fillRect(x, y, 1, h);
-    ctx.fillRect(x + w - 1, y, 1, h);
-  }
-}
-
-function triangle(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number, dir: 'up' | 'down', color: string): void {
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  if (dir === 'up') {
-    ctx.moveTo(cx - size, cy + size);
-    ctx.lineTo(cx + size, cy + size);
-    ctx.lineTo(cx, cy - size);
-  } else {
-    ctx.moveTo(cx - size, cy - size);
-    ctx.lineTo(cx + size, cy - size);
-    ctx.lineTo(cx, cy + size);
-  }
-  ctx.closePath();
-  ctx.fill();
-}
-
-/** Draws two scroll arrows side by side (up on the left half, down on the right
- * half) within `r` — designed for short scroll-bar strips (e.g. teamList's
- * 10px bottom band) where stacking them vertically would be too small. */
-export function drawScrollArrows(ctx: CanvasRenderingContext2D, r: Rect, upHot: boolean, downHot: boolean): void {
-  const x = Math.round(r.x), y = Math.round(r.y), w = Math.round(r.w), h = Math.round(r.h);
-  const halfW = Math.floor(w / 2);
-  const upRect: Rect = { x, y, w: halfW, h };
-  const downRect: Rect = { x: x + halfW, y, w: w - halfW, h };
-  ctx.fillStyle = upHot ? HOT_FACE : PALETTE.chromeBg;
-  ctx.fillRect(upRect.x, upRect.y, upRect.w, upRect.h);
-  ctx.fillStyle = downHot ? HOT_FACE : PALETTE.chromeBg;
-  ctx.fillRect(downRect.x, downRect.y, downRect.w, downRect.h);
-  ctx.fillStyle = PALETTE.bevelDark;
-  ctx.fillRect(x + halfW, y, 1, h);
-  const size = Math.max(2, Math.floor(h / 3));
-  triangle(ctx, upRect.x + upRect.w / 2, y + h / 2, size, 'up', PALETTE.text);
-  triangle(ctx, downRect.x + downRect.w / 2, y + h / 2, size, 'down', PALETTE.text);
-}
-
-/** Draws a big-font gold heading, horizontally centred at `x` (defaults to
- * screen centre when omitted by caller — callers pass the centre explicitly),
- * with a 1px darker shadow offset by (1,1). */
-export function drawTitleBanner(ctx: CanvasRenderingContext2D, text: string, y: number, cx = 400): void {
-  drawTextCentered(ctx, text, cx + 1, y + 1, PALETTE.black, 'big');
-  drawTextCentered(ctx, text, cx, y, PALETTE.gold, 'big');
-}
-
-/** Draws a huge 'title'-size gold heading with a 2px dark drop shadow, used
- * only by the main menu's marquee title. */
-export function drawMarqueeTitle(ctx: CanvasRenderingContext2D, text: string, cx: number, y: number): void {
-  drawTextCentered(ctx, text, cx + 2, y + 2, PALETTE.black, 'title');
-  drawTextCentered(ctx, text, cx, y, PALETTE.gold, 'title');
-}
-
-// Re-exported so callers of chrome.ts have everything they need without an
-// extra import for simple label-fitting logic.
-export { textWidth, FONT_BIG_H, FONT_SMALL_H };
-
-// ============================================================================
-// POSTER CHROME — the CC3-style "propaganda poster" menu look: real canvas
-// fonts (not the bitmap pixelfont), torn-metal buttons, a top logotype/title
-// bar and a bottom control strip. Used by mainMenu/battleSetup/options/
-// debrief/operation; drawn in the 800x600 MENU-local coordinate space (the
-// caller is responsible for translating by MENU_X/MENU_Y first).
-// ============================================================================
-
-/** Draws `text` once in `shadow` offset by (2,2) then once in `color` at (x,y).
- * Caller sets `align`/`ctx.textBaseline` expectations via the `align` param
- * (baseline is always 'alphabetic'). */
+/** Draws `text` with a 2px dark drop shadow. Baseline is always 'alphabetic'. */
 export function drawShadowText(
   ctx: CanvasRenderingContext2D,
   text: string,
@@ -199,23 +45,32 @@ export function drawShadowText(
   ctx.restore();
 }
 
-/** Draws the cached procedural poster background filling the 800x600 area
- * (assumes the caller has already translated the context to MENU-local
- * origin). */
-export function drawPoster(ctx: CanvasRenderingContext2D): void {
-  ctx.drawImage(getPosterBackground(), 0, 0);
+/** Plain text in one of the UI styles (no shadow); leaves the ctx state untouched. */
+export function drawLabel(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, font: string, color: string, align: CanvasTextAlign = 'left'): void {
+  ctx.save();
+  ctx.font = font;
+  ctx.textAlign = align;
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = color;
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+/** A gold section heading (the one heading style used inside screens). */
+export function drawHeading(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, align: CanvasTextAlign = 'left'): void {
+  drawShadowText(ctx, text, x, y, UI.heading, UI.gold, 'rgba(0,0,0,0.8)', align);
 }
 
 const STENCIL_FONT = '"Stencil", "Stencil Std", "Arial Narrow", Impact, sans-serif';
 
 /** Draws `text` one glyph at a time with `spacing` px extra advance; returns
  * the total advance. When `draw` is false only measures. */
-function spacedText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, spacing: number, draw: boolean, shadowOff = 1): number {
+function spacedText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, spacing: number, draw: boolean): number {
   let cx = x;
   for (const ch of text) {
     if (draw) {
       ctx.fillStyle = 'rgba(0,0,0,0.8)';
-      ctx.fillText(ch, cx + shadowOff, y + shadowOff);
+      ctx.fillText(ch, cx + 1.5, y + 1.5);
       ctx.fillStyle = '#f4f4ee';
       ctx.fillText(ch, cx, y);
     }
@@ -224,24 +79,20 @@ function spacedText(ctx: CanvasRenderingContext2D, text: string, x: number, y: n
   return cx - x - spacing;
 }
 
-/** Top-left "CLOSE||COMBAT" logotype: thin, widely letter-spaced white
- * stencil capitals with a pair of narrow yellow bars between the words.
- * Spans roughly MENU x 10-233 (screen 122-345 at 1024x768). */
+/** Top-left "CLOSE||COMBAT" logotype: widely letter-spaced white capitals with
+ * a pair of narrow yellow bars between the words (MENU x 10..233). */
 export function drawLogo(ctx: CanvasRenderingContext2D): void {
-  const x = 10;
-  const y = 30;
   const targetW = 223;
   ctx.save();
   ctx.font = `bold 22px ${STENCIL_FONT}`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
   const gap = 6;
-  const barsW = 4 + 3 + 4;
+  const barsW = 11;
   const natural = spacedText(ctx, 'CLOSE', 0, 0, 5, false) + gap + barsW + gap + spacedText(ctx, 'COMBAT', 0, 0, 5, false);
-  const k = natural > 0 ? targetW / natural : 1;
-  ctx.translate(x, y);
-  ctx.scale(k, 1);
-  let cx = spacedText(ctx, 'CLOSE', 0, 0, 5, true, 1.5) + gap;
+  ctx.translate(10, 30);
+  ctx.scale(natural > 0 ? targetW / natural : 1, 1);
+  let cx = spacedText(ctx, 'CLOSE', 0, 0, 5, true) + gap;
   for (const barX of [cx, cx + 7]) {
     ctx.fillStyle = '#f0c020';
     ctx.fillRect(barX, -19, 4, 20);
@@ -249,12 +100,11 @@ export function drawLogo(ctx: CanvasRenderingContext2D): void {
     ctx.fillRect(barX, -3, 4, 4);
   }
   cx += barsW + gap;
-  spacedText(ctx, 'COMBAT', cx, 0, 5, true, 1.5);
+  spacedText(ctx, 'COMBAT', cx, 0, 5, true);
   ctx.restore();
 }
 
-/** Top-right screen-name label, e.g. 'MAIN', 'REQUISITION', 'BATTLE' —
- * letter-spaced stencil face, right-aligned at MENU x 784. */
+/** Top-right screen name ('MAIN', 'REQUISITION', ...), right-aligned at MENU x 784. */
 export function drawScreenTitle(ctx: CanvasRenderingContext2D, text: string): void {
   ctx.save();
   ctx.font = `bold 22px ${STENCIL_FONT}`;
@@ -262,231 +112,127 @@ export function drawScreenTitle(ctx: CanvasRenderingContext2D, text: string): vo
   ctx.textBaseline = 'alphabetic';
   const t = text.toUpperCase();
   const total = spacedText(ctx, t, 0, 0, 2.5, false);
-  spacedText(ctx, t, 784 - total, 30, 2.5, true, 1.5);
+  spacedText(ctx, t, 784 - total, 30, 2.5, true);
   ctx.restore();
 }
 
-export interface MetalButtonOpts {
-  hot?: boolean;
-  disabled?: boolean;
-}
-
-function buttonSeed(r: Rect): number {
-  return Math.round(r.x * 31 + r.y * 17);
-}
-
-/** Builds (but doesn't stroke/fill) a ragged torn-metal outline path for `r`. */
-function jaggedButtonPath(ctx: CanvasRenderingContext2D, r: Rect, seed: number): void {
+/** A ragged outline around `r`: `amp` px of jag along the long edges; `tornEnd` cuts a
+ * swallow-tail notch into the right end, like a banner torn off its pole. */
+function raggedPath(ctx: CanvasRenderingContext2D, r: Rect, amp: number, teethW: number, tornEnd = false): void {
   const { x, y, w, h } = r;
-  const jag = (i: number, salt: number) => (hash2(seed + i, salt) - 0.5) * 14;
-  const teethX = 9;
-  const teethY = 3;
+  const seed = Math.round(r.x * 31 + r.y * 17);
+  const jag = (i: number, salt: number) => (hash2(seed + i, salt) - 0.5) * amp;
+  const n = Math.max(4, Math.round(w / teethW));
   ctx.beginPath();
   ctx.moveTo(x, y + jag(0, 1));
-  for (let i = 1; i <= teethX; i++) ctx.lineTo(x + (w * i) / teethX, y + jag(i, 1));
-  for (let i = 1; i <= teethY; i++) ctx.lineTo(x + w + jag(i, 2), y + (h * i) / teethY);
-  for (let i = teethX - 1; i >= 0; i--) ctx.lineTo(x + (w * i) / teethX, y + h + jag(i, 3));
-  for (let i = teethY - 1; i >= 1; i--) ctx.lineTo(x + jag(i, 4), y + (h * i) / teethY);
+  for (let i = 1; i <= n; i++) ctx.lineTo(x + (w * i) / n, y + jag(i, 1));
+  ctx.lineTo(tornEnd ? x + w - h * 0.35 : x + w + jag(1, 2), y + h * 0.5);
+  for (let i = n; i >= 0; i--) ctx.lineTo(x + (w * i) / n, y + h + jag(i, 3));
   ctx.closePath();
 }
 
-/** A large torn-metal-strip button used for the main menu's marquee choices:
- * jagged edges, riveted look, bold left-aligned 26px text (yellow on hover). */
-export function drawMetalButton(ctx: CanvasRenderingContext2D, r: Rect, label: string, opts: MetalButtonOpts = {}): void {
-  const { hot = false, disabled = false } = opts;
-  const seed = buttonSeed(r);
-
-  // 3px offset drop shadow at 40% opacity, cut to the same jagged silhouette
+/** The main menu's big banner button: a dark steel strip with a torn right end and a
+ * bold 26px label (gold when hovered). */
+export function drawMetalButton(ctx: CanvasRenderingContext2D, r: Rect, label: string, hot = false): void {
   ctx.save();
-  ctx.translate(3, 3);
-  jaggedButtonPath(ctx, r, seed);
-  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.translate(3, 4);
+  raggedPath(ctx, r, 5, 40, true);
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
   ctx.fill();
   ctx.restore();
 
   ctx.save();
-  jaggedButtonPath(ctx, r, seed);
-  ctx.clip();
-  // diagonal gunmetal gradient
-  const grad = ctx.createLinearGradient(r.x, r.y, r.x + r.w * 0.5, r.y + r.h);
-  if (disabled) {
-    grad.addColorStop(0, '#333333');
-    grad.addColorStop(1, '#151515');
-  } else if (hot) {
-    grad.addColorStop(0, '#6e6e6e');
-    grad.addColorStop(0.5, '#414141');
-    grad.addColorStop(1, '#242424');
-  } else {
-    grad.addColorStop(0, '#3a3a3a');
-    grad.addColorStop(1, '#1a1a1a');
-  }
+  raggedPath(ctx, r, 5, 40, true);
+  const grad = ctx.createLinearGradient(0, r.y, 0, r.y + r.h);
+  grad.addColorStop(0, hot ? '#5a5652' : '#3e3a38');
+  grad.addColorStop(0.5, hot ? '#34302e' : '#262322');
+  grad.addColorStop(1, hot ? '#1e1b1a' : '#151312');
   ctx.fillStyle = grad;
-  ctx.fillRect(r.x - 6, r.y - 6, r.w + 12, r.h + 12);
-  ctx.fillStyle = disabled ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.18)';
-  ctx.fillRect(r.x, r.y, r.w, 3);
-  ctx.fillStyle = 'rgba(0,0,0,0.5)';
-  for (let rx = r.x + 12; rx < r.x + r.w - 6; rx += 36) {
-    ctx.beginPath();
-    ctx.arc(rx, r.y + 4, 1.4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(rx, r.y + r.h - 4, 1.4, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  if (disabled) {
-    // flat 45% grey wash desaturates the whole button in one pass
-    ctx.fillStyle = 'rgba(60,60,60,0.45)';
-    ctx.fillRect(r.x - 6, r.y - 6, r.w + 12, r.h + 12);
-  }
+  ctx.fill();
+  ctx.clip();
+  ctx.fillStyle = 'rgba(255,255,255,0.16)';
+  ctx.fillRect(r.x, r.y - 4, r.w, 6);
   ctx.restore();
-
-  jaggedButtonPath(ctx, r, seed);
-  ctx.strokeStyle = 'rgba(0,0,0,0.7)';
-  ctx.lineWidth = 2;
+  raggedPath(ctx, r, 5, 40, true);
+  ctx.strokeStyle = hot ? 'rgba(240,210,74,0.8)' : 'rgba(200,180,154,0.55)';
+  ctx.lineWidth = 1.5;
   ctx.stroke();
 
-  const textColor = disabled ? '#6a6a6a' : hot ? '#f2d048' : '#f4f4f0';
-  ctx.save();
-  if (disabled) ctx.globalAlpha = 0.55;
-  drawShadowText(ctx, label, r.x + 18, r.y + r.h / 2 + 9, 'bold 26px Arial, Helvetica, sans-serif', textColor);
-  ctx.restore();
+  drawShadowText(ctx, label, r.x + 20, r.y + r.h / 2 + 9, 'bold 26px Arial, Helvetica, sans-serif', hot ? UI.gold : '#f4f4f0');
 }
 
 export interface SmallButtonOpts {
+  /** pointer over it */
   hot?: boolean;
+  /** the chosen value of a toggle group (German/Soviet, a tab, ...) */
+  active?: boolean;
+  /** temporarily unavailable (e.g. Next with an empty roster) */
   disabled?: boolean;
 }
 
-/** Ragged tab outline with a small (about +-1.5px) jag. */
-function raggedTabPath(ctx: CanvasRenderingContext2D, r: Rect, seed: number): void {
-  const { x, y, w, h } = r;
-  const jag = (i: number, salt: number) => (hash2(seed + i, salt) - 0.5) * 3;
-  const teethX = Math.max(4, Math.round(w / 6));
-  const teethY = 3;
-  ctx.beginPath();
-  ctx.moveTo(x, y + jag(0, 1));
-  for (let i = 1; i <= teethX; i++) ctx.lineTo(x + (w * i) / teethX, y + jag(i, 1));
-  for (let i = 1; i <= teethY; i++) ctx.lineTo(x + w + jag(i, 2), y + (h * i) / teethY);
-  for (let i = teethX - 1; i >= 0; i--) ctx.lineTo(x + (w * i) / teethX, y + h + jag(i, 3));
-  for (let i = teethY - 1; i >= 1; i--) ctx.lineTo(x + jag(i, 4), y + (h * i) / teethY);
-  ctx.closePath();
-}
-
-/** A small torn tab button for the bottom control strip: dark maroon fill,
- * ragged tan border, light-grey bold text with a 1px black shadow. */
+/** A small torn tab button (bottom strip, toggles, tabs): maroon fill, tan ragged edge. */
 export function drawSmallMetalButton(ctx: CanvasRenderingContext2D, r: Rect, label: string, opts: SmallButtonOpts = {}): void {
-  const { hot = false, disabled = false } = opts;
-  const seed = buttonSeed(r);
+  const { hot = false, active = false, disabled = false } = opts;
   ctx.save();
-  if (disabled) ctx.globalAlpha = 0.55;
-  const inner: Rect = { x: r.x + 1, y: r.y + 1, w: r.w - 2, h: r.h - 2 };
-  raggedTabPath(ctx, inner, seed);
-  ctx.fillStyle = hot && !disabled ? '#7a3a30' : '#3a1a14';
+  if (disabled) ctx.globalAlpha = 0.4;
+  raggedPath(ctx, { x: r.x + 1, y: r.y + 1, w: r.w - 2, h: r.h - 2 }, 2.5, 6);
+  ctx.fillStyle = active ? '#8a2418' : hot && !disabled ? '#5a2a22' : '#321612';
   ctx.fill();
-  ctx.strokeStyle = '#c8b49a';
-  ctx.lineWidth = 2;
-  ctx.lineJoin = 'miter';
+  ctx.strokeStyle = active ? '#f0c878' : '#c8b49a';
+  ctx.lineWidth = 1.5;
   ctx.stroke();
-  ctx.font = 'bold 12px Arial, Helvetica, sans-serif';
+  ctx.font = UI.label;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const cx = Math.round(r.x + r.w / 2);
   const cy = Math.round(r.y + r.h / 2) + 1;
   ctx.fillStyle = '#000000';
   ctx.fillText(label, cx + 1, cy + 1);
-  ctx.fillStyle = hot && !disabled ? '#f2d048' : '#c8c2ba';
+  ctx.fillStyle = active ? '#fff4d8' : hot && !disabled ? UI.gold : '#d8d0c6';
   ctx.fillText(label, cx, cy);
   ctx.restore();
 }
 
-export interface BottomStripButtonSpec {
-  label: string;
-  rect: Rect;
-  disabled?: boolean;
-  hot?: boolean;
-}
-
-/** Draws a row of small bevelled buttons for the bottom control strip. */
-export function drawBottomStrip(ctx: CanvasRenderingContext2D, buttons: BottomStripButtonSpec[]): void {
-  for (const b of buttons) drawSmallMetalButton(ctx, b.rect, b.label, { disabled: b.disabled, hot: b.hot });
-}
-
-/** A translucent dark panel with a beveled metal-plate frame (light top/left,
- * dark bottom/right edges) plus a corner rivet dot at each corner — used for
- * list/info panels on the poster-style screens. */
+/** A translucent dark panel with a thin warm edge — list/info panels on the poster screens. */
 export function drawDarkPanel(ctx: CanvasRenderingContext2D, r: Rect): void {
   const x = Math.round(r.x), y = Math.round(r.y), w = Math.round(r.w), h = Math.round(r.h);
   ctx.save();
-  ctx.fillStyle = 'rgba(10,4,3,0.82)';
+  ctx.fillStyle = 'rgba(12,5,4,0.84)';
   ctx.fillRect(x, y, w, h);
-  // beveled edges
-  ctx.fillStyle = '#6b3a22';
-  ctx.fillRect(x, y, w, 2);
-  ctx.fillRect(x, y, 2, h);
-  ctx.fillStyle = '#170a06';
-  ctx.fillRect(x, y + h - 2, w, 2);
-  ctx.fillRect(x + w - 2, y, 2, h);
-  // corner rivets
-  const rivet = (cx: number, cy: number) => {
-    ctx.fillStyle = '#0d0d0d';
-    ctx.beginPath();
-    ctx.arc(cx, cy, 2, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.35)';
-    ctx.beginPath();
-    ctx.arc(cx - 0.6, cy - 0.6, 0.8, 0, Math.PI * 2);
-    ctx.fill();
-  };
-  rivet(x + 6, y + 6);
-  rivet(x + w - 6, y + 6);
-  rivet(x + 6, y + h - 6);
-  rivet(x + w - 6, y + h - 6);
+  ctx.strokeStyle = 'rgba(160,96,64,0.55)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
   ctx.restore();
 }
 
-/** Draws `text` rotated -90deg (bottom-to-top) in a chunky, letter-spaced
- * "stencil" treatment (heavy outline + gaps read as cut stencil lettering),
- * used for the vertical "FORCE POOL" / "ACTIVE ROSTER" labels. Glyphs occupy
- * roughly x-size*0.75 .. x on screen. Optional `size` sets the font px,
- * `gradient` fills along the text run, and `maxLen` squeezes the run to fit. */
-export function drawVerticalStencil(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  x: number,
-  yBottom: number,
-  color = '#ff7a1a',
-  size = 25,
-  gradient?: [string, string],
-  maxLen?: number,
-): void {
+/** `text` set vertically in chunky letter-spaced Impact with a dark outline and a flame
+ * gradient — the requisition screen's "FORCE POOL" / "ACTIVE ROSTER" labels, one on each
+ * outer edge. Upward (default): reads bottom-to-top from (x, y) = its baseline's bottom end,
+ * glyphs to the left of x. Downward: reads top-to-bottom from (x, y) = its top-left corner,
+ * glyphs to the right of x. `maxLen` squeezes the run to fit. */
+export function drawVerticalStencil(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, size: number, maxLen: number, downward = false): void {
   ctx.save();
-  ctx.translate(x, yBottom);
-  ctx.rotate(-Math.PI / 2);
+  ctx.translate(x, y);
+  ctx.rotate(downward ? Math.PI / 2 : -Math.PI / 2);
   ctx.font = `900 ${size}px Impact, "Arial Black", Arial, sans-serif`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
   const spacing = Math.max(2, Math.round(size * 0.08));
-  let total = 0;
+  let total = -spacing;
   for (const ch of text) total += ctx.measureText(ch).width + spacing;
-  total -= spacing;
-  if (maxLen && total > maxLen) ctx.scale(maxLen / total, 1);
-  let fill: string | CanvasGradient = color;
-  if (gradient) {
-    const g = ctx.createLinearGradient(0, 0, total, 0);
-    g.addColorStop(0, gradient[0]);
-    g.addColorStop(1, gradient[1]);
-    fill = g;
-  }
+  if (total > maxLen) ctx.scale(maxLen / total, 1);
+  const g = ctx.createLinearGradient(0, 0, total, 0);
+  g.addColorStop(0, '#ff6a00');
+  g.addColorStop(1, '#ffc030');
+  ctx.lineWidth = 4;
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#1a0a05';
   let cx = 0;
   for (const ch of text) {
-    const w = ctx.measureText(ch).width;
-    ctx.lineWidth = size >= 36 ? 4 : 3;
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = '#1a0a05';
     ctx.strokeText(ch, cx, 0);
-    ctx.fillStyle = fill;
+    ctx.fillStyle = g;
     ctx.fillText(ch, cx, 0);
-    cx += w + spacing;
+    cx += ctx.measureText(ch).width + spacing;
   }
   ctx.restore();
 }

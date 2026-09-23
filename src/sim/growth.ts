@@ -85,6 +85,16 @@ function settle(map: GameMap, f: GrowthField, dirty: Set<number>): void {
   f.version++;
 }
 
+/** Clip the half-metre patch struck by a low round. Height and LOS share the same cut field. */
+export function cutGrowthAt(map: GameMap, pos: Vec2, heightM: number): boolean {
+  const f = getGrowth(map);
+  if (growthHeightAt(map, pos.x, pos.y) <= heightM) return false;
+  const dirty = new Set<number>();
+  setCut(map, f, Math.floor(pos.x * f.res), Math.floor(pos.y * f.res), 2, dirty);
+  settle(map, f, dirty);
+  return dirty.size > 0;
+}
+
 /** Press the growth down under a vehicle's footprint: crushed under both tracks, bent between. */
 export function flattenUnderVehicle(map: GameMap, pos: Vec2, facing: number, lengthM: number, widthM: number): void {
   const f = getGrowth(map);

@@ -1,7 +1,7 @@
 {
  "scale": 1,
  "cell": {
-  "w": 116,
+  "w": 118,
   "h": 116
  },
  "anchor": {
@@ -62,11 +62,13 @@
  },
  "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
  "vehicle": "t34_85",
+ "season": "summer",
  "hasTurret": true,
  "lengthM": 6.7,
  "widthM": 3.0,
  "turretPivotM": {
   "x": 0.0,
   "y": 0.55
- }
+ },
+ "image": "vehicles_t34_85_1.webp"
 }

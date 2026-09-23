@@ -5,12 +5,11 @@ import { TILE_M, otherSide } from '@/shared/types';
 import { VEHICLE_DEFS } from '@/data/units';
 import { addMessage } from './messages';
 import type { Rng } from '@/shared/rng';
-import { clamp, dist, facingTo, vadd, vnorm, vscale, vsub } from '@/shared/math';
+import { angleTo, clamp, dist, facingFromAngle, facingTo, vadd, vnorm, vscale, vsub } from '@/shared/math';
 import { findPath, isPassable, type TileCostFn } from './path';
 import { fireHazards, nearFireHazard } from './vehicleExplosion';
 import { teamHasSmoke } from './team';
 import { isFirstFireFrozen, isLeaderless } from './mind';
-import { angleTo } from '@/shared/math';
 import { formationBaseHeading, rotateOffset } from './spawn';
 import { settleTile } from './coverSeek';
 import { isDazed } from './daze';
@@ -64,6 +63,20 @@ function stopSoldier(s: Soldier): void {
 }
 
 type OrderKind = Order['type'];
+
+/** C4: the id of a spotted enemy team whose position (or a tracked belief of it) is within
+ * ASSAULT_TRIGGER_TILES of `p`, else null. Vehicles count (AT charge). */
+export const ASSAULT_TRIGGER_TILES = 5; // 15 m
+export function spottedEnemyTeamNear(state: BattleState, side: Side, p: Vec2): number | null {
+  for (const id of state.spotted[side]) {
+    const e = state.soldiers.get(id);
+    if (!e || e.health === 'dead') continue;
+    const t = state.teams.get(e.teamId);
+    if (!t || t.outOfAction) continue;
+    if (dist(t.pos, p) <= ASSAULT_TRIGGER_TILES) return t.id;
+  }
+  return null;
+}
 
 function effectiveType(team: Team, order: Order): OrderKind {
   if (team.vehicleId != null && (order.type === 'sneak' || order.type === 'moveFast')) return 'move';
@@ -129,8 +142,8 @@ export function fireHazardCost(state: BattleState, mover: 'infantry' | 'vehicle'
 
 /** A* path from `from` through each of `points` in turn. Burning vehicles are gone round
  * (`fireHazardCost`; `softVehicle`: an open-topped vehicle, which avoids them like infantry).
- * An unreachable intermediate point is
- * skipped (the route goes on to the next one). Records per-point leg headings for followers. */
+ * skipped (the route goes on to the next one). Records per-point leg headings for followers, and
+ * records a failed leg's point so `stepOrderWaypoints` can drop the waypoint no one will visit. */
 export function routeVia(state: BattleState, from: Vec2, points: readonly Vec2[], mover: 'infantry' | 'vehicle', softVehicle = false): Vec2[] {
   const hazardCost = fireHazardCost(state, mover, softVehicle);
   if (points.length === 1) {
@@ -141,17 +154,30 @@ export function routeVia(state: BattleState, from: Vec2, points: readonly Vec2[]
   let path: Vec2[] = [];
   const headings: number[] = [];
   let cur = from;
-  for (const p of points) {
+  let skipped = skippedLegs.get(state);
+  for (let pi = 0; pi < points.length; pi++) {
+    const p = points[pi];
     const leg = findPath(state.map, cur, p, mover, undefined, hazardCost);
-    if (leg.length === 0) continue;
+    const reached = leg.length > 0 && dist(leg[leg.length - 1], p) <= 1;
+    if (!reached) {
+      if (pi < points.length - 1) {
+        if (!skipped) { skipped = new Map(); skippedLegs.set(state, skipped); }
+        skipped.set(pointKey(p), state.time);
+      }
+      continue;
+    }
     const h = dist(cur, p) > 1e-6 ? angleTo(cur, p) : (headings.length ? headings[headings.length - 1] : 0);
     path = path.concat(leg);
     for (let i = 0; i < leg.length; i++) headings.push(h);
     cur = leg[leg.length - 1];
   }
-  pathLegHeadings.set(path, headings);
   return path;
 }
+
+/** Tile keys of waypoints whose routing leg failed (per state, with the time of the failure): a
+ * follower (or the whole team) will never come near such a point, so its waypoint is dropped. */
+const skippedLegs = new WeakMap<BattleState, Map<string, number>>();
+const pointKey = (p: Vec2) => `${Math.floor(p.x)},${Math.floor(p.y)}`;
 
 /** Waypoint reached radius (tiles). */
 export const WAYPOINT_REACHED_TILES = 2;
@@ -174,10 +200,22 @@ export function stepOrderWaypoints(state: BattleState): void {
       if (leader && leader.health !== 'dead' && leader.health !== 'incapacitated') { ref = leader.pos; route = leader.path; }
     }
     while (wps.length > 0 && dist(ref, wps[0]) <= WAYPOINT_REACHED_TILES) wps.shift();
-    // a leg the path had to skip (unreachable waypoint): once the route no longer comes near it, drop it
+    // a leg the path had to skip (unreachable waypoint): drop it once recorded as skipped (or once
+    // the route no longer comes near it), so followers are not stranded waiting for it
+    let dropped = false;
     if (wps.length > 0 && route && route.length > 0 && state.time - order.issuedAt > 1) {
       const w = wps[0];
-      if (!route.some((p) => dist(p, w) <= WAYPOINT_REACHED_TILES + 1)) wps.shift();
+      if (!route.some((p) => dist(p, w) <= WAYPOINT_REACHED_TILES + 1)) { wps.shift(); dropped = true; }
+    }
+    if (!dropped && wps.length > 0) {
+      const skipped = skippedLegs.get(state);
+      if (skipped) {
+        for (let i = wps.length - 1; i >= 0; i--) {
+          const key = pointKey(wps[i]);
+          const t = skipped.get(key);
+          if (t != null && state.time - t > 1) { wps.splice(i, 1); skipped.delete(key); }
+        }
+      }
     }
   }
 }
@@ -191,7 +229,8 @@ export function isOrderActive(state: BattleState, team: Team): boolean {
   if (state.time - order.issuedAt < 0.5) return true;
   if (team.vehicleId != null) {
     const v = state.vehicles.get(team.vehicleId);
-    return !!v && v.path.length > 0;
+    // a vehicle holding fire (empty path) still keeps its order marker while the target is unreached
+    return !!v && dist(v.pos, order.target) > WAYPOINT_REACHED_TILES;
   }
   for (const id of team.soldierIds) {
     const s = state.soldiers.get(id);
@@ -313,8 +352,9 @@ export function applyOrderToSoldier(state: BattleState, team: Team, s: Soldier, 
   if (type === 'smoke' && !isVehicleTeam && team.type !== 'mortar' && !teamHasSmoke(state, team)) { s.mind.pendingOrderAt = undefined; return; }
   if (!canObey(state, rng, s, team, order.target)) return;
 
-  if (type === 'move' || type === 'moveFast' || type === 'sneak') {
-    const activity = type === 'move' ? 'moving' : type === 'moveFast' ? 'movingFast' : 'sneaking';
+  if (type === 'move' || type === 'moveFast' || type === 'sneak' || type === 'assault') {
+    const activity = type === 'move' || type === 'assault' ? 'moving'
+      : type === 'moveFast' ? 'movingFast' : 'sneaking';
     if (isVehicleTeam) {
       s.activity = activity === 'sneaking' ? 'moving' : (activity as Soldier['activity']);
       return;
@@ -323,21 +363,21 @@ export function applyOrderToSoldier(state: BattleState, team: Team, s: Soldier, 
     const dest = destinationFor(state, team, s, order, offset);
     let path: Vec2[] | null = null;
     const wps = order.waypoints && order.waypoints.length > 0 ? order.waypoints : null;
-    if (s.id === team.leaderId) {
-      path = leaderPath ?? routeVia(state, s.pos, orderRoutePoints(order), 'infantry');
-    } else {
-      if (leaderPath) {
-        // formation offset turned to each leg's direction of travel (the last leg's = the slot's)
-        const legs = wps ? pathLegHeadings.get(leaderPath) : undefined;
-        const base = formationBaseHeading(state.map, team.side);
-        const shift = legs ? (i: number) => rotateOffset(s.formationOffset, (legs[i] ?? headingFor(state, team, order)) - base) : offset;
-        path = followerPathFromLeader(state, s, leaderPath, shift, rng) ?? followLeaderRoute(state, s, leaderPath, dest);
+      if (s.id === team.leaderId) {
+        path = leaderPath ?? routeVia(state, s.pos, orderRoutePoints(order), 'infantry');
+      } else {
+        if (leaderPath) {
+          // formation offset turned to each leg's direction of travel (the last leg's = the slot's)
+          const legs = wps ? pathLegHeadings.get(leaderPath) : undefined;
+          const base = formationBaseHeading(state.map, team.side);
+          const shift = legs ? (i: number) => rotateOffset(s.formationOffset, (legs[i] ?? headingFor(state, team, order)) - base) : offset;
+          path = followerPathFromLeader(state, s, leaderPath, shift, rng) ?? followLeaderRoute(state, s, leaderPath, dest);
+        }
+        if (!path) {
+          path = wps ? routeVia(state, s.pos, [...wps, dest], 'infantry') : findPath(state.map, s.pos, dest, 'infantry', undefined, fireHazardCost(state, 'infantry'));
+          if (path.length === 0) path = routeVia(state, s.pos, orderRoutePoints(order), 'infantry');
+        }
       }
-      if (!path) {
-        path = wps ? routeVia(state, s.pos, [...wps, dest], 'infantry') : findPath(state.map, s.pos, dest, 'infantry', undefined, fireHazardCost(state, 'infantry'));
-        if (path.length === 0) path = routeVia(state, s.pos, orderRoutePoints(order), 'infantry');
-      }
-    }
     const hop = withArrivalHop(state, s.pos, path, dest);
     path = hop.path;
     claim(state, order, s, hop.end);
@@ -345,15 +385,17 @@ export function applyOrderToSoldier(state: BattleState, team: Team, s: Soldier, 
     s.path = path;
     s.activity = activity as Soldier['activity'];
     s.stance = type === 'sneak' ? 'prone' : 'standing';
+    // face the first leg immediately so a deploy-phase order reads its direction at once
+    if (path.length > 0) s.facing = facingFromAngle(angleTo(s.pos, path[0]));
     return;
   }
-
   if (type === 'fire') {
-    if (isVehicleTeam) { s.activity = 'firing'; return; }
+    if (isVehicleTeam) { s.activity = 'firing'; s.facing = facingFromAngle(angleTo(s.pos, order.target)); return; }
     stopSoldier(s);
     s.activity = 'firing';
     s.targetPoint = order.target;
     s.stance = s.cover < 0.2 ? 'prone' : 'crouching';
+    s.facing = facingFromAngle(angleTo(s.pos, order.target));
     return;
   }
 
@@ -385,18 +427,20 @@ export function applyOrderToSoldier(state: BattleState, team: Team, s: Soldier, 
   }
 
   if (type === 'defend') {
-    if (isVehicleTeam) { s.activity = 'defending'; return; }
+    if (isVehicleTeam) { s.activity = 'defending'; s.facing = facingFromAngle(angleTo(s.pos, order.target)); return; }
     stopSoldier(s);
     s.activity = 'defending';
     s.stance = s.cover < 0.2 ? 'prone' : 'crouching';
+    s.facing = facingFromAngle(angleTo(s.pos, order.target));
     return;
   }
 
   if (type === 'ambush') {
-    if (isVehicleTeam) { s.activity = 'ambushing'; return; }
+    if (isVehicleTeam) { s.activity = 'ambushing'; s.facing = facingFromAngle(angleTo(s.pos, order.target)); return; }
     stopSoldier(s);
     s.activity = 'ambushing';
     s.stance = 'prone';
+    s.facing = facingFromAngle(angleTo(s.pos, order.target));
   }
 }
 
@@ -422,6 +466,12 @@ function releaseDelayedOrders(state: BattleState, rng: Rng): void {
 }
 
 export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rng, own = false): void {
+  // C4: a Move Fast whose target lands on/near a spotted enemy is an ASSAULT — the team
+  // charges at moveFast pace with weapons ready; grenades free-throw once in range.
+  if (order.type === 'moveFast' && team.vehicleId == null) {
+    const spotted = spottedEnemyTeamNear(state, team.side, order.target);
+    if (spotted != null) order = { ...order, type: 'assault', targetTeamId: spotted };
+  }
   // a Move order onto the team's own abandoned vehicle sends the crew back into it, or is refused
   // while they are too shaken (spec 2026-09-17 §10)
   if (tryRemountOrder(state, team, order)) return;
@@ -453,9 +503,16 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
   team.order = order;
   const type = effectiveType(team, order);
 
-  if (type === 'fire' || type === 'defend' || type === 'ambush') {
-    team.facing = facingTo(team.pos, order.target);
-  }
+  // Immediate facing (user micromanagement): every order points the men where it sends them
+  // right away — Defend/Ambush/Fire face the target; a move order faces the first leg of the
+  // route. Without this a Defend click leaves the team facing its old direction until the
+  // next sim step (or forever, for a stationary team).
+  const facingPoint = (type === 'fire' || type === 'defend' || type === 'ambush' || type === 'smoke')
+    ? order.target
+    : (type === 'move' || type === 'moveFast' || type === 'sneak' || type === 'assault')
+      ? (order.waypoints && order.waypoints.length > 0 ? order.waypoints[0] : order.target)
+      : null;
+  if (facingPoint && dist(team.pos, facingPoint) > 1e-3) team.facing = facingTo(team.pos, facingPoint);
 
   const vehicle = isVehicleTeam ? state.vehicles.get(team.vehicleId!) : undefined;
   let leaderPath: Vec2[] | undefined;
@@ -483,7 +540,7 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
     // infantry without smoke (and not a mortar) cannot execute the order at all
     if (!isVehicleTeam && team.type !== 'mortar' && !teamHasSmoke(state, team)) return;
   } else if (type === 'defend' || type === 'ambush') {
-    if (vehicle) vehicle.path = [];
+    if (vehicle) { vehicle.path = []; vehicle.targetPoint = order.target; }
   }
 
   for (const sid of team.soldierIds) {

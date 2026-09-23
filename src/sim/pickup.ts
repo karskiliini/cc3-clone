@@ -62,6 +62,7 @@ function isStunned(s: Soldier, time: number): boolean { return s.stunnedUntil !=
 
 /** Able to go for an item at all (spec: not pinned, cowering, panicked or stunned). */
 export function ableToLoot(state: BattleState, s: Soldier): boolean {
+  if (s.carryingMgMount != null) return false;
   if (s.health === 'dead' || s.health === 'incapacitated' || s.vehicleId != null) return false;
   if (isStunned(s, state.time) || isDazed(s, state.time) || s.dodgeUntil != null || s.crewTask) return false;
   if (NO_LOOT_STATES.has(s.mind.state) || NO_LOOT_ACTIVITIES.has(s.activity)) return false;
@@ -385,7 +386,7 @@ export function stepPickups(state: BattleState, rng: Rng, _dt: number): void {
     if ((tick + s.id) % 10 !== 0) continue;
     if (s.pickup || !ableToLoot(state, s)) continue;
     const team = state.teams.get(s.teamId);
-    if (!team || team.crewWeapon || team.vehicleId != null) continue;
+    if (!team || (team.crewWeapon && !team.crewWeapon.lightMode) || team.vehicleId != null) continue;
     if (underFire(state, s, QUIET_S) || tooShaken(s)) continue;
     if (!grid) grid = buildGrid(items);
     if (grid.size === 0) return;

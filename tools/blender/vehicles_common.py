@@ -35,7 +35,8 @@ except ImportError:
     bpy = None
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-SPRITES = os.path.join(ROOT, "public", "sprites")
+# VEH_OUT redirects atlases (and the render cache) for quick look-dev renders outside the repo
+SPRITES = os.environ.get("VEH_OUT") or os.path.join(ROOT, "public", "sprites")
 
 
 # ------------------------------------------------------------------ footprints
@@ -61,7 +62,8 @@ def ellipse_fp(w, l, seg=16, cy=0.0, cx=0.0):
             for i in range(seg)]
 
 
-def star_fp(r, cx=0.0, cy=0.0, inner=0.4):
+def star_fp(r, inner=0.46, cx=0.0, cy=0.0):
+    """Five-point star, one point to +Y; a fat inner radius keeps the arms at 10 px/m."""
     pts = []
     for i in range(10):
         a = math.pi / 2 + i * math.pi / 5
@@ -218,13 +220,18 @@ class Kit:
         self.box((s * 0.2, s * 0.9, 0.006), (0, 0, 0.008), "black")
         self.xform = old
 
-    def star(self, r, loc, rot=(0, 0, 0)):
-        """Plain red star lying in the local XY plane."""
-        fp = star_fp(r)
-        n = len(fp)
-        vs = [(p[0], p[1], 0.006) for p in fp] + [(0, 0, 0.006)]
-        fs = [(i, (i + 1) % n, n) for i in range(n)]
-        self.add(vs, fs, "red", loc, rot)
+    def star(self, r, loc, rot=(0, 0, 0), border=0.09):
+        """Red star with a white border lying in the local XY plane (on a roof: rot 0).  Drawn larger
+        than life (r = tip radius) so the five points survive the downsample: ~9 px across at 10 px/m."""
+        M = Matrix.Translation(Vector(loc)) @ Euler([math.radians(a) for a in rot], "XYZ").to_matrix().to_4x4()
+        old = self.xform
+        self.xform = (old @ M) if old is not None else M
+        for rr, z, mat in ((r + border, 0.006, "white"), (r, 0.014, "red")):
+            fp = star_fp(rr)
+            n = len(fp)
+            vs = [(p[0], p[1], z) for p in fp] + [(0, 0, z)]
+            self.add(vs, [(i, (i + 1) % n, n) for i in range(n)], mat)
+        self.xform = old
 
     # ---- finish
     def build(self, materials, collection=None):
@@ -286,16 +293,72 @@ def _ramp(nodes, links, src, lo, hi):
     return n.outputs[0]
 
 
+def _math(nodes, links, op, a, b=None):
+    n = nodes.new("ShaderNodeMath")
+    n.operation = op
+    for sock, val in ((n.inputs[0], a), (n.inputs[1], b)):
+        if val is None:
+            continue
+        if hasattr(val, "links") or hasattr(val, "is_linked"):
+            links.new(val, sock)
+        else:
+            sock.default_value = val
+    return n.outputs[0]
+
+
+def _noise(nodes, links, vec, scale, detail=2.0, dist=0.0, loc=(0, 0, 0), stretch=(1, 1, 1)):
+    mp = nodes.new("ShaderNodeMapping")
+    mp.inputs["Location"].default_value = loc
+    mp.inputs["Scale"].default_value = stretch
+    links.new(vec, mp.inputs[0])
+    nz = nodes.new("ShaderNodeTexNoise")
+    nz.inputs["Scale"].default_value = scale
+    nz.inputs["Detail"].default_value = detail
+    nz.inputs["Distortion"].default_value = dist
+    links.new(mp.outputs[0], nz.inputs["Vector"])
+    return nz.outputs[0]
+
+
+EDGE_R = 0.035          # bevel-shader radius (m): every hard edge catches a sliver of light
+AO_DIST = 0.45          # cavity darkening reach (m)
+
+
+def _relief(nodes, links, bsdf, ao_min=0.5):
+    """Rounded-edge shading normal + (edge mask, ao factor) sockets.
+    edge 0..1 is high on convex edges (bevelled normal turned away from the true normal); ao 0..1
+    darkens corners and the undersides next to other plates."""
+    bev = nodes.new("ShaderNodeBevel")
+    bev.samples = 8
+    bev.inputs["Radius"].default_value = EDGE_R
+    links.new(bev.outputs[0], bsdf.inputs["Normal"])
+    geo = nodes.new("ShaderNodeNewGeometry")
+    dot = nodes.new("ShaderNodeVectorMath"); dot.operation = "DOT_PRODUCT"
+    links.new(bev.outputs[0], dot.inputs[0]); links.new(geo.outputs["Normal"], dot.inputs[1])
+    edge = _ramp(nodes, links, dot.outputs["Value"], 0.985, 0.8)
+    ao = nodes.new("ShaderNodeAmbientOcclusion")
+    ao.samples = 8
+    ao.inputs["Distance"].default_value = AO_DIST
+    aof = nodes.new("ShaderNodeMapRange")
+    aof.inputs[1].default_value = 0.0; aof.inputs[2].default_value = 1.0
+    aof.inputs[3].default_value = ao_min; aof.inputs[4].default_value = 1.0
+    links.new(ao.outputs["AO"], aof.inputs[0])
+    return edge, aof.outputs[0]
+
+
 def paint_material(name, base, dust="#8a7d60", camo=None, dust_top=0.9, rough=0.85, dust_amt=0.6,
-                   scorch=None, soot_at=None, mottle=0.2, gain=1.0):
-    """Painted armour.  camo = [(hex, threshold_lo, threshold_hi, noise_seed_offset)...] soft bands.
-    scorch = (dark_hex, rust_hex) turns it into the knocked-out burnt finish; soot_at = (x, y, radius)
-    blackens the engine deck (object coordinates)."""
+                   scorch=None, soot_at=None, mottle=0.2, gain=1.0, whitewash=None):
+    """Painted armour.  camo = [(hex, threshold_lo, threshold_hi, noise_seed_offset)...] soft sprayed
+    bands.  scorch = (dark_hex, rust_hex) turns it into the knocked-out burnt finish; soot_at = (x, y,
+    radius) blackens the engine deck (object coordinates).  whitewash = hex: brushed winter lime wash
+    over the paint, thin and streaky, worn through on the edges and the lower hull.
+    Every coat gets bevel-rounded edges (a light sliver on each plate edge), worn lighter paint on
+    the edges, cavity AO and faint vertical rain streaks, so plates read apart at 10 px/m."""
     m, nt, nodes, links, bsdf = _nodes(name)
     tc = nodes.new("ShaderNodeTexCoord")
     obj = tc.outputs["Object"]
+    edge, ao = _relief(nodes, links, bsdf)
     col = _lin(base)
-    out = None
+    out = col
     if camo:
         cur = col
         for i, (hexc, lo, hi, off) in enumerate(camo):
@@ -305,50 +368,48 @@ def paint_material(name, base, dust="#8a7d60", camo=None, dust_top=0.9, rough=0.
             mp.inputs["Scale"].default_value = (1.0, 0.55, 0.5)
             links.new(obj, mp.inputs[0])
             nz = nodes.new("ShaderNodeTexNoise")
-            nz.inputs["Scale"].default_value = 0.85
-            nz.inputs["Detail"].default_value = 1.5
+            nz.inputs["Scale"].default_value = 1.25
+            nz.inputs["Detail"].default_value = 3.0
+            nz.inputs["Roughness"].default_value = 0.45
             nz.inputs["Distortion"].default_value = 0.6
             links.new(mp.outputs[0], nz.inputs["Vector"])
             f = _ramp(nodes, links, nz.outputs[0], lo, hi)
             cur = _mix(nodes, links, f, cur, _lin(hexc))
         out = cur
-    else:
-        out = col
-    # mottling (paint wear / stains)
-    nz = nodes.new("ShaderNodeTexNoise")
-    nz.inputs["Scale"].default_value = 4.0
-    nz.inputs["Detail"].default_value = 3.0
-    links.new(obj, nz.inputs["Vector"])
-    f = _ramp(nodes, links, nz.outputs[0], 0.35, 0.75)
-    fm = nodes.new("ShaderNodeMath"); fm.operation = "MULTIPLY"; fm.inputs[1].default_value = mottle
-    links.new(f, fm.inputs[0])
-    out = _mix(nodes, links, fm.outputs[0], out, (0.02, 0.02, 0.018, 1))
+    # mottling (fading, stains): a fine and a broad layer, both gentle
+    f = _ramp(nodes, links, _noise(nodes, links, obj, 4.0, 3.0), 0.3, 0.8)
+    out = _mix(nodes, links, _math(nodes, links, "MULTIPLY", f, mottle), out, (0.02, 0.02, 0.018, 1))
+    fb = _ramp(nodes, links, _noise(nodes, links, obj, 1.3, 2.0, loc=(3.1, 1.7, 0)), 0.35, 0.7)
+    out = _mix(nodes, links, _math(nodes, links, "MULTIPLY", fb, 0.18), out, (0.02, 0.02, 0.018, 1))
+    # rain / oil streaks running down the plates
+    st = _ramp(nodes, links, _noise(nodes, links, obj, 7.0, 2.0, stretch=(1.0, 1.0, 0.12), loc=(0.4, 0.9, 0)), 0.58, 0.72)
+    out = _mix(nodes, links, _math(nodes, links, "MULTIPLY", st, 0.22), out, (0.03, 0.03, 0.025, 1))
+    if whitewash:
+        # brushed lime: patchy cover, thin where the brush ran dry, rubbed off on edges and low down
+        cov = _ramp(nodes, links, _noise(nodes, links, obj, 1.5, 2.5, loc=(7.7, 2.3, 0.5)), 0.33, 0.45)
+        brush = _ramp(nodes, links, _noise(nodes, links, obj, 9.0, 3.0, stretch=(1.0, 0.25, 1.0), loc=(1.3, 5.1, 0)), 0.25, 0.6)
+        wcov = _math(nodes, links, "MULTIPLY", cov, _math(nodes, links, "ADD", _math(nodes, links, "MULTIPLY", brush, 0.25), 0.7))
+        wcov = _math(nodes, links, "MULTIPLY", wcov, _math(nodes, links, "SUBTRACT", 1.0, _math(nodes, links, "MULTIPLY", edge, 0.8)))
+        out = _mix(nodes, links, wcov, out, _lin(whitewash))
     if scorch:
         dark, rust = scorch
-        nz2 = nodes.new("ShaderNodeTexNoise")
-        nz2.inputs["Scale"].default_value = 1.6
-        nz2.inputs["Detail"].default_value = 3.0
-        links.new(obj, nz2.inputs["Vector"])
-        f2 = _ramp(nodes, links, nz2.outputs[0], 0.3, 0.7)
+        f2 = _ramp(nodes, links, _noise(nodes, links, obj, 1.6, 3.0), 0.3, 0.7)
         burnt = _mix(nodes, links, f2, _lin(dark), _lin(rust))
         # a little of the old paint survives in patches
-        nz3 = nodes.new("ShaderNodeTexNoise")
-        nz3.inputs["Scale"].default_value = 0.9
-        links.new(obj, nz3.inputs["Vector"])
-        f3 = _ramp(nodes, links, nz3.outputs[0], 0.52, 0.72)
-        f3m = nodes.new("ShaderNodeMath"); f3m.operation = "MULTIPLY"; f3m.inputs[1].default_value = 0.45
-        links.new(f3, f3m.inputs[0])
-        out = _mix(nodes, links, f3m.outputs[0], burnt, out)
+        f3 = _ramp(nodes, links, _noise(nodes, links, obj, 0.9, 2.0), 0.52, 0.72)
+        out = _mix(nodes, links, _math(nodes, links, "MULTIPLY", f3, 0.45), burnt, out)
+    else:
+        # chipped, sun-faded paint on every hard edge
+        worn = _mix(nodes, links, 1.0, out, (1.35, 1.33, 1.28, 1.0), blend="MULTIPLY")
+        out = _mix(nodes, links, _math(nodes, links, "MULTIPLY", edge, 0.4), out, worn)
     # dust: strong on the lower hull, a breath on everything
     sep = nodes.new("ShaderNodeSeparateXYZ")
     links.new(obj, sep.inputs[0])
     fz = _ramp(nodes, links, sep.outputs[2], dust_top, 0.15)
-    fzm = nodes.new("ShaderNodeMath"); fzm.operation = "MULTIPLY"; fzm.inputs[1].default_value = dust_amt
-    links.new(fz, fzm.inputs[0])
-    fza = nodes.new("ShaderNodeMath"); fza.operation = "ADD"; fza.inputs[1].default_value = 0.06
-    links.new(fzm.outputs[0], fza.inputs[0])
+    dn = _ramp(nodes, links, _noise(nodes, links, obj, 3.0, 3.0, loc=(2.2, 0.3, 0)), 0.2, 0.8)
+    fza = _math(nodes, links, "ADD", _math(nodes, links, "MULTIPLY", _math(nodes, links, "MULTIPLY", fz, dn), dust_amt), 0.03)
     dustc = _lin(dust) if not scorch else _lin("#4a443a")
-    out = _mix(nodes, links, fza.outputs[0], out, dustc)
+    out = _mix(nodes, links, _math(nodes, links, "MINIMUM", fza, 0.9), out, dustc)
     if soot_at:
         sx, sy, sr = soot_at
         mp = nodes.new("ShaderNodeMapping")
@@ -358,46 +419,53 @@ def paint_material(name, base, dust="#8a7d60", camo=None, dust_top=0.9, rough=0.
         ln = nodes.new("ShaderNodeVectorMath"); ln.operation = "LENGTH"
         links.new(mp.outputs[0], ln.inputs[0])
         fs = _ramp(nodes, links, ln.outputs["Value"], sr, sr * 0.35)
-        fsm = nodes.new("ShaderNodeMath"); fsm.operation = "MULTIPLY"; fsm.inputs[1].default_value = 0.9
-        links.new(fs, fsm.inputs[0])
-        out = _mix(nodes, links, fsm.outputs[0], out, _lin("#0b0a09"))
-    if gain != 1.0:
-        out = _mix(nodes, links, 1.0, out, (gain, gain, gain, 1.0), blend="MULTIPLY")
+        out = _mix(nodes, links, _math(nodes, links, "MULTIPLY", fs, 0.9), out, _lin("#0b0a09"))
+    g = gain
+    out = _mix(nodes, links, 1.0, out, (g, g, g, 1.0), blend="MULTIPLY") if g != 1.0 else out
+    out = _mix(nodes, links, 1.0, out, ao, blend="MULTIPLY")
     links.new(out, bsdf.inputs["Base Color"])
-    bsdf.inputs["Roughness"].default_value = rough
+    rn = _math(nodes, links, "ADD", _math(nodes, links, "MULTIPLY", fb, -0.15), rough)
+    links.new(rn, bsdf.inputs["Roughness"])
     try:
-        bsdf.inputs["Specular IOR Level"].default_value = 0.25
+        bsdf.inputs["Specular IOR Level"].default_value = 0.3
     except Exception:
         pass
     return m
 
 
 def track_material(name, base="#2b2926", dust="#7d7259", pitch=0.17, burnt=False):
-    """Dark steel track with link bands hinted across the run (bands along Y in object space)."""
+    """Dark steel track with link bands hinted across the run (bands along Y in object space), dusty
+    low down, bright worn steel on the edges (the grousers)."""
     m, nt, nodes, links, bsdf = _nodes(name)
     tc = nodes.new("ShaderNodeTexCoord")
+    edge, ao = _relief(nodes, links, bsdf, ao_min=0.6)
     sep = nodes.new("ShaderNodeSeparateXYZ")
     links.new(tc.outputs["Object"], sep.inputs[0])
-    mul = nodes.new("ShaderNodeMath"); mul.operation = "MULTIPLY"; mul.inputs[1].default_value = 1.0 / pitch
-    links.new(sep.outputs[1], mul.inputs[0])
-    fr = nodes.new("ShaderNodeMath"); fr.operation = "FRACT"
-    links.new(mul.outputs[0], fr.inputs[0])
-    f = _ramp(nodes, links, fr.outputs[0], 0.55, 0.75)
+    fr = _math(nodes, links, "FRACT", _math(nodes, links, "MULTIPLY", sep.outputs[1], 1.0 / pitch))
+    f = _ramp(nodes, links, fr, 0.55, 0.75)
     band = _mix(nodes, links, f, _lin(base), _lin("#0e0d0c"))
     fz = _ramp(nodes, links, sep.outputs[2], 0.7, 0.05)
-    fzm = nodes.new("ShaderNodeMath"); fzm.operation = "MULTIPLY"; fzm.inputs[1].default_value = 0.2 if burnt else 0.5
-    links.new(fz, fzm.inputs[0])
-    fza = nodes.new("ShaderNodeMath"); fza.operation = "ADD"; fza.inputs[1].default_value = 0.0 if burnt else 0.15
-    links.new(fzm.outputs[0], fza.inputs[0])
-    out = _mix(nodes, links, fza.outputs[0], band, _lin(dust))
+    fza = _math(nodes, links, "ADD", _math(nodes, links, "MULTIPLY", fz, 0.2 if burnt else 0.5), 0.0 if burnt else 0.15)
+    out = _mix(nodes, links, fza, band, _lin(dust))
+    if not burnt:
+        out = _mix(nodes, links, _math(nodes, links, "MULTIPLY", edge, 0.6), out, _lin("#77746a"))
+    out = _mix(nodes, links, 1.0, out, ao, blend="MULTIPLY")
     links.new(out, bsdf.inputs["Base Color"])
     bsdf.inputs["Roughness"].default_value = 0.7
     bsdf.inputs["Metallic"].default_value = 0.3
     return m
 
 
-def flat_material(name, hexcol, rough=0.8, metallic=0.0):
-    return C.make_material(name, hexcol, rough, metallic)
+def flat_material(name, hexcol, rough=0.8, metallic=0.0, relief=True):
+    """Plain coloured material; relief adds the bevelled-edge normal and cavity AO of the paint."""
+    m = C.make_material(name, hexcol, rough, metallic)
+    if relief:
+        nt = m.node_tree
+        bsdf = nt.nodes.get("Principled BSDF")
+        edge, ao = _relief(nt.nodes, nt.links, bsdf, ao_min=0.55)
+        out = _mix(nt.nodes, nt.links, 1.0, bsdf.inputs["Base Color"].default_value[:], ao, blend="MULTIPLY")
+        nt.links.new(out, bsdf.inputs["Base Color"])
+    return m
 
 
 def common_materials(mats, burnt=False):
@@ -412,7 +480,7 @@ def common_materials(mats, burnt=False):
     mats["grille"] = flat_material("grille" + sfx, "#15140f" if not burnt else "#070706", 0.9)
     mats["black"] = flat_material("blackm" + sfx, "#121212", 0.7)
     mats["white"] = flat_material("whitem" + sfx, sc("#e6e4da"), 0.8)
-    mats["red"] = flat_material("redm" + sfx, sc("#b3261c"), 0.8)
+    mats["red"] = flat_material("redm" + sfx, sc("#b8261c"), 0.75)
     mats["steel"] = flat_material("steel" + sfx, sc("#3a3c38"), 0.45, 0.6)
     mats["gunmetal"] = flat_material("gunmetal" + sfx, sc("#2a2b28"), 0.4, 0.7)
     mats["rubber"] = flat_material("rubber" + sfx, "#191917", 0.9)
@@ -421,7 +489,7 @@ def common_materials(mats, burnt=False):
     mats["brass"] = flat_material("brass" + sfx, sc("#a88f48"), 0.4, 0.8)
     mats["leather"] = flat_material("leather" + sfx, sc("#4a3626"), 0.8)
     mats["rust"] = flat_material("rust" + sfx, sc("#5a3a26"), 0.9)
-    mats["floor"] = flat_material("floor" + sfx, sc("#3a3a34"), 0.9)
+    mats["floor"] = flat_material("floor" + sfx, sc("#24241f"), 0.9)
     mats["track"] = track_material("track" + sfx, burnt=burnt)
     return mats
 
@@ -470,10 +538,12 @@ def ground_y_factor(ctx):
 
 
 def render_dirs(objs_fn, dirs, px_per_m, cell, anchor, shadow, engine="CYCLES", samples=24,
-                supersample=2, max_px=4096, log=None, device="GPU"):
+                supersample=2, max_px=4096, log=None, device="GPU", filter_width=None, catcher_z=0.0):
     """Render `dirs` facings.  objs_fn(ctx) is called after each setup_scene (which wipes the file)
     and must (re)build the model and return a list of (object, camera_visible) to be instanced per
-    facing; the first placement reuses the objects themselves.  Returns [rgba per dir]."""
+    facing; the first placement reuses the objects themselves.  Returns [rgba per dir].
+    filter_width overrides the pixel filter (narrower = crisper edges); catcher_z lifts the shadow
+    catcher (a turret throws its shadow on the deck it sits on, not on the ground)."""
     ss_cell = cell
     cols = max(1, min(dirs, max_px // (ss_cell * supersample)))
     rows_max = max(1, max_px // (ss_cell * supersample))
@@ -486,6 +556,9 @@ def render_dirs(objs_fn, dirs, px_per_m, cell, anchor, shadow, engine="CYCLES", 
                             shadow=shadow, engine=engine, samples=samples)
         if engine == "CYCLES" and device == "GPU":
             use_gpu(ctx.scene)
+        if filter_width is not None and engine == "CYCLES":
+            ctx.scene.cycles.filter_width = filter_width
+        ctx.catcher.location.z = catcher_z
         protos = objs_fn(ctx)
         ky = ground_y_factor(ctx)
         for i in range(n):
@@ -509,12 +582,13 @@ def render_dirs(objs_fn, dirs, px_per_m, cell, anchor, shadow, engine="CYCLES", 
     return out
 
 
-def crop_union(entries, anchor, pad=1, thresh=6):
+def crop_union(entries, anchor, pad=1, thresh=6, outline=0.0, sharpen=0.0):
     """entries: {key: [rgba per dir]} all the same cell size.  Crops every cell to the union alpha
-    bbox (+pad) and returns (entries, (w, h), new_anchor).  Width/height are made even."""
+    bbox (+pad) and returns (entries, (w, h), new_anchor).  Width/height are made even.
+    outline / sharpen: see clean_cell."""
     x0 = y0 = 10 ** 9
     x1 = y1 = -1
-    entries = {k: [clean_cell(im) for im in frames] for k, frames in entries.items()}
+    entries = {k: [clean_cell(im, outline, sharpen) for im in frames] for k, frames in entries.items()}
     for frames in entries.values():
         for im in frames:
             ys, xs = np.where(im[..., 3] > thresh)
@@ -539,12 +613,37 @@ def crop_union(entries, anchor, pad=1, thresh=6):
 SHADOW_GAIN = 0.8      # Cycles' catcher shadow peaks near 0.78 alpha; bring it to ~common.SHADOW_DARKNESS
 
 
-def clean_cell(a):
+def clean_cell(a, outline=0.0, sharpen=0.0):
     """Post-process one RGBA cell: drop near-invisible alpha, recolour the pure-shadow pixels to
-    common.SHADOW_RGB, scale and quantise their alpha (kills the render noise that bloats the PNG)."""
+    common.SHADOW_RGB, scale and quantise their alpha (kills the render noise that bloats the PNG).
+    sharpen: unsharp-mask amount on the object's colour (plates stay crisp after the downsample).
+    outline: darken the object's silhouette pixels by this fraction (the thin dark rim that keeps a
+    sprite readable on any ground, as the original's sprites have)."""
     a = a.copy()
     al = a[..., 3].astype(np.int32)
     shadow = (a[..., :3].astype(np.int32).sum(-1) < 40) & (al < 250)
+    obj = (~shadow) & (al > 24)
+    if sharpen > 0:
+        rgb = a[..., :3].astype(np.float32)
+        w = obj.astype(np.float32)
+        pad_rgb = np.pad(rgb * w[..., None], ((1, 1), (1, 1), (0, 0)), mode="edge")
+        pad_w = np.pad(w, 1, mode="edge")
+        acc = np.zeros_like(rgb)
+        accw = np.zeros_like(w)
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                k = 0.25 if dx == 0 and dy == 0 else (0.125 if dx == 0 or dy == 0 else 0.0625)
+                acc += k * pad_rgb[1 + dy:1 + dy + rgb.shape[0], 1 + dx:1 + dx + rgb.shape[1]]
+                accw += k * pad_w[1 + dy:1 + dy + rgb.shape[0], 1 + dx:1 + dx + rgb.shape[1]]
+        blur = acc / np.maximum(accw, 1e-6)[..., None]
+        sh = np.clip(rgb + sharpen * (rgb - blur), 0, 255)
+        a[..., :3][obj] = sh[obj].astype(np.uint8)
+    if outline > 0:
+        solid = (~shadow) & (al > 150)
+        p = np.pad(solid, 1)
+        inner = p[:-2, 1:-1] & p[2:, 1:-1] & p[1:-1, :-2] & p[1:-1, 2:]
+        rim = obj & ~inner
+        a[..., :3][rim] = (a[..., :3][rim].astype(np.float32) * (1.0 - outline)).astype(np.uint8)
     al = np.where(al < 10, 0, al)
     al = np.where(shadow, (al * SHADOW_GAIN).astype(np.int32) // 8 * 8, al)
     a[..., 3] = al.astype(np.uint8)
@@ -561,7 +660,8 @@ class Atlas:
         from PIL import Image
         with open(base + ".json") as fh:
             self.meta = json.load(fh)
-        self.img = Image.open(base + ".png").convert("RGBA")
+        img = self.meta.get("image") or (os.path.basename(base) + ".png")
+        self.img = Image.open(os.path.join(os.path.dirname(base), img)).convert("RGBA")
         self.cw, self.ch = self.meta["cell"]["w"], self.meta["cell"]["h"]
         self.ax, self.ay = self.meta["anchor"]["x"], self.meta["anchor"]["y"]
 

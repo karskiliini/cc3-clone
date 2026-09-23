@@ -128,8 +128,9 @@ means that looks best and is cheap to build. Blender 5.2 is installed (`/opt/hom
 **Principle.** All models are our own, built procedurally by Python scripts from primitives (no
 downloaded or third-party assets, nothing taken from the original game). Blender runs headless:
 `blender -b -P tools/blender/<script>.py -- <args>`; `npm run sprites` rebuilds everything. Outputs are
-committed under `public/sprites/` so the game needs no Blender at runtime. The code-drawn sprites stay
-as a fallback when an atlas is missing.
+committed under `public/sprites/` so the game needs no Blender at runtime. (2026-09-23: the old
+code-drawn soldier and crew-weapon sprites were removed; until an atlas has loaded a man is a small
+side-coloured marker.)
 
 **Camera and light (shared by all scripts, in `tools/blender/common.py`).** Orthographic camera
 looking straight down with a slight tilt (about 12° from vertical, toward the north edge of the
@@ -156,6 +157,8 @@ Each atlas is a PNG grid plus a JSON file with the same base name:
 }
 ```
 
+An optional top-level `"image"` names the sheet when it is not `<name>.png` (the soldier and parts
+sheets are lossless WebP since 2026-09-23).
 Frame index = `start + dir * frames + frame`; grid position = (index % columns, floor(index / columns)).
 Direction 0 faces north (up), increasing clockwise. `anchor` is the pixel in the cell that sits on the
 unit's ground position.
@@ -173,8 +176,8 @@ landed pose (corpse or stunned survivor). The detaching shadow is drawn by the g
 ellipse that shrinks with height) so the sprite itself carries no shadow during flight.
 
 **Runtime (`src/render/spriteAtlas.ts`).** Loads atlases and JSON before a battle starts (progress on
-the deploy screen), exposes `drawSoldier(ctx, key, dir, frame, x, y, zoom)` etc., falls back to the
-code-drawn sprite when an entry is missing, and frees atlases for unused side/season combinations.
+the deploy screen), exposes `drawSoldier(ctx, key, dir, frame, x, y, zoom)` etc., and frees atlases
+for unused side/season combinations.
 
 ## 6. Crew-served weapons are worked by men, task by task (user request)
 

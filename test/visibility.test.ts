@@ -46,7 +46,7 @@ function makeState(map: ReturnType<typeof buildMap>): BattleState {
       german: { side: 'german', morale: 100, truceOffered: false, truceAccepted: false, kills: 0, losses: 0, score: 0 },
       soviet: { side: 'soviet', morale: 100, truceOffered: false, truceAccepted: false, kills: 0, losses: 0, score: 0 },
     },
-    spotted, spottedVehicles, messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [],
+    spotted, spottedVehicles, messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [], projectiles: [], sparks: [], pendingBursts: [], structureFx: [],
     result: null, events: [], nextId: 1000,
   };
 }
@@ -171,7 +171,7 @@ describe('observerVisibility', () => {
   });
 });
 
-describe.runIf(!!(globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.VISPERF)('visibility overlay perf (VISPERF=1)', () => {
+describe.skipIf(!(globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.VISPERF)('visibility overlay perf (VISPERF=1)', () => {
   it('measures one full pass on the largest map', async () => {
     const { Battle } = await import('@/sim/battle');
     const { MAPS } = await import('@/data/maps');

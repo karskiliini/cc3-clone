@@ -285,6 +285,7 @@ function stepBoarding(state: BattleState, team: Team, v: Vehicle, def: VehicleDe
     if (!s || !isAble(s) || s.vehicleId != null) continue;
     if (s.hatch) { outside++; continue; }
     if (!canBoard(state, s)) continue;
+    if (cw?.mountBlocked && cw.gunnerId === s.id) { outside++; continue; }
     if (roomLeft(state, v) <= 0) { if (s.path.length > 0 && dist(s.path[s.path.length - 1], spot) < 1) { s.path = []; s.activity = 'defending'; s.stance = 'crouching'; } continue; }
     outside++;
     if (!packed) continue; // the move order is packing the weapon first (crewWeapon.ts)

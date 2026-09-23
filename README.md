@@ -20,17 +20,51 @@ order first (hotkey, order bar, or right-click menu), then click the target.
 
 - Select: left click a soldier or a team box; drag a rectangle on the map for group select;
   Shift adds to the selection; Ctrl+A selects all; double-click a team box to centre on it.
+- Control groups (in battle): **Ctrl+1–9 / Ctrl+0** assigns the selection; **1–9 / 0** recalls it.
+  The numbered HUD buttons show each group's team count and highlight the active group. Click to recall,
+  Ctrl-click to assign; assigning an empty selection clears the group. Cmd works in place of Ctrl.
+  Groups automatically drop lost teams, and recalling an empty group preserves the current selection.
 - Orders: press **Z** Move, **X** Move Fast, **C** Sneak, **V** Fire, **B** Smoke, **N** Defend,
   **M** Ambush (or click the order bar in the bottom strip, or right-click for the classic menu),
-  then click the target. Shift-click adds waypoints (visited in click order before the final click). Esc cancels.
+  then click the target. For Move, Move Fast, and Sneak, hold Shift and click to add waypoints;
+  release Shift to finish at the last placed waypoint, with no extra click. Esc cancels.
   Order endpoints stay marked on the map; hover one to see its line to the team, click it to select that team.
 - Scroll: two-finger scroll / mouse wheel pans; pinch or Ctrl+wheel zooms around the pointer;
-  middle-drag or Space+drag pans; screen edges and arrows/WASD scroll too.
+  middle-drag or Space+drag pans; screen edges and the arrow keys scroll too.
 - Fire order over an enemy: when the pointer is on a spotted enemy team that one of the selected teams can
   actually shoot at, the cursor becomes a large aiming cross and the enemy's visible men (or hull) are
   bracketed. Against armour the cross shows the chance of the best available gun against the plate it
   would hit from there: **black** will not penetrate, **yellow** might, **green** is likely to; red is for men.
 - Hold **Alt** while placing a Fire order: line of sight (bright green clear, dark green obscured, red blocked).
+  Available MGs and vehicle guns show **guesstimate** where concealment permits scattered area fire.
+- Vehicles and MGs can fire scattered bursts or shells into an obscured ordered area, or toward a recent
+  reported firing position. Smoke and foliage hide the target; hills and solid walls still stop direct fire.
+  Low rounds clip crops and tall grass. Repeated branch hits clear hedges and trees; rounds can stop or
+  deflect, with splinters and an orange outgoing tracer marking the contact.
+- Infantry pace at normal battle speed: walking **1.1 m/s**, running **2.4 m/s**, crouching at most
+  **0.7 m/s**, crawling at most **0.3 m/s**, before terrain, wounds, fatigue, and carrying penalties.
+  Feet advance with distance travelled. Soldiers take time to turn, raise, and steady their weapons;
+  range, training, exhaustion, and suppression affect acquisition time. Moving riflemen pause to aim
+  and continue their route between shots. `tools/animPreview.html` demonstrates these at battle speed.
+- SMGs use timed rounds with visible shoulder/hip poses, torso rotation, recoil and sweeping fire.
+  Close assaults and heavy defensive pressure allow faster, less accurate snap fire with rifles,
+  pistols, LMGs and SMGs. Full panic occasionally produces a brief erratic shot or burst, followed
+  by hesitation or flight; broken and cowering men do not fire. Weapon cycling and reloads still apply.
+  Aimed fire uses short bursts (or a PPSh single shot at range); hip fire is a less accurate close-range
+  choice. Prone men keep their weapons shouldered, with smaller recoil and narrower sweeps. Frightened,
+  inexperienced men are more likely to hold the trigger until their magazine is empty. Becoming unable
+  to fire or receiving a new order interrupts the burst. `tools/smgPreview.html` shows the behaviors.
+- Crew MG mounts are separate loads carried by an assistant. A fallen or unable carrier drops the
+  mount; another capable crewman must walk over and collect it. MG34/MG42 tripod guns can continue
+  as light MGs without the mount. The Maxim needs a carrier to move. Losing an assistant never
+  dismantles a gun already mounted; a lone portable-gun operator can pack the gun and leave its
+  tripod behind. Carriers move more slowly with their hands occupied. `tools/mgMountPreview.html`
+  demonstrates packing, casualties, recovery and remounting with the real simulation and renderer.
+- Explosions account for posture and physical shelter. Trenches, craters and intervening walls
+  reduce injury, suppression and knockback; exposed standing men are more vulnerable than men
+  crouching or prone. Grass and smoke provide no blast shielding. A burst inside the same
+  fighting position bypasses its shelter. Shells, rockets, grenades and vehicle detonations use
+  the same exposure rules. `tools/blastProtectionPreview.html` compares the resulting motion.
 - Unit vision: while teams are selected the map shows what they can see of an enemy standing in the open —
   untouched where he would be spotted for sure, a dark-green tint where only obscured (concealment, distance,
   behind the soldiers' facing), darkened where out of range (300 m ring) or blocked. **L** toggles it
@@ -38,12 +72,15 @@ order first (hotkey, order bar, or right-click menu), then click the target.
 - Vehicles: a Move order clicked on a friendly halftrack with room makes the team mount it (the vehicle is
   bracketed in green and the pointer says Mount); any new order to the passengers makes them dismount. A crew that
   bailed out can be sent back to its own serviceable vehicle the same way (Re-man), if their nerves allow it.
+  Panicked crews take time to climb out and drop down, lie prone in shock, then crawl toward nearby cover.
+  Tanks turn and drive along a route into cover; they reverse only when the route is behind the hull.
 - Elevation: the ground height under the pointer is always shown beside it, with the height of whatever
   stands there or is dug in (for example `12.4 m +6.0` on a roof, `12.4 m -1.2` in a foxhole).
 - Tall grass and crops stand about a metre high and limit sight by that height. Vehicles press them down as
   they drive: ground level under the tracks, a little higher between them; blasts flatten them too. The lanes
   open lines of sight, and show in the depth map and the pointer's elevation.
-- **Tab** depth map: the battlefield's surface height as a relief map. The colour ramp spans about
+- **Tab** steps the game speed: 1x, 2x, 4x, back to 1x.
+- **§** depth map: the battlefield's surface height as a relief map. The colour ramp spans about
   0-30 m above the datum (blue-violet for holes below ground, through greens and yellows for low ground,
   to orange and red on hilltops and tall buildings), with a green hatch for tree crowns and contours every
   0.5 m below ground and 2 m above. Hills, ridges, valleys and river beds show as broad bands. Craters, foxholes and trenches show as depressions; blasts breach walls,

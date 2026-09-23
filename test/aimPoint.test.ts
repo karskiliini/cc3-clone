@@ -180,6 +180,9 @@ describe('aim point on the fire mission', () => {
       const state = makeState(1942);
       addGun(state, 'pak38', FROM, 3, { experience: 75, ammo: 20, ammoReserve: 0, rounds: { ...NO_APCR, ap: 14 } });
       const t = kvAt(state, 300);
+      // Isolate the gunner's aim: vehicles now return area fire on the belief formed by an
+      // incoming round even without a spotted target, which otherwise suppresses this crew.
+      t.v.mainAmmo = 0; t.v.coaxAmmo = 0; t.v.bowAmmo = 0;
       state.spottedVehicles.german.add(t.v.id);
       run(state, new Rng(seed), 120);
       if (t.v.state === 'immobilized' || t.v.state === 'abandoned') immobilised++;

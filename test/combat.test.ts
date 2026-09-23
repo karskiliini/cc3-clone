@@ -125,7 +125,7 @@ describe('applyHESplash', () => {
       },
       spotted: { german: new Set(), soviet: new Set() },
       spottedVehicles: { german: new Set(), soviet: new Set() },
-      messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [],
+      messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [], projectiles: [], sparks: [], pendingBursts: [], structureFx: [],
       result: null, events: [], nextId: 10,
     };
   }
@@ -190,6 +190,7 @@ describe('applyHESplash', () => {
       let fired = 0;
       for (let i = 0; i < 200; i++) {
         const before = getSmallArmsStats(state).fired;
+        state.time += 0.1;
         stepCombat(state, rng, 0.1);
         if (getSmallArmsStats(state).fired > before) fired++;
         // This measures fire RATE, not lethality: keep the target alive (a dead/incapacitated

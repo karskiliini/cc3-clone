@@ -21,15 +21,9 @@
   </head>
   <body>
     <h1>cc3_clone — combat effects preview (deterministic, no rAF needed)</h1>
-    <p>
-      Each row is one effect; the 4 columns are hand-set life stages
-      (early / quarter / mid-late / near-end) of that effect's lifetime,
-      drawn with the SAME <code>drawEffects</code>/<code>drawVehicles</code>
-      code the live battle uses, against a plain grass-colored background —
-      so a screenshot always catches every effect regardless of frame timing.
-    </p>
+    <p>Every combat effect at several ages, drawn by the same <code>drawEffects</code> the battle uses. <code>?bg=snow</code> for winter, <code>?anim=1</code> to play.</p>
     <div id="canvasWrap">
-      <canvas id="c" width="1024" height="630"></canvas>
+      <canvas id="c" width="1024" height="960"></canvas>
     </div>
     <div class="legend" id="legend"></div>
     <script type="module" src="./fxPreview.ts"></script>

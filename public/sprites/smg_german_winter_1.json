@@ -1,0 +1,920 @@
+{
+ "scale": 1,
+ "cell": {
+  "w": 36,
+  "h": 36
+ },
+ "anchor": {
+  "x": 18,
+  "y": 19
+ },
+ "columns": 96,
+ "dirs": 16,
+ "entries": {
+  "standing.aimed.twist0": {
+   "start": 0,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": -40,
+   "fireMode": "aimed",
+   "muzzleBodyM": [
+    {
+     "x": -0.47139,
+     "y": 0.82049,
+     "z": 1.85989
+    },
+    {
+     "x": -0.42959,
+     "y": 0.75206,
+     "z": 1.99528
+    },
+    {
+     "x": -0.45857,
+     "y": 0.79927,
+     "z": 1.90337
+    }
+   ]
+  },
+  "standing.aimed.twist1": {
+   "start": 48,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": -20,
+   "fireMode": "aimed",
+   "muzzleBodyM": [
+    {
+     "x": -0.1207,
+     "y": 0.92577,
+     "z": 1.85989
+    },
+    {
+     "x": -0.10483,
+     "y": 0.84717,
+     "z": 1.99528
+    },
+    {
+     "x": -0.11592,
+     "y": 0.90145,
+     "z": 1.90337
+    }
+   ]
+  },
+  "standing.aimed.twist2": {
+   "start": 96,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": 0,
+   "fireMode": "aimed",
+   "muzzleBodyM": [
+    {
+     "x": 0.24484,
+     "y": 0.90476,
+     "z": 1.85989
+    },
+    {
+     "x": 0.23287,
+     "y": 0.82548,
+     "z": 1.99528
+    },
+    {
+     "x": 0.24102,
+     "y": 0.88027,
+     "z": 1.90337
+    }
+   ]
+  },
+  "standing.aimed.twist3": {
+   "start": 144,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": 20,
+   "fireMode": "aimed",
+   "muzzleBodyM": [
+    {
+     "x": 0.58115,
+     "y": 0.76,
+     "z": 1.85989
+    },
+    {
+     "x": 0.54279,
+     "y": 0.68959,
+     "z": 1.99528
+    },
+    {
+     "x": 0.56919,
+     "y": 0.73829,
+     "z": 1.90337
+    }
+   ]
+  },
+  "standing.aimed.twist4": {
+   "start": 192,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": 40,
+   "fireMode": "aimed",
+   "muzzleBodyM": [
+    {
+     "x": 0.84767,
+     "y": 0.50894,
+     "z": 1.85989
+    },
+    {
+     "x": 0.78754,
+     "y": 0.4559,
+     "z": 1.99528
+    },
+    {
+     "x": 0.829,
+     "y": 0.49263,
+     "z": 1.90337
+    }
+   ]
+  },
+  "standing.hip.twist0": {
+   "start": 240,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": -40,
+   "fireMode": "hip",
+   "muzzleBodyM": [
+    {
+     "x": -0.43782,
+     "y": 0.66354,
+     "z": 1.55093
+    },
+    {
+     "x": -0.35587,
+     "y": 0.51899,
+     "z": 1.73601
+    },
+    {
+     "x": -0.41362,
+     "y": 0.61986,
+     "z": 1.61123
+    }
+   ]
+  },
+  "standing.hip.twist1": {
+   "start": 288,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": -20,
+   "fireMode": "hip",
+   "muzzleBodyM": [
+    {
+     "x": -0.14285,
+     "y": 0.7668,
+     "z": 1.55093
+    },
+    {
+     "x": -0.11528,
+     "y": 0.60295,
+     "z": 1.73601
+    },
+    {
+     "x": -0.13504,
+     "y": 0.71749,
+     "z": 1.61123
+    }
+   ]
+  },
+  "standing.hip.twist2": {
+   "start": 336,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": 0,
+   "fireMode": "hip",
+   "muzzleBodyM": [
+    {
+     "x": 0.16966,
+     "y": 0.76296,
+     "z": 1.55093
+    },
+    {
+     "x": 0.13953,
+     "y": 0.59955,
+     "z": 1.73601
+    },
+    {
+     "x": 0.16013,
+     "y": 0.71394,
+     "z": 1.61123
+    }
+   ]
+  },
+  "standing.hip.twist3": {
+   "start": 384,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": 20,
+   "fireMode": "hip",
+   "muzzleBodyM": [
+    {
+     "x": 0.46201,
+     "y": 0.65246,
+     "z": 1.55093
+    },
+    {
+     "x": 0.3778,
+     "y": 0.50921,
+     "z": 1.73601
+    },
+    {
+     "x": 0.43629,
+     "y": 0.60966,
+     "z": 1.61123
+    }
+   ]
+  },
+  "standing.hip.twist4": {
+   "start": 432,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": 40,
+   "fireMode": "hip",
+   "muzzleBodyM": [
+    {
+     "x": 0.69893,
+     "y": 0.44863,
+     "z": 1.55093
+    },
+    {
+     "x": 0.57081,
+     "y": 0.34283,
+     "z": 1.73601
+    },
+    {
+     "x": 0.66012,
+     "y": 0.41722,
+     "z": 1.61123
+    }
+   ]
+  },
+  "crouched.aimed.twist0": {
+   "start": 480,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": -40,
+   "fireMode": "aimed",
+   "muzzleBodyM": [
+    {
+     "x": -0.55419,
+     "y": 0.89341,
+     "z": 1.24141
+    },
+    {
+     "x": -0.51328,
+     "y": 0.83184,
+     "z": 1.38936
+    },
+    {
+     "x": -0.54168,
+     "y": 0.87444,
+     "z": 1.28888
+    }
+   ]
+  },
+  "crouched.aimed.twist1": {
+   "start": 528,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": -20,
+   "fireMode": "aimed",
+   "muzzleBodyM": [
+    {
+     "x": -0.09702,
+     "y": 1.01297,
+     "z": 1.24141
+    },
+    {
+     "x": -0.07964,
+     "y": 0.94112,
+     "z": 1.38936
+    },
+    {
+     "x": -0.09175,
+     "y": 0.99086,
+     "z": 1.28888
+    }
+   ]
+  },
+  "crouched.aimed.twist2": {
+   "start": 576,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": 0,
+   "fireMode": "aimed",
+   "muzzleBodyM": [
+    {
+     "x": 0.37348,
+     "y": 0.96895,
+     "z": 1.24141
+    },
+    {
+     "x": 0.36523,
+     "y": 0.8955,
+     "z": 1.38936
+    },
+    {
+     "x": 0.37087,
+     "y": 0.94638,
+     "z": 1.28888
+    }
+   ]
+  },
+  "crouched.aimed.twist3": {
+   "start": 624,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": 20,
+   "fireMode": "aimed",
+   "muzzleBodyM": [
+    {
+     "x": 0.80054,
+     "y": 0.76668,
+     "z": 1.24141
+    },
+    {
+     "x": 0.76767,
+     "y": 0.70047,
+     "z": 1.38936
+    },
+    {
+     "x": 0.79037,
+     "y": 0.74636,
+     "z": 1.28888
+    }
+   ]
+  },
+  "crouched.aimed.twist4": {
+   "start": 672,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": 40,
+   "fireMode": "aimed",
+   "muzzleBodyM": [
+    {
+     "x": 1.13267,
+     "y": 0.43053,
+     "z": 1.24141
+    },
+    {
+     "x": 1.07914,
+     "y": 0.37956,
+     "z": 1.38936
+    },
+    {
+     "x": 1.11616,
+     "y": 0.41492,
+     "z": 1.28888
+    }
+   ]
+  },
+  "crouched.hip.twist0": {
+   "start": 720,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": -40,
+   "fireMode": "hip",
+   "muzzleBodyM": [
+    {
+     "x": -0.51607,
+     "y": 0.7078,
+     "z": 0.89039
+    },
+    {
+     "x": -0.43763,
+     "y": 0.58465,
+     "z": 1.10549
+    },
+    {
+     "x": -0.49311,
+     "y": 0.67132,
+     "z": 0.96002
+    }
+   ]
+  },
+  "crouched.hip.twist1": {
+   "start": 768,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": -20,
+   "fireMode": "hip",
+   "muzzleBodyM": [
+    {
+     "x": -0.12468,
+     "y": 0.82552,
+     "z": 0.89039
+    },
+    {
+     "x": -0.09309,
+     "y": 0.68296,
+     "z": 1.10549
+    },
+    {
+     "x": -0.11558,
+     "y": 0.78339,
+     "z": 0.96002
+    }
+   ]
+  },
+  "crouched.hip.twist2": {
+   "start": 816,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": 0,
+   "fireMode": "hip",
+   "muzzleBodyM": [
+    {
+     "x": 0.28337,
+     "y": 0.80227,
+     "z": 0.89039
+    },
+    {
+     "x": 0.26429,
+     "y": 0.65751,
+     "z": 1.10549
+    },
+    {
+     "x": 0.27751,
+     "y": 0.75957,
+     "z": 0.96002
+    }
+   ]
+  },
+  "crouched.hip.twist3": {
+   "start": 864,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": 20,
+   "fireMode": "hip",
+   "muzzleBodyM": [
+    {
+     "x": 0.65886,
+     "y": 0.64086,
+     "z": 0.89039
+    },
+    {
+     "x": 0.59142,
+     "y": 0.51136,
+     "z": 1.10549
+    },
+    {
+     "x": 0.63875,
+     "y": 0.60274,
+     "z": 0.96002
+    }
+   ]
+  },
+  "crouched.hip.twist4": {
+   "start": 912,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": 40,
+   "fireMode": "hip",
+   "muzzleBodyM": [
+    {
+     "x": 0.9565,
+     "y": 0.36076,
+     "z": 0.89039
+    },
+    {
+     "x": 0.84884,
+     "y": 0.26213,
+     "z": 1.10549
+    },
+    {
+     "x": 0.92456,
+     "y": 0.33182,
+     "z": 0.96002
+    }
+   ]
+  },
+  "kneeling.aimed.twist0": {
+   "start": 960,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": -40,
+   "fireMode": "aimed",
+   "muzzleBodyM": [
+    {
+     "x": -0.46426,
+     "y": 0.71199,
+     "z": 1.26406
+    },
+    {
+     "x": -0.42323,
+     "y": 0.64355,
+     "z": 1.39986
+    },
+    {
+     "x": -0.45168,
+     "y": 0.69077,
+     "z": 1.30767
+    }
+   ]
+  },
+  "kneeling.aimed.twist1": {
+   "start": 1008,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": -20,
+   "fireMode": "aimed",
+   "muzzleBodyM": [
+    {
+     "x": -0.11413,
+     "y": 0.81441,
+     "z": 1.26406
+    },
+    {
+     "x": -0.09898,
+     "y": 0.73607,
+     "z": 1.39986
+    },
+    {
+     "x": -0.10957,
+     "y": 0.79017,
+     "z": 1.30767
+    }
+   ]
+  },
+  "kneeling.aimed.twist2": {
+   "start": 1056,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": 0,
+   "fireMode": "aimed",
+   "muzzleBodyM": [
+    {
+     "x": 0.24992,
+     "y": 0.79091,
+     "z": 1.26406
+    },
+    {
+     "x": 0.23735,
+     "y": 0.71211,
+     "z": 1.39986
+    },
+    {
+     "x": 0.24591,
+     "y": 0.76657,
+     "z": 1.30767
+    }
+   ]
+  },
+  "kneeling.aimed.twist3": {
+   "start": 1104,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": 20,
+   "fireMode": "aimed",
+   "muzzleBodyM": [
+    {
+     "x": 0.58397,
+     "y": 0.64431,
+     "z": 1.26406
+    },
+    {
+     "x": 0.54521,
+     "y": 0.57456,
+     "z": 1.39986
+    },
+    {
+     "x": 0.57188,
+     "y": 0.62282,
+     "z": 1.30767
+    }
+   ]
+  },
+  "kneeling.aimed.twist4": {
+   "start": 1152,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": 40,
+   "fireMode": "aimed",
+   "muzzleBodyM": [
+    {
+     "x": 0.84773,
+     "y": 0.39231,
+     "z": 1.26406
+    },
+    {
+     "x": 0.78746,
+     "y": 0.34002,
+     "z": 1.39986
+    },
+    {
+     "x": 0.82902,
+     "y": 0.37624,
+     "z": 1.30767
+    }
+   ]
+  },
+  "kneeling.hip.twist0": {
+   "start": 1200,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": -40,
+   "fireMode": "hip",
+   "muzzleBodyM": [
+    {
+     "x": -0.42808,
+     "y": 0.5549,
+     "z": 0.95365
+    },
+    {
+     "x": -0.348,
+     "y": 0.41048,
+     "z": 1.13978
+    },
+    {
+     "x": -0.40446,
+     "y": 0.51128,
+     "z": 1.01428
+    }
+   ]
+  },
+  "kneeling.hip.twist1": {
+   "start": 1248,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": -20,
+   "fireMode": "hip",
+   "muzzleBodyM": [
+    {
+     "x": -0.13385,
+     "y": 0.65443,
+     "z": 0.95365
+    },
+    {
+     "x": -0.10801,
+     "y": 0.49132,
+     "z": 1.13978
+    },
+    {
+     "x": -0.12659,
+     "y": 0.60536,
+     "z": 1.01428
+    }
+   ]
+  },
+  "kneeling.hip.twist2": {
+   "start": 1296,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": 0,
+   "fireMode": "hip",
+   "muzzleBodyM": [
+    {
+     "x": 0.17666,
+     "y": 0.64732,
+     "z": 0.95365
+    },
+    {
+     "x": 0.14516,
+     "y": 0.48521,
+     "z": 1.13978
+    },
+    {
+     "x": 0.16671,
+     "y": 0.59873,
+     "z": 1.01428
+    }
+   ]
+  },
+  "kneeling.hip.twist3": {
+   "start": 1344,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": 20,
+   "fireMode": "hip",
+   "muzzleBodyM": [
+    {
+     "x": 0.46602,
+     "y": 0.53444,
+     "z": 0.95365
+    },
+    {
+     "x": 0.38098,
+     "y": 0.39288,
+     "z": 1.13978
+    },
+    {
+     "x": 0.44005,
+     "y": 0.49218,
+     "z": 1.01428
+    }
+   ]
+  },
+  "kneeling.hip.twist4": {
+   "start": 1392,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": 40,
+   "fireMode": "hip",
+   "muzzleBodyM": [
+    {
+     "x": 0.69932,
+     "y": 0.3294,
+     "z": 0.95365
+    },
+    {
+     "x": 0.57099,
+     "y": 0.22546,
+     "z": 1.13978
+    },
+    {
+     "x": 0.66046,
+     "y": 0.29857,
+     "z": 1.01428
+    }
+   ]
+  },
+  "prone.aimed.twist0": {
+   "start": 1440,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": -20,
+   "fireMode": "aimed",
+   "muzzleBodyM": [
+    {
+     "x": -0.31347,
+     "y": 1.13542,
+     "z": 0.3575
+    },
+    {
+     "x": -0.30316,
+     "y": 1.10708,
+     "z": 0.41232
+    },
+    {
+     "x": -0.31022,
+     "y": 1.12649,
+     "z": 0.37505
+    }
+   ]
+  },
+  "prone.aimed.twist1": {
+   "start": 1488,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": -10,
+   "fireMode": "aimed",
+   "muzzleBodyM": [
+    {
+     "x": -0.077,
+     "y": 1.17353,
+     "z": 0.3575
+    },
+    {
+     "x": -0.07176,
+     "y": 1.14383,
+     "z": 0.41232
+    },
+    {
+     "x": -0.07535,
+     "y": 1.16417,
+     "z": 0.37505
+    }
+   ]
+  },
+  "prone.aimed.twist2": {
+   "start": 1536,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": 0,
+   "fireMode": "aimed",
+   "muzzleBodyM": [
+    {
+     "x": 0.1625,
+     "y": 1.17,
+     "z": 0.3575
+    },
+    {
+     "x": 0.1625,
+     "y": 1.13985,
+     "z": 0.41232
+    },
+    {
+     "x": 0.1625,
+     "y": 1.1605,
+     "z": 0.37505
+    }
+   ]
+  },
+  "prone.aimed.twist3": {
+   "start": 1584,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": 10,
+   "fireMode": "aimed",
+   "muzzleBodyM": [
+    {
+     "x": 0.39775,
+     "y": 1.12493,
+     "z": 0.3575
+    },
+    {
+     "x": 0.39251,
+     "y": 1.09524,
+     "z": 0.41232
+    },
+    {
+     "x": 0.3961,
+     "y": 1.11558,
+     "z": 0.37505
+    }
+   ]
+  },
+  "prone.aimed.twist4": {
+   "start": 1632,
+   "frames": 3,
+   "fps": 20,
+   "loop": false,
+   "twistDegrees": 20,
+   "fireMode": "aimed",
+   "muzzleBodyM": [
+    {
+     "x": 0.62159,
+     "y": 1.0397,
+     "z": 0.3575
+    },
+    {
+     "x": 0.61128,
+     "y": 1.01137,
+     "z": 0.41232
+    },
+    {
+     "x": 0.61834,
+     "y": 1.03077,
+     "z": 0.37505
+    }
+   ]
+  }
+ },
+ "side": "german",
+ "season": "winter",
+ "pxPerM": 10,
+ "figureScale": 1.3,
+ "tiltDeg": 12.0,
+ "weapons": [
+  "smg"
+ ],
+ "bodyHeading": true,
+ "twistDegrees": [
+  -40,
+  -20,
+  0,
+  20,
+  40
+ ],
+ "proneTwistDegrees": [
+  -20,
+  -10,
+  0,
+  10,
+  20
+ ],
+ "recoilFrames": [
+  "rest",
+  "kick",
+  "recovery"
+ ],
+ "muzzleCoordinateFrame": "body-local: x right, y forward, z up; figureScale already applied",
+ "image": "smg_german_winter_1.webp"
+}

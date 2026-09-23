@@ -16,7 +16,7 @@ import { hasLOS } from './los';
 import { bestRoundAgainst } from './ballistics';
 import { addMessage } from './messages';
 import { onPassengerBoarded, onPassengerOut } from './transport';
-import { isDazed } from './daze';
+import { applyDaze, isDazed } from './daze';
 import {
   coaxUsable, crewRoleOf, ensureSeats, expectedArmorMm, hasSystem, hurtCrewman, isImmobile, mainGunUsable, seatRoles, systemState, vehicleLayout,
 } from './vehicleDamage';
@@ -24,8 +24,8 @@ import {
 /** Seconds a calm, unhurt man of average experience needs through a hatch (spec: 1.5 to 2.5 s). */
 export const CLIMB_MIN_S = 1.5;
 export const CLIMB_MAX_S = 2.5;
-/** A panicked bail-out is faster and sloppier. */
-export const PANIC_CLIMB_MUL = 0.6;
+/** Shocked crew struggle through the hatch before throwing themselves down. */
+export const PANIC_CLIMB_MUL = 1.8;
 export const WOUNDED_CLIMB_MUL = 1.5;
 /** How far from the hull side a man lands (m). */
 export const BESIDE_HULL_M = 0.9;
@@ -196,6 +196,7 @@ export function stepExit(state: BattleState, rng: Pick<Rng, 'next'>, v: Vehicle)
       vehicleId: v.id, hatch: hi, kind: 'bailout', from: hatchWorld(v, def, h), to: besideHatch(state, v, def, hi, threatDir),
       start: at, until: at + climbSeconds(man, panicked), panicked,
     };
+    if (panicked) climb.dropAt = at + (climb.until - at) * 0.7;
     busy[hi] = climb.until;
     man.vehicleId = null;
     man.hatch = climb;
@@ -214,7 +215,7 @@ export function hatchProgress(c: HatchClimb, time: number): number {
   return clamp((time - c.start) / Math.max(1e-6, c.until - c.start), 0, 1);
 }
 
-function stepClimbs(state: BattleState): void {
+function stepClimbs(state: BattleState, rng: Rng): void {
   for (const s of state.soldiers.values()) {
     const c = s.hatch;
     if (!c) continue;
@@ -226,7 +227,13 @@ function stepClimbs(state: BattleState): void {
       const h = c.passenger ? undefined : vehicleLayout(def).hatches[c.hatch]; // a standing transport: fixed ends
       if (h) { const onHull = hatchWorld(v, def, h); if (c.kind === 'bailout') c.from = onHull; else c.to = onHull; }
     }
-    const p = hatchProgress(c, state.time);
+    let p = hatchProgress(c, state.time);
+    if (c.dropAt != null) {
+      // Most of the time is spent hauling himself out. Only then does he drop off the hull,
+      // accelerating toward the ground instead of sliding evenly across it throughout the climb.
+      if (state.time < c.dropAt) p = 0.12 * clamp((state.time - c.start) / Math.max(1e-6, c.dropAt - c.start), 0, 1);
+      else p = 0.12 + 0.88 * clamp((state.time - c.dropAt) / Math.max(1e-6, c.until - c.dropAt), 0, 1) ** 2;
+    }
     s.pos = { x: c.from.x + (c.to.x - c.from.x) * p, y: c.from.y + (c.to.y - c.from.y) * p };
     s.stance = 'standing';
     s.cover = 0;
@@ -237,8 +244,19 @@ function stepClimbs(state: BattleState): void {
       s.pos = { ...c.to };
       if (c.panicked) {
         s.activity = 'panicked'; s.mind.state = 'panicked';
-        s.reloadTimer = 0; // movement.ts: free to pick a direction to run in
-        if (v) s.bailRun = { to: runSpot(state, v, s), until: state.time + (v.state === 'burning' ? BAIL_RUN_FIRE_S : BAIL_RUN_S) };
+        s.reloadTimer = 0;
+        if (c.passenger) {
+          // Troops unloading a transport still make their emergency dash clear of it.
+          if (v) s.bailRun = { to: runSpot(state, v, s), until: state.time + (v.state === 'burning' ? BAIL_RUN_FIRE_S : BAIL_RUN_S) };
+        } else {
+          // A shaken tank crew first lies where it fell, then uses the existing dazed crawl
+          // for nearby cover. These gates also keep orders, firing and remounting from taking over.
+          s.bailRun = undefined;
+          s.dodgeUntil = undefined;
+          s.stance = 'prone';
+          s.stunnedUntil = Math.max(s.stunnedUntil ?? 0, state.time + (2.5 + rng.next() * 2) * (s.health === 'wounded' ? 1.2 : 1));
+          applyDaze(state, s, 0.9, false);
+        }
       } else { s.activity = 'defending'; s.stance = 'crouching'; }
       if (c.passenger && v) onPassengerOut(state, v, s, c.panicked);
     } else if (c.passenger) {
@@ -252,7 +270,7 @@ function stepClimbs(state: BattleState): void {
   }
 }
 
-/** Seconds a man who bailed out in a panic runs before he goes to ground. */
+/** Seconds a passenger who left a transport in a panic runs before he goes to ground. */
 export const BAIL_RUN_S = 4;
 /** ...and out of a burning one: long enough to get clear of it (sim/vehicleExplosion.ts FIRE_HAZARD_M). */
 export const BAIL_RUN_FIRE_S = 8;
@@ -550,7 +568,7 @@ export function stepVehicleCrews(state: BattleState, rng: Rng, dt: number): void
     if (!v.remount && tick && v.state === 'abandoned' && crewReturnRefusal(state, v, false) == null) v.remount = { since: state.time, ordered: false };
     stepRemount(state, v, team, def);
   }
-  stepClimbs(state);
+  stepClimbs(state, rng);
 }
 
 /** Direction the crew last believed the danger to be in, for the renderer and tests. */

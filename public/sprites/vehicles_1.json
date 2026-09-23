@@ -247,7 +247,7 @@
   "panther": {
    "file": "vehicles_panther_1",
    "cell": {
-    "w": 122,
+    "w": 124,
     "h": 122
    },
    "anchor": {
@@ -315,7 +315,7 @@
    "file": "vehicles_tiger_1",
    "cell": {
     "w": 116,
-    "h": 116
+    "h": 114
    },
    "anchor": {
     "x": 57,
@@ -385,7 +385,7 @@
     "h": 84
    },
    "anchor": {
-    "x": 42,
+    "x": 41,
     "y": 41
    },
    "columns": 16,
@@ -461,12 +461,12 @@
   "t26": {
    "file": "vehicles_t26_1",
    "cell": {
-    "w": 84,
+    "w": 82,
     "h": 82
    },
    "anchor": {
     "x": 41,
-    "y": 41
+    "y": 40
    },
    "columns": 16,
    "hasTurret": true,
@@ -532,7 +532,7 @@
     "h": 96
    },
    "anchor": {
-    "x": 49,
+    "x": 48,
     "y": 48
    },
    "columns": 16,
@@ -796,7 +796,7 @@
   "t34_85": {
    "file": "vehicles_t34_85_1",
    "cell": {
-    "w": 116,
+    "w": 118,
     "h": 116
    },
    "anchor": {
@@ -863,7 +863,7 @@
   "is2": {
    "file": "vehicles_is2_1",
    "cell": {
-    "w": 136,
+    "w": 138,
     "h": 134
    },
    "anchor": {

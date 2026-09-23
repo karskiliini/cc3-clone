@@ -3,7 +3,7 @@ import type { BattleConfig, BattleState, GameMap, MapDef, Soldier, Team, Terrain
 import { SIM_DT, TILE_M } from '@/shared/types';
 import { Rng } from '@/shared/rng';
 import { dist } from '@/shared/math';
-import { stepCombat, getCombatInstrumentation, mortarDispersionM, mortarObservation, mortarWalkState } from '@/sim/combat';
+import { stepCombat, stepPendingBursts, getCombatInstrumentation, mortarDispersionM, mortarFlightS, mortarObservation, mortarWalkState } from '@/sim/combat';
 import {
   stepCrewWeapons, crewWeaponStatus, layTimeS, loadTimeS, fireMissionWait, MISSION_NEW_AIM_M,
 } from '@/sim/crewWeapon';
@@ -40,7 +40,7 @@ function makeState(): BattleState {
     },
     spotted: { german: new Set(), soviet: new Set() },
     spottedVehicles: { german: new Set(), soviet: new Set() },
-    messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [],
+    messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [], projectiles: [], sparks: [], pendingBursts: [], structureFx: [],
     result: null, events: [], nextId: 100,
   };
 }
@@ -87,7 +87,8 @@ function addSpotter(state: BattleState, pos: Vec2): Soldier {
   return s;
 }
 
-/** Steps the crew-weapon and combat systems; returns HE impact points and their times. */
+/** Steps the crew-weapon and combat systems; returns each mortar round fired: where it will land
+ * and when it was fired (the bomb bursts a flight time later, see stepPendingBursts). */
 const HOME = new WeakMap<Soldier, Vec2>();
 function run(state: BattleState, rng: Rng, seconds: number): { pos: Vec2; t: number }[] {
   const out: { pos: Vec2; t: number }[] = [];
@@ -95,8 +96,11 @@ function run(state: BattleState, rng: Rng, seconds: number): { pos: Vec2; t: num
   for (let i = 0; i < steps; i++) {
     state.time += SIM_DT;
     stepCrewWeapons(state, SIM_DT);
+    const n0 = state.projectiles.length;
     stepCombat(state, rng, SIM_DT);
-    for (const e of state.explosions) if (e.kind === 'he') out.push({ pos: e.pos, t: state.time });
+    stepPendingBursts(state, rng);
+    for (const p of state.projectiles.slice(n0)) if (p.kind === 'mortar') out.push({ pos: p.to, t: state.time });
+    state.projectiles = state.projectiles.filter((p) => state.time < p.t0 + p.flightS);
     state.explosions.length = 0;
     state.tracers.length = 0;
     state.events.length = 0;
@@ -123,6 +127,33 @@ describe('indirect fire: mortars', () => {
     expect(hits.length).toBeGreaterThan(0);
     expect(getCombatInstrumentation(state).mortarRoundsFiredBySide.german).toBe(hits.length);
     for (const h of hits) expect(dist(h.pos, target) * TILE_M).toBeLessThan(60);
+  });
+
+  it('the bomb bursts where and when it lands, a flight time after it is fired', () => {
+    const { state, mortar, gunner } = mortarSetup();
+    mortar.order = { type: 'fire', target: { x: 100, y: 20 }, issuedAt: 0 };
+    let fired: { t: number; from: Vec2; pos: Vec2; flightS: number } | null = null;
+    let burst: { t: number; pos: Vec2 } | null = null;
+    for (let i = 0; i < Math.round(40 / SIM_DT) && !burst; i++) {
+      state.time += SIM_DT;
+      stepCrewWeapons(state, SIM_DT);
+      stepCombat(state, new Rng(4 + i), SIM_DT);
+      if (!fired && state.projectiles.length) {
+        const p = state.projectiles[0];
+        fired = { t: state.time, from: p.from, pos: p.to, flightS: p.flightS };
+        expect(state.explosions.filter((e) => e.kind === 'he')).toHaveLength(0); // nothing yet
+      }
+      stepPendingBursts(state, new Rng(9));
+      const he = state.explosions.find((e) => e.kind === 'he');
+      if (he) burst = { t: state.time, pos: he.pos };
+    }
+    expect(fired).not.toBeNull();
+    expect(burst).not.toBeNull();
+    expect(fired!.flightS).toBeCloseTo(mortarFlightS(dist(fired!.from, fired!.pos) * TILE_M), 5);
+    expect(dist(fired!.from, gunner.pos) * TILE_M).toBeLessThan(2); // fired from the gunner's tube
+    expect(burst!.t - fired!.t).toBeGreaterThanOrEqual(fired!.flightS - 1e-6);
+    expect(burst!.t - fired!.t).toBeLessThan(fired!.flightS + SIM_DT + 1e-6);
+    expect(burst!.pos).toEqual(fired!.pos);
   });
 
   it('does not fire inside its minimum range', () => {

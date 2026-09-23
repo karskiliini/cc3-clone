@@ -2,7 +2,7 @@
 // teamIconArt.ts — hand-authored 40x26 painted-miniature team icons for the
 // battle HUD team grid and the Requisition force pool, replacing the old
 // flat vector silhouettes. Each icon is built as a 2D grid of characters (one
-// char per pixel), following the same method as soldierArt.ts/vehicleArt.ts:
+// char per pixel), following the same method as soldierArt.ts:
 // dedicated builder code stamps small pixel groups (helmet, tunic, legs,
 // weapon, tracks...) onto a blank grid, which is then painted onto a canvas
 // via a small palette. The lower third of every icon carries a soft pale

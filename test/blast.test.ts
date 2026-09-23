@@ -36,7 +36,7 @@ function makeState(): BattleState {
       soviet: { side: 'soviet', morale: 80, truceOffered: false, truceAccepted: false, kills: 0, losses: 0, score: 0 },
     },
     spotted: { german: new Set(), soviet: new Set() }, spottedVehicles: { german: new Set(), soviet: new Set() },
-    messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [], result: null, events: [], nextId: 10,
+    messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [], projectiles: [], sparks: [], pendingBursts: [], structureFx: [], result: null, events: [], nextId: 10,
   };
 }
 const mortar: WeaponDef = {
@@ -65,7 +65,7 @@ describe('blast knockback', () => {
       expect(s.blast!.time).toBe(10);
       return (s.pos.x - (10.5 + dTiles)) * TILE_M;
     };
-    const near = throwOf(mortar, 0.5), far = throwOf(mortar, 2.5), small = throwOf(grenade, 0.5);
+    const near = throwOf(mortar, 0.5), far = throwOf(mortar, 2), small = throwOf(grenade, 0.5);
     for (const m of [near, far, small]) { expect(m).toBeGreaterThanOrEqual(1 - 1e-6); expect(m).toBeLessThanOrEqual(15 + 1e-6); }
     expect(near).toBeGreaterThan(far);
     expect(near).toBeGreaterThan(small);

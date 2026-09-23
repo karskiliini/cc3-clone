@@ -39,7 +39,7 @@ function makeState(): BattleState {
     },
     spotted: { german: new Set(), soviet: new Set() },
     spottedVehicles: { german: new Set(), soviet: new Set() },
-    messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [],
+    messages: [], explosions: [], tracers: [], flashes: [], bloodDecals: [], projectiles: [], sparks: [], pendingBursts: [], structureFx: [],
     result: null, events: [], nextId: 100,
   };
 }
@@ -298,9 +298,10 @@ describe('crew tasks: the firing chain', () => {
     const { state, team, men } = gunSetup('pak40', 'atgun', 2, 'ready');
     const cw = team.crewWeapon!;
     const gunner = men[0];
-    // loaded and laid on a point (gun timing: a 7.5 cm round takes ~5.9 s to load, was 3.5 s)
-    step(state, 9);
+    // The loader must walk to the breech before spending ~5.9 s loading the 7.5 cm round.
+    const loadedAfter = until(state, () => !!cw.chambered, 20);
     expect(cw.chambered).toBe(true);
+    expect(loadedAfter).toBeGreaterThan(loadTimeS('pak40', men[1].experience));
     const aim = { x: 50, y: 5 };
     expect(fireMissionWait(state, team, gunner, { aim, targetTeamId: 7 })).toBeGreaterThan(1);
     until(state, () => !!cw.laid, 10, () => { fireMissionWait(state, team, gunner, { aim, targetTeamId: 7 }); });
@@ -372,7 +373,6 @@ describe('crew tasks: determinism', () => {
 });
 
 import { crewTaskAnim, progressFrame, weaponStateChain } from '@/render/soldierAnim';
-import { legacyVariant, trailVariant } from '@/render/weaponArt';
 
 describe('crew tasks: what the renderer is told', () => {
   it('a working crewman gets his task pose with the frame from the task progress; packing plays it backwards', () => {
@@ -410,12 +410,9 @@ describe('crew tasks: what the renderer is told', () => {
 
   it('weapon sprite states fall back to setup / half / packed when the atlas lacks the drill steps', () => {
     expect(weaponStateChain('limbered')).toEqual(['limbered', 'packed']);
-    expect(weaponStateChain('trailLeftOpen')).toEqual(['trailLeftOpen']); // else the code-drawn swinging leg
+    expect(weaponStateChain('trailLeftOpen')).toEqual(['trailLeftOpen']);
     expect(weaponStateChain('emplaced')).toEqual(['emplaced', 'setup']);
     expect(weaponStateChain('recoil')).toEqual(['recoil', 'emplaced', 'setup']);
-    expect(legacyVariant('trailsClosed')).toBe('packed');
-    expect(legacyVariant(trailVariant(0.5, 0))).toBe('half');
-    expect(trailVariant(0.49, 1)).toBe('trail:2:4');
   });
 });
 
@@ -427,6 +424,9 @@ describe('crew tasks: a hauled gun pivots about its axle', () => {
     const { state, team, men } = gunSetup('pak40', 'atgun', 3, 'packed');
     const cw = team.crewWeapon!;
     cw.facing = Math.PI / 2; // limbered, muzzle east
+    // The haulers have already walked to the towing eye; this case isolates the axle and turn.
+    men[0].pos = weaponFramePoint(cw.pos, cw.facing, haulStationM('pak40', 0));
+    men[1].pos = weaponFramePoint(cw.pos, cw.facing, haulStationM('pak40', 1));
     const corner = { x: 62, y: 30 }, end = { x: 62, y: 40 };
     team.order = { type: 'move', target: end, issuedAt: 0 };
     for (const m of men) { m.path = [{ ...corner }, { ...end }]; m.activity = 'moving'; }

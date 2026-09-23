@@ -1,0 +1,40 @@
+{
+ "scale": 2,
+ "cell": {
+  "w": 190,
+  "h": 186
+ },
+ "anchor": {
+  "x": 84,
+  "y": 82
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "marder3.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "marder3.hull.trackL": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "marder3.hull.trackR": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "marder3",
+ "season": "winter",
+ "hasTurret": false,
+ "lengthM": 4.65,
+ "widthM": 2.95,
+ "image": "vehicles_marder3_winter_2.webp"
+}

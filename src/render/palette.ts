@@ -110,6 +110,7 @@ export const ORDER_COLOR: Record<OrderType, string> = {
   smoke: '#e8e8e0',
   defend: '#4ac0c0',
   ambush: '#e08a2c',
+  assault: '#e05a2c',
 };
 
 export const SIDE_COLOR: Record<Side, string> = {

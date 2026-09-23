@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   atlasCellCount, atlasCellRect, atlasDestRect, atlasFrameIndex, atlasScaleForZoom, battleAtlasNames, drawAtlasFrame,
-  drawSoldier, registerAtlas, soldierAtlasName, turretPivotM, validateAtlasMeta, type AtlasMeta,
+  drawSoldier, registerAtlas, soldierAtlasName, smgAtlasName, turretPivotM, validateAtlasMeta, weaponMuzzleM, freeAllAtlases, type AtlasMeta,
 } from '@/render/spriteAtlas';
 import { entryKeyChain, resolveEntryKey } from '@/render/soldierAnim';
 import { buildSoldierPlaceholder, buildVehiclePlaceholder, buildWeaponPlaceholder } from '../tools/placeholderAtlas';
@@ -41,9 +41,10 @@ describe('atlas index maths', () => {
 
   it('names the atlases a battle needs', () => {
     expect(soldierAtlasName('german', 'autumn', 1)).toBe('soldiers_german_summer_1');
+    expect(smgAtlasName('soviet', 'autumn', 2)).toBe('smg_soviet_summer_2');
     expect(battleAtlasNames(['german', 'soviet'], 'winter')).toEqual([
-      'soldiers_german_winter_1', 'soldiers_soviet_winter_1', 'weapons_1', 'items_1', 'parts_german_winter_1', 'parts_soviet_winter_1',
-      'soldiers_german_winter_2', 'soldiers_soviet_winter_2', 'weapons_2', 'items_2', 'parts_german_winter_2', 'parts_soviet_winter_2',
+      'soldiers_german_winter_1', 'soldiers_soviet_winter_1', 'smg_german_winter_1', 'smg_soviet_winter_1', 'weapons_1', 'items_1', 'parts_german_winter_1', 'parts_soviet_winter_1',
+      'soldiers_german_winter_2', 'soldiers_soviet_winter_2', 'smg_german_winter_2', 'smg_soviet_winter_2', 'weapons_2', 'items_2', 'parts_german_winter_2', 'parts_soviet_winter_2',
     ]);
   });
 
@@ -128,5 +129,18 @@ describe('drawing and fallback', () => {
     expect(resolveEntryKey({ 'standing.idle': 1 }, entryKeyChain('prone', 'crawl', 'pinned', null))).toBe('standing.idle');
     expect(resolveEntryKey({}, entryKeyChain('prone', 'crawl', 'pinned', null))).toBeNull();
     expect(drawSoldier(ctx, atlas, entryKeyChain('kneeling', 'aim', 'shaken', 'smg'), Math.PI / 2, () => 1, 10, 10, 1)).toBe('kneeling.aim');
+  });
+});
+
+describe('crew weapon muzzle', () => {
+  it('comes from the weapons atlas (y forward there, aft here), with a mirrored table before it loads', () => {
+    freeAllAtlases();
+    expect(weaponMuzzleM('pak40')).toEqual({ x: 0, y: -3.31 });
+    expect(weaponMuzzleM('unknown')).toEqual({ x: 0, y: -1 });
+    const meta = { scale: 1, cell: { w: 8, h: 8 }, anchor: { x: 4, y: 4 }, columns: 4, dirs: 32, entries: {},
+      weapons: { pak40: { muzzleM: { x: 0.1, y: 3.5 } } } };
+    registerAtlas('weapons_1', meta as unknown as AtlasMeta, null);
+    expect(weaponMuzzleM('pak40')).toEqual({ x: 0.1, y: -3.5 });
+    freeAllAtlases();
   });
 });

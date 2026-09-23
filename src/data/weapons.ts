@@ -38,8 +38,8 @@ export const WEAPONS: Record<string, WeaponDef> = {
   mg34: w({ id: 'mg34', name: 'MG34', cls: 'lmg', rangeM: 800, rate: 3, burst: 5, accuracy: 0.3, lethality: 0.5, suppression: 0.35, penetrationMm: 0, heRadiusM: 0, ammo: 50, reloadS: 4 }),
   mg42: w({ id: 'mg42', name: 'MG42', cls: 'lmg', rangeM: 800, rate: 4, burst: 7, accuracy: 0.3, lethality: 0.5, suppression: 0.35, penetrationMm: 0, heRadiusM: 0, ammo: 50, reloadS: 4 }),
   dp28: w({ id: 'dp28', name: 'DP-28', cls: 'lmg', rangeM: 800, rate: 2, burst: 4, accuracy: 0.3, lethality: 0.5, suppression: 0.35, penetrationMm: 0, heRadiusM: 0, ammo: 47, reloadS: 4 }),
-  mg34_hmg: w({ id: 'mg34_hmg', name: 'MG34 (tripod)', cls: 'hmg', rangeM: 1000, rate: 3, burst: 8, accuracy: 0.35, lethality: 0.5, suppression: 0.4, penetrationMm: 0, heRadiusM: 0, ammo: 250, reloadS: 6, setupS: 5, packS: 3 }),
-  mg42_hmg: w({ id: 'mg42_hmg', name: 'MG42 (tripod)', cls: 'hmg', rangeM: 1000, rate: 4, burst: 9, accuracy: 0.35, lethality: 0.5, suppression: 0.42, penetrationMm: 0, heRadiusM: 0, ammo: 250, reloadS: 6, setupS: 5, packS: 3 }),
+  mg34_hmg: w({ id: 'mg34_hmg', name: 'MG34 (tripod)', cls: 'hmg', unmountedWeaponId: 'mg34', rangeM: 1000, rate: 3, burst: 8, accuracy: 0.35, lethality: 0.5, suppression: 0.4, penetrationMm: 0, heRadiusM: 0, ammo: 250, reloadS: 6, setupS: 5, packS: 3 }),
+  mg42_hmg: w({ id: 'mg42_hmg', name: 'MG42 (tripod)', cls: 'hmg', unmountedWeaponId: 'mg42', rangeM: 1000, rate: 4, burst: 9, accuracy: 0.35, lethality: 0.5, suppression: 0.42, penetrationMm: 0, heRadiusM: 0, ammo: 250, reloadS: 6, setupS: 5, packS: 3 }),
   maxim: w({ id: 'maxim', name: 'Maxim M1910', cls: 'hmg', rangeM: 1000, rate: 3, burst: 8, accuracy: 0.3, lethality: 0.5, suppression: 0.4, penetrationMm: 0, heRadiusM: 0, ammo: 250, reloadS: 6, setupS: 6, packS: 3 }),
 
   // ---------------------------------------------------------- coax weapons

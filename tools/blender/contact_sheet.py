@@ -27,7 +27,8 @@ SNOW = os.path.join(ROOT, "ref/wf18/full_moscow_snow_z1.png")
 class Atlas:
     def __init__(self, base):
         self.meta = json.load(open(base + ".json"))
-        self.img = Image.open(base + ".png").convert("RGBA")
+        img = self.meta.get("image")
+        self.img = Image.open(os.path.join(os.path.dirname(base), img) if img else base + ".png").convert("RGBA")
         self.cw, self.ch = self.meta["cell"]["w"], self.meta["cell"]["h"]
 
     def cell(self, key, d, f):

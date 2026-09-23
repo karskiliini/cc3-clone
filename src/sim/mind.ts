@@ -15,6 +15,7 @@ import { VEHICLE_DEFS } from '@/data/units';
 import { addMessage } from './messages';
 import { applyOrderToSoldier, orderRoutePoints, routeVia } from './orders';
 import { DAZE_VETERAN_EXP, isDazed } from './daze';
+import { blastExposure } from './blastExposure';
 
 // ---------------------------------------------------------------- motivation
 /** Motivation seed from experience (proxy for conscript/regular/elite quality bands) + leadership. */
@@ -350,7 +351,7 @@ export function onIncomingFire(
 export function onExplosionNear(state: BattleState, soldier: Soldier, pos: Vec2): void {
   const distM = dist(soldier.pos, pos) * TILE_M;
   if (distM > 20) return;
-  const coverFactor = 1 - (soldier.cover ?? 0) * 0.5;
+  const coverFactor = blastExposure(state, soldier, pos).shock;
   addStress(soldier.mind, 15 * (1 - distM / 20) * coverFactor);
   soldier.mind.lastIncomingAt = state.time;
   soldier.mind.threatLevel = Math.max(soldier.mind.threatLevel, 0.6);

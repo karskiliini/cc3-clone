@@ -1,0 +1,50 @@
+{
+ "scale": 1,
+ "cell": {
+  "w": 124,
+  "h": 122
+ },
+ "anchor": {
+  "x": 61,
+  "y": 62
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "panther.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "panther.hull.trackL": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "panther.hull.trackR": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "panther.turret.ok": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "panther",
+ "season": "winter",
+ "hasTurret": true,
+ "lengthM": 6.9,
+ "widthM": 3.4,
+ "turretPivotM": {
+  "x": 0.0,
+  "y": 0.3
+ },
+ "image": "vehicles_panther_winter_1.webp"
+}

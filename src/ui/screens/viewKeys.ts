@@ -1,10 +1,21 @@
 // Pure keyboard helpers shared by the battle and deployment screens (node-testable).
 import type { GameSettings, Vec2 } from '@/shared/types';
 
-/** Tab toggles the depth map view. Returns true when the key was handled. */
+/** '§' (the key left of 1; '½' with Shift) toggles the depth map view. Returns true when handled. */
 export function handleDepthMapKey(keysPressed: ReadonlySet<string>, settings: GameSettings): boolean {
-  if (!keysPressed.has('tab')) return false;
+  if (!keysPressed.has('§') && !keysPressed.has('½')) return false;
   settings.showDepthMap = !settings.showDepthMap;
+  return true;
+}
+
+/** Game speeds, slowest first. */
+export const GAME_SPEEDS: readonly GameSettings['speed'][] = [1, 2, 4];
+
+/** Tab steps the game speed up (1x, 2x, 4x, back to 1x). Returns true when the key was handled. */
+export function handleSpeedKey(keysPressed: ReadonlySet<string>, settings: GameSettings): boolean {
+  if (!keysPressed.has('tab')) return false;
+  const i = GAME_SPEEDS.indexOf(settings.speed);
+  settings.speed = GAME_SPEEDS[(i + 1) % GAME_SPEEDS.length];
   return true;
 }
 

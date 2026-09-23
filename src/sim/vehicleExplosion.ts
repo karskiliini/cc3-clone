@@ -19,19 +19,19 @@
 //   vehicleCrew.ts): men keep 15 m away.
 // Deterministic: seeded Rng only, Map / array iteration order only.
 // ============================================================================
-import type { BattleState, Debris, DebrisKind, Side, Soldier, Vec2, Vehicle, VehicleDef, WeaponDef } from '@/shared/types';
+import type { BattleState, Debris, DebrisKind, Side, Vec2, Vehicle, VehicleDef, WeaponDef } from '@/shared/types';
 import { TILE_M, otherSide } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { clamp, dist } from '@/shared/math';
 import { VEHICLE_DEFS } from '@/data/units';
 import { WEAPONS } from '@/data/weapons';
 import { applyHESplash, applyHit, leaveCrater } from './combat';
-import { applyDaze } from './daze';
+import { blastExposure } from './blastExposure';
 import { DEBRIS_CAP, DEBRIS_VARIANTS, debrisOf } from './debris';
 import { hasLOS } from './los';
 import { coverAt, inBounds } from './map';
 import { addMessage } from './messages';
-import { addStress, onKnockedDown } from './mind';
+import { addStress } from './mind';
 import { isPassable } from './path';
 import { vehicleRounds } from './aimPoint';
 import { hurtCrewman, hurtPassenger } from './vehicleDamage';
@@ -189,36 +189,13 @@ function everyoneAboardDies(state: BattleState, v: Vehicle, side: Side): void {
 /** The area event shared by the ammunition and the fuel-tank explosion. */
 function blastAt(state: BattleState, rng: Rng, v: Vehicle, weapon: WeaponDef, killerSide: Side, craterM: number): void {
   const pos = { x: v.pos.x, y: v.pos.y };
-  const radiusTiles = weapon.heRadiusM / TILE_M;
-  const near: Soldier[] = [];
-  for (const s of state.soldiers.values()) {
-    if (s.vehicleId != null || s.health === 'dead' || s.health === 'incapacitated') continue;
-    if (dist(s.pos, pos) <= radiusTiles * KNOCKDOWN_SHARE) near.push(s);
-  }
-  // inside 5 m of an ammunition explosion hardly anyone gets away with it
-  if (weapon.heRadiusM >= EXPLOSION_MIN_RADIUS_M) {
-    for (const s of near) {
-      if (dist(s.pos, pos) * TILE_M > INNER_LETHAL_M) continue;
-      const cover = coverAt(state.map, s.pos);
-      if (rng.chance(0.9 * (1 - cover * 0.5))) applyHit(state, s, weapon, rng, killerSide);
-      else if (cover < 0.5 && s.health === 'healthy') { s.health = 'wounded'; s.morale = clamp(s.morale - 20, 0, 100); }
-    }
-  }
-  const distBefore = new Map<number, number>();
-  for (const s of near) distBefore.set(s.id, dist(s.pos, pos));
-  applyHESplash(state, rng, pos, weapon, killerSide, undefined, v.id);
+  // Resolve the entire wave once against each man's original posture and shelter. The old
+  // extra casualty/knockdown passes bypassed cover and used positions changed by the first hit.
+  applyHESplash(state, rng, pos, weapon, killerSide, undefined, v.id, {
+    innerLethalM: weapon.heRadiusM >= EXPLOSION_MIN_RADIUS_M ? INNER_LETHAL_M : undefined,
+    knockdownShare: KNOCKDOWN_SHARE,
+  });
   leaveCrater(state, pos, weapon, craterM);
-  // the blast wave floors men further out than a shell's would
-  for (const s of near) {
-    if (s.health === 'dead' || s.health === 'incapacitated') continue;
-    if (s.stunnedUntil != null && s.stunnedUntil > state.time) continue;
-    const force = clamp(1 - (distBefore.get(s.id) ?? 0) / radiusTiles, 0.2, 1) * clamp(weapon.heRadiusM / 6, 0.4, 1.5);
-    s.stunnedUntil = state.time + Math.min(4, rng.range(1.5, 3) + (s.experience < 35 ? 0.5 : 0));
-    applyDaze(state, s, force, false);
-    s.stance = 'prone';
-    s.path = [];
-    onKnockedDown(s, force);
-  }
 }
 
 function shockWitnesses(state: BattleState, pos: Vec2, scale: number): void {
@@ -227,7 +204,7 @@ function shockWitnesses(state: BattleState, pos: Vec2, scale: number): void {
     if (s.vehicleId != null || s.health === 'dead' || s.health === 'incapacitated') continue;
     const d = dist(s.pos, pos);
     if (d > rT || !hasLOS(state.map, s.pos, pos)) continue;
-    const k = (1 - 0.6 * (d / rT)) * scale;
+    const k = (1 - 0.6 * (d / rT)) * scale * blastExposure(state, s, pos).shock;
     addStress(s.mind, (s.experience < 35 ? 26 : s.experience < 65 ? 18 : 12) * k);
     s.suppression = clamp(s.suppression + 45 * k, 0, 100);
     s.mind.lastIncomingAt = state.time;
@@ -242,6 +219,7 @@ export function detonateVehicle(state: BattleState, rng: Rng, v: Vehicle, killer
   if (radiusM <= 0) return false;
   const load = loadFraction(state, v, def);
   const team = state.teams.get(v.teamId);
+  v.fire = { t0: state.time };
   v.state = 'burning';
   v.path = []; v.speed = 0;
   v.exiting = undefined; v.unloading = undefined; v.remount = undefined; v.bailBy = undefined; v.seatSwap = undefined;

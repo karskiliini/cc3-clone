@@ -1,7 +1,7 @@
 {
  "scale": 2,
  "cell": {
-  "w": 228,
+  "w": 230,
   "h": 226
  },
  "anchor": {
@@ -62,11 +62,13 @@
  },
  "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
  "vehicle": "tiger",
+ "season": "summer",
  "hasTurret": true,
  "lengthM": 6.3,
  "widthM": 3.6,
  "turretPivotM": {
   "x": 0.0,
   "y": 0.05
- }
+ },
+ "image": "vehicles_tiger_2.webp"
 }

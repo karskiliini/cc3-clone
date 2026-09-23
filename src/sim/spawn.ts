@@ -1,7 +1,7 @@
 import type { BattleState, GameMap, Team, TeamDef, Side, Vec2, Soldier, Vehicle } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
-import { angleTo, vadd } from '@/shared/math';
+import { angleTo, facingFromAngle, vadd } from '@/shared/math';
 import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';
 import { randomName } from '@/data/names';
@@ -363,7 +363,14 @@ export function spawnTeam(state: BattleState, def: TeamDef, side: Side, pos: Vec
     team.vehicleId = vehicle.id;
   }
 
+  // default stance: DEFEND facing the map's attack direction (own deploy zone -> enemy zone).
+  // The blue arc in the deploy screen / battle map comes from this order + facing; the player can
+  // replace it in the deploy screen with any order (move/hide/ambush/attack) aimed with the mouse.
   const baseHeading = formationBaseHeading(state.map, side);
+  const facing = facingFromAngle(baseHeading);
+  const ahead = { x: pos.x + Math.cos(baseHeading) * 4, y: pos.y + Math.sin(baseHeading) * 4 };
+  team.facing = facing;
+  team.order = { type: 'defend', target: ahead, issuedAt: state.time };
   const offsets = naturalFormation(def, rng).map((o) => rotateOffset(o, baseHeading));
   const positions = vehicle ? null : layoutTeamPositions(state.map, pos, offsets);
   let totalExp = 0;

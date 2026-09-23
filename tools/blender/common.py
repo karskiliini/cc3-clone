@@ -44,6 +44,7 @@ The atlas JSON follows docs/superpowers/specs/2026-09-17-soldier-animation-desig
 import json
 import math
 import os
+import subprocess
 import tempfile
 
 import numpy as np
@@ -330,6 +331,25 @@ def load_png(path):
         return (buf.reshape(h, w, 4)[::-1] * 255 + 0.5).astype(np.uint8)
 
 
+def to_webp(base, lossy=False):
+    """Re-encode <base>.png as WebP with the system python's Pillow (Blender's python has none), then
+    drop the PNG. Lossless by default (about 40 % of the PNG); `lossy` keeps alpha lossless and codes
+    colour at quality 95 with sharp YUV (about 20 % of the PNG, no visible change on the painted
+    vehicle sheets). Returns False (PNG kept) when that fails. The atlas JSON's `image` field names
+    the file; loaders fall back to <base>.png without it."""
+    opts = ("quality=95, alpha_quality=100, method=6, use_sharp_yuv=True" if lossy
+            else "lossless=True, quality=100, method=5")
+    code = ("import sys; from PIL import Image; "
+            f"Image.open(sys.argv[1]).save(sys.argv[2], 'WEBP', {opts})")
+    try:
+        subprocess.run(["python3", "-c", code, base + ".png", base + ".webp"], check=True, timeout=600)
+    except Exception as ex:          # no Pillow / no webp support: keep the PNG
+        print(f"webp conversion skipped for {base}: {ex}", flush=True)
+        return False
+    os.remove(base + ".png")
+    return True
+
+
 class AtlasPacker:
     """Collects entries and writes <base>.png + <base>.json in the contract format."""
 
@@ -347,8 +367,9 @@ class AtlasPacker:
         self.cells[key] = frames_by_dir
         self.entries[key] = dict(frames=n, fps=fps, loop=bool(loop), **extra)
 
-    def save(self, base, extra=None):
-        """Write base+'.png' and base+'.json'.  `extra` is merged into the JSON top level."""
+    def save(self, base, extra=None, webp=None):
+        """Write base+'.png' (or, with webp='lossless' | 'lossy', base+'.webp') and base+'.json'.
+        `extra` is merged into the JSON top level."""
         idx = 0
         layout = {}
         for key in self.entries:
@@ -375,6 +396,8 @@ class AtlasPacker:
         }
         if extra:
             meta.update(extra)
+        if webp and to_webp(base, lossy=webp == "lossy"):
+            meta["image"] = os.path.basename(base) + ".webp"
         with open(base + ".json", "w") as fh:
             json.dump(meta, fh, indent=1)
         return meta

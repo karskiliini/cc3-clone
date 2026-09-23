@@ -21,11 +21,11 @@ const BTN_W = 39;
 const BTN_H = 19;
 
 type Slot = OrderType | 'cancel';
-const SLOTS: Slot[] = ['move', 'moveFast', 'sneak', 'fire', 'smoke', 'defend', 'ambush', 'cancel'];
+const SLOTS: Slot[] = ['move', 'moveFast', 'sneak', 'fire', 'smoke', 'defend', 'ambush', 'cancel'] as Slot[];
 const SLOT_LABEL: Record<Slot, string> = {
   move: 'Move', moveFast: 'Move Fast', sneak: 'Sneak', fire: 'Fire',
   smoke: 'Smoke', defend: 'Defend', ambush: 'Ambush', cancel: 'Cancel',
-};
+} as Record<Slot, string>;
 const TOOLTIP_MIN_X = 620;
 const TOOLTIP_MAX_X = 1020;
 

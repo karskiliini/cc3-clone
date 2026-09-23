@@ -105,927 +105,927 @@
   },
   "standing.throw": {
    "start": 752,
-   "frames": 4,
-   "fps": 8,
+   "frames": 6,
+   "fps": 6.7,
    "loop": false
   },
   "standing.hit": {
-   "start": 816,
+   "start": 848,
    "frames": 3,
    "fps": 7,
    "loop": false
   },
   "crouched.idle": {
-   "start": 864,
+   "start": 896,
    "frames": 4,
    "fps": 3.3,
    "loop": true
   },
   "crouched.idle@smg": {
-   "start": 928,
+   "start": 960,
    "frames": 4,
    "fps": 3.3,
    "loop": true
   },
   "crouched.idle@lmg": {
-   "start": 992,
+   "start": 1024,
    "frames": 4,
    "fps": 3.3,
    "loop": true
   },
   "crouched.idle@none": {
-   "start": 1056,
+   "start": 1088,
    "frames": 4,
    "fps": 3.3,
    "loop": true
   },
   "crouched.aim": {
-   "start": 1120,
-   "frames": 2,
-   "fps": 2,
-   "loop": true
-  },
-  "crouched.aim@smg": {
    "start": 1152,
    "frames": 2,
    "fps": 2,
    "loop": true
   },
-  "crouched.aim@lmg": {
+  "crouched.aim@smg": {
    "start": 1184,
    "frames": 2,
    "fps": 2,
    "loop": true
   },
-  "crouched.fire": {
+  "crouched.aim@lmg": {
    "start": 1216,
+   "frames": 2,
+   "fps": 2,
+   "loop": true
+  },
+  "crouched.fire": {
+   "start": 1248,
    "frames": 3,
    "fps": 12,
    "loop": false
   },
   "crouched.fire@smg": {
-   "start": 1264,
+   "start": 1296,
    "frames": 3,
    "fps": 12,
    "loop": false
   },
   "crouched.fire@lmg": {
-   "start": 1312,
+   "start": 1344,
    "frames": 3,
    "fps": 12,
    "loop": false
   },
   "crouched.reload": {
-   "start": 1360,
+   "start": 1392,
    "frames": 4,
    "fps": 3,
    "loop": false
   },
   "crouched.hide": {
-   "start": 1424,
-   "frames": 2,
-   "fps": 1.5,
-   "loop": true
-  },
-  "crouched.hide@none": {
    "start": 1456,
    "frames": 2,
    "fps": 1.5,
    "loop": true
   },
-  "crouched.pickup": {
+  "crouched.hide@none": {
    "start": 1488,
+   "frames": 2,
+   "fps": 1.5,
+   "loop": true
+  },
+  "crouched.pickup": {
+   "start": 1520,
    "frames": 4,
    "fps": 2,
    "loop": false,
    "progress": true
   },
   "crouched.pickup@none": {
-   "start": 1552,
+   "start": 1584,
    "frames": 4,
    "fps": 2,
    "loop": false,
    "progress": true
   },
   "crouched.throw": {
-   "start": 1616,
-   "frames": 4,
-   "fps": 8,
+   "start": 1648,
+   "frames": 6,
+   "fps": 6.7,
    "loop": false
   },
   "crouched.hit": {
-   "start": 1680,
+   "start": 1744,
    "frames": 3,
    "fps": 7,
    "loop": false
   },
   "kneeling.idle": {
-   "start": 1728,
-   "frames": 4,
-   "fps": 3.3,
-   "loop": true
-  },
-  "kneeling.idle@smg": {
    "start": 1792,
    "frames": 4,
    "fps": 3.3,
    "loop": true
   },
-  "kneeling.idle@lmg": {
+  "kneeling.idle@smg": {
    "start": 1856,
    "frames": 4,
    "fps": 3.3,
    "loop": true
   },
-  "kneeling.idle@none": {
+  "kneeling.idle@lmg": {
    "start": 1920,
    "frames": 4,
    "fps": 3.3,
    "loop": true
   },
-  "kneeling.aim": {
+  "kneeling.idle@none": {
    "start": 1984,
-   "frames": 2,
-   "fps": 2,
+   "frames": 4,
+   "fps": 3.3,
    "loop": true
   },
-  "kneeling.aim@smg": {
-   "start": 2016,
-   "frames": 2,
-   "fps": 2,
-   "loop": true
-  },
-  "kneeling.aim@lmg": {
+  "kneeling.aim": {
    "start": 2048,
    "frames": 2,
    "fps": 2,
    "loop": true
   },
-  "kneeling.fire": {
+  "kneeling.aim@smg": {
    "start": 2080,
+   "frames": 2,
+   "fps": 2,
+   "loop": true
+  },
+  "kneeling.aim@lmg": {
+   "start": 2112,
+   "frames": 2,
+   "fps": 2,
+   "loop": true
+  },
+  "kneeling.fire": {
+   "start": 2144,
    "frames": 3,
    "fps": 12,
    "loop": false
   },
   "kneeling.fire@smg": {
-   "start": 2128,
+   "start": 2192,
    "frames": 3,
    "fps": 12,
    "loop": false
   },
   "kneeling.fire@lmg": {
-   "start": 2176,
+   "start": 2240,
    "frames": 3,
    "fps": 12,
    "loop": false
   },
   "kneeling.reload": {
-   "start": 2224,
+   "start": 2288,
    "frames": 4,
    "fps": 3,
    "loop": false
   },
   "kneeling.hide": {
-   "start": 2288,
+   "start": 2352,
    "frames": 2,
    "fps": 1.5,
    "loop": true
   },
   "kneeling.hide@none": {
-   "start": 2320,
+   "start": 2384,
    "frames": 2,
    "fps": 1.5,
    "loop": true
   },
   "kneeling.pickup": {
-   "start": 2352,
-   "frames": 4,
-   "fps": 2,
-   "loop": false,
-   "progress": true
-  },
-  "kneeling.pickup@none": {
    "start": 2416,
    "frames": 4,
    "fps": 2,
    "loop": false,
    "progress": true
   },
-  "kneeling.throw": {
+  "kneeling.pickup@none": {
    "start": 2480,
    "frames": 4,
-   "fps": 8,
+   "fps": 2,
+   "loop": false,
+   "progress": true
+  },
+  "kneeling.throw": {
+   "start": 2544,
+   "frames": 6,
+   "fps": 6.7,
    "loop": false
   },
   "kneeling.hit": {
-   "start": 2544,
+   "start": 2640,
    "frames": 3,
    "fps": 7,
    "loop": false
   },
   "prone.idle": {
-   "start": 2592,
+   "start": 2688,
    "frames": 4,
    "fps": 3.3,
    "loop": true
   },
   "prone.idle@smg": {
-   "start": 2656,
+   "start": 2752,
    "frames": 4,
    "fps": 3.3,
    "loop": true
   },
   "prone.idle@lmg": {
-   "start": 2720,
+   "start": 2816,
    "frames": 4,
    "fps": 3.3,
    "loop": true
   },
   "prone.idle@none": {
-   "start": 2784,
+   "start": 2880,
    "frames": 4,
    "fps": 3.3,
    "loop": true
   },
   "prone.aim": {
-   "start": 2848,
+   "start": 2944,
    "frames": 2,
    "fps": 2,
    "loop": true
   },
   "prone.aim@smg": {
-   "start": 2880,
+   "start": 2976,
    "frames": 2,
    "fps": 2,
    "loop": true
   },
   "prone.aim@lmg": {
-   "start": 2912,
+   "start": 3008,
    "frames": 2,
    "fps": 2,
    "loop": true
   },
   "prone.fire": {
-   "start": 2944,
-   "frames": 3,
-   "fps": 12,
-   "loop": false
-  },
-  "prone.fire@smg": {
-   "start": 2992,
-   "frames": 3,
-   "fps": 12,
-   "loop": false
-  },
-  "prone.fire@lmg": {
    "start": 3040,
    "frames": 3,
    "fps": 12,
    "loop": false
   },
-  "prone.reload": {
+  "prone.fire@smg": {
    "start": 3088,
+   "frames": 3,
+   "fps": 12,
+   "loop": false
+  },
+  "prone.fire@lmg": {
+   "start": 3136,
+   "frames": 3,
+   "fps": 12,
+   "loop": false
+  },
+  "prone.reload": {
+   "start": 3184,
    "frames": 4,
    "fps": 3,
    "loop": false
   },
   "prone.hide": {
-   "start": 3152,
+   "start": 3248,
    "frames": 2,
    "fps": 1.5,
    "loop": true
   },
   "prone.hide@none": {
-   "start": 3184,
+   "start": 3280,
    "frames": 2,
    "fps": 1.5,
    "loop": true
   },
   "prone.pickup": {
-   "start": 3216,
+   "start": 3312,
    "frames": 3,
    "fps": 2,
    "loop": false,
    "progress": true
   },
   "prone.pickup@none": {
-   "start": 3264,
+   "start": 3360,
    "frames": 3,
    "fps": 2,
    "loop": false,
    "progress": true
   },
   "prone.throw": {
-   "start": 3312,
-   "frames": 4,
-   "fps": 8,
+   "start": 3408,
+   "frames": 6,
+   "fps": 6.7,
    "loop": false
   },
   "prone.hit": {
-   "start": 3376,
+   "start": 3504,
    "frames": 3,
    "fps": 7,
    "loop": false
   },
   "standing.walk": {
-   "start": 3424,
-   "frames": 4,
-   "fps": 6,
+   "start": 3552,
+   "frames": 8,
+   "fps": 8,
    "loop": true,
-   "strideM": 1.352
+   "strideM": 1.56
   },
   "standing.walk@smg": {
-   "start": 3488,
-   "frames": 4,
-   "fps": 6,
+   "start": 3680,
+   "frames": 8,
+   "fps": 8,
    "loop": true,
-   "strideM": 1.352
+   "strideM": 1.56
   },
   "standing.walk@lmg": {
-   "start": 3552,
-   "frames": 4,
-   "fps": 6,
+   "start": 3808,
+   "frames": 8,
+   "fps": 8,
    "loop": true,
-   "strideM": 1.352
+   "strideM": 1.56
   },
   "standing.walk@none": {
-   "start": 3616,
-   "frames": 4,
-   "fps": 6,
+   "start": 3936,
+   "frames": 8,
+   "fps": 8,
    "loop": true,
-   "strideM": 1.352
+   "strideM": 1.56
   },
   "standing.run": {
-   "start": 3680,
-   "frames": 6,
-   "fps": 12,
+   "start": 4064,
+   "frames": 8,
+   "fps": 13,
    "loop": true,
-   "strideM": 2.2880000000000003
+   "strideM": 2.6
   },
   "standing.run@smg": {
-   "start": 3776,
-   "frames": 6,
-   "fps": 12,
+   "start": 4192,
+   "frames": 8,
+   "fps": 13,
    "loop": true,
-   "strideM": 2.2880000000000003
+   "strideM": 2.6
   },
   "standing.run@lmg": {
-   "start": 3872,
-   "frames": 6,
-   "fps": 12,
+   "start": 4320,
+   "frames": 8,
+   "fps": 13,
    "loop": true,
-   "strideM": 2.2880000000000003
+   "strideM": 2.6
   },
   "standing.run@none": {
-   "start": 3968,
-   "frames": 6,
-   "fps": 12,
+   "start": 4448,
+   "frames": 8,
+   "fps": 13,
    "loop": true,
-   "strideM": 2.2880000000000003
+   "strideM": 2.6
   },
   "crouched.sneak": {
-   "start": 4064,
-   "frames": 4,
-   "fps": 5,
+   "start": 4576,
+   "frames": 8,
+   "fps": 7,
    "loop": true,
-   "strideM": 0.9359999999999999
+   "strideM": 1.1440000000000001
   },
   "crouched.sneak@smg": {
-   "start": 4128,
-   "frames": 4,
-   "fps": 5,
+   "start": 4704,
+   "frames": 8,
+   "fps": 7,
    "loop": true,
-   "strideM": 0.9359999999999999
+   "strideM": 1.1440000000000001
   },
   "crouched.sneak@lmg": {
-   "start": 4192,
-   "frames": 4,
-   "fps": 5,
+   "start": 4832,
+   "frames": 8,
+   "fps": 7,
    "loop": true,
-   "strideM": 0.9359999999999999
+   "strideM": 1.1440000000000001
   },
   "crouched.sneak@none": {
-   "start": 4256,
-   "frames": 4,
-   "fps": 5,
+   "start": 4960,
+   "frames": 8,
+   "fps": 7,
    "loop": true,
-   "strideM": 0.9359999999999999
+   "strideM": 1.1440000000000001
   },
   "prone.crawl": {
-   "start": 4320,
-   "frames": 4,
-   "fps": 4,
+   "start": 5088,
+   "frames": 8,
+   "fps": 5,
    "loop": true,
-   "strideM": 0.8840000000000001
+   "strideM": 0.9880000000000001
   },
   "prone.crawl@smg": {
-   "start": 4384,
-   "frames": 4,
-   "fps": 4,
+   "start": 5216,
+   "frames": 8,
+   "fps": 5,
    "loop": true,
-   "strideM": 0.8840000000000001
+   "strideM": 0.9880000000000001
   },
   "prone.crawl@lmg": {
-   "start": 4448,
-   "frames": 4,
-   "fps": 4,
+   "start": 5344,
+   "frames": 8,
+   "fps": 5,
    "loop": true,
-   "strideM": 0.8840000000000001
+   "strideM": 0.9880000000000001
   },
   "prone.crawl@none": {
-   "start": 4512,
-   "frames": 4,
-   "fps": 4,
+   "start": 5472,
+   "frames": 8,
+   "fps": 5,
    "loop": true,
-   "strideM": 0.8840000000000001
+   "strideM": 0.9880000000000001
   },
   "prone.woundedCrawl": {
-   "start": 4576,
-   "frames": 4,
-   "fps": 2.5,
+   "start": 5600,
+   "frames": 6,
+   "fps": 3,
    "loop": true,
    "strideM": 0.5720000000000001
   },
   "standing.idle.alert": {
-   "start": 4640,
+   "start": 5696,
    "frames": 4,
    "fps": 2.5,
    "loop": true
   },
   "standing.idle.shaken": {
-   "start": 4704,
+   "start": 5760,
    "frames": 4,
    "fps": 4,
    "loop": true
   },
   "standing.idle.pinned": {
-   "start": 4768,
+   "start": 5824,
    "frames": 2,
    "fps": 3,
    "loop": true
   },
   "standing.idle.cowering": {
-   "start": 4800,
+   "start": 5856,
    "frames": 2,
    "fps": 6,
    "loop": true
   },
   "standing.idle.panicked": {
-   "start": 4832,
+   "start": 5888,
    "frames": 4,
    "fps": 7,
    "loop": true
   },
   "crouched.idle.alert": {
-   "start": 4896,
+   "start": 5952,
    "frames": 4,
    "fps": 2.5,
    "loop": true
   },
   "crouched.idle.shaken": {
-   "start": 4960,
+   "start": 6016,
    "frames": 4,
    "fps": 4,
    "loop": true
   },
   "crouched.idle.pinned": {
-   "start": 5024,
+   "start": 6080,
    "frames": 2,
    "fps": 3,
    "loop": true
   },
   "crouched.idle.cowering": {
-   "start": 5056,
+   "start": 6112,
    "frames": 2,
    "fps": 6,
    "loop": true
   },
   "crouched.idle.panicked": {
-   "start": 5088,
+   "start": 6144,
    "frames": 4,
    "fps": 7,
    "loop": true
   },
   "kneeling.idle.alert": {
-   "start": 5152,
+   "start": 6208,
    "frames": 4,
    "fps": 2.5,
    "loop": true
   },
   "kneeling.idle.shaken": {
-   "start": 5216,
+   "start": 6272,
    "frames": 4,
    "fps": 4,
    "loop": true
   },
   "kneeling.idle.pinned": {
-   "start": 5280,
+   "start": 6336,
    "frames": 2,
    "fps": 3,
    "loop": true
   },
   "kneeling.idle.cowering": {
-   "start": 5312,
+   "start": 6368,
    "frames": 2,
    "fps": 6,
    "loop": true
   },
   "kneeling.idle.panicked": {
-   "start": 5344,
+   "start": 6400,
    "frames": 4,
    "fps": 7,
    "loop": true
   },
   "prone.idle.alert": {
-   "start": 5408,
+   "start": 6464,
    "frames": 4,
    "fps": 2.5,
    "loop": true
   },
   "prone.idle.shaken": {
-   "start": 5472,
+   "start": 6528,
    "frames": 4,
    "fps": 4,
    "loop": true
   },
   "prone.idle.pinned": {
-   "start": 5536,
+   "start": 6592,
    "frames": 2,
    "fps": 3,
    "loop": true
   },
   "prone.idle.cowering": {
-   "start": 5568,
+   "start": 6624,
    "frames": 2,
    "fps": 6,
    "loop": true
   },
   "prone.idle.panicked": {
-   "start": 5600,
+   "start": 6656,
    "frames": 4,
    "fps": 7,
    "loop": true
   },
   "standing.walk.shaken": {
-   "start": 5664,
-   "frames": 4,
-   "fps": 5,
+   "start": 6720,
+   "frames": 8,
+   "fps": 7,
    "loop": true,
-   "strideM": 0.8840000000000001
+   "strideM": 0.9880000000000001
   },
   "crouched.sneak.shaken": {
-   "start": 5728,
-   "frames": 4,
-   "fps": 4,
+   "start": 6848,
+   "frames": 8,
+   "fps": 6,
    "loop": true,
-   "strideM": 0.9359999999999999
+   "strideM": 1.1440000000000001
   },
   "standing.run.panicked": {
-   "start": 5792,
-   "frames": 6,
-   "fps": 13,
+   "start": 6976,
+   "frames": 8,
+   "fps": 14,
    "loop": true,
    "strideM": 2.08
   },
   "prone.crawl.panicked": {
-   "start": 5888,
-   "frames": 4,
-   "fps": 7,
+   "start": 7104,
+   "frames": 6,
+   "fps": 8,
    "loop": true,
    "strideM": 0.5
   },
   "standing.idle.berserk": {
-   "start": 5952,
+   "start": 7200,
    "frames": 4,
    "fps": 6,
    "loop": true
   },
   "standing.run.berserk": {
-   "start": 6016,
-   "frames": 6,
-   "fps": 12,
+   "start": 7264,
+   "frames": 8,
+   "fps": 13,
    "loop": true,
-   "strideM": 2.2880000000000003
+   "strideM": 2.6
   },
   "standing.fire.berserk": {
-   "start": 6112,
+   "start": 7392,
    "frames": 3,
    "fps": 12,
    "loop": false
   },
   "standing.idle.surrendered": {
-   "start": 6160,
+   "start": 7440,
    "frames": 2,
    "fps": 1.5,
    "loop": true
   },
   "kneeling.idle.surrendered": {
-   "start": 6192,
+   "start": 7472,
    "frames": 2,
    "fps": 1.5,
    "loop": true
   },
   "standing.walk.surrendered": {
-   "start": 6224,
-   "frames": 4,
-   "fps": 5,
+   "start": 7504,
+   "frames": 8,
+   "fps": 7,
    "loop": true,
-   "strideM": 1.352
+   "strideM": 1.56
   },
   "crew.haul": {
-   "start": 6288,
-   "frames": 4,
-   "fps": 5,
+   "start": 7632,
+   "frames": 8,
+   "fps": 7,
    "loop": true,
    "strideM": 1.04
   },
   "crew.trail": {
-   "start": 6352,
+   "start": 7760,
    "frames": 5,
    "fps": 2,
    "loop": false,
    "progress": true
   },
   "crew.dig": {
-   "start": 6432,
+   "start": 7840,
    "frames": 4,
    "fps": 3,
    "loop": false,
    "progress": true
   },
   "crew.load.gun": {
-   "start": 6496,
+   "start": 7904,
    "frames": 5,
    "fps": 2,
    "loop": false,
    "progress": true
   },
   "crew.lay": {
-   "start": 6576,
+   "start": 7984,
    "frames": 3,
    "fps": 2,
    "loop": true
   },
   "crew.fire": {
-   "start": 6624,
+   "start": 8032,
    "frames": 3,
    "fps": 6,
    "loop": false,
    "progress": true
   },
   "crew.baseplate": {
-   "start": 6672,
+   "start": 8080,
    "frames": 4,
    "fps": 2,
    "loop": false,
    "progress": true
   },
   "crew.tube": {
-   "start": 6736,
+   "start": 8144,
    "frames": 4,
    "fps": 2,
    "loop": false,
    "progress": true
   },
   "crew.bipod": {
-   "start": 6800,
+   "start": 8208,
    "frames": 4,
    "fps": 2,
    "loop": false,
    "progress": true
   },
   "crew.load.mortar": {
-   "start": 6864,
+   "start": 8272,
    "frames": 4,
    "fps": 3,
    "loop": false,
    "progress": true
   },
   "crew.tripod": {
-   "start": 6928,
+   "start": 8336,
    "frames": 4,
    "fps": 2,
    "loop": false,
    "progress": true
   },
   "crew.mountmg": {
-   "start": 6992,
+   "start": 8400,
    "frames": 4,
    "fps": 2,
    "loop": false,
    "progress": true
   },
   "crew.belt": {
-   "start": 7056,
+   "start": 8464,
    "frames": 4,
    "fps": 3,
    "loop": false,
    "progress": true
   },
   "crew.mg": {
-   "start": 7120,
+   "start": 8528,
    "frames": 2,
    "fps": 1.5,
    "loop": true
   },
   "crew.mg.fire": {
-   "start": 7152,
+   "start": 8560,
    "frames": 2,
    "fps": 14,
    "loop": true
   },
   "crew.carry.tube": {
-   "start": 7184,
-   "frames": 4,
-   "fps": 6,
+   "start": 8592,
+   "frames": 8,
+   "fps": 8,
    "loop": true,
-   "strideM": 1.352
+   "strideM": 1.56
   },
   "crew.carry.plate": {
-   "start": 7248,
-   "frames": 4,
-   "fps": 6,
+   "start": 8720,
+   "frames": 8,
+   "fps": 8,
    "loop": true,
-   "strideM": 1.352
+   "strideM": 1.56
   },
   "crew.carry.mg": {
-   "start": 7312,
-   "frames": 4,
-   "fps": 6,
+   "start": 8848,
+   "frames": 8,
+   "fps": 8,
    "loop": true,
-   "strideM": 1.352
+   "strideM": 1.56
   },
   "crew.carry.tripod": {
-   "start": 7376,
-   "frames": 4,
-   "fps": 6,
+   "start": 8976,
+   "frames": 8,
+   "fps": 8,
    "loop": true,
-   "strideM": 1.352
+   "strideM": 1.56
   },
   "corpse.crushed0": {
-   "start": 7440,
+   "start": 9104,
    "frames": 1,
    "fps": 1,
    "loop": false
   },
   "corpse.crushed1": {
-   "start": 7456,
+   "start": 9120,
    "frames": 1,
    "fps": 1,
    "loop": false
   },
   "corpse.crushed2": {
-   "start": 7472,
+   "start": 9136,
    "frames": 1,
    "fps": 1,
    "loop": false
   },
   "corpse.crushed3": {
-   "start": 7488,
+   "start": 9152,
    "frames": 1,
    "fps": 1,
    "loop": false
   },
   "corpse0": {
-   "start": 7504,
+   "start": 9168,
    "frames": 1,
    "fps": 1,
    "loop": false
   },
   "corpse1": {
-   "start": 7520,
+   "start": 9184,
    "frames": 1,
    "fps": 1,
    "loop": false
   },
   "corpse2": {
-   "start": 7536,
+   "start": 9200,
    "frames": 1,
    "fps": 1,
    "loop": false
   },
   "corpse3": {
-   "start": 7552,
+   "start": 9216,
    "frames": 1,
    "fps": 1,
    "loop": false
   },
   "corpse4": {
-   "start": 7568,
+   "start": 9232,
    "frames": 1,
    "fps": 1,
    "loop": false
   },
   "corpse5": {
-   "start": 7584,
+   "start": 9248,
    "frames": 1,
    "fps": 1,
    "loop": false
   },
   "corpse6": {
-   "start": 7600,
+   "start": 9264,
    "frames": 1,
    "fps": 1,
    "loop": false
   },
   "corpse7": {
-   "start": 7616,
+   "start": 9280,
    "frames": 1,
    "fps": 1,
    "loop": false
   },
   "ragdoll.flight0": {
-   "start": 7632,
+   "start": 9296,
    "frames": 6,
    "fps": 9,
    "loop": false,
    "landed": 0
   },
   "ragdoll.flight1": {
-   "start": 7728,
+   "start": 9392,
    "frames": 6,
    "fps": 9,
    "loop": false,
    "landed": 1
   },
   "ragdoll.flight2": {
-   "start": 7824,
+   "start": 9488,
    "frames": 6,
    "fps": 9,
    "loop": false,
    "landed": 2
   },
   "ragdoll.flight3": {
-   "start": 7920,
+   "start": 9584,
    "frames": 6,
    "fps": 9,
    "loop": false,
    "landed": 3
   },
   "ragdoll.flight4": {
-   "start": 8016,
+   "start": 9680,
    "frames": 6,
    "fps": 9,
    "loop": false,
    "landed": 4
   },
   "ragdoll.flight5": {
-   "start": 8112,
+   "start": 9776,
    "frames": 6,
    "fps": 9,
    "loop": false,
    "landed": 5
   },
   "ragdoll.landed0": {
-   "start": 8208,
+   "start": 9872,
    "frames": 1,
    "fps": 1,
    "loop": false
   },
   "ragdoll.landed1": {
-   "start": 8224,
+   "start": 9888,
    "frames": 1,
    "fps": 1,
    "loop": false
   },
   "ragdoll.landed2": {
-   "start": 8240,
+   "start": 9904,
    "frames": 1,
    "fps": 1,
    "loop": false
   },
   "ragdoll.landed3": {
-   "start": 8256,
+   "start": 9920,
    "frames": 1,
    "fps": 1,
    "loop": false
   },
   "ragdoll.landed4": {
-   "start": 8272,
+   "start": 9936,
    "frames": 1,
    "fps": 1,
    "loop": false
   },
   "ragdoll.landed5": {
-   "start": 8288,
+   "start": 9952,
    "frames": 1,
    "fps": 1,
    "loop": false
   },
   "ragdoll.landed6": {
-   "start": 8304,
+   "start": 9968,
    "frames": 1,
    "fps": 1,
    "loop": false
   },
   "ragdoll.landed7": {
-   "start": 8320,
+   "start": 9984,
    "frames": 1,
    "fps": 1,
    "loop": false
   },
   "crew.bailout": {
-   "start": 8336,
+   "start": 10000,
    "frames": 6,
    "fps": 5,
    "loop": false,
@@ -1033,12 +1033,66 @@
    "hullHeightM": 1.5
   },
   "crew.mount": {
-   "start": 8432,
+   "start": 10096,
    "frames": 6,
    "fps": 5,
    "loop": false,
    "progress": true,
    "hullHeightM": 1.5
+  },
+  "kneeling.bandage": {
+   "start": 10192,
+   "frames": 4,
+   "fps": 3,
+   "loop": true
+  },
+  "crew.drag": {
+   "start": 10256,
+   "frames": 8,
+   "fps": 7,
+   "loop": true,
+   "strideM": 0.8320000000000001,
+   "dragM": 1.3
+  },
+  "prone.dragged": {
+   "start": 10384,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "prone.wounded": {
+   "start": 10400,
+   "frames": 1,
+   "fps": 1,
+   "loop": false
+  },
+  "standing.drop": {
+   "start": 10416,
+   "frames": 6,
+   "fps": 12,
+   "loop": false,
+   "progress": true
+  },
+  "standing.drop@smg": {
+   "start": 10512,
+   "frames": 6,
+   "fps": 12,
+   "loop": false,
+   "progress": true
+  },
+  "standing.drop@lmg": {
+   "start": 10608,
+   "frames": 6,
+   "fps": 12,
+   "loop": false,
+   "progress": true
+  },
+  "standing.drop@none": {
+   "start": 10704,
+   "frames": 6,
+   "fps": 12,
+   "loop": false,
+   "progress": true
   },
   "standing.idle@rifle": {
    "start": 0,
@@ -1077,35 +1131,35 @@
    "alias": "standing.pickup"
   },
   "crouched.idle@rifle": {
-   "start": 864,
+   "start": 896,
    "frames": 4,
    "fps": 3.3,
    "loop": true,
    "alias": "crouched.idle"
   },
   "crouched.aim@rifle": {
-   "start": 1120,
+   "start": 1152,
    "frames": 2,
    "fps": 2,
    "loop": true,
    "alias": "crouched.aim"
   },
   "crouched.fire@rifle": {
-   "start": 1216,
+   "start": 1248,
    "frames": 3,
    "fps": 12,
    "loop": false,
    "alias": "crouched.fire"
   },
   "crouched.hide@rifle": {
-   "start": 1424,
+   "start": 1456,
    "frames": 2,
    "fps": 1.5,
    "loop": true,
    "alias": "crouched.hide"
   },
   "crouched.pickup@rifle": {
-   "start": 1488,
+   "start": 1520,
    "frames": 4,
    "fps": 2,
    "loop": false,
@@ -1113,35 +1167,35 @@
    "alias": "crouched.pickup"
   },
   "kneeling.idle@rifle": {
-   "start": 1728,
+   "start": 1792,
    "frames": 4,
    "fps": 3.3,
    "loop": true,
    "alias": "kneeling.idle"
   },
   "kneeling.aim@rifle": {
-   "start": 1984,
+   "start": 2048,
    "frames": 2,
    "fps": 2,
    "loop": true,
    "alias": "kneeling.aim"
   },
   "kneeling.fire@rifle": {
-   "start": 2080,
+   "start": 2144,
    "frames": 3,
    "fps": 12,
    "loop": false,
    "alias": "kneeling.fire"
   },
   "kneeling.hide@rifle": {
-   "start": 2288,
+   "start": 2352,
    "frames": 2,
    "fps": 1.5,
    "loop": true,
    "alias": "kneeling.hide"
   },
   "kneeling.pickup@rifle": {
-   "start": 2352,
+   "start": 2416,
    "frames": 4,
    "fps": 2,
    "loop": false,
@@ -1149,35 +1203,35 @@
    "alias": "kneeling.pickup"
   },
   "prone.idle@rifle": {
-   "start": 2592,
+   "start": 2688,
    "frames": 4,
    "fps": 3.3,
    "loop": true,
    "alias": "prone.idle"
   },
   "prone.aim@rifle": {
-   "start": 2848,
+   "start": 2944,
    "frames": 2,
    "fps": 2,
    "loop": true,
    "alias": "prone.aim"
   },
   "prone.fire@rifle": {
-   "start": 2944,
+   "start": 3040,
    "frames": 3,
    "fps": 12,
    "loop": false,
    "alias": "prone.fire"
   },
   "prone.hide@rifle": {
-   "start": 3152,
+   "start": 3248,
    "frames": 2,
    "fps": 1.5,
    "loop": true,
    "alias": "prone.hide"
   },
   "prone.pickup@rifle": {
-   "start": 3216,
+   "start": 3312,
    "frames": 3,
    "fps": 2,
    "loop": false,
@@ -1185,85 +1239,93 @@
    "alias": "prone.pickup"
   },
   "standing.walk@rifle": {
-   "start": 3424,
-   "frames": 4,
-   "fps": 6,
+   "start": 3552,
+   "frames": 8,
+   "fps": 8,
    "loop": true,
-   "strideM": 1.352,
+   "strideM": 1.56,
    "alias": "standing.walk"
   },
   "standing.run@rifle": {
-   "start": 3680,
-   "frames": 6,
-   "fps": 12,
+   "start": 4064,
+   "frames": 8,
+   "fps": 13,
    "loop": true,
-   "strideM": 2.2880000000000003,
+   "strideM": 2.6,
    "alias": "standing.run"
   },
   "crouched.sneak@rifle": {
-   "start": 4064,
-   "frames": 4,
-   "fps": 5,
+   "start": 4576,
+   "frames": 8,
+   "fps": 7,
    "loop": true,
-   "strideM": 0.9359999999999999,
+   "strideM": 1.1440000000000001,
    "alias": "crouched.sneak"
   },
   "prone.crawl@rifle": {
-   "start": 4320,
-   "frames": 4,
-   "fps": 4,
+   "start": 5088,
+   "frames": 8,
+   "fps": 5,
    "loop": true,
-   "strideM": 0.8840000000000001,
+   "strideM": 0.9880000000000001,
    "alias": "prone.crawl"
   },
+  "standing.drop@rifle": {
+   "start": 10416,
+   "frames": 6,
+   "fps": 12,
+   "loop": false,
+   "progress": true,
+   "alias": "standing.drop"
+  },
   "prone.woundedCrawl@none": {
-   "start": 4576,
-   "frames": 4,
-   "fps": 2.5,
+   "start": 5600,
+   "frames": 6,
+   "fps": 3,
    "loop": true,
    "strideM": 0.5720000000000001,
    "alias": "prone.woundedCrawl"
   },
   "standing.run.panicked@none": {
-   "start": 5792,
-   "frames": 6,
-   "fps": 13,
+   "start": 6976,
+   "frames": 8,
+   "fps": 14,
    "loop": true,
    "strideM": 2.08,
    "alias": "standing.run.panicked"
   },
   "standing.idle.surrendered@none": {
-   "start": 6160,
+   "start": 7440,
    "frames": 2,
    "fps": 1.5,
    "loop": true,
    "alias": "standing.idle.surrendered"
   },
   "kneeling.idle.surrendered@none": {
-   "start": 6192,
+   "start": 7472,
    "frames": 2,
    "fps": 1.5,
    "loop": true,
    "alias": "kneeling.idle.surrendered"
   },
   "standing.walk.surrendered@none": {
-   "start": 6224,
-   "frames": 4,
-   "fps": 5,
+   "start": 7504,
+   "frames": 8,
+   "fps": 7,
    "loop": true,
-   "strideM": 1.352,
+   "strideM": 1.56,
    "alias": "standing.walk.surrendered"
   },
   "crew.haul@none": {
-   "start": 6288,
-   "frames": 4,
-   "fps": 5,
+   "start": 7632,
+   "frames": 8,
+   "fps": 7,
    "loop": true,
    "strideM": 1.04,
    "alias": "crew.haul"
   },
   "crew.trail@none": {
-   "start": 6352,
+   "start": 7760,
    "frames": 5,
    "fps": 2,
    "loop": false,
@@ -1271,7 +1333,7 @@
    "alias": "crew.trail"
   },
   "crew.dig@none": {
-   "start": 6432,
+   "start": 7840,
    "frames": 4,
    "fps": 3,
    "loop": false,
@@ -1279,7 +1341,7 @@
    "alias": "crew.dig"
   },
   "crew.load.gun@none": {
-   "start": 6496,
+   "start": 7904,
    "frames": 5,
    "fps": 2,
    "loop": false,
@@ -1287,14 +1349,14 @@
    "alias": "crew.load.gun"
   },
   "crew.lay@none": {
-   "start": 6576,
+   "start": 7984,
    "frames": 3,
    "fps": 2,
    "loop": true,
    "alias": "crew.lay"
   },
   "crew.fire@none": {
-   "start": 6624,
+   "start": 8032,
    "frames": 3,
    "fps": 6,
    "loop": false,
@@ -1302,7 +1364,7 @@
    "alias": "crew.fire"
   },
   "crew.baseplate@none": {
-   "start": 6672,
+   "start": 8080,
    "frames": 4,
    "fps": 2,
    "loop": false,
@@ -1310,7 +1372,7 @@
    "alias": "crew.baseplate"
   },
   "crew.tube@none": {
-   "start": 6736,
+   "start": 8144,
    "frames": 4,
    "fps": 2,
    "loop": false,
@@ -1318,7 +1380,7 @@
    "alias": "crew.tube"
   },
   "crew.bipod@none": {
-   "start": 6800,
+   "start": 8208,
    "frames": 4,
    "fps": 2,
    "loop": false,
@@ -1326,7 +1388,7 @@
    "alias": "crew.bipod"
   },
   "crew.load.mortar@none": {
-   "start": 6864,
+   "start": 8272,
    "frames": 4,
    "fps": 3,
    "loop": false,
@@ -1334,7 +1396,7 @@
    "alias": "crew.load.mortar"
   },
   "crew.tripod@none": {
-   "start": 6928,
+   "start": 8336,
    "frames": 4,
    "fps": 2,
    "loop": false,
@@ -1342,7 +1404,7 @@
    "alias": "crew.tripod"
   },
   "crew.mountmg@none": {
-   "start": 6992,
+   "start": 8400,
    "frames": 4,
    "fps": 2,
    "loop": false,
@@ -1350,7 +1412,7 @@
    "alias": "crew.mountmg"
   },
   "crew.belt@none": {
-   "start": 7056,
+   "start": 8464,
    "frames": 4,
    "fps": 3,
    "loop": false,
@@ -1358,53 +1420,53 @@
    "alias": "crew.belt"
   },
   "crew.mg@none": {
-   "start": 7120,
+   "start": 8528,
    "frames": 2,
    "fps": 1.5,
    "loop": true,
    "alias": "crew.mg"
   },
   "crew.mg.fire@none": {
-   "start": 7152,
+   "start": 8560,
    "frames": 2,
    "fps": 14,
    "loop": true,
    "alias": "crew.mg.fire"
   },
   "crew.carry.tube@none": {
-   "start": 7184,
-   "frames": 4,
-   "fps": 6,
+   "start": 8592,
+   "frames": 8,
+   "fps": 8,
    "loop": true,
-   "strideM": 1.352,
+   "strideM": 1.56,
    "alias": "crew.carry.tube"
   },
   "crew.carry.plate@none": {
-   "start": 7248,
-   "frames": 4,
-   "fps": 6,
+   "start": 8720,
+   "frames": 8,
+   "fps": 8,
    "loop": true,
-   "strideM": 1.352,
+   "strideM": 1.56,
    "alias": "crew.carry.plate"
   },
   "crew.carry.mg@none": {
-   "start": 7312,
-   "frames": 4,
-   "fps": 6,
+   "start": 8848,
+   "frames": 8,
+   "fps": 8,
    "loop": true,
-   "strideM": 1.352,
+   "strideM": 1.56,
    "alias": "crew.carry.mg"
   },
   "crew.carry.tripod@none": {
-   "start": 7376,
-   "frames": 4,
-   "fps": 6,
+   "start": 8976,
+   "frames": 8,
+   "fps": 8,
    "loop": true,
-   "strideM": 1.352,
+   "strideM": 1.56,
    "alias": "crew.carry.tripod"
   },
   "crew.bailout@none": {
-   "start": 8336,
+   "start": 10000,
    "frames": 6,
    "fps": 5,
    "loop": false,
@@ -1413,7 +1475,7 @@
    "alias": "crew.bailout"
   },
   "crew.mount@none": {
-   "start": 8432,
+   "start": 10096,
    "frames": 6,
    "fps": 5,
    "loop": false,
@@ -1421,204 +1483,234 @@
    "hullHeightM": 1.5,
    "alias": "crew.mount"
   },
-  "kneeling.sneak": {
-   "start": 4064,
+  "kneeling.bandage@none": {
+   "start": 10192,
    "frames": 4,
-   "fps": 5,
+   "fps": 3,
    "loop": true,
-   "strideM": 0.9359999999999999,
+   "alias": "kneeling.bandage"
+  },
+  "crew.drag@none": {
+   "start": 10256,
+   "frames": 8,
+   "fps": 7,
+   "loop": true,
+   "strideM": 0.8320000000000001,
+   "dragM": 1.3,
+   "alias": "crew.drag"
+  },
+  "prone.dragged@none": {
+   "start": 10384,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "alias": "prone.dragged"
+  },
+  "prone.wounded@none": {
+   "start": 10400,
+   "frames": 1,
+   "fps": 1,
+   "loop": false,
+   "alias": "prone.wounded"
+  },
+  "kneeling.sneak": {
+   "start": 4576,
+   "frames": 8,
+   "fps": 7,
+   "loop": true,
+   "strideM": 1.1440000000000001,
    "alias": "crouched.sneak"
   },
   "kneeling.sneak@smg": {
-   "start": 4128,
-   "frames": 4,
-   "fps": 5,
+   "start": 4704,
+   "frames": 8,
+   "fps": 7,
    "loop": true,
-   "strideM": 0.9359999999999999,
+   "strideM": 1.1440000000000001,
    "alias": "crouched.sneak@smg"
   },
   "kneeling.sneak@lmg": {
-   "start": 4192,
-   "frames": 4,
-   "fps": 5,
+   "start": 4832,
+   "frames": 8,
+   "fps": 7,
    "loop": true,
-   "strideM": 0.9359999999999999,
+   "strideM": 1.1440000000000001,
    "alias": "crouched.sneak@lmg"
   },
   "kneeling.sneak@none": {
-   "start": 4256,
-   "frames": 4,
-   "fps": 5,
+   "start": 4960,
+   "frames": 8,
+   "fps": 7,
    "loop": true,
-   "strideM": 0.9359999999999999,
+   "strideM": 1.1440000000000001,
    "alias": "crouched.sneak@none"
   },
   "kneeling.sneak@rifle": {
-   "start": 4064,
-   "frames": 4,
-   "fps": 5,
+   "start": 4576,
+   "frames": 8,
+   "fps": 7,
    "loop": true,
-   "strideM": 0.9359999999999999,
+   "strideM": 1.1440000000000001,
    "alias": "crouched.sneak"
   },
   "standing.sneak": {
-   "start": 4064,
-   "frames": 4,
-   "fps": 5,
+   "start": 4576,
+   "frames": 8,
+   "fps": 7,
    "loop": true,
-   "strideM": 0.9359999999999999,
+   "strideM": 1.1440000000000001,
    "alias": "crouched.sneak"
   },
   "standing.sneak@smg": {
-   "start": 4128,
-   "frames": 4,
-   "fps": 5,
+   "start": 4704,
+   "frames": 8,
+   "fps": 7,
    "loop": true,
-   "strideM": 0.9359999999999999,
+   "strideM": 1.1440000000000001,
    "alias": "crouched.sneak@smg"
   },
   "standing.sneak@lmg": {
-   "start": 4192,
-   "frames": 4,
-   "fps": 5,
+   "start": 4832,
+   "frames": 8,
+   "fps": 7,
    "loop": true,
-   "strideM": 0.9359999999999999,
+   "strideM": 1.1440000000000001,
    "alias": "crouched.sneak@lmg"
   },
   "standing.sneak@none": {
-   "start": 4256,
-   "frames": 4,
-   "fps": 5,
+   "start": 4960,
+   "frames": 8,
+   "fps": 7,
    "loop": true,
-   "strideM": 0.9359999999999999,
+   "strideM": 1.1440000000000001,
    "alias": "crouched.sneak@none"
   },
   "standing.sneak@rifle": {
-   "start": 4064,
-   "frames": 4,
-   "fps": 5,
+   "start": 4576,
+   "frames": 8,
+   "fps": 7,
    "loop": true,
-   "strideM": 0.9359999999999999,
+   "strideM": 1.1440000000000001,
    "alias": "crouched.sneak"
   },
   "kneeling.sneak.shaken": {
-   "start": 5728,
-   "frames": 4,
-   "fps": 4,
+   "start": 6848,
+   "frames": 8,
+   "fps": 6,
    "loop": true,
-   "strideM": 0.9359999999999999,
+   "strideM": 1.1440000000000001,
    "alias": "crouched.sneak.shaken"
   },
   "standing.sneak.shaken": {
-   "start": 5728,
-   "frames": 4,
-   "fps": 4,
+   "start": 6848,
+   "frames": 8,
+   "fps": 6,
    "loop": true,
-   "strideM": 0.9359999999999999,
+   "strideM": 1.1440000000000001,
    "alias": "crouched.sneak.shaken"
   },
   "crouched.sneak.panicked": {
-   "start": 5792,
-   "frames": 6,
-   "fps": 13,
+   "start": 6976,
+   "frames": 8,
+   "fps": 14,
    "loop": true,
    "strideM": 2.08,
    "alias": "standing.run.panicked"
   },
   "kneeling.sneak.panicked": {
-   "start": 5792,
-   "frames": 6,
-   "fps": 13,
+   "start": 6976,
+   "frames": 8,
+   "fps": 14,
    "loop": true,
    "strideM": 2.08,
    "alias": "standing.run.panicked"
   },
   "standing.walk.panicked": {
-   "start": 5792,
-   "frames": 6,
-   "fps": 13,
+   "start": 6976,
+   "frames": 8,
+   "fps": 14,
    "loop": true,
    "strideM": 2.08,
    "alias": "standing.run.panicked"
   },
   "standing.walk.berserk": {
-   "start": 6016,
-   "frames": 6,
-   "fps": 12,
+   "start": 7264,
+   "frames": 8,
+   "fps": 13,
    "loop": true,
-   "strideM": 2.2880000000000003,
+   "strideM": 2.6,
    "alias": "standing.run.berserk"
   },
   "standing.aim.berserk": {
-   "start": 6112,
+   "start": 7392,
    "frames": 3,
    "fps": 12,
    "loop": false,
    "alias": "standing.fire.berserk"
   },
   "crouched.idle.surrendered": {
-   "start": 6192,
+   "start": 7472,
    "frames": 2,
    "fps": 1.5,
    "loop": true,
    "alias": "kneeling.idle.surrendered"
   },
   "prone.idle.surrendered": {
-   "start": 6192,
+   "start": 7472,
    "frames": 2,
    "fps": 1.5,
    "loop": true,
    "alias": "kneeling.idle.surrendered"
   },
   "standing.woundedCrawl": {
-   "start": 4576,
-   "frames": 4,
-   "fps": 2.5,
+   "start": 5600,
+   "frames": 6,
+   "fps": 3,
    "loop": true,
    "strideM": 0.5720000000000001,
    "alias": "prone.woundedCrawl"
   },
   "crouched.woundedCrawl": {
-   "start": 4576,
-   "frames": 4,
-   "fps": 2.5,
+   "start": 5600,
+   "frames": 6,
+   "fps": 3,
    "loop": true,
    "strideM": 0.5720000000000001,
    "alias": "prone.woundedCrawl"
   },
   "kneeling.woundedCrawl": {
-   "start": 4576,
-   "frames": 4,
-   "fps": 2.5,
+   "start": 5600,
+   "frames": 6,
+   "fps": 3,
    "loop": true,
    "strideM": 0.5720000000000001,
    "alias": "prone.woundedCrawl"
   },
   "crew.carry.baseplate": {
-   "start": 7248,
-   "frames": 4,
-   "fps": 6,
+   "start": 8720,
+   "frames": 8,
+   "fps": 8,
    "loop": true,
-   "strideM": 1.352,
+   "strideM": 1.56,
    "alias": "crew.carry.plate"
   },
   "crew.carry": {
-   "start": 7376,
-   "frames": 4,
-   "fps": 6,
+   "start": 8976,
+   "frames": 8,
+   "fps": 8,
    "loop": true,
-   "strideM": 1.352,
+   "strideM": 1.56,
    "alias": "crew.carry.tripod"
   },
   "crew.gunner": {
-   "start": 6576,
+   "start": 7984,
    "frames": 3,
    "fps": 2,
    "loop": true,
    "alias": "crew.lay"
   },
   "crew.loader.mortar": {
-   "start": 6864,
+   "start": 8272,
    "frames": 4,
    "fps": 3,
    "loop": false,
@@ -1626,7 +1718,7 @@
    "alias": "crew.load.mortar"
   },
   "crew.loader.gun": {
-   "start": 6496,
+   "start": 7904,
    "frames": 5,
    "fps": 2,
    "loop": false,
@@ -1634,7 +1726,7 @@
    "alias": "crew.load.gun"
   },
   "crew.loader": {
-   "start": 6496,
+   "start": 7904,
    "frames": 5,
    "fps": 2,
    "loop": false,
@@ -1642,56 +1734,56 @@
    "alias": "crew.load.gun"
   },
   "standing.hide.cowering": {
-   "start": 4800,
+   "start": 5856,
    "frames": 2,
    "fps": 6,
    "loop": true,
    "alias": "standing.idle.cowering"
   },
   "standing.hide.pinned": {
-   "start": 4768,
+   "start": 5824,
    "frames": 2,
    "fps": 3,
    "loop": true,
    "alias": "standing.idle.pinned"
   },
   "crouched.hide.cowering": {
-   "start": 5056,
+   "start": 6112,
    "frames": 2,
    "fps": 6,
    "loop": true,
    "alias": "crouched.idle.cowering"
   },
   "crouched.hide.pinned": {
-   "start": 5024,
+   "start": 6080,
    "frames": 2,
    "fps": 3,
    "loop": true,
    "alias": "crouched.idle.pinned"
   },
   "kneeling.hide.cowering": {
-   "start": 5312,
+   "start": 6368,
    "frames": 2,
    "fps": 6,
    "loop": true,
    "alias": "kneeling.idle.cowering"
   },
   "kneeling.hide.pinned": {
-   "start": 5280,
+   "start": 6336,
    "frames": 2,
    "fps": 3,
    "loop": true,
    "alias": "kneeling.idle.pinned"
   },
   "prone.hide.cowering": {
-   "start": 5568,
+   "start": 6624,
    "frames": 2,
    "fps": 6,
    "loop": true,
    "alias": "prone.idle.cowering"
   },
   "prone.hide.pinned": {
-   "start": 5536,
+   "start": 6592,
    "frames": 2,
    "fps": 3,
    "loop": true,
@@ -1707,5 +1799,6 @@
   "rifle",
   "smg",
   "lmg"
- ]
+ ],
+ "image": "soldiers_german_winter_1.webp"
 }

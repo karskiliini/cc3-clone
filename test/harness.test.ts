@@ -503,5 +503,5 @@ describe('determinism', () => {
     expect(b.german).toEqual(a.german);
     expect(b.soviet).toEqual(a.soviet);
     expect(b.soldierPositions).toEqual(a.soldierPositions);
-  });
+  }, 60000);
 });

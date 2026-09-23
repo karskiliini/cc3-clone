@@ -3,14 +3,11 @@
 // Everything here is generated in code (pixel strings + canvas drawing ops).
 // Nothing is copied from any existing game.
 // ============================================================================
-import type { Side, Season, Stance, Facing8, CursorKind } from '@/shared/types';
+import type { Side, Season, CursorKind } from '@/shared/types';
 import { TILE_PX, TILE_M } from '@/shared/types';
 import { hash2 } from '@/shared/rng';
 import { createCanvas, ctx2d } from '@/render/pixelUtil';
-import { buildVehiclePart, composeVehicleFrame, VEHICLE_FACINGS, type VehiclePartArt } from '@/render/vehicleArt';
-import { buildSoldierSprite, type SoldierOutline, type SoldierPose } from '@/render/soldierArt';
 import { buildTeamIcon } from '@/render/teamIconArt';
-import { buildWeaponSprite, WEAPON_FACINGS, type WeaponVariant } from '@/render/weaponArt';
 
 const PX_PER_M = TILE_PX / TILE_M; // 5 px/m
 
@@ -26,7 +23,7 @@ function cached(key: string, build: () => HTMLCanvasElement): HTMLCanvasElement 
 }
 
 // ============================================================================
-// SOLDIERS
+// UNIT SPRITE SCALES (soldiers and crew weapons come from the Blender atlases, spriteAtlas.ts)
 // ============================================================================
 const OUTLINE = '#1a1a14';
 
@@ -57,129 +54,6 @@ class LruCache {
     return c;
   }
   get size(): number { return this.map.size; }
-}
-// round5-battle.md fix #4 added 6 mental-state/health poses (cowering, panicked, pinned, wary,
-// berserk, surrendered, woundedCrawl) on top of the 4 calm stances, growing the per-scale key
-// space (pose x frame x facing x outline, one season/side pair active per battle) to a few
-// hundred entries. Bumped from 900 so a battle visiting every pose/facing on both sides doesn't
-// thrash the LRU; still a small, fixed bound (tiny canvases, no measurable memory impact).
-const SOLDIER_CACHE_CAP = 1400;
-const VEHICLE_CACHE_CAP = 160;
-const soldierCaches: Record<UnitSpriteScale, LruCache> = { 1: new LruCache(SOLDIER_CACHE_CAP), 2: new LruCache(SOLDIER_CACHE_CAP) };
-
-/** Current unit-sprite cache sizes (for the preview page / perf checks). */
-export function unitSpriteCacheStats(): Record<string, number> {
-  return { soldier1: soldierCaches[1].size, soldier2: soldierCaches[2].size, vehicle1: vehicleArtCaches[1].size, vehicle2: vehicleArtCaches[2].size };
-}
-
-/** Oriented soldier sprite, square, centred on the soldier. Authored at
- * `scale` px per 1x px: draw at `width * zoom / scale`. */
-const SOLDIER_STILL_POSES = new Set<Stance | SoldierPose>(['dead', 'prone', 'pinned', 'cowering', 'surrendered', 'woundedCrawl']);
-
-export function getSoldierSprite(
-  side: Side,
-  season: Season,
-  stance: SoldierPose,
-  facing: Facing8,
-  frame: 0 | 1,
-  outline: SoldierOutline = 'enemy',
-  scale: number = 1,
-): HTMLCanvasElement {
-  const sc = unitSpriteScale(scale);
-  const fr = SOLDIER_STILL_POSES.has(stance) ? 0 : frame;
-  const ol = stance === 'dead' ? 'enemy' : outline;
-  const key = `${side}|${season === 'winter' ? 'winter' : 'summer'}|${stance}|${facing}|${fr}|${ol}`;
-  return soldierCaches[sc].get(key, () => buildSoldierSprite(side, season, stance, facing, fr, ol, sc));
-}
-
-// ============================================================================
-// VEHICLES
-// ============================================================================
-// Dimensions must mirror src/data/units.ts VEHICLE_DEFS exactly (setVehicleDims
-// pushes the real values in at startup; this table is the fallback/default).
-const DIMENSIONS: Record<string, { lengthM: number; widthM: number }> = {
-  pz3j: { lengthM: 5.6, widthM: 2.9 },
-  pz4f1: { lengthM: 5.9, widthM: 2.9 },
-  pz4gh: { lengthM: 5.9, widthM: 2.9 },
-  stug3g: { lengthM: 5.4, widthM: 2.9 },
-  panther: { lengthM: 6.9, widthM: 3.4 },
-  tiger: { lengthM: 6.3, widthM: 3.6 },
-  sdkfz251: { lengthM: 5.8, widthM: 2.1 },
-  marder3: { lengthM: 4.65, widthM: 2.95 },
-  t26: { lengthM: 4.6, widthM: 2.4 },
-  bt7: { lengthM: 5.7, widthM: 2.3 },
-  t34_76: { lengthM: 6.7, widthM: 3.0 },
-  t34_85: { lengthM: 6.7, widthM: 3.0 },
-  kv1: { lengthM: 6.8, widthM: 3.3 },
-  is2: { lengthM: 6.8, widthM: 3.1 },
-  t70: { lengthM: 4.3, widthM: 2.3 },
-  su76: { lengthM: 5.0, widthM: 2.7 },
-  su85: { lengthM: 6.1, widthM: 3.0 },
-};
-let vehicleDims: Record<string, { lengthM: number; widthM: number }> = { ...DIMENSIONS };
-
-/** Allow the game to push real VehicleDef dimensions in once src/data/units is loaded. */
-export function setVehicleDims(dims: Record<string, { lengthM: number; widthM: number }>): void {
-  vehicleDims = { ...vehicleDims, ...dims };
-}
-
-function getDims(defId: string): { lengthM: number; widthM: number } {
-  return vehicleDims[defId] ?? { lengthM: 6, widthM: 3 };
-}
-
-
-/** Hull/turret sprite centred on the vehicle pivot, authored at `scale` px
- * per 1x px (draw at `width * zoom / scale`). Knocked-out/burning variants
- * share the 'knockedOut' art at every scale. */
-export function getVehicleSprite(defId: string, part: 'hull' | 'turret', state: 'ok' | 'knockedOut', scale: number = 1): HTMLCanvasElement {
-  return getVehicleArt(defId, part, state, scale).body;
-}
-
-/** wf19: the part plus its soft cast-shadow sprite and the four directional light overlays that
- * unitRender blends by the hull's rotation (so the sun stays NW whatever the vehicle's facing). */
-const vehicleArtCaches: Record<UnitSpriteScale, Map<string, VehiclePartArt>> = { 1: new Map(), 2: new Map() };
-export function getVehicleArt(defId: string, part: 'hull' | 'turret', state: 'ok' | 'knockedOut', scale: number = 1): VehiclePartArt {
-  const sc = unitSpriteScale(scale);
-  const key = `${defId}|${part}|${state}`;
-  const cache = vehicleArtCaches[sc];
-  let art = cache.get(key);
-  if (!art) {
-    const { lengthM, widthM } = getDims(defId);
-    art = buildVehiclePart(defId, part, lengthM, widthM, state, sc);
-    cache.set(key, art);
-    // 17 vehicles x 2 parts x 2 states = 68 entries at most: bounded by the roster, no LRU needed
-    if (cache.size > VEHICLE_CACHE_CAP) cache.delete(cache.keys().next().value as string);
-  }
-  return art;
-}
-
-/** Pre-lit, pre-shadowed frame of a vehicle part rotated to `rad` (quantised to VEHICLE_FACINGS
- * steps), pivot at the canvas centre: blit unrotated at `width * zoom / scale`. Bounded LRU per
- * scale (a battle touches a few vehicle types x 64 steps x 2 parts). */
-const vehicleFrameCaches: Record<UnitSpriteScale, LruCache> = { 1: new LruCache(640), 2: new LruCache(320) };
-export function getVehicleFrame(defId: string, part: 'hull' | 'turret', state: 'ok' | 'knockedOut', rad: number, scale: number = 1): HTMLCanvasElement {
-  const sc = unitSpriteScale(scale);
-  const step = ((Math.round((rad / (Math.PI * 2)) * VEHICLE_FACINGS) % VEHICLE_FACINGS) + VEHICLE_FACINGS) % VEHICLE_FACINGS;
-  return vehicleFrameCaches[sc].get(`${defId}|${part}|${state}|${step}`, () =>
-    composeVehicleFrame(getVehicleArt(defId, part, state, sc), step, sc, part === 'turret' ? 0.75 : 1));
-}
-
-// ============================================================================
-// CREW-SERVED WEAPONS (mortars, HMGs, AT guns, AT rifles) — art in weaponArt.ts
-// ============================================================================
-const WEAPON_CACHE_CAP = 240;
-const weaponCaches: Record<UnitSpriteScale, LruCache> = { 1: new LruCache(WEAPON_CACHE_CAP), 2: new LruCache(WEAPON_CACHE_CAP) };
-
-/** Weapon sprite rotated to `facingRad` (0 = muzzle north, clockwise; quantised to 16 steps),
- * pivot at the canvas centre, authored at `scale` px per 1x px: draw at `width * zoom / scale`. */
-export function getWeaponSprite(
-  weaponId: string, variant: WeaponVariant, facingRad: number, side: Side, season: Season, scale: number = 1,
-): HTMLCanvasElement {
-  const sc = unitSpriteScale(scale);
-  const f = ((Math.round((facingRad / (Math.PI * 2)) * WEAPON_FACINGS) % WEAPON_FACINGS) + WEAPON_FACINGS) % WEAPON_FACINGS;
-  const winter = season === 'winter';
-  const key = `${weaponId}|${variant}|${f}|${side}|${winter ? 'w' : 's'}`;
-  return weaponCaches[sc].get(key, () => buildWeaponSprite(weaponId, variant, f, side, winter ? 'winter' : 'summer', sc));
 }
 
 // ============================================================================

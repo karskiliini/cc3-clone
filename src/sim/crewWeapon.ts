@@ -44,6 +44,7 @@ import { AIM_HOLD_MAX_S, SKILL_ACE, aimLayMul, chooseAimPoint, chooseRound, gunn
 import { expectedArmorMm } from './vehicleDamage';
 import { formationBaseHeading, rotateOffset } from './spawn';
 import { isDazed, recoveryFactor } from './daze';
+import { INFANTRY_PACE, infantrySpeedMs } from './infantryPace';
 
 export type CrewServedClass = 'mortar' | 'hmg' | 'atgun';
 const CREW_SERVED = new Set<WeaponClass>(['mortar', 'hmg', 'atgun']);
@@ -56,8 +57,8 @@ export const REMAN_RADIUS_TILES = 1.5;
 export const RETURN_RADIUS_TILES = 40 / TILE_M;
 /** A man this close (tiles) to a station is at it. */
 export const AT_STATION_TILES = 0.3;
-/** Walking pace between stations, m/s (a crouched scuttle). */
-export const STATION_WALK_MS = 1.6;
+/** Requested walking pace between stations, m/s; crouched men keep their lower posture cap. */
+export const STATION_WALK_MS = INFANTRY_PACE.walk;
 /** Swinging a limbered gun round by its trail, rad/s. */
 const SWING_RATE = 1.2;
 
@@ -115,11 +116,11 @@ export const TASK_WORD: Record<CrewTaskId, string> = {
   placeTripod: 'Tripod', mountGun: 'Mounting gun', feedBelt: 'Feeding belt', dismountGun: 'Packing up', liftTripod: 'Packing up',
   load: 'Loading', lay: 'Aiming', fire: 'Firing', dropRound: 'Dropping round', unload: 'Unloading',
 };
-export const CREW_TASK_WORDS: string[] = Array.from(new Set(Object.values(TASK_WORD)));
+export const CREW_TASK_WORDS: string[] = [...new Set(Object.values(TASK_WORD)), 'MG mount'];
 
 /** The word for a crewman's current task, or null when he has none. */
 export function crewTaskWord(s: Soldier): string | null {
-  return s.crewTask ? TASK_WORD[s.crewTask.id] : null;
+  return s.crewTask ? TASK_WORD[s.crewTask.id] : s.carryingMgMount != null ? 'MG mount' : null;
 }
 
 // ------------------------------------------------------------------ geometry
@@ -304,9 +305,11 @@ function desiredFacing(state: BattleState, team: Team, gunner: Soldier, from: Ve
 }
 
 function isOrderedMove(team: Team, gunner: Soldier, cw: CrewWeaponState): boolean {
-  if (gunner.path.length === 0 || isFleeing(gunner)) return false;
+  if (isFleeing(gunner)) return false;
   const ord = team.order;
-  return !!ord && MOVE_ORDERS.has(ord.type) && ord.issuedAt >= cw.setAt;
+  // Waiting at a transport door is still travel: keep the weapon packed through the queue.
+  return !!ord && MOVE_ORDERS.has(ord.type) && ord.issuedAt >= cw.setAt
+    && (gunner.path.length > 0 || ord.mountVehicleId != null);
 }
 
 // ------------------------------------------------------------------ state
@@ -458,8 +461,9 @@ function pickWorker(free: Soldier[], station: Vec2, task: CrewTaskId, gunnerId: 
 /** One step of a crewman towards `target` (tile coords). Returns true when he is at it. */
 function walkTo(state: BattleState, s: Soldier, target: Vec2, dt: number): boolean {
   const d = dist(s.pos, target);
-  if (d <= 0.04) { s.pos = { x: target.x, y: target.y }; return true; }
-  const step = Math.min(d, (STATION_WALK_MS * (s.health === 'wounded' ? 0.7 : 1) * dt) / TILE_M);
+  if (d <= 1e-4) return true;
+  const tile = tileAt(state.map, Math.floor(s.pos.x), Math.floor(s.pos.y));
+  const step = Math.min(d, (infantrySpeedMs(s, STATION_WALK_MS) * TERRAIN_PROPS[tile].speedMul * dt) / TILE_M);
   const nx = s.pos.x + ((target.x - s.pos.x) / d) * step;
   const ny = s.pos.y + ((target.y - s.pos.y) / d) * step;
   const tx = Math.floor(nx), ty = Math.floor(ny);
@@ -471,6 +475,103 @@ function walkTo(state: BattleState, s: Soldier, target: Vec2, dt: number): boole
   s.pos = { x: nx, y: ny };
   s.animFrame = Math.floor(state.time / 0.3) % 2;
   return dist(s.pos, target) <= AT_STATION_TILES;
+}
+
+// ------------------------------------------------------------ separate MG mounts
+function canCarryMount(state: BattleState, s: Soldier | undefined, cw: CrewWeaponState): s is Soldier {
+  return isAbleCrewman(state, s) && s.id !== cw.gunnerId && s.fatigue < 90 && !s.carrying
+    && !s.hatch && s.pickup?.until == null && !(s.bandageUntil != null && state.time < s.bandageUntil)
+    && !crewServedClass(s.weaponId);
+}
+
+function mountHelpers(state: BattleState, team: Team, cw: CrewWeaponState): Soldier[] {
+  return team.soldierIds.map(id => state.soldiers.get(id)).filter((s): s is Soldier => canCarryMount(state, s, cw))
+    .sort((a, b) => Number(a.isLeader) - Number(b.isLeader)
+      || dist(a.pos, cw.mount?.pos ?? cw.pos) - dist(b.pos, cw.mount?.pos ?? cw.pos) || a.id - b.id);
+}
+
+/** Move the physical mount, never the weapon's completed assembly state. Losing a carrier
+ * drops his travelling load; losing an assistant beside an emplaced gun changes no equipment. */
+function stepMgMount(state: BattleState, team: Team, cw: CrewWeaponState, dt: number): void {
+  if (crewServedClass(cw.weaponId) !== 'hmg') return;
+  ensureTaskState(cw, 'hmg');
+  if (!cw.mount) {
+    const deployed = cw.done!.includes('placeTripod');
+    const carrier = deployed ? undefined : mountHelpers(state, team, cw)[0];
+    cw.mount = { state: deployed ? 'deployed' : carrier ? 'carried' : 'ground',
+      pos: { ...(carrier?.pos ?? cw.pos) }, carrierId: carrier?.id ?? null };
+  }
+  const m = cw.mount;
+  if (cw.lightMode && !team.soldierIds.some(id => {
+    const s = state.soldiers.get(id);
+    return s && s.health !== 'dead' && s.health !== 'incapacitated'
+      && (s.vehicleId == null || s.seat === 'passenger') && s.weaponId === WEAPONS[cw.weaponId].unmountedWeaponId;
+  })) {
+    // With nobody holding the portable gun, recover that first. A survivor must not become
+    // permanently occupied by its mount while the gun lies beside its fallen owner.
+    const carrier = m.carrierId != null ? state.soldiers.get(m.carrierId) : undefined;
+    if (m.state === 'carried') { m.pos = { ...(carrier?.pos ?? m.pos) }; m.state = 'ground'; m.carrierId = null; }
+    m.recovery = undefined; return;
+  }
+  if (m.state === 'carried') {
+    const carrier = state.soldiers.get(m.carrierId!);
+    if (carrier) m.pos = { ...carrier.pos };
+    const travelling = carrier && carrier.health !== 'dead' && carrier.health !== 'incapacitated'
+      && ((carrier.vehicleId != null && carrier.seat === 'passenger') || carrier.hatch?.passenger);
+    if (canCarryMount(state, carrier, cw) || travelling) {
+      carrier.carryingMgMount = team.id; carrier.aiming = undefined; carrier.smgBurst = undefined;
+      return;
+    }
+    m.state = 'ground'; m.carrierId = null; m.recovery = undefined;
+  }
+  // A deployed tripod stays put. It can be recovered separately once its gun has left.
+  if (m.state === 'deployed' && !cw.lightMode) return;
+  let worker = m.recovery ? state.soldiers.get(m.recovery.soldierId) : undefined;
+  if (!canCarryMount(state, worker, cw)) {
+    m.recovery = undefined;
+    worker = mountHelpers(state, team, cw).find(s => dist(s.pos, m.pos) <= RETURN_RADIUS_TILES);
+    if (!worker) return;
+    const path = findPath(state.map, worker.pos, m.pos, 'infantry');
+    if (!path.length && dist(worker.pos, m.pos) > AT_STATION_TILES) return;
+    m.recovery = { soldierId: worker.id, path, worked: 0 };
+  }
+  const r = m.recovery!;
+  worker.aiming = undefined; worker.smgBurst = undefined; worker.fireTimer = Math.max(worker.fireTimer, 0.5);
+  worker.mind.lastCoverSeekAt = state.time;
+  const next = r.path[0] ?? m.pos;
+  if (dist(worker.pos, m.pos) > AT_STATION_TILES) {
+    walkTo(state, worker, next, dt);
+    if (dist(worker.pos, next) <= AT_STATION_TILES && r.path.length) r.path.shift();
+    worker.crewTask = { id: 'liftTripod', walking: true, progress: 0 };
+    return;
+  }
+  r.worked += dt;
+  worker.crewTask = { id: 'liftTripod', walking: false, progress: Math.min(1, r.worked / TASK_S.liftTripod) };
+  if (r.worked >= TASK_S.liftTripod) {
+    m.state = 'carried'; m.carrierId = worker.id; m.pos = { ...worker.pos }; m.recovery = undefined;
+    worker.carryingMgMount = team.id;
+  }
+}
+
+function useLightMg(state: BattleState, team: Team, cw: CrewWeaponState, gunner: Soldier): boolean {
+  const light = WEAPONS[cw.weaponId]?.unmountedWeaponId;
+  if (!light || !WEAPONS[light]) return false;
+  if (!cw.lightMode) {
+    gunner.weaponId = light;
+    const excess = Math.max(0, gunner.ammo - WEAPONS[light].ammo);
+    gunner.ammo -= excess; gunner.ammoReserve += excess;
+    gunner.aiming = undefined; clearMission(cw);
+    cw.lightMode = true; cw.done = []; cw.workers = {}; cw.progress = {}; cw.open = [];
+    cw.goal = 'pack'; cw.phase = 'packed'; cw.timer = 0;
+    if (team.side === state.config.playerSide) addMessage(state, `${team.name}\nMount left behind; using the light MG.`, 'warn');
+  }
+  cw.pos = { ...gunner.pos }; cw.facing = facingAngle(gunner.facing);
+  return true;
+}
+
+/** True when the mount is a separate stationary object, drawn even after the gun leaves. */
+export function separateMgMount(cw: CrewWeaponState): boolean {
+  return !!cw.mount && cw.mount.state !== 'carried' && (!!cw.lightMode || cw.mount.state === 'ground');
 }
 
 function abandon(state: BattleState, team: Team, cw: CrewWeaponState, why: 'fled' | 'fell'): void {
@@ -557,8 +658,10 @@ function stepAbandoned(state: BattleState, team: Team, cw: CrewWeaponState, cls:
     if (s.path.length > 0 && !(team.order && MOVE_ORDERS.has(team.order.type) && team.order.issuedAt > cw.abandonedAt)) continue;
     if (!gunner && state.time < cw.abandonedAt + takeoverDelayS(s)) continue;
     const old = state.soldiers.get(cw.gunnerId);
-    if (old && old.id !== s.id && old.weaponId === cw.weaponId && s.weaponId !== cw.weaponId) {
-      s.weaponId = cw.weaponId;
+    const currentWeaponId = cw.lightMode ? WEAPONS[cw.weaponId].unmountedWeaponId! : cw.weaponId;
+    if (cw.lightMode && s.weaponId !== currentWeaponId && old?.weaponId !== currentWeaponId) continue;
+    if (old && old.id !== s.id && old.weaponId === currentWeaponId && s.weaponId !== currentWeaponId) {
+      s.weaponId = currentWeaponId;
       s.ammo = old.ammo;
       s.ammoReserve = old.ammoReserve;
       s.reloadTimer = 0;
@@ -643,6 +746,10 @@ function completeTask(state: BattleState, team: Team, cw: CrewWeaponState, cls: 
   const undoes = UNDOES[task];
   if (undoes) {
     cw.done = cw.done!.filter((k) => k !== undoes && !(task === 'dismountGun' && k === 'feedBelt'));
+    if (task === 'liftTripod' && cw.mount) {
+      cw.mount.state = 'carried'; cw.mount.carrierId = worker.id; cw.mount.pos = { ...worker.pos };
+      worker.carryingMgMount = team.id;
+    }
     return;
   }
   switch (task) {
@@ -694,6 +801,9 @@ function completeTask(state: BattleState, team: Team, cw: CrewWeaponState, cls: 
       break;
     }
     case 'placeBaseplate': cw.baseplateBy = worker.id; break;
+    case 'placeTripod':
+      if (cw.mount) { cw.mount.state = 'deployed'; cw.mount.carrierId = null; cw.mount.pos = { ...cw.pos }; worker.carryingMgMount = undefined; }
+      break;
     default: break;
   }
   cw.done!.push(task);
@@ -715,6 +825,7 @@ function stepTasks(state: BattleState, team: Team, cw: CrewWeaponState, cls: Cre
   const able: Soldier[] = [];
   for (const s of crew) {
     s.mind.lastCoverSeekAt = state.time;
+    if (cw.mount?.recovery?.soldierId === s.id) continue;
     if (!isAbleCrewman(state, s)) continue;
     able.push(s);
     if (!orderedMove && s.path.length > 0) { s.path = []; if (s.activity === 'moving' || s.activity === 'movingFast' || s.activity === 'sneaking') s.activity = team.order?.type === 'defend' ? 'defending' : 'idle'; }
@@ -730,12 +841,16 @@ function stepTasks(state: BattleState, team: Team, cw: CrewWeaponState, cls: Cre
   const workers = cw.workers!;
   for (const k of Object.keys(workers) as CrewTaskId[]) {
     const w = state.soldiers.get(workers[k]!);
-    if (!open.includes(k) || !isAbleCrewman(state, w) || !able.includes(w)) delete workers[k];
+    if (!open.includes(k) || !isAbleCrewman(state, w) || !able.includes(w)
+      || (k === 'liftTripod' && !canCarryMount(state, w, cw))
+      || (k === 'placeTripod' && (cw.mount?.state !== 'carried' || cw.mount.carrierId !== w.id))) delete workers[k];
   }
   const busy = new Set<number>(Object.values(workers) as number[]);
   for (const task of open) {
     if (workers[task] != null) continue;
-    const free = able.filter((s) => !busy.has(s.id));
+    const free = able.filter((s) => !busy.has(s.id) && s.id !== cw.mount?.recovery?.soldierId
+      && (task !== 'liftTripod' || canCarryMount(state, s, cw))
+      && (task !== 'placeTripod' || (cw.mount?.state === 'carried' && cw.mount.carrierId === s.id)));
     const avoid = task === 'setBipod' && able.length > 1 ? cw.baseplateBy : undefined;
     const pick = pickWorker(free, taskStation(cw, cls, task), task, gunner.id, avoid);
     if (pick) { workers[task] = pick.id; busy.add(pick.id); }
@@ -748,7 +863,10 @@ function stepTasks(state: BattleState, team: Team, cw: CrewWeaponState, cls: Cre
     const w = workers[task] != null ? state.soldiers.get(workers[task]!) : undefined;
     if (!w) continue;
     const station = taskStation(cw, cls, task);
-    const there = dist(w.pos, station) <= AT_STATION_TILES || walkTo(state, w, station, dt);
+    const reached = dist(w.pos, station) <= AT_STATION_TILES || walkTo(state, w, station, dt);
+    // A blocked station approach is tolerated by older crew drills; a physical mount cannot
+    // be placed or picked up across the obstacle from where the worker got stuck.
+    const there = task === 'placeTripod' || task === 'liftTripod' ? dist(w.pos, station) <= AT_STATION_TILES : reached;
     // a man still recovering from a daze works slowly (sim/daze.ts: x0.7 fading back to 1)
     const total = taskDurationS(cw, task, w, gunner) / recoveryFactor(w, state.time);
     if (there) {
@@ -821,9 +939,9 @@ function taskDurationS(cw: CrewWeaponState, task: CrewTaskId, worker: Soldier, g
 }
 
 /** Hauling pace of a manhandled gun, m/s. */
-export const HAUL_SPEED_MS = 1.3;
+export const HAUL_SPEED_MS = 0.65;
 /** How fast the men can slew the gun about its axle while pushing it, rad/s. */
-export const HAUL_TURN_RATE = 0.9;
+export const HAUL_TURN_RATE = 0.25;
 /** Hauler stations either side of the towing eye (metres, weapon frame). */
 export function haulStationM(weaponId: string, i: number): Vec2 {
   return { x: i === 0 ? -0.4 : 0.4, y: towLengthM(weaponId) };
@@ -851,6 +969,15 @@ export function gunHaulers(state: BattleState, team: Team, cw: CrewWeaponState):
  * gun is pushed muzzle-first), and the haulers are put at their stations FROM the axle pose. */
 function haulGun(state: BattleState, team: Team, cw: CrewWeaponState, gunner: Soldier, dt: number): void {
   const path = gunner.path;
+  const towingEye = weaponFramePoint(cw.pos, cw.facing, haulStationM(cw.weaponId, 0));
+  if (dist(gunner.pos, towingEye) > 1e-4) {
+    // Finishing the packing drill does not teleport the gunner onto the towing eye. He and the
+    // other hauler walk into place while the axle stays still, then begin pushing next step.
+    gunHaulers(state, team, cw).forEach((s, i) => {
+      walkTo(state, s, weaponFramePoint(cw.pos, cw.facing, haulStationM(cw.weaponId, i)), dt);
+    });
+    return;
+  }
   if (path.length > 0 && !isFleeing(gunner) && isAbleCrewman(state, gunner)) {
     const wp = path[0];
     const want = dist(cw.pos, wp) > 0.05 ? angleTo(cw.pos, wp) : cw.facing;
@@ -872,8 +999,8 @@ function haulGun(state: BattleState, team: Team, cw: CrewWeaponState, gunner: So
   // the men, from the axle pose
   gunHaulers(state, team, cw).forEach((s, i) => {
     const st = weaponFramePoint(cw.pos, cw.facing, haulStationM(cw.weaponId, i));
-    if (i === 0 || dist(s.pos, st) <= 0.15) s.pos = st;
-    else walkTo(state, s, st, dt * 2); // the second man catches up with the trail at a trot
+    if (i === 0) s.pos = st;
+    else walkTo(state, s, st, dt);
     s.facing = facingFromAngle(cw.facing);
     s.animFrame = Math.floor(state.time / 0.3) % 2;
     if (i > 0 && path.length === 0) s.path = [];
@@ -900,12 +1027,14 @@ function stepTeamWeapon(state: BattleState, team: Team, dt: number): void {
     if (s && s.crewTask) s.crewTask = undefined;
   }
   let gunner = cw ? state.soldiers.get(cw.gunnerId) : undefined;
-  if (cw && (!isActive(gunner) || gunner.weaponId !== weaponId)) {
+  const carriedWeaponId = cw?.lightMode ? WEAPONS[weaponId]?.unmountedWeaponId : weaponId;
+  if (cw && (!isActive(gunner) || gunner.weaponId !== carriedWeaponId)) {
     // the weapon has changed hands (mind.ts promotes the next crewman when the gunner falls)
     for (const id of team.soldierIds) {
       const s = state.soldiers.get(id);
-      if (isActive(s) && s.weaponId === weaponId) { cw.gunnerId = s.id; gunner = s; break; }
+      if (isActive(s) && s.weaponId === carriedWeaponId) { cw.gunnerId = s.id; gunner = s; break; }
     }
+    if (cw.lightMode && gunner?.weaponId !== carriedWeaponId) gunner = undefined;
   }
   if (!cw) {
     for (const id of team.soldierIds) {
@@ -916,6 +1045,8 @@ function stepTeamWeapon(state: BattleState, team: Team, dt: number): void {
     cw = initCrewWeapon(state, team, gunner, cls);
   }
   ensureTaskState(cw, cls);
+  stepMgMount(state, team, cw, dt);
+  cw.mountBlocked = false;
 
   if (!isActive(gunner) || cw.abandoned || isFleeing(gunner)) clearMission(cw);
   if (!isActive(gunner)) {
@@ -950,6 +1081,31 @@ function stepTeamWeapon(state: BattleState, team: Team, dt: number): void {
   }
 
   const orderedMove = isOrderedMove(team, gunner, cw);
+  if (cls === 'hmg') {
+    const mount = cw.mount!;
+    const helpers = mountHelpers(state, team, cw);
+    const mounted = cw.done!.includes('mountGun');
+    // Heavy guns without a portable form stay put. Do not dismantle a working emplacement
+    // merely because the only assistant went down or a move order is waiting.
+    if (!WEAPONS[weaponId].unmountedWeaponId && (orderedMove || cw.goal === 'pack')
+      && mount.state !== 'carried' && (!helpers.length || mount.state === 'ground')) {
+      cw.mountBlocked = true;
+      if (mounted) setGoal(cw, 'deploy');
+      deriveLegacy(cw, cls); gateFire(cw, gunner, dt); return;
+    }
+    if (cw.lightMode) {
+      const carrier = mount.carrierId != null ? state.soldiers.get(mount.carrierId) : undefined;
+      if (carrier && mount.state === 'carried' && gunner.path.length === 0 && team.order?.mountVehicleId == null
+        && dist(carrier.pos, gunner.pos) * TILE_M <= 6) {
+        // Both loads are together again. Rebuild the real deployment tasks; no instant remount.
+        gunner.weaponId = weaponId; gunner.aiming = undefined; cw.lightMode = false;
+        cw.pos = pivotFromGunner(cls, gunner.pos, facingAngle(gunner.facing));
+        cw.facing = facingAngle(gunner.facing); setGoal(cw, 'deploy'); cw.setAt = state.time;
+      } else { useLightMg(state, team, cw, gunner); return; }
+    } else if (!mounted && (mount.state === 'ground' || (orderedMove && mount.state === 'deployed' && !helpers.length))) {
+      if (useLightMg(state, team, cw, gunner)) return;
+    }
+  }
   const carried = cw.done!.length === 0 && cw.goal === 'pack';
   if (orderedMove) {
     if (cw.goal !== 'pack') { setGoal(cw, 'pack'); clearMission(cw); }
@@ -1015,12 +1171,17 @@ function gateFire(cw: CrewWeaponState, gunner: Soldier, dt: number): void {
 
 /** Advance every crew-served weapon one sim step. Called at the start of stepMovement. */
 export function stepCrewWeapons(state: BattleState, dt: number): void {
+  for (const s of state.soldiers.values()) s.carryingMgMount = undefined;
   for (const team of state.teams.values()) {
     if (team.vehicleId != null) continue;
     // riding in a transport with the weapon packed: it goes where its gunner goes
     if (team.transportId != null && team.crewWeapon) {
       const g = state.soldiers.get(team.crewWeapon.gunnerId);
-      if (g && g.seat === 'passenger' && g.vehicleId != null) { team.crewWeapon.pos = { ...g.pos }; continue; }
+      if (g && g.seat === 'passenger' && g.vehicleId != null) {
+        team.crewWeapon.pos = { ...g.pos };
+        stepMgMount(state, team, team.crewWeapon, dt);
+        continue;
+      }
     }
     stepTeamWeapon(state, team, dt);
   }
@@ -1031,7 +1192,11 @@ export function stepCrewWeapons(state: BattleState, dt: number): void {
 export function isHeldForPacking(state: BattleState, s: Soldier): boolean {
   const team = state.teams.get(s.teamId);
   const cw = team?.crewWeapon;
-  if (!cw || cw.phase !== 'packing' || cw.abandoned) return false;
+  if (!cw) return false;
+  if (cw.mount?.recovery?.soldierId === s.id) return true;
+  if (cw.abandoned) return false;
+  if (cw.mountBlocked && cw.gunnerId === s.id && !isFleeing(s)) return true;
+  if (cw.lightMode || cw.phase !== 'packing') return false;
   return !isFleeing(s);
 }
 
@@ -1055,6 +1220,9 @@ export function onCrewOrder(state: BattleState, team: Team, type: OrderType): vo
 export function crewWeaponStatus(team: Team): TeamStatusWord | null {
   const cw = team.crewWeapon;
   if (!cw || cw.abandoned) return null;
+  if (cw.mountBlocked) return 'Need carrier';
+  if (cw.mount?.recovery) return 'Recovering mount';
+  if (cw.lightMode) return null;
   const first = cw.open?.[0];
   if (first) return TASK_STATUS[first];
   if (cw.phase === 'settingUp') return 'Setting up';
