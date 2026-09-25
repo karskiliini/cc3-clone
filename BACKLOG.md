@@ -19,8 +19,38 @@ Completion: Apply cover and posture consistently to blast injury, suppression, k
 
 ## Queued
 
-None.
-The next request receives ID 011.
+**011 — Feature: Command layer and per-side perspective (multiplayer prerequisite).**
+
+Request: Prepare the sim for multiplayer (plan: `docs/superpowers/plans/multiplayer.md` §7 P1–P2). All UI-to-sim mutations become serializable commands applied at tick boundaries, and the sim stops assuming a single human `playerSide`.
+
+Completion: `Battle.submit(command)` queues orders, deploy moves, truce, flee, pause and speed, applying them at the start of a sim tick in canonical order. No UI or render module calls `issueOrder`, `deployTeam`, `flee` or `addMessage` on sim state directly. `controllers: Record<Side, 'human' | 'ai'>` replaces `playerSide`/`aiBothSides` in the sim. Messages carry a side tag, and each side's debrief is graded from its own perspective. A test battle with two human sides runs without AI orders, and the harness still passes with both sides on AI. Single-player plays unchanged; full test suite and `npm run build` pass.
+
+**012 — Feature: Determinism fixes, state hash and replays (multiplayer prerequisite).**
+
+Request: Make lockstep determinism verifiable (plan §2 D1–D7, §7 P3–P5).
+
+Completion:
+- The crater height-field sync happens in the sim (`leaveCrater`), and render no longer writes `BattleState` (the `unitRender.ts` muzzle snap).
+- `Rng` exposes its state, and `hashState` covers RNG state, time, soldiers, vehicles, VLs and scores.
+- Battles record a command log that can be saved and replayed.
+- A replay run in a fresh Node process reproduces the identical per-tick hash chain.
+- `tools/determinism.html` gives identical hash chains in Chrome, Firefox, Safari and Node for 5 maps × 2 seeds. If it does not, the sim moves to a deterministic `src/shared/dmath.ts`, with a test banning `Math` transcendental functions under `src/sim`.
+
+**013 — Feature: Online multiplayer (umbrella).**
+
+Request: "plan multiplayer to the backlog. We should ponder 2 possibilities. 1) local games connecting to each other over internet, and 2) the game runs on a server and each player connects to the server and plays it." Both are evaluated in `docs/superpowers/plans/multiplayer.md`. The recommendation is deterministic lockstep over a WebSocket relay (option 1), with the authoritative server (option 2) kept as a later path for ranked play.
+
+Blocked on: 011, 012 and the user decisions in plan §8 (1v1 or co-op, AI availability, lobby/ranked, relay hosting, map-hack tolerance, speed and pause policy, Safari support, scope).
+
+Completion: plan milestones M1–M5 are met.
+- Two browsers on different networks choose their own forces and deploy.
+- They play a full battle through the deployed relay with matching state hashes.
+- Pause and speed follow the agreed policy.
+- A disconnect offers AI takeover or forfeit.
+- A reloaded tab rejoins by fast-forwarding the command log.
+- A desync produces a downloadable log that reproduces offline.
+
+The next request receives ID 014.
 
 ## Completed
 
