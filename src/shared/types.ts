@@ -349,6 +349,11 @@ export interface SoldierMind {
   trait?: 'steady' | 'nervous' | 'brave' | 'reckless' | 'cautious' | 'stoic';
   /** issuedAt of a team order this soldier refused (failed obedience); retried after hesitation. */
   pendingOrderAt?: number;
+  /** Move Fast under fire (sim/hitTheDirt.ts): battle time he threw himself down and began to
+   * crawl on along his route; undefined while he runs. */
+  downAt?: number;
+  /** ...he holds still until this time while he drops to the ground or gets back up. */
+  downHoldUntil?: number;
 }
 
 export interface Soldier {

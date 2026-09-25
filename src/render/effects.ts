@@ -426,6 +426,7 @@ function drawMovementDust(ctx: CanvasRenderingContext2D, cam: Camera, state: Bat
   for (const s of state.soldiers.values()) {
     if (s.path.length === 0 || s.vehicleId != null || s.health !== 'healthy' && s.health !== 'wounded') continue;
     if (s.activity !== 'movingFast' && s.activity !== 'panicked' && s.activity !== 'routed' && s.activity !== 'berserk') continue;
+    if (s.stance === 'prone') continue; // crawling on under fire (sim/hitTheDirt.ts) kicks up no running dust
     if (s.side !== viewer && !state.spotted[viewer].has(s.id)) continue;
     const p = worldToScreen(cam, s.pos);
     if (p.x < -8 || p.y < -8 || p.x > VIEW_W + 8 || p.y > VIEW_H + 8) continue;
