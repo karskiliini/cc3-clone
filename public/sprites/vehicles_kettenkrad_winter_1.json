@@ -1,0 +1,40 @@
+{
+ "scale": 1,
+ "cell": {
+  "w": 48,
+  "h": 46
+ },
+ "anchor": {
+  "x": 24,
+  "y": 23
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "kettenkrad.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "kettenkrad.hull.trackL": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "kettenkrad.hull.trackR": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "kettenkrad",
+ "season": "winter",
+ "hasTurret": false,
+ "lengthM": 3.0,
+ "widthM": 1.6,
+ "image": "vehicles_kettenkrad_winter_1.webp"
+}

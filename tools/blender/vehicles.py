@@ -40,10 +40,13 @@ OLIV = "#46502d"      # Olivgruen RAL 6003
 RBRN = "#5a3424"      # Rotbraun RAL 8017
 CAMO_A = [(OLIV, 0.52, 0.58, 0.0), (RBRN, 0.57, 0.63, 7.3)]
 CAMO_B = [(OLIV, 0.50, 0.56, 3.1)]
+CAMO_A2 = [(OLIV, 0.52, 0.58, 4.4), (RBRN, 0.57, 0.63, 2.9)]
+OD = "#474a2e"        # US olive drab (Lend-Lease Shermans kept it, with Soviet markings)
 CAMO_C = [(RBRN, 0.50, 0.56, 5.2), (OLIV, 0.58, 0.64, 1.4)]
 
 
-SUPERSAMPLE = 3      # 3x3 rays-per-pixel grid, box-downsampled: clean plate edges without mush
+SUPERSAMPLE = {1: 3, 2: 2}   # per scale: 3x3 / 2x2 pixel grid, box-downsampled (clean plate edges without mush;
+                             # at 20 px/m 2x2 is as fine as 3x3 at 10 px/m and renders twice as fast)
 FILTER_W = 1.0       # Cycles pixel filter width (px of the supersampled image)
 OUTLINE = 0.3        # darken the silhouette pixels by this much (see VC.clean_cell)
 SHARPEN = 0.35       # unsharp mask on the object colour after the downsample
@@ -166,14 +169,14 @@ def ko_xform(k, ko, yaw=9.0, roll=3.5, shift=(0.05, -0.04)):
 
 # ======================================================================= GERMAN
 def german_medium(k, d, ko, v):
-    """Pz III J / Pz IV F1 / Pz IV H: tub between the tracks, box superstructure over the fenders,
-    lower engine deck, near-vertical plates."""
+    """Pz III J / Flammpanzer III (Pz III M hull) / Pz IV F1, G, H: tub between the tracks, box
+    superstructure over the fenders, lower engine deck, near-vertical plates."""
     L, W = d["L"], d["W"]
-    skirt = v == "pz4gh"
-    Wh = W - (0.0 if not skirt else 0.0)
-    tw = 0.38 if v != "pz3j" else 0.36
+    pz4 = v.startswith("pz4")
+    skirt = v in ("pz4gh", "flammpanzer3")
+    Wh = W
+    tw = 0.38 if pz4 else 0.36
     top = 0.92
-    pz4 = v != "pz3j"
     gear(k, L - 0.05, Wh, tw, top, 8 if pz4 else 6, 0.235 if pz4 else 0.26, rollers=4 if pz4 else 3)
     wb = Wh - 2 * tw + 0.06
     zr = 1.62 if pz4 else 1.55          # hull roof
@@ -222,7 +225,7 @@ def german_medium(k, d, ko, v):
 
 
 def german_medium_turret(k, d, ko, v, zr, proxy):
-    pz4 = v != "pz3j"
+    pz4 = v.startswith("pz4")
     w, l = (1.95, 2.25) if pz4 else (1.8, 2.0)
     h = 0.62
     fp = [(-w / 2, -l * 0.28), (-w * 0.34, -l / 2), (w * 0.34, -l / 2), (w / 2, -l * 0.28), (w * 0.43, l * 0.42), (-w * 0.43, l * 0.42)]
@@ -241,8 +244,15 @@ def german_medium_turret(k, d, ko, v, zr, proxy):
     k.box((1.0 if pz4 else 0.9, 0.22, 0.46), (0, l * 0.42 + 0.08, zr + 0.34), "paint", top=(0.9, 0.8))
     if v == "pz3j":
         barrel(k, l * 0.42 + 0.1, 2.35, 0.06, zr + 0.34, sleeve=(0.55, 0.11))
+    elif v == "flammpanzer3":
+        # flame projector: a thick dummy sleeve with the thin flame tube running out of it
+        barrel(k, l * 0.42 + 0.1, 2.3, 0.034, zr + 0.34, sleeve=(1.0, 0.12), taper=1.0)
+        k.cyl(0.055, 0.12, (0, l * 0.42 + 2.37, zr + 0.34), "gunmetal", axis="Y", seg=8)
     elif v == "pz4f1":
         barrel(k, l * 0.42 + 0.1, 1.05, 0.105, zr + 0.34, sleeve=(0.4, 0.15), taper=1.0)
+    elif v == "pz4g":
+        # 7.5 cm KwK 40 L/43 with the single-baffle ball muzzle brake
+        barrel(k, l * 0.42 + 0.1, 2.75, 0.075, zr + 0.34, sleeve=(0.6, 0.13), brake=(0.26, 0.14))
     else:
         barrel(k, l * 0.42 + 0.1, 3.05, 0.075, zr + 0.34, sleeve=(0.6, 0.13), brake=(0.36, 0.13))
     k.tube((0.3, l * 0.42, zr + 0.34), (0.3, l * 0.42 + 0.5, zr + 0.34), 0.025, "gunmetal", seg=6)
@@ -322,7 +332,8 @@ def tiger_turret(k, d, ko, zr, proxy):
     k.tube((0, l / 2 + 1.1, zr + 0.42), (0, l / 2 + 1.9, zr + 0.42), 0.15, "paint", seg=10)
 
 
-def panther(k, d, ko):
+def panther(k, d, ko, v="G"):
+    """Panther G (and A / D: v): same plan; D has the letterbox MG port instead of the ball mount."""
     L, W = d["L"], d["W"]
     tw, top = 0.66, 1.08
     gear(k, L, W, tw, top, 8, 0.43, interleave=True, rs=0.42, ri=0.32, zs=0.8, zi=0.55)
@@ -349,17 +360,27 @@ def panther(k, d, ko):
         tools(k, s * (W / 2 - 0.33), 0.3, 1.45, 1.3, s)
         spare_track(k, (s * (W / 2 - 0.22), -1.6, 1.45), 4, along="Y", rot=(0, s * 35, 0), link=(0.2, 0.3, 0.06))
     k.hatch((0.95, 1.2), (0, -L / 2 + 1.1, zr), "paint", open_deg=50 if ko else 0, hinge="left")
-    k.cyl(0.12, 0.12, (0.8, L / 2 - 1.1, 1.45), "paint", axis="Y", seg=10, rot=(-90 + 35, 0, 0))   # ball MG
+    if v == "D":
+        k.box((0.3, 0.05, 0.1), (0.8, L / 2 - 1.1, 1.47), "gunmetal", rot=(-55, 0, 0))            # letterbox MG port
+    else:
+        k.cyl(0.12, 0.12, (0.8, L / 2 - 1.1, 1.45), "paint", axis="Y", seg=10, rot=(-90 + 35, 0, 0))   # ball MG
     k.cross(0.46, (W / 2 * 0.89 + 0.01, -0.2, (zr + top) / 2), rot=(90 - 16, 0, 90))
     k.cross(0.46, (-W / 2 * 0.89 - 0.01, -0.2, (zr + top) / 2), rot=(90 - 16, 0, -90))
     return (0.0, 0.3), zr
 
 
-def panther_turret(k, d, ko, zr, proxy):
+def panther_turret(k, d, ko, zr, proxy, v="G"):
     w, l, h = 2.3, 2.55, 0.78
     fp = [(-w / 2, -l / 2 + 0.2), (-w * 0.38, -l / 2), (w * 0.38, -l / 2), (w / 2, -l / 2 + 0.2), (w * 0.32, l / 2 - 0.2), (-w * 0.32, l / 2 - 0.2)]
     k.extrude(fp, zr + 0.02, zr + h, "paint", scale=(0.74, 0.88), shift=(0, -0.1), centre=(0, 0))
-    cupola(k, -0.45, -0.55, zr + h - 0.02, 0.4, 0.25, ko)
+    if v == "D":
+        # tall drum cupola; triple smoke-grenade dischargers on the turret cheeks
+        cupola(k, -0.45, -0.55, zr + h - 0.02, 0.36, 0.36, ko)
+        for s in (-1, 1):
+            for i in range(3):
+                k.cyl(0.05, 0.22, (s * 0.92, 0.35 - i * 0.14, zr + 0.62), "gunmetal", axis="Y", seg=6, rot=(-90 + 45, 0, s * 30))
+    else:
+        cupola(k, -0.45, -0.55, zr + h - 0.02, 0.4, 0.25, ko)
     k.hatch((0.3, 0.3), (0.35, 0.3, zr + h - 0.01), "paint", round_seg=10)
     if proxy:
         return
@@ -367,10 +388,15 @@ def panther_turret(k, d, ko, zr, proxy):
     barrel(k, l / 2 + 0.1, 4.3, 0.085, zr + 0.4, sleeve=(0.7, 0.15), brake=(0.45, 0.15))
 
 
-def stug3g(k, d, ko):
+def stug3g(k, d, ko, pz4=False):
+    """StuG III G; pz4: StuG IV (the same casemate on the longer Pz IV chassis, 8 small road wheels,
+    with the driver's armoured cab jutting out of the front left)."""
     L, W = d["L"], d["W"]
     tw, top = 0.38, 0.9
-    gear(k, L - 0.05, W, tw, top, 6, 0.26, rollers=3)
+    if pz4:
+        gear(k, L - 0.05, W, tw, top, 8, 0.235, rollers=4)
+    else:
+        gear(k, L - 0.05, W, tw, top, 6, 0.26, rollers=3)
     wb = W - 2 * tw + 0.06
     ze, zc = 1.38, 1.72
     prof = [(-L / 2 + 0.3, 0.42), (-L / 2 + 0.05, 0.95), (-L / 2 + 0.12, ze), (-0.1, ze), (L / 2 - 1.1, 1.2), (L / 2 - 0.4, 1.08),
@@ -391,6 +417,9 @@ def stug3g(k, d, ko):
     fp = rect_fp(W - 0.1, cy1 - cy0, (cy0 + cy1) / 2)
     k.extrude(fp, top + 0.08, zc, "paint", scale=(0.8, 0.86), shift=(0, -0.12), centre=(0, (cy0 + cy1) / 2))
     k.box((1.6, 1.0, 0.1), (0, 0.35, zc + 0.04), "paint")                                # raised roof centre
+    if pz4:
+        k.box((0.72, 0.62, 0.42), (-0.62, cy1 + 0.18, top + 0.3), "paint", top=(0.9, 0.55), shift=(0, -0.12))
+        k.box((0.3, 0.05, 0.08), (-0.62, cy1 + 0.43, top + 0.36), "gunmetal", rot=(-50, 0, 0))   # driver's visor
     cupola(k, -0.6, -0.05, zc + 0.06, 0.34, 0.2, ko)
     k.hatch((0.55, 0.7), (0.55, 0.0, zc + 0.09), "paint", open_deg=100 if ko else 0, hinge="rear")
     k.box((0.6, 0.03, 0.34), (0.55, 0.42, zc + 0.3), "paint", rot=(-15, 0, 0))            # loader MG shield
@@ -507,7 +536,7 @@ def sdkfz251(k, d, ko):
 
 
 # ======================================================================= SOVIET
-def t34_hull(k, d, ko, su85=False):
+def t34_hull(k, d, ko, su85=False, flame=False):
     L, W = d["L"], d["W"]
     tw, top = 0.5, 0.95
     Lh = L - 0.35 if not su85 else L - 0.1         # hull body; tracks run the full length
@@ -527,6 +556,11 @@ def t34_hull(k, d, ko, su85=False):
     k.box((0.62, 0.7, 0.05), (-0.35 if not su85 else -0.55, (y1 + Lh / 2) / 2 - 0.1, (zr + top) / 2 + 0.1), "paint", rot=(-sl - (50 if ko else 0), 0, 0))
     if not su85:
         k.cyl(0.14, 0.14, (0.55, (y1 + Lh / 2) / 2 + 0.1, (zr + top) / 2 + 0.0), "paint", axis="Y", seg=10, rot=(-90 + sl, 0, 0))
+    if flame:
+        # OT-34: ATO-41 flame projector in place of the bow MG, a stubby armoured tube
+        yb, zb = (y1 + Lh / 2) / 2 + 0.1, (zr + top) / 2
+        k.tube((0.55, yb, zb), (0.55, yb + 0.75, zb - 0.05), 0.075, "paint", seg=10, r2=0.06)
+        k.cyl(0.05, 0.08, (0.55, yb + 0.78, zb - 0.05), "gunmetal", axis="Y", seg=8)
     spare_track(k, (0.3 if su85 else 0.0, Lh / 2 - 0.22, top + 0.22), 4, rot=(-sl, 0, 0), link=(0.24, 0.3, 0.06))
     # engine deck: side louvres, central raised cover, rear mesh
     for s in (-1, 1):
@@ -587,7 +621,9 @@ def t34_85_turret(k, d, ko, zr, proxy):
     barrel(k, l / 2 - 0.1, 4.0, 0.078, zr + 0.36)
 
 
-def su85(k, d, ko):
+def su85(k, d, ko, v="su85"):
+    """SU-85; v = "su100" (D-10S, commander's cupola in a sponson bulge on the right) or "su122"
+    (short M-30S howitzer in its big round armoured mantlet)."""
     L, W = d["L"], d["W"]
     zr = t34_hull(k, d, ko, su85=True)
     Lh = L - 0.1
@@ -599,15 +635,29 @@ def su85(k, d, ko):
     fp = rect_fp(W - 0.06, (y1 + 0.75) - y0, (y0 + y1 + 0.75) / 2)
     k.extrude(fp, top + 0.03, zc, "paint", scale=(0.74, 0.62), shift=(0, -0.42), centre=(0, (y0 + y1 + 0.75) / 2))
     k.hatch((0.6, 0.55), (0.35, y0 + 0.5, zc), "paint", open_deg=95 if ko else 0, hinge="rear")
-    cupola(k, 0.62, 0.35, zc - 0.02, 0.3, 0.2, ko)
+    if v != "su100":
+        cupola(k, 0.62, 0.35, zc - 0.02, 0.3, 0.2, ko)
     k.hatch((0.5, 0.6), (-0.4, y0 + 0.55, zc), "paint", open_deg=80 if ko else 0, hinge="left")
     k.box((0.22, 0.22, 0.1), (-0.3, 0.6, zc + 0.05), "paint")
     k.star(0.4, (-0.12, 1.02, zc + 0.105))
-    # gun: ball mantlet right of centre, long tube
     gx, gy, gz = 0.28, y1 + 0.35, 1.5
+    if v == "su122":
+        gx = -0.1
+        k.cyl(0.55, 0.55, (gx, gy + 0.05, gz), "paint", axis="Y", seg=14, r2=0.42)       # "bell" mantlet
+        k.cyl(0.2, 0.5, (gx, gy + 0.55, gz), "paint", axis="Y", seg=10, r2=0.17)
+        barrel(k, gy + 0.5, 1.75, 0.105, gz, x=gx, taper=1.0)
+        return None, zc
+    if v == "su100":
+        # commander's cupola on a bulge out of the right side plate
+        k.box((0.5, 0.75, 0.62), (W / 2 - 0.62, y1 - 0.35, zc - 0.32), "paint", top=(0.8, 0.85))
+        cupola(k, W / 2 - 0.62, y1 - 0.35, zc - 0.02, 0.3, 0.2, ko)
+    # gun: ball mantlet right of centre, long tube
     k.cyl(0.42, 0.5, (gx, gy, gz), "paint", axis="Y", seg=12, r2=0.3, rot=(-90 + 8, 0, 0))
     k.cyl(0.24, 0.8, (gx, gy + 0.55, gz), "paint", axis="Y", seg=10, r2=0.17)
-    barrel(k, gy + 0.4, 3.6, 0.078, gz, x=gx)
+    if v == "su100":
+        barrel(k, gy + 0.4, 4.7, 0.085, gz, x=gx, sleeve=(0.6, 0.14))
+    else:
+        barrel(k, gy + 0.4, 3.6, 0.078, gz, x=gx)
     return None, zc
 
 
@@ -683,7 +733,7 @@ def is2(k, d, ko):
     return (0.0, 0.85), zr
 
 
-def is2_turret(k, d, ko, zr, proxy):
+def is2_turret(k, d, ko, zr, proxy, gun="122"):
     w, l, h = 2.2, 3.0, 0.8
     fp = rounded_fp(w, l, 0.9, seg=5, cy=-0.35, r_front=0.7)
     k.extrude(fp, zr + 0.02, zr + h, "paint", scale=(0.78, 0.86), shift=(0, -0.02), smooth=True, centre=(0, -0.35))
@@ -696,7 +746,10 @@ def is2_turret(k, d, ko, zr, proxy):
         return
     k.cyl(0.4, 1.15, (0, l / 2 - 0.62, zr + 0.4), "paint", axis="X", seg=12)
     k.box((1.0, 0.5, 0.62), (0, l / 2 - 0.45, zr + 0.4), "paint", top=(0.8, 0.8))
-    barrel(k, l / 2 - 0.3, 5.1, 0.11, zr + 0.4, sleeve=(1.3, 0.2), brake=(0.62, 0.22), taper=0.9)
+    if gun == "85":         # IS-1 / IS-85: D-5T, no muzzle brake
+        barrel(k, l / 2 - 0.3, 4.35, 0.08, zr + 0.4, sleeve=(1.0, 0.16))
+    else:
+        barrel(k, l / 2 - 0.3, 5.1, 0.11, zr + 0.4, sleeve=(1.3, 0.2), brake=(0.62, 0.22), taper=0.9)
 
 
 def t26(k, d, ko):
@@ -838,6 +891,382 @@ def su76(k, d, ko):
     return None, zr
 
 
+# ============================================================== 2026-09-25 additions
+# ---------------------------------------------------------------- German
+def tiger2(k, d, ko):
+    """Tiger II: Panther-like sloped hull, bigger; nine overlapping road wheels a side."""
+    L, W = d["L"], d["W"]
+    tw, top = 0.8, 1.2
+    gear(k, L, W, tw, top, 9, 0.4, interleave=True, rs=0.45, ri=0.36, zs=0.85, zi=0.6)
+    zr = 2.02
+    wb = W - 2 * tw + 0.08
+    prof = [(-L / 2 + 0.55, 0.5), (-L / 2 + 0.1, zr - 0.05), (L / 2 - 1.9, zr), (L / 2 - 0.2, 1.0), (L / 2 - 0.8, 0.5)]
+    k.prism(prof, wb, "paint")
+    fp = [(-W / 2, -L / 2 + 0.25), (W / 2, -L / 2 + 0.25), (W / 2, L / 2 - 1.35), (-W / 2, L / 2 - 1.35)]
+    k.extrude(fp, top + 0.02, zr, "paint", scale=(0.8, 1.0), centre=(0, (-L / 2 + 0.25 + L / 2 - 1.35) / 2))
+    k.prism([(L / 2 - 1.9, zr), (L / 2 - 0.3, top + 0.02), (L / 2 - 1.9, top + 0.02)], W, "paint", width2=[W * 0.8, W, W])
+    for s in (-1, 1):
+        k.box((tw * 0.9, 0.7, 0.03), (s * (W / 2 - tw / 2), L / 2 - 0.25, top + 0.02), "paint", rot=(-20, 0, 0))
+        k.hatch((0.5, 0.58), (s * 0.82, L / 2 - 2.35, zr), "paint", open_deg=90 if ko else 0, hinge="left" if s < 0 else "right")
+        k.cyl(0.38, 0.06, (s * 1.02, -L / 2 + 1.15, zr + 0.03), "paint", axis="Z", seg=14)      # fan housings
+        k.cyl(0.3, 0.02, (s * 1.02, -L / 2 + 1.15, zr + 0.07), "grille", axis="Z", seg=14)
+        k.grille((0.75, 0.45), (s * 1.02, -L / 2 + 1.9, zr), "paint")
+        k.grille((0.75, 0.42), (s * 1.02, -L / 2 + 0.5, zr), "paint")
+        k.cyl(0.09, 0.8, (s * 0.38, -L / 2 + 0.05, 1.6), "rust", axis="Z", seg=8, rot=(-12, 0, 0))
+        tools(k, s * (W / 2 - 0.35), 0.2, top + 0.45, 1.4, s)
+        k.cyl(0.03, 2.6, (s * (W / 2 - 0.22), -0.6, top + 0.5), "steel", axis="Y", seg=6)   # tow cables
+    k.hatch((1.0, 1.25), (0, -L / 2 + 1.2, zr), "paint", open_deg=50 if ko else 0, hinge="left")
+    k.cyl(0.12, 0.12, (0.85, L / 2 - 1.2, 1.55), "paint", axis="Y", seg=10, rot=(-90 + 40, 0, 0))   # ball MG
+    k.cross(0.5, (W / 2 * 0.9 + 0.01, -0.3, (zr + top) / 2), rot=(90 - 25, 0, 90))
+    k.cross(0.5, (-W / 2 * 0.9 - 0.01, -0.3, (zr + top) / 2), rot=(90 - 25, 0, -90))
+    return (0.0, 0.2), zr
+
+
+def tiger2_turret(k, d, ko, zr, proxy):
+    """Henschel turret: narrow sloped face, flat sides flaring back to a long overhanging bustle."""
+    w, h = 2.75, 0.82
+    fp = [(-0.72, 1.2), (0.72, 1.2), (w / 2, 0.35), (w / 2 - 0.05, -1.6), (w / 2 - 0.25, -1.95), (-w / 2 + 0.25, -1.95),
+          (-w / 2 + 0.05, -1.6), (-w / 2, 0.35)]
+    k.extrude(fp, zr + 0.02, zr + h, "paint", scale=(0.84, 0.92), shift=(0, -0.2), centre=(0, -0.3))
+    cupola(k, -0.55, -0.55, zr + h - 0.02, 0.38, 0.24, ko)
+    k.hatch((0.5, 0.6), (0.55, -0.4, zr + h), "paint", open_deg=90 if ko else 0, hinge="rear")
+    k.hatch((0.28, 0.28), (0.0, 0.3, zr + h), "paint", round_seg=10)
+    k.hatch((0.55, 0.3), (0, -1.75, zr + 0.4), "paint")
+    if proxy:
+        return
+    k.cyl(0.36, 0.7, (0, 1.35, zr + 0.42), "paint", axis="Y", seg=12, r2=0.26)            # Saukopf mantlet
+    barrel(k, 1.6, 5.0, 0.085, zr + 0.42, sleeve=(1.1, 0.15), brake=(0.45, 0.15))
+
+
+def hetzer(k, d, ko):
+    """Jagdpanzer 38(t): low wedge on the widened 38(t) running gear, gun right of centre."""
+    L, W = d["L"], d["W"]
+    tw, top = 0.35, 0.72
+    gear(k, L - 0.05, W, tw, top, 4, 0.39, rs=0.3, ri=0.28, zs=0.5, zi=0.5, rollers=1)
+    zc = 1.82
+    k.prism([(-L / 2 + 0.3, 0.38), (-L / 2 + 0.05, 0.8), (L / 2 - 0.05, 0.8), (L / 2 - 0.35, 0.38)], W - 2 * tw + 0.06, "paint")
+    fp = rounded_fp(W - 0.02, L - 0.12, 0.08, seg=1)
+    k.extrude(fp, 0.8, zc, "paint", scale=(0.66, 0.62), shift=(0, -0.62), centre=(0, 0))
+    y0, y1 = -L / 2 + 0.55, L / 2 - 1.55                                                  # roof extent
+    k.hatch((0.5, 0.62), (-0.35, -0.55, zc), "paint", open_deg=95 if ko else 0, hinge="left")
+    k.hatch((0.48, 0.5), (0.3, -0.2, zc), "paint", open_deg=90 if ko else 0, hinge="right")
+    k.grille((1.0, 0.55), (0, y0 + 0.2, zc), "paint")
+    # remote-controlled MG with its little shield on the roof
+    k.box((0.28, 0.03, 0.2), (-0.35, 0.25, zc + 0.14), "paint", rot=(-20, 0, 0))
+    k.tube((-0.35, 0.05, zc + 0.12), (-0.35, 0.8, zc + 0.12), 0.022, "gunmetal", seg=6)
+    # gun: cast Saukopf mantlet on the glacis, right of centre
+    gx, gz = 0.38, 1.28
+    k.cyl(0.3, 0.55, (gx, L / 2 - 0.95, gz), "paint", axis="Y", seg=12, r2=0.18, rot=(-90 + 10, 0, 0))
+    barrel(k, L / 2 - 0.7, 2.35, 0.07, gz, x=gx, sleeve=(0.4, 0.12))
+    k.cyl(0.16, 1.3, (0, -L / 2 - 0.05, 0.95), "rust", axis="X", seg=10)                   # muffler
+    for s in (-1, 1):
+        k.box((0.28, L - 1.2, 0.03), (s * (W / 2 - 0.14), -0.2, top + 0.05), "paint")         # fenders
+        k.box((0.02, L - 1.5, 0.32), (s * (W / 2 + 0.02), -0.3, 0.72), "paint")              # side skirts
+    tools(k, W / 2 - 0.2, -0.4, top + 0.1, 1.1, 1)
+    k.cross(0.36, (W / 2 * 0.72 + 0.03, -0.4, 1.3), rot=(90 - 40, 0, 90))
+    k.cross(0.36, (-W / 2 * 0.72 - 0.03, -0.4, 1.3), rot=(90 - 40, 0, -90))
+    return None, zc
+
+
+def sdkfz251_rocket(k, d, ko):
+    """SdKfz 251/1 with Wurfrahmen 40: three launch frames a side, each with a crated 28/32 cm rocket."""
+    out = sdkfz251(k, d, ko)
+    L, W = d["L"], d["W"]
+    cyb = (-L / 2 + 0.05 + L / 2 - 2.0) / 2
+    for s in (-1, 1):
+        for i, y in enumerate((cyb - 0.85, cyb, cyb + 0.85)):
+            x = s * (W / 2 + 0.12)
+            k.box((0.06, 0.7, 0.05), (x, y, 1.25), "steel")                                   # frame rail
+            k.box((0.36, 0.7, 0.3), (x, y, 1.42), "wood", rot=(18, 0, 0))                     # crate
+            if not ko or i != 1:
+                k.cyl(0.15, 0.36, (x, y + 0.48, 1.52), "paint2", axis="Y", seg=10, rot=(-90 + 18, 0, 0))   # warhead
+    return out
+
+
+def kubelwagen(k, d, ko):
+    """VW Type 82: flat-panelled open body, bonnet sloping to the nose, spare wheel on the bonnet."""
+    L, W = d["L"], d["W"]
+    wr, ww = 0.34, 0.18
+    yf, yr = L / 2 - 0.62, -L / 2 + 0.62
+    for s in (-1, 1):
+        for y in (yf, yr):
+            k.cyl(wr, ww, (s * (W / 2 - ww / 2 - 0.02), y, wr), "rubber", axis="X", seg=14)
+            k.cyl(wr * 0.55, ww + 0.02, (s * (W / 2 - ww / 2 - 0.02), y, wr), "paint", axis="X", seg=10)
+            # mudguard: curved plate over the wheel
+            k.box((ww + 0.1, 0.62, 0.03), (s * (W / 2 - ww / 2 - 0.02), y, 2 * wr + 0.1), "paint2")
+            k.box((ww + 0.1, 0.3, 0.03), (s * (W / 2 - ww / 2 - 0.02), y + 0.4, 2 * wr - 0.02), "paint2", rot=(-40, 0, 0))
+            k.box((ww + 0.1, 0.3, 0.03), (s * (W / 2 - ww / 2 - 0.02), y - 0.4, 2 * wr - 0.02), "paint2", rot=(40, 0, 0))
+    bw = W - 0.42
+    zb = 0.98
+    # body: slab sides, bonnet sloping down to the nose, rear engine deck
+    prof = [(-L / 2 + 0.05, 0.4), (-L / 2, 0.85), (-L / 2 + 0.3, zb), (L / 2 - 1.05, zb), (L / 2 - 0.05, 0.78), (L / 2, 0.45)]
+    k.prism(prof, bw, "paint")
+    # open cabin: dark well with two bench seats, windscreen frame, steering wheel
+    cy0, cy1 = -L / 2 + 0.55, L / 2 - 1.1
+    k.box((bw - 0.12, cy1 - cy0, 0.02), (0, (cy0 + cy1) / 2, zb + 0.005), "floor")
+    for y in (cy1 - 0.45, cy0 + 0.35):
+        k.box((bw - 0.25, 0.4, 0.08), (0, y, zb + 0.05), "canvas")
+        k.box((bw - 0.25, 0.08, 0.35), (0, y - 0.22, zb + 0.18), "canvas")
+    k.box((bw + 0.02, 0.04, 0.34), (0, cy1 + 0.02, zb + 0.16), "steel", rot=(-15, 0, 0))    # windscreen frame
+    k.cyl(0.17, 0.03, (-0.28, cy1 - 0.2, zb + 0.3), "black", axis="Y", seg=10, rot=(-90 + 50, 0, 0))
+    k.cyl(0.14, bw - 0.1, (0, -L / 2 + 0.38, zb + 0.1), "canvas", axis="X", seg=10)         # folded hood
+    k.cyl(0.28, 0.14, (0, L / 2 - 0.62, 0.95), "rubber", axis="Z", seg=14, rot=(-13, 0, 0))   # spare wheel
+    k.cyl(0.15, 0.16, (0, L / 2 - 0.62, 0.95), "paint2", axis="Z", seg=10, rot=(-13, 0, 0))
+    k.box((0.12, 0.3, 0.4), (-(bw / 2 + 0.07), cy0 + 0.3, zb - 0.15), "paint2")             # jerrycan
+    for s in (-1, 1):
+        k.cyl(0.07, 0.06, (s * 0.42, L / 2 - 0.05, 0.72), "gunmetal", axis="Y", seg=8)       # headlamps
+    return None, zb
+
+
+def kettenkrad(k, d, ko):
+    """SdKfz 2 Kettenkrad: motorcycle front end, tracked rear with a rear-facing bench.  Drawn at its
+    real 1 m width (the def's 1.6 m includes clearance)."""
+    L = d["L"]
+    W = 1.05
+    tw, top = 0.2, 0.6
+    Lt = 1.95
+    cyt = -L / 2 + Lt / 2 + 0.05
+    gear(k, Lt, W, tw, top, 4, 0.22, cy=cyt, interleave=True, rs=0.2, ri=0.2, zs=0.4, zi=0.38)
+    for s in (-1, 1):
+        k.box((tw + 0.08, Lt - 0.05, 0.03), (s * (W / 2 - tw / 2), cyt, top + 0.05), "paint")       # track guards
+    # front wheel, fork and handlebar
+    yf = L / 2 - 0.35
+    k.cyl(0.3, 0.1, (0, yf, 0.3), "rubber", axis="X", seg=14)
+    k.box((0.16, 0.55, 0.03), (0, yf, 0.66), "paint2", rot=(-8, 0, 0))                          # mudguard
+    k.tube((0, yf, 0.3), (0, yf - 0.35, 0.95), 0.03, "steel", seg=6)
+    k.tube((-0.36, yf - 0.4, 1.0), (0.36, yf - 0.4, 1.0), 0.02, "black", seg=6)
+    # body: engine cowling tapering to the nose, driver's saddle, rear bench over the tracks
+    prof = [(-L / 2 + 0.05, 0.35), (-L / 2 + 0.05, 0.72), (yf - 0.55, 0.78), (yf - 0.3, 0.62), (yf - 0.4, 0.35)]
+    k.prism(prof, W - 2 * tw - 0.04, "paint", width2=[W - 0.45, W - 0.45, W - 0.45, 0.3, 0.3])
+    k.box((0.32, 0.45, 0.14), (0, yf - 0.85, 0.85), "leather")                                  # saddle
+    k.box((W - 0.2, 0.42, 0.08), (0, -L / 2 + 0.45, 0.82), "canvas")                           # rear bench
+    k.box((W - 0.2, 0.06, 0.3), (0, -L / 2 + 0.7, 0.95), "canvas")
+    k.grille((0.4, 0.4), (0, yf - 1.35, 0.72), "paint")
+    k.box((0.3, 0.15, 0.2), (0.3, -L / 2 + 0.05, 0.7), "paint2")                                # tool box
+    return None, 0.8
+
+
+# ---------------------------------------------------------------- Soviet
+def ot34(k, d, ko):
+    zr = t34_hull(k, d, ko, flame=True)
+    return (0.0, 0.62), zr
+
+
+def is1(k, d, ko):
+    return is2(k, d, ko)
+
+
+def is3(k, d, ko):
+    """IS-3: 'pike nose' of two plates meeting at a ridge, low wide hull with the side shelves."""
+    L, W = d["L"], d["W"]
+    tw, top = 0.63, 0.98
+    gear(k, L - 0.05, W, tw, top, 6, 0.27, rs=0.34, ri=0.3, zs=0.68, zi=0.58, tyre=False, rollers=3)
+    zr = 1.5
+    wb = W - 2 * tw + 0.06
+    k.prism([(-L / 2 + 0.5, 0.45), (-L / 2 + 0.02, 0.95), (-L / 2 + 0.6, zr), (L / 2 - 1.9, zr), (L / 2 - 0.3, 0.85), (L / 2 - 0.6, 0.45)], wb, "paint")
+    # upper hull: sloped side shelves over the tracks, plan narrows into the pike
+    fp = [(-W / 2, -L / 2 + 0.6), (W / 2, -L / 2 + 0.6), (W / 2, L / 2 - 2.2), (0.55, L / 2 - 0.1), (-0.55, L / 2 - 0.1), (-W / 2, L / 2 - 2.2)]
+    k.extrude(fp, top + 0.03, zr, "paint", scale=(0.84, 0.92), shift=(0, -0.3), centre=(0, 0))
+    k.prism([(L / 2 - 1.9, zr + 0.02), (L / 2 - 0.35, top + 0.1), (L / 2 - 1.9, top + 0.1)], 0.06, "paint2")   # the ridge
+    k.hatch((0.55, 0.5), (0, L / 2 - 2.15, zr), "paint", open_deg=95 if ko else 0, hinge="rear")
+    for s in (-1, 1):
+        k.grille((0.55, 0.85), (s * 0.78, -L / 2 + 1.7, zr), "paint")
+        k.cyl(0.1, 0.35, (s * 0.95, -L / 2 + 0.5, zr + 0.02), "rust", axis="Y", seg=8)
+        k.box((0.3, 1.2, 0.2), (s * (W / 2 - 0.2), -0.2, top + 0.14), "paint")                 # side stowage
+    k.hatch((0.8, 0.9), (0, -L / 2 + 1.65, zr), "paint", open_deg=55 if ko else 0, hinge="front")
+    k.grille((1.4, 0.4), (0, -L / 2 + 0.85, zr - 0.02), "paint")
+    k.cyl(0.03, 2.2, (W / 2 - 0.5, -0.8, zr + 0.02), "steel", axis="Y", seg=6)
+    return (0.0, 0.55), zr
+
+
+def is3_turret(k, d, ko, zr, proxy):
+    """The flat 'frying pan' dome."""
+    w, l = 2.5, 2.95
+    fp = ellipse_fp(w, l, 20, cy=-0.25)
+    k.extrude(fp, zr + 0.02, zr + 0.34, "paint", scale=(0.9, 0.9), smooth=True, centre=(0, -0.25))
+    fp2 = ellipse_fp(w * 0.9, l * 0.9, 20, cy=-0.25)
+    k.extrude(fp2, zr + 0.34, zr + 0.62, "paint", scale=(0.62, 0.66), smooth=True, centre=(0, -0.25))
+    cupola(k, -0.42, -0.45, zr + 0.58, 0.38, 0.2, ko, hinge="front")
+    k.hatch((0.45, 0.45), (0.45, -0.5, zr + 0.6), "paint", open_deg=95 if ko else 0, hinge="front", round_seg=12)
+    k.star(0.4, (0.0, 0.3, zr + 0.64))
+    if proxy:
+        return
+    k.cyl(0.3, 0.7, (0, 1.2, zr + 0.36), "paint", axis="Y", seg=12, r2=0.22)
+    barrel(k, 1.35, 4.9, 0.11, zr + 0.38, sleeve=(1.2, 0.2), brake=(0.62, 0.22), taper=0.9)
+
+
+def su152(k, d, ko):
+    """SU-152: KV-1S chassis with a big slab casemate; the 152 mm ML-20S in a boxy mantlet."""
+    L, W = d["L"], d["W"]
+    tw, top = 0.66, 1.0
+    gear(k, L - 0.05, W, tw, top, 6, 0.3, rs=0.34, ri=0.33, zs=0.7, zi=0.62, tyre=False, rollers=3)
+    zr = 1.55
+    wb = W - 2 * tw + 0.06
+    k.prism([(-L / 2 + 0.45, 0.45), (-L / 2 + 0.02, 0.95), (-L / 2 + 0.5, zr - 0.12), (-L / 2 + 1.0, zr), (L / 2 - 0.9, zr),
+             (L / 2 - 0.45, 1.12), (L / 2 - 0.05, 0.85), (L / 2 - 0.5, 0.45)], wb, "paint")
+    fenders(k, L - 0.2, W, tw + 0.02, top + 0.04, flaps=True)
+    zc = 2.3
+    cy0, cy1 = -0.6, L / 2 - 0.55
+    fp = rect_fp(W - 0.45, cy1 - cy0, (cy0 + cy1) / 2)
+    k.extrude(fp, top + 0.03, zc, "paint", scale=(0.9, 0.78), shift=(0, -0.3), centre=(0, (cy0 + cy1) / 2))
+    k.hatch((0.55, 0.5), (0.55, cy0 + 0.5, zc), "paint", open_deg=95 if ko else 0, hinge="rear", round_seg=12)
+    k.hatch((0.5, 0.5), (-0.55, cy0 + 0.5, zc), "paint", open_deg=85 if ko else 0, hinge="rear", round_seg=12)
+    k.hatch((0.55, 0.5), (0.0, cy0 + 1.1, zc), "paint")
+    k.star(0.42, (-0.1, cy0 + 1.75, zc + 0.045))
+    for s in (-1, 1):
+        k.box((0.36, 0.9, 0.24), (s * (W / 2 - 0.22), -1.5, top + 0.18), "paint")
+        k.grille((0.45, 0.95), (s * 0.85, -L / 2 + 1.3, zr), "paint")
+        k.cyl(0.08, 0.3, (s * 0.55, -L / 2 + 1.35, zr + 0.1), "rust", axis="Y", seg=8)
+    k.grille((1.7, 0.3), (0, -L / 2 + 0.55, zr - 0.2), "paint")
+    k.hatch((0.8, 0.6), (0, -L / 2 + 1.25, zr), "paint", open_deg=55 if ko else 0, hinge="front")
+    gx, gz = 0.28, 1.6
+    k.box((0.8, 0.55, 0.75), (gx, cy1 + 0.1, gz), "paint", top=(0.85, 0.7))                    # mantlet box
+    k.cyl(0.24, 0.9, (gx, cy1 + 0.75, gz), "paint", axis="Y", seg=12, r2=0.2)                  # recoil sleeve
+    barrel(k, cy1 + 0.9, 2.0, 0.105, gz, x=gx, brake=(0.5, 0.17), taper=1.0)
+    k.cyl(0.03, 2.4, (W / 2 - 0.3, -1.6, top + 0.35), "steel", axis="Y", seg=6)
+    return None, zc
+
+
+def t28(k, d, ko):
+    """T-28: long hull, main turret amidships, two small MG turrets flanking the driver's cab,
+    small coil-sprung road wheels behind armoured skirts."""
+    L, W = d["L"], d["W"]
+    tw, top = 0.38, 1.05
+    gear(k, L - 0.05, W, tw, top, 12, 0.16, rs=0.33, ri=0.3, zs=0.62, zi=0.55, rollers=4)
+    zr = 1.72
+    wb = W - 2 * tw + 0.1
+    k.prism([(-L / 2 + 0.35, 0.45), (-L / 2 + 0.05, 1.05), (-L / 2 + 0.3, zr - 0.1), (L / 2 - 1.35, zr - 0.1), (L / 2 - 1.3, 1.5),
+             (L / 2 - 0.35, 1.3), (L / 2 - 0.05, 0.9), (L / 2 - 0.45, 0.45)], wb + 0.35, "paint")
+    for s in (-1, 1):
+        k.box((0.03, L - 1.2, 0.55), (s * (W / 2 + 0.01), -0.1, 0.68), "paint")                  # suspension skirt
+        k.box((tw + 0.12, L - 0.5, 0.035), (s * (W / 2 - tw / 2 + 0.02), -0.05, top + 0.03), "paint")
+    # forward superstructure: driver's cab between the two MG turrets
+    k.box((W - 0.25, 1.25, 0.12), (0, L / 2 - 1.45, zr - 0.02), "paint")
+    k.box((0.7, 0.55, 0.3), (0, L / 2 - 1.05, zr + 0.1), "paint", top=(0.85, 0.6), shift=(0, -0.08))
+    k.hatch((0.45, 0.35), (0, L / 2 - 1.25, zr + 0.25), "paint", open_deg=90 if ko else 0, hinge="rear")
+    for s in (-1, 1):
+        x, y = s * 0.78, L / 2 - 1.45
+        k.cyl(0.42, 0.52, (x, y, zr + 0.3), "paint", axis="Z", seg=14, r2=0.38)
+        k.hatch((0.36, 0.36), (x - s * 0.05, y - 0.08, zr + 0.56), "paint", round_seg=10, open_deg=90 if ko else 0, hinge="rear")
+        k.tube((x + s * 0.12, y + 0.3, zr + 0.32), (x + s * 0.3, y + 0.85, zr + 0.32), 0.03, "gunmetal", seg=6)
+        k.grille((0.4, 1.3), (s * 0.8, -L / 2 + 1.35, zr - 0.1), "paint")
+    k.grille((1.1, 0.7), (0, -L / 2 + 1.1, zr - 0.08), "paint")
+    k.hatch((0.8, 0.8), (0, -L / 2 + 2.05, zr - 0.1), "paint", open_deg=55 if ko else 0, hinge="front")
+    k.cyl(0.09, 0.9, (0, -L / 2 + 0.05, 1.2), "rust", axis="X", seg=8)
+    tools(k, -(W / 2 - 0.22), -1.4, top + 0.06, 1.2, -1)
+    return (0.0, -0.1), zr - 0.1
+
+
+def t28_turret(k, d, ko, zr, proxy):
+    """Main turret: elliptical, with a rear bustle and the handrail frame aerial."""
+    k.extrude(ellipse_fp(1.85, 2.2, 18, cy=0.05), zr + 0.02, zr + 0.8, "paint", scale=(0.94, 0.94), smooth=True, centre=(0, 0.05))
+    k.box((1.1, 0.8, 0.62), (0, -1.1, zr + 0.4), "paint", top=(0.95, 0.9))
+    for s in (-1, 1):
+        k.hatch((0.42, 0.55), (s * 0.3, -0.2, zr + 0.8), "paint", open_deg=95 if ko else 0, hinge="front")
+    k.star(0.36, (0, 0.45, zr + 0.845))
+    # handrail aerial: a ring of posts and rail around the turret top
+    n = 16
+    for i in range(n):
+        a0, a1 = 2 * math.pi * i / n, 2 * math.pi * (i + 1) / n
+        p0 = (1.05 * math.cos(a0), -0.15 + 1.25 * math.sin(a0), zr + 1.02)
+        p1 = (1.05 * math.cos(a1), -0.15 + 1.25 * math.sin(a1), zr + 1.02)
+        k.tube(p0, p1, 0.015, "steel", seg=4)
+        if i % 4 == 0:
+            k.tube((p0[0] * 0.85, p0[1] * 0.85, zr + 0.75), p0, 0.014, "steel", seg=4)
+    if proxy:
+        return
+    k.box((0.7, 0.3, 0.45), (0, 1.1, zr + 0.4), "paint", top=(0.85, 0.8))
+    barrel(k, 1.2, 1.85, 0.065, zr + 0.4, sleeve=(0.5, 0.11))
+
+
+def sherman76(k, d, ko):
+    """M4A2(76)W: VVSS bogies, straight 47-degree glacis, sponsons over the tracks, rounded rear."""
+    L, W = d["L"], d["W"]
+    tw, top = 0.42, 0.95
+    gear(k, L - 0.3, W, tw, top, 6, 0.27, cy=0.05, rs=0.3, ri=0.3, zs=0.7, zi=0.5, rollers=0)
+    for s in (-1, 1):
+        for i in range(3):                                                                       # bogie brackets
+            y = -L / 2 + 0.95 + i * (L - 2.0) / 2
+            k.box((0.18, 0.55, 0.35), (s * (W / 2 - tw - 0.02), y, 0.5), "paint2")
+            k.cyl(0.1, tw * 0.7, (s * (W / 2 - tw / 2), y - 0.1, top - 0.1), "rubber", axis="X", seg=8)   # return roller
+    zr = 1.85
+    wb = W - 2 * tw + 0.06
+    k.prism([(-L / 2 + 0.45, 0.45), (-L / 2 + 0.2, 1.0), (-L / 2 + 0.3, zr - 0.05), (L / 2 - 1.55, zr), (L / 2 - 0.15, 0.95), (L / 2 - 0.5, 0.45)], wb, "paint")
+    yb0, yb1 = -L / 2 + 0.3, L / 2 - 1.55
+    fp = rounded_fp(W - 0.04, yb1 - yb0, 0.3, seg=3, cy=(yb0 + yb1) / 2, r_front=0.02)
+    k.extrude(fp, top + 0.02, zr, "paint", centre=(0, (yb0 + yb1) / 2))
+    k.prism([(L / 2 - 1.55, zr), (L / 2 - 0.15, top + 0.02), (L / 2 - 1.55, top + 0.02)], W - 0.04, "paint")        # glacis
+    for s in (-1, 1):
+        k.box((0.55, 0.62, 0.14), (s * 0.55, L / 2 - 1.75, zr + 0.05), "paint", top=(0.9, 0.7))       # driver's hoods
+        k.hatch((0.48, 0.52), (s * 0.55, L / 2 - 2.2, zr), "paint", open_deg=90 if ko else 0, hinge="rear", round_seg=0)
+        k.cyl(0.06, 0.45, (s * 0.5, -L / 2 + 0.15, 1.35), "rust", axis="Z", seg=8)
+        tools(k, s * (W / 2 - 0.2), -0.7, zr, 1.2, s)
+    k.cyl(0.12, 0.14, (0.55, L / 2 - 1.0, 1.42), "paint", axis="Y", seg=10, rot=(-90 + 43, 0, 0))   # bow MG ball
+    k.grille((1.4, 1.0), (0, -L / 2 + 0.95, zr), "paint")
+    k.hatch((0.55, 0.5), (0, -0.55, zr), "paint")
+    k.box((W - 0.5, 0.35, 0.3), (0, -L / 2 + 0.05, 1.25), "paint", rot=(20, 0, 0))                     # exhaust deflector
+    return (0.0, 0.25), zr
+
+
+def sherman76_turret(k, d, ko, zr, proxy):
+    """T23 turret: rounded, rear bustle, commander's cupola right, loader's hatch left."""
+    fp = rounded_fp(1.95, 2.55, 0.8, seg=5, cy=-0.25, r_front=0.55)
+    k.extrude(fp, zr + 0.02, zr + 0.78, "paint", scale=(0.86, 0.9), smooth=True, centre=(0, -0.25))
+    cupola(k, 0.42, -0.5, zr + 0.74, 0.36, 0.22, ko)
+    k.hatch((0.46, 0.46), (-0.45, -0.45, zr + 0.78), "paint", open_deg=95 if ko else 0, hinge="rear", round_seg=12)
+    k.star(0.36, (0.0, 0.35, zr + 0.8))
+    if proxy:
+        return
+    k.box((1.05, 0.3, 0.55), (0, 1.0, zr + 0.4), "paint", top=(0.95, 0.85))
+    barrel(k, 1.1, 3.95, 0.065, zr + 0.4, sleeve=(0.4, 0.11))
+    k.tube((0.3, 1.0, zr + 0.4), (0.3, 1.45, zr + 0.4), 0.022, "gunmetal", seg=6)
+
+
+def bm13(k, d, ko):
+    """BM-13 on the Studebaker US6: bonnet, cab, and the M-13 rail rack over the bed, travelling flat."""
+    L, W = d["L"], d["W"]
+    wr = 0.45
+    yf = L / 2 - 1.05
+    for s in (-1, 1):
+        k.cyl(wr, 0.26, (s * (W / 2 - 0.18), yf, wr), "rubber", axis="X", seg=16)
+        k.cyl(wr * 0.5, 0.28, (s * (W / 2 - 0.18), yf, wr), "paint2", axis="X", seg=10)
+        for y in (-L / 2 + 1.25, -L / 2 + 2.3):
+            k.cyl(wr, 0.46, (s * (W / 2 - 0.26), y, wr), "rubber", axis="X", seg=16)          # dual wheels
+            k.cyl(wr * 0.5, 0.48, (s * (W / 2 - 0.26), y, wr), "paint2", axis="X", seg=10)
+        # front wings sweeping into the running boards
+        k.box((0.42, 1.1, 0.03), (s * (W / 2 - 0.2), yf + 0.05, 1.02), "paint", rot=(8, 0, 0))
+        k.box((0.3, 1.0, 0.03), (s * (W / 2 - 0.15), yf - 1.05, 0.62), "paint")
+    k.box((0.15, L - 1.0, 0.25), (0.42, -0.3, 0.72), "gunmetal")                                  # chassis rails
+    k.box((0.15, L - 1.0, 0.25), (-0.42, -0.3, 0.72), "gunmetal")
+    # bonnet + grille
+    k.box((0.95, 1.25, 0.5), (0, L / 2 - 0.75, 1.15), "paint", top=(0.9, 0.95))
+    k.box((0.85, 0.05, 0.55), (0, L / 2 - 0.1, 1.1), "grille")
+    # cab
+    yc = L / 2 - 1.85
+    k.box((W - 0.25, 1.0, 1.0), (0, yc, 1.55), "paint", top=(0.95, 0.85), shift=(0, -0.05))
+    k.box((W - 0.4, 0.04, 0.35), (0, yc + 0.47, 1.9), "black", rot=(-12, 0, 0))                 # windscreen
+    k.star(0.3, (0, yc - 0.05, 2.06))
+    # launcher: rack frame on the bed, 8 rails pointing forward over the cab (travelling position)
+    y0 = -L / 2 + 0.2
+    k.box((W - 0.3, 2.3, 0.2), (0, y0 + 1.15, 0.95), "paint")                                    # bed / base
+    k.box((0.9, 0.6, 0.45), (0, y0 + 0.9, 1.25), "paint2")                                      # turntable, gear
+    rl = 5.0
+    zr0, zr1 = 1.7, 2.15
+    for i in range(8):
+        x = -0.72 + i * (1.44 / 7)
+        k.tube((x, y0 + 0.15, zr0), (x, y0 + 0.15 + rl, zr1), 0.035, "steel", seg=4)
+        if i % 2 == 0 or not ko:
+            k.tube((x, y0 + 0.7, zr0 + 0.12), (x, y0 + 2.1, zr0 + 0.25), 0.065, "paint2", seg=8)   # rocket on the rail
+    for t in (0.1, 0.55, 0.95):
+        yy = y0 + 0.15 + rl * t
+        k.box((1.6, 0.06, 0.08), (0, yy, zr0 + (zr1 - zr0) * t - 0.05), "gunmetal")                # cross frames
+    k.box((0.08, rl, 0.08), (-0.82, y0 + 0.15 + rl / 2, (zr0 + zr1) / 2 - 0.05), "gunmetal", rot=(-math.degrees(math.atan2(zr1 - zr0, rl)), 0, 0))
+    k.box((0.08, rl, 0.08), (0.82, y0 + 0.15 + rl / 2, (zr0 + zr1) / 2 - 0.05), "gunmetal", rot=(-math.degrees(math.atan2(zr1 - zr0, rl)), 0, 0))
+    k.box((0.7, 0.4, 0.5), (W / 2 - 0.4, y0 + 2.2, 1.1), "paint2")                              # fuel tank / locker
+    return None, 1.2
+
+
+
 VEHICLES = {
     # id: (hull_fn, turret_fn, base paint, camo, engine-deck soot centre y as a fraction of L)
     "pz3j": (lambda k, d, ko: german_medium(k, d, ko, "pz3j"), lambda k, d, ko, z, p: german_medium_turret(k, d, ko, "pz3j", z, p), GREY, None, -0.3),
@@ -857,7 +1286,30 @@ VEHICLES = {
     "is2": (is2, is2_turret, SOVG, None, -0.3),
     "su76": (su76, None, SOVG, None, 0.15),
     "su85": (su85, None, SOVG, None, -0.3),
+    # 2026-09-25 additions
+    "tiger2": (tiger2, tiger2_turret, DYEL, CAMO_A, -0.33),
+    "pantherD": (lambda k, d, ko: panther(k, d, ko, "D"), lambda k, d, ko, z, p: panther_turret(k, d, ko, z, p, "D"), DYEL, CAMO_B, -0.33),
+    "pantherA": (lambda k, d, ko: panther(k, d, ko, "A"), panther_turret, DYEL, CAMO_A2, -0.33),
+    "pz4g": (lambda k, d, ko: german_medium(k, d, ko, "pz4g"), lambda k, d, ko, z, p: german_medium_turret(k, d, ko, "pz4g", z, p), GREY, None, -0.3),
+    "stug4": (lambda k, d, ko: stug3g(k, d, ko, pz4=True), None, DYEL, CAMO_A, -0.3),
+    "hetzer": (hetzer, None, DYEL, CAMO_C, -0.3),
+    "flammpanzer3": (lambda k, d, ko: german_medium(k, dict(d, L=5.6), ko, "flammpanzer3"),
+                     lambda k, d, ko, z, p: german_medium_turret(k, d, ko, "flammpanzer3", z, p), DYEL, CAMO_B, -0.3),
+    "sdkfz251_rocket": (sdkfz251_rocket, None, DYEL, CAMO_B, 0.3),
+    "kubelwagen": (kubelwagen, None, DYEL, None, -0.35),
+    "kettenkrad": (kettenkrad, None, DYEL, None, 0.0),
+    "is1": (is1, lambda k, d, ko, z, p: is2_turret(k, d, ko, z, p, "85"), SOVG, None, -0.3),
+    "is3": (is3, is3_turret, SOVG, None, -0.3),
+    "ot34": (ot34, t34_76_turret, SOVG, None, -0.3),
+    "su100": (lambda k, d, ko: su85(k, d, ko, "su100"), None, SOVG, None, -0.3),
+    "su122": (lambda k, d, ko: su85(k, d, ko, "su122"), None, SOVG, None, -0.3),
+    "su152": (su152, None, SOVG, None, -0.33),
+    "t28": (t28, t28_turret, SOVG, None, -0.3),
+    "sherman76": (sherman76, sherman76_turret, OD, None, -0.33),
+    "bm13": (bm13, None, SOVG, None, 0.3),
 }
+# wheeled vehicles: no track to throw (the game falls back to the ok hull)
+NO_TRACK = ("kubelwagen", "bm13")
 
 
 WASH = "#b4b2a8"          # winter lime wash
@@ -962,7 +1414,7 @@ def render_vehicle(vid, d, scale, args, log):
     anchor = (cell // 2, cell // 2)
     entries = {}
     turreted = bool(VEHICLES[vid][1])
-    todo = [("hull", st) for st in HULL_STATES if turreted or st != "blown"]
+    todo = [("hull", st) for st in HULL_STATES if (turreted or st != "blown") and not (vid in NO_TRACK and st.startswith("track"))]
     if turreted:
         todo += [("turret", st) for st in TURRET_STATES]
     if args.season == "winter":
@@ -983,7 +1435,7 @@ def render_vehicle(vid, d, scale, args, log):
         # the turret throws its shadow (gun tube included) onto the deck it sits on
         frames = VC.render_dirs(lambda ctx: build(vid, d, st, part, args.season)[0], args.dirs, ppm, cell, anchor,
                                 shadow=True, engine=args.engine, samples=args.samples, device=args.device,
-                                supersample=SUPERSAMPLE, filter_width=FILTER_W,
+                                supersample=SUPERSAMPLE[scale], filter_width=FILTER_W,
                                 catcher_z=0.0 if (part == "hull" or st == "blown") else deck_z(vid, d))
         np.savez_compressed(path, f=np.stack(frames))
         entries[key] = frames

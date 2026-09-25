@@ -1,0 +1,74 @@
+{
+ "scale": 2,
+ "cell": {
+  "w": 246,
+  "h": 242
+ },
+ "anchor": {
+  "x": 121,
+  "y": 123
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "pantherD.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pantherD.hull.ko": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pantherD.hull.blown": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pantherD.hull.trackL": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pantherD.hull.trackR": {
+   "start": 256,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pantherD.turret.ok": {
+   "start": 320,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pantherD.turret.ko": {
+   "start": 384,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pantherD.turret.blown": {
+   "start": 448,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "pantherD",
+ "season": "summer",
+ "hasTurret": true,
+ "lengthM": 6.9,
+ "widthM": 3.3,
+ "turretPivotM": {
+  "x": 0.0,
+  "y": 0.3
+ },
+ "image": "vehicles_pantherD_2.webp"
+}

@@ -1,0 +1,28 @@
+{
+ "scale": 2,
+ "cell": {
+  "w": 176,
+  "h": 174
+ },
+ "anchor": {
+  "x": 81,
+  "y": 81
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "bm13.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "bm13",
+ "season": "winter",
+ "hasTurret": false,
+ "lengthM": 6.5,
+ "widthM": 2.3,
+ "image": "vehicles_bm13_winter_2.webp"
+}

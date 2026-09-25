@@ -1,0 +1,74 @@
+{
+ "scale": 1,
+ "cell": {
+  "w": 142,
+  "h": 140
+ },
+ "anchor": {
+  "x": 70,
+  "y": 71
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "tiger2.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "tiger2.hull.ko": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "tiger2.hull.blown": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "tiger2.hull.trackL": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "tiger2.hull.trackR": {
+   "start": 256,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "tiger2.turret.ok": {
+   "start": 320,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "tiger2.turret.ko": {
+   "start": 384,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "tiger2.turret.blown": {
+   "start": 448,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "tiger2",
+ "season": "summer",
+ "hasTurret": true,
+ "lengthM": 7.3,
+ "widthM": 3.7,
+ "turretPivotM": {
+  "x": 0.0,
+  "y": 0.2
+ },
+ "image": "vehicles_tiger2_1.webp"
+}

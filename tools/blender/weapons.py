@@ -5,7 +5,7 @@ setup / half / packed, packed into public/sprites/weapons_<scale>.png/.json per 
                                             [--dirs 32] [--samples 32]
 
 Weapon ids are the game's (src/data/weapons.ts): mortar81, mortar82, mg34_hmg, mg42_hmg, maxim,
-pak38, pak40, m1937_45mm, zis3, ptrd.  Frame: muzzle toward +Y (direction 0 = north), origin/anchor
+pak38, pak40, m1937_45mm, zis3, ptrd, nebel41.  Frame: muzzle toward +Y (direction 0 = north), origin/anchor
 at the weapon pivot (mortar baseplate, tripod head, gun axle, PTRD bipod) as in weaponArt.ts.
 Every weapon's 3 x 32 cells are cached in node_modules/.cache/sprites/weapons_<scale>/<id>_*.npz so a partial
 run (--only) re-renders just those and re-packs the whole atlas (resumable).
@@ -177,7 +177,42 @@ AT = {
     "pak40": dict(trail=2.7, spread=25, wx=0.93, wr=0.45, ww=0.24, barrel=2.95, r=0.062, brake=(0.36, 0.11), shield=(1.8, 1.0), kind="ger"),
     "m1937_45mm": dict(trail=2.2, spread=23, wx=0.76, wr=0.43, ww=0.14, barrel=2.0, r=0.04, brake=None, shield=(1.35, 0.85), kind="sov45"),
     "zis3": dict(trail=2.8, spread=26, wx=0.98, wr=0.46, ww=0.24, barrel=2.85, r=0.06, brake=(0.34, 0.115), shield=(1.7, 1.05), kind="zis3"),
+    # 15 cm Nebelwerfer 41: six tubes on the lightened 3.7 cm PaK 35/36 carriage
+    "nebel41": dict(trail=1.9, spread=22, wx=0.7, wr=0.36, ww=0.12, barrel=1.3, r=0.08, brake=None, shield=None, kind="nebel"),
 }
+
+
+def nebel_tubes(k, st, p):
+    """The six-tube cluster (a revolver of 15 cm tubes held by front and rear hexagonal frames).  It
+    travels level and is cranked up once the trails are spread and dug in."""
+    wr = p["wr"]
+    elev = {"emplaced": 35.0, "recoil": 35.0, "trailsOpen": 12.0}.get(st, 0.0)
+    E = Euler((math.radians(elev), 0, 0), "XYZ").to_matrix().to_4x4()
+    piv = Vector((0, -0.2, wr + 0.42))
+    k.xform = Matrix.Translation(piv) @ E
+    tl, rr = p["barrel"], 0.19
+    y0 = -0.35
+    for i in range(6):
+        a = math.radians(30 + 60 * i)
+        x, z = rr * math.cos(a), rr * math.sin(a)
+        k.tube((x, y0, z), (x, y0 + tl, z), p["r"] * 1.1, "gun", seg=10)
+        k.cyl(p["r"] * 0.8, 0.02, (x, y0 + tl + 0.005, z), "hole", axis="Y", seg=8)
+    for yy in (y0 + 0.12, y0 + tl - 0.12):
+        k.cyl(rr + 0.12, 0.06, (0, yy, 0), "gun", axis="Y", seg=6)                    # hexagonal frames
+    k.tube((0, y0 - 0.1, 0), (0, y0 + tl, 0), 0.05, "gunmetal", seg=8)                    # central spindle
+    k.xform = None
+    k.box((0.3, 0.45, 0.35), (0, -0.15, wr + 0.12), "gun")                                    # cradle / elevating gear
+    k.cyl(0.08, 0.03, (-0.3, -0.35, wr + 0.3), "gunmetal", axis="X", seg=8)                  # elevation handwheel
+    if st in ("emplaced", "recoil"):
+        k.tube((0, 0.35, wr + 0.2), (0, 0.75, 0.02), 0.035, "gun", seg=6)                     # front support leg
+        k.box((0.2, 0.2, 0.03), (0, 0.78, 0.015), "gun")
+        for i in range(3):                                                                    # rockets in their crates
+            k.box((0.34, 1.05, 0.3), (1.25 + i * 0.1, -0.9 - i * 0.42, 0.15), "wood", rot=(0, 0, 8 + i * 4))
+    if st == "recoil":                                                                        # launch scorch behind
+        k.extrude(ellipse_fp(0.9, 1.6, 12, cy=-1.6), 0.0, 0.01, "earth", scale=(0.7, 0.7))
+    ca, se = math.cos(math.radians(elev)), math.sin(math.radians(elev))
+    my = -0.2 + (y0 + tl) * ca
+    return (0.0, round(my, 2))
 
 
 AT_STATES = ("limbered", "trailsClosed", "trailLeftOpen", "trailRightOpen", "trailsOpen", "emplaced", "recoil")
@@ -213,6 +248,16 @@ def at_gun(k, st, wid):
     if st in ("limbered", "trailsClosed"):
         k.cyl(0.07, 0.12, (0, -p["trail"] - 0.2, tip_z + 0.02), "gunmetal", axis="Z", seg=8)       # towing eye
         k.box((0.3, 0.1, 0.06), (0, -p["trail"] + 0.35, tip_z + 0.06), "gunmetal")                # trail lock
+    if p["kind"] == "nebel":
+        muzzle = nebel_tubes(k, st, p)
+        a = math.radians(p["spread"])
+        tl = p["trail"] + 0.45
+        stations = {"gunner": (-0.6, -0.5), "loader": (0.6, -0.8),
+                    "trailLeft": (round(-0.16 - math.sin(a) * tl, 2), round(-0.1 - math.cos(a) * tl, 2)),
+                    "trailRight": (round(0.16 + math.sin(a) * tl, 2), round(-0.1 - math.cos(a) * tl, 2)),
+                    "ammo": (1.35, -1.3), "tail": (0.0, round(-p["trail"] - 0.75, 2)),
+                    "trailLeftClosed": (-0.5, round(-p["trail"] - 0.15, 2)), "trailRightClosed": (0.5, round(-p["trail"] - 0.15, 2))}
+        return muzzle, 1.0, stations
     # cradle, breech, barrel
     gz = wr + 0.42
     rc = 0.4 if st == "recoil" else 0.0
@@ -308,6 +353,7 @@ WEAPONS = {
     "pak40": (lambda k, st: at_gun(k, st, "pak40"), GER_YEL, "#4a4f40", AT_ST, AT_ALIASES),
     "m1937_45mm": (lambda k, st: at_gun(k, st, "m1937_45mm"), SOV_GREEN, "#4f5738", AT_ST, AT_ALIASES),
     "zis3": (lambda k, st: at_gun(k, st, "zis3"), SOV_GREEN, "#4f5738", AT_ST, AT_ALIASES),
+    "nebel41": (lambda k, st: at_gun(k, st, "nebel41"), GER_YEL, "#4a4f40", AT_ST, AT_ALIASES),
     "ptrd": (ptrd, SOV_GREEN, "#4f5738", PTRD_STATES, {}),
 }
 

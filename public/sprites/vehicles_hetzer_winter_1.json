@@ -1,0 +1,40 @@
+{
+ "scale": 1,
+ "cell": {
+  "w": 98,
+  "h": 98
+ },
+ "anchor": {
+  "x": 44,
+  "y": 45
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "hetzer.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "hetzer.hull.trackL": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "hetzer.hull.trackR": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "hetzer",
+ "season": "winter",
+ "hasTurret": false,
+ "lengthM": 4.9,
+ "widthM": 2.6,
+ "image": "vehicles_hetzer_winter_1.webp"
+}

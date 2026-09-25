@@ -1,0 +1,74 @@
+{
+ "scale": 2,
+ "cell": {
+  "w": 198,
+  "h": 194
+ },
+ "anchor": {
+  "x": 98,
+  "y": 96
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "flammpanzer3.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "flammpanzer3.hull.ko": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "flammpanzer3.hull.blown": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "flammpanzer3.hull.trackL": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "flammpanzer3.hull.trackR": {
+   "start": 256,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "flammpanzer3.turret.ok": {
+   "start": 320,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "flammpanzer3.turret.ko": {
+   "start": 384,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "flammpanzer3.turret.blown": {
+   "start": 448,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "flammpanzer3",
+ "season": "summer",
+ "hasTurret": true,
+ "lengthM": 6.3,
+ "widthM": 2.9,
+ "turretPivotM": {
+  "x": 0.0,
+  "y": 0.1
+ },
+ "image": "vehicles_flammpanzer3_2.webp"
+}

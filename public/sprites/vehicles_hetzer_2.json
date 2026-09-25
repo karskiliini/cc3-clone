@@ -1,0 +1,46 @@
+{
+ "scale": 2,
+ "cell": {
+  "w": 192,
+  "h": 190
+ },
+ "anchor": {
+  "x": 87,
+  "y": 88
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "hetzer.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "hetzer.hull.ko": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "hetzer.hull.trackL": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "hetzer.hull.trackR": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "hetzer",
+ "season": "summer",
+ "hasTurret": false,
+ "lengthM": 4.9,
+ "widthM": 2.6,
+ "image": "vehicles_hetzer_2.webp"
+}

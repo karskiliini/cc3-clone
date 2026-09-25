@@ -1,0 +1,74 @@
+{
+ "scale": 2,
+ "cell": {
+  "w": 254,
+  "h": 248
+ },
+ "anchor": {
+  "x": 127,
+  "y": 124
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "t28.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "t28.hull.ko": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "t28.hull.blown": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "t28.hull.trackL": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "t28.hull.trackR": {
+   "start": 256,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "t28.turret.ok": {
+   "start": 320,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "t28.turret.ko": {
+   "start": 384,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "t28.turret.blown": {
+   "start": 448,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "t28",
+ "season": "summer",
+ "hasTurret": true,
+ "lengthM": 7.4,
+ "widthM": 2.9,
+ "turretPivotM": {
+  "x": 0.0,
+  "y": -0.1
+ },
+ "image": "vehicles_t28_2.webp"
+}

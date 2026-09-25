@@ -1,0 +1,74 @@
+{
+ "scale": 2,
+ "cell": {
+  "w": 218,
+  "h": 216
+ },
+ "anchor": {
+  "x": 107,
+  "y": 110
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "sherman76.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "sherman76.hull.ko": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "sherman76.hull.blown": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "sherman76.hull.trackL": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "sherman76.hull.trackR": {
+   "start": 256,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "sherman76.turret.ok": {
+   "start": 320,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "sherman76.turret.ko": {
+   "start": 384,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "sherman76.turret.blown": {
+   "start": 448,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "sherman76",
+ "season": "summer",
+ "hasTurret": true,
+ "lengthM": 6.3,
+ "widthM": 2.6,
+ "turretPivotM": {
+  "x": 0.0,
+  "y": 0.25
+ },
+ "image": "vehicles_sherman76_2.webp"
+}

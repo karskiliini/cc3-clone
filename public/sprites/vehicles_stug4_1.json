@@ -1,0 +1,46 @@
+{
+ "scale": 1,
+ "cell": {
+  "w": 114,
+  "h": 114
+ },
+ "anchor": {
+  "x": 52,
+  "y": 53
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "stug4.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "stug4.hull.ko": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "stug4.hull.trackL": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "stug4.hull.trackR": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "stug4",
+ "season": "summer",
+ "hasTurret": false,
+ "lengthM": 5.9,
+ "widthM": 2.9,
+ "image": "vehicles_stug4_1.webp"
+}

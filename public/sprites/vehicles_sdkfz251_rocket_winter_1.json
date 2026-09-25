@@ -1,0 +1,40 @@
+{
+ "scale": 1,
+ "cell": {
+  "w": 86,
+  "h": 84
+ },
+ "anchor": {
+  "x": 41,
+  "y": 41
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "sdkfz251_rocket.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "sdkfz251_rocket.hull.trackL": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "sdkfz251_rocket.hull.trackR": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "sdkfz251_rocket",
+ "season": "winter",
+ "hasTurret": false,
+ "lengthM": 5.8,
+ "widthM": 2.1,
+ "image": "vehicles_sdkfz251_rocket_winter_1.webp"
+}

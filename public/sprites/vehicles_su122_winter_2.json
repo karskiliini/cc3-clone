@@ -1,0 +1,40 @@
+{
+ "scale": 2,
+ "cell": {
+  "w": 220,
+  "h": 214
+ },
+ "anchor": {
+  "x": 106,
+  "y": 104
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "su122.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "su122.hull.trackL": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "su122.hull.trackR": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "su122",
+ "season": "winter",
+ "hasTurret": false,
+ "lengthM": 6.1,
+ "widthM": 3.0,
+ "image": "vehicles_su122_winter_2.webp"
+}

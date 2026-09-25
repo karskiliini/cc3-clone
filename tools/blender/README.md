@@ -201,3 +201,11 @@ offset smoke lobes that roll out, rise, drift with the wind and break up by nois
 and building dust from them). Burst entries carry `times`: the seconds after detonation each frame
 shows (frames are eased, dense around the flash); `src/render/fxSprites.ts` picks frames by time.
 Render cost (5 threads, shared machine): 64 px entries 2-9 min, `he` ~17 min, `he.big` ~17-20 min per variant.
+
+### 2026-09-25 additions
+Tiger II, Panther D / A (from `panther(v=)`), Pz IV G and Flammpanzer III (from `german_medium`), StuG IV
+(`stug3g(pz4=True)`), Hetzer, SdKfz 251 with Wurfrahmen 40, Kübelwagen, Kettenkrad, IS-1 (IS-2 with the 85 mm gun),
+IS-3, OT-34 (T-34/76 with the hull flame projector), SU-100 / SU-122 (from `su85(v=)`), SU-152, T-28, M4A2(76)W
+Sherman (olive drab, Soviet stars), BM-13 on the Studebaker; Nebelwerfer 41 in `weapons.py` (the AT-gun carriage
+with the six-tube cluster, same drill states as the PaK 38). Wheeled vehicles (`NO_TRACK`) have no trackL / trackR.
+Scale 2 renders at 2x2 supersampling (`SUPERSAMPLE`), as fine as 3x3 at scale 1 and twice as fast.

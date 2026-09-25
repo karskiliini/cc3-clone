@@ -1,0 +1,40 @@
+{
+ "scale": 2,
+ "cell": {
+  "w": 226,
+  "h": 226
+ },
+ "anchor": {
+  "x": 103,
+  "y": 104
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "stug4.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "stug4.hull.trackL": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "stug4.hull.trackR": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "stug4",
+ "season": "winter",
+ "hasTurret": false,
+ "lengthM": 5.9,
+ "widthM": 2.9,
+ "image": "vehicles_stug4_winter_2.webp"
+}

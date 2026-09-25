@@ -1,0 +1,74 @@
+{
+ "scale": 1,
+ "cell": {
+  "w": 104,
+  "h": 102
+ },
+ "anchor": {
+  "x": 52,
+  "y": 51
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "pz4g.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pz4g.hull.ko": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pz4g.hull.blown": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pz4g.hull.trackL": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pz4g.hull.trackR": {
+   "start": 256,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pz4g.turret.ok": {
+   "start": 320,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pz4g.turret.ko": {
+   "start": 384,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "pz4g.turret.blown": {
+   "start": 448,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "pz4g",
+ "season": "summer",
+ "hasTurret": true,
+ "lengthM": 5.9,
+ "widthM": 2.9,
+ "turretPivotM": {
+  "x": 0.0,
+  "y": 0.18
+ },
+ "image": "vehicles_pz4g_1.webp"
+}

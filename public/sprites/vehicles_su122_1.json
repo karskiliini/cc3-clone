@@ -1,0 +1,46 @@
+{
+ "scale": 1,
+ "cell": {
+  "w": 112,
+  "h": 108
+ },
+ "anchor": {
+  "x": 54,
+  "y": 52
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "su122.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "su122.hull.ko": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "su122.hull.trackL": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "su122.hull.trackR": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "su122",
+ "season": "summer",
+ "hasTurret": false,
+ "lengthM": 6.1,
+ "widthM": 3.0,
+ "image": "vehicles_su122_1.webp"
+}

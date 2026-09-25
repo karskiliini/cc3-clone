@@ -1,0 +1,50 @@
+{
+ "scale": 1,
+ "cell": {
+  "w": 140,
+  "h": 138
+ },
+ "anchor": {
+  "x": 68,
+  "y": 71
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "tiger2.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "tiger2.hull.trackL": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "tiger2.hull.trackR": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "tiger2.turret.ok": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "tiger2",
+ "season": "winter",
+ "hasTurret": true,
+ "lengthM": 7.3,
+ "widthM": 3.7,
+ "turretPivotM": {
+  "x": 0.0,
+  "y": 0.2
+ },
+ "image": "vehicles_tiger2_winter_1.webp"
+}

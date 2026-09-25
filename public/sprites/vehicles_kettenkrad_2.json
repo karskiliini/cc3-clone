@@ -1,0 +1,46 @@
+{
+ "scale": 2,
+ "cell": {
+  "w": 92,
+  "h": 90
+ },
+ "anchor": {
+  "x": 46,
+  "y": 45
+ },
+ "columns": 16,
+ "dirs": 64,
+ "entries": {
+  "kettenkrad.hull.ok": {
+   "start": 0,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "kettenkrad.hull.ko": {
+   "start": 64,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "kettenkrad.hull.trackL": {
+   "start": 128,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  },
+  "kettenkrad.hull.trackR": {
+   "start": 192,
+   "frames": 1,
+   "fps": 0,
+   "loop": false
+  }
+ },
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicle": "kettenkrad",
+ "season": "summer",
+ "hasTurret": false,
+ "lengthM": 3.0,
+ "widthM": 1.6,
+ "image": "vehicles_kettenkrad_2.webp"
+}

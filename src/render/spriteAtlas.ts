@@ -135,16 +135,10 @@ export function vehicleDefAtlasName(defId: string, scale: 1 | 2, season: Season 
 /** Vehicles still waiting for their own Blender model are drawn as the closest existing one,
  * scaled to their own length, instead of not at all. A vehicle's own atlas wins as soon as it
  * exists. */
-export const VEHICLE_STAND_IN: Readonly<Record<string, string>> = {
-  tiger2: 'tiger', pantherD: 'panther', pantherA: 'panther', pz4g: 'pz4gh', flammpanzer3: 'pz3j',
-  stug4: 'stug3g', hetzer: 'stug3g', sdkfz251_rocket: 'sdkfz251', kubelwagen: 'sdkfz251', kettenkrad: 'sdkfz251',
-  is1: 'is2', is3: 'is2', ot34: 't34_76', t28: 't34_76', sherman76: 't34_76',
-  su100: 'su85', su122: 'su85', su152: 'su85', bm13: 'sdkfz251',
-};
+export const VEHICLE_STAND_IN: Readonly<Record<string, string>> = {};
 
-/** Crew weapons waiting for their own model: the 15 cm Nebelwerfer 41 is a wheeled carriage with
- * split trails, like the PaK 38. */
-export const WEAPON_STAND_IN: Readonly<Record<string, string>> = { nebel41: 'pak38' };
+/** Crew weapons waiting for their own model, drawn as the closest existing one (none at present). */
+export const WEAPON_STAND_IN: Readonly<Record<string, string>> = {};
 
 /** Which vehicle's art draws `defId` (itself, or its stand-in while its own atlas is missing) and
  * at what size relative to that art. */
