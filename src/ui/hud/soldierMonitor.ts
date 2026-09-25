@@ -188,7 +188,7 @@ function activityWord(s: Soldier, team: Team | null, vehicle: Vehicle | undefine
   if (s.mind.state === 'shaken') return 'Shaken';
   switch (s.activity) {
     case 'moving': return vehicle && roleName === 'Driver' ? 'Driving' : 'Moving';
-    case 'movingFast': return 'Running';
+    case 'movingFast': return s.mind.downAt != null ? 'Crawling' : 'Running';
     case 'sneaking': return 'Crawling';
     case 'firing': return 'Firing';
     case 'reloading': return 'Reloading';

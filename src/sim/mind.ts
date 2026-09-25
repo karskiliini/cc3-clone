@@ -556,6 +556,8 @@ function resumeFromOrder(state: BattleState, s: Soldier, team: Team | undefined)
   if (order && (order.type === 'move' || order.type === 'moveFast' || order.type === 'sneak')) {
     s.path = routeVia(state, s.pos, orderRoutePoints(order), 'infantry');
     s.activity = order.type === 'moveFast' ? 'movingFast' : order.type === 'sneak' ? 'sneaking' : 'moving';
+    // down under Move Fast fire (hitTheDirt.ts): he crawls on until he judges it quiet
+    if (order.type === 'moveFast' && s.mind.downAt != null) s.stance = 'prone';
   } else if (order && order.type === 'ambush') {
     s.activity = 'ambushing';
     s.stance = 'prone';

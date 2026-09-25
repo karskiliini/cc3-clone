@@ -10,6 +10,7 @@ import { stepCrewWeapons, isHeldForPacking, isHaulingGun } from './crewWeapon';
 import { stepOrderWaypoints } from './orders';
 import { isDazed, stepDazed } from './daze';
 import { INFANTRY_PACE, infantrySpeedMs } from './infantryPace';
+import { stepHitTheDirt } from './hitTheDirt';
 
 const SPEEDS: Record<string, number> = {
   moving: INFANTRY_PACE.walk,
@@ -99,14 +100,21 @@ export function stepMovement(state: BattleState, rng: Rng, dt: number): void {
 
     applyMindStanceAndFacing(state, s);
 
+    // Move Fast under fire (hitTheDirt.ts): he drops and crawls on along the same path, and gets
+    // up to run again on his own judgement; still while dropping / getting up
+    const downHold = stepHitTheDirt(state, s);
+
     const speed = SPEEDS[s.activity];
-    if (speed != null && s.path.length > 0 && !isHeldForPacking(state, s) && !isHaulingGun(state, s)) {
+    if (downHold) s.animFrame = 0;
+    else if (speed != null && s.path.length > 0 && !isHeldForPacking(state, s) && !isHaulingGun(state, s)) {
       const fatigueFast = s.mind.state !== 'panicked' && s.mind.state !== 'broken' && s.fatigue > 70 && s.activity === 'movingFast';
       moveAlongPath(state, s, fatigueFast ? SPEEDS.moving : speed, dt);
       if (Math.floor(state.time / 0.3) % 2 === 0) s.animFrame = 0; else s.animFrame = 1;
     }
 
-    if (s.activity === 'movingFast') s.fatigue = Math.min(100, s.fatigue + 2 * dt);
+    // a man crawling under a Move Fast order tires like a walker, not a sprinter
+    if (s.activity === 'movingFast' && s.mind?.downAt == null) s.fatigue = Math.min(100, s.fatigue + 2 * dt);
+    else if (s.activity === 'movingFast') s.fatigue = Math.min(100, s.fatigue + 0.5 * dt);
     else if (s.activity === 'moving') s.fatigue = Math.min(100, s.fatigue + 0.5 * dt);
     else if (s.activity === 'idle') s.fatigue = Math.max(0, s.fatigue - 1 * dt);
   }
@@ -161,8 +169,10 @@ function onArrive(state: BattleState, s: Soldier): void {
     s.stance = s.cover < 0.2 ? 'prone' : 'crouching';
   } else {
     s.activity = 'idle';
-    s.stance = isEnemyNear(state, s) ? 'crouching' : 'standing';
+    // got there crawling under fire (hitTheDirt.ts): he stays down where he arrived
+    s.stance = s.mind?.downAt != null ? 'prone' : isEnemyNear(state, s) ? 'crouching' : 'standing';
   }
+  if (s.mind) { s.mind.downAt = undefined; s.mind.downHoldUntil = undefined; }
 }
 
 function isEnemyNear(state: BattleState, s: Soldier): boolean {
