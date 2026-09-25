@@ -546,6 +546,55 @@ function seekFiringSpot(state: BattleState, v: Vehicle, def: VehicleDef): void {
   }
 }
 
+// ------------------------------------------------------------------ steering along a route
+/** A driver looks this far (tiles) down his route for a point he can drive straight at. */
+const LOOKAHEAD_TILES = 6;
+/** A waypoint this close (tiles) that has fallen behind the hull counts as passed. */
+const PASSED_TILES = 1.6;
+/** The last waypoint, this close (tiles) but well off the bow, counts as reached: a tank does not
+ * pivot round on the spot to cover the last couple of metres. */
+const ARRIVED_TILES = 1.2;
+const ARRIVED_OFF_BOW = Math.PI / 3;
+
+/** `v` can drive the straight line from where it is to `b`: every tile on it can be driven, none
+ * is harder going than `maxCost` (a shortcut never takes it through the bog its route went round),
+ * and it passes clear of every other hull (nor through the vehicle its route went round). */
+function straightDrivable(state: BattleState, v: Vehicle, b: Vec2, maxCost: number): boolean {
+  const a = v.pos;
+  const d = dist(a, b);
+  const n = Math.max(1, Math.ceil(d / 0.3));
+  const r = hullRadiusTiles(v);
+  const others = [...state.vehicles.values()].filter((o) => o !== v && dist(o.pos, a) < d + r + hullRadiusTiles(o) + 1);
+  for (let i = 1; i <= n; i++) {
+    const p = { x: a.x + ((b.x - a.x) * i) / n, y: a.y + ((b.y - a.y) * i) / n };
+    const x = Math.floor(p.x), y = Math.floor(p.y);
+    if (!isPassable(state.map, x, y, 'vehicle')) return false;
+    if (TERRAIN_PROPS[tileAt(state.map, x, y)].vehicleCost > maxCost) return false;
+    for (const o of others) if (dist(o.pos, p) < r + hullRadiusTiles(o) && dist(o.pos, p) < dist(o.pos, a)) return false;
+  }
+  return true;
+}
+
+/** How a driver follows a tile-by-tile route: waypoints he has already passed are dropped instead
+ * of turned back for, he steers for the farthest point ahead he can reach in a straight line, and
+ * the last couple of metres to a point off his bow count as arrived. A shortcut never cuts past a
+ * waypoint the player set (the route goes where it was told to). */
+function pursuePath(state: BattleState, v: Vehicle, def: VehicleDef): void {
+  const path = v.path;
+  const offBow = (p: Vec2): number => Math.abs(wrapAngle(angleTo(v.pos, p) - v.hullFacing));
+  const pinned = state.teams.get(v.teamId)?.order?.waypoints ?? [];
+  const isPinned = (p: Vec2): boolean => pinned.some((w) => dist(w, p) <= 1);
+  while (path.length > 1 && dist(v.pos, path[0]) < PASSED_TILES && offBow(path[0]) > Math.PI / 2 && !isPinned(path[0])) path.shift();
+  let skip = 0, maxCost = TERRAIN_PROPS[tileAt(state.map, Math.floor(v.pos.x), Math.floor(v.pos.y))].vehicleCost;
+  for (let i = 0; i < path.length && dist(v.pos, path[i]) <= LOOKAHEAD_TILES; i++) {
+    maxCost = Math.max(maxCost, TERRAIN_PROPS[tileAt(state.map, Math.floor(path[i].x), Math.floor(path[i].y))].vehicleCost);
+    if (i > 0 && straightDrivable(state, v, path[i], maxCost)) skip = i;
+    if (isPinned(path[i])) break; // the player's waypoint: steer for it, never past it
+  }
+  if (skip > 0) path.splice(0, skip);
+  if (def.turnRadiusM == null && path.length === 1 && dist(v.pos, path[0]) < ARRIVED_TILES && offBow(path[0]) > ARRIVED_OFF_BOW) path.length = 0;
+}
+
 /** Moves `v` to `next` unless another hull is in the way (then see onHullBlocked). */
 function driveTo(state: BattleState, v: Vehicle, next: Vec2): boolean {
   const blocker = vehicleBlockingAt(state, v, next);
@@ -723,6 +772,8 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     // early dodge: a man in the path AHEAD of the hull steps aside before the hull-local test
     stepOverrunLookahead(state, rng, v, def);
 
+    pursuePath(state, v, def);
+    if (v.path.length === 0) { v.speed = 0; continue; }
     const wp = v.path[0];
     const desired = angleTo(v.pos, wp);
     const tx = Math.floor(v.pos.x), ty = Math.floor(v.pos.y);
