@@ -11,7 +11,7 @@ import { addTank, makeState } from './vehicleDamageHelpers';
 
 describe('a tank drives into cover instead of sliding', () => {
   for (const defId of ['pz4gh', 't34_76']) {
-    it(`${defId} turns and drives forward into side cover with hull-aligned displacement`, () => {
+    it(`${defId} turns and drives into side cover with hull-aligned displacement, front toward the threat`, () => {
       const state = makeState();
       const { v } = addTank(state, defId, { x: 200.5, y: 200.5 }, 0, 60, 'german');
       state.map.tiles[200 * state.map.width + 202] = 'buildingStone';
@@ -20,7 +20,8 @@ describe('a tank drives into cover instead of sliding', () => {
       expect(hasLOS(state.map, v.pos, threat)).toBe(true);
       const start = { ...v.pos };
       const rng = new Rng(3);
-      let moved = 0, pivoted = false, reachedCover = false;
+      let moved = 0, reachedCover = false;
+      const startFacing = v.hullFacing;
       for (let i = 0; i < 18 / SIM_DT; i++) {
         const before = { ...v.pos }, facing = v.hullFacing;
         state.time += SIM_DT;
@@ -28,16 +29,20 @@ describe('a tank drives into cover instead of sliding', () => {
         const delta = dist(before, v.pos);
         const turned = Math.abs(wrapAngle(v.hullFacing - facing));
         expect(turned).toBeLessThanOrEqual(VEHICLE_DEFS[defId].hullTurnDegS! * Math.PI / 180 * SIM_DT + 1e-8);
-        if (delta < 1e-8 && turned > 1e-6) pivoted = true;
+        // the front armour never swings more than square to the gun it is getting away from
+        expect(Math.abs(wrapAngle(v.hullFacing - angleTo(v.pos, threat)))).toBeLessThanOrEqual(Math.PI / 2 + 1e-6);
         if (delta > 1e-8) {
           moved += delta * TILE_M;
-          expect(Math.abs(wrapAngle(angleTo(before, v.pos) - v.hullFacing))).toBeLessThan(0.01);
-          expect(v.speed).toBeGreaterThanOrEqual(0);
+          // along the hull axis only (forward, or backward with a negative speed): never sideways
+          const along = wrapAngle(angleTo(before, v.pos) - v.hullFacing);
+          const backward = Math.abs(along) > Math.PI / 2;
+          expect(Math.abs(backward ? wrapAngle(along - Math.PI) : along)).toBeLessThan(0.01);
+          expect(backward ? v.speed < 0 : v.speed >= 0).toBe(true);
           expect(isPassable(state.map, Math.floor(v.pos.x), Math.floor(v.pos.y), 'vehicle')).toBe(true);
         }
         if (!hasLOS(state.map, v.pos, threat)) { reachedCover = true; break; }
       }
-      expect(pivoted).toBe(true);
+      expect(Math.abs(wrapAngle(v.hullFacing - startFacing))).toBeGreaterThan(0.1); // it steered, not slid
       expect(moved).toBeGreaterThan(2);
       expect(dist(start, v.pos) * TILE_M).toBeGreaterThan(2);
       expect(reachedCover).toBe(true);

@@ -420,12 +420,14 @@ function stepOneVehicleMind(state: BattleState, rng: Rng, dt: number, v: Vehicle
     track.target = found?.target ?? null;
     track.route = found?.route ?? [];
     if (track.target) {
-      const first = track.route[0];
-      // Preserve frontal armour only when cover already lies along the rearward driving line.
-      // Side cover requires a forward manoeuvre, rather than translating sideways under the hull.
-      track.backing = !!first
-        && Math.abs(wrapAngle(angleTo(v.pos, first) + Math.PI - v.hullFacing)) <= DEG30
-        && Math.abs(wrapAngle(angleTo(v.pos, top.pos) - v.hullFacing)) <= DEG30;
+      // The FRONT stays toward the threat: cover on the far side of the tank from the threat
+      // (more than 90 deg off the threat bearing) is reached in reverse, the hull brought round to
+      // face the threat first; cover toward / beside the threat is driven to forward. Decided from
+      // where the cover lies, never from where the hull happens to point now (that turned a tank
+      // parked side-on, or with the first route tile under its own hull, round to drive away
+      // forward: its back and its dragged-round turret to the gun it was running from).
+      const look = coverLookahead(v, track.route, track.target);
+      track.backing = Math.abs(wrapAngle(angleTo(v.pos, look) - angleTo(v.pos, top.pos))) > Math.PI / 2;
     }
     // nothing to hide behind: it stands where it is, so look again in a moment, not every step
     if (!track.target) track.searchAfter = state.time + 2;
@@ -491,6 +493,18 @@ function driveReversing(state: BattleState, rng: Rng, dt: number, v: Vehicle, sp
 }
 
 
+/** The gun's lay is on the commander's top threat when their bearings agree this closely (rad). */
+const ARMOUR_THREAT_MATCH_RAD = (10 * Math.PI) / 180;
+/** Hysteresis on the forward/reverse choice of a cover drive (rad either side of square). */
+const COVER_FLIP_HYST_RAD = (25 * Math.PI) / 180;
+/** Where a cover route is heading, for the forward/reverse choice: the first route point at least
+ * 2 tiles off (the first tile or two of a grid route may lie under the hull or zig-zag), else the
+ * cover spot itself. */
+function coverLookahead(v: Vehicle, route: Vec2[], target: Vec2): Vec2 {
+  for (const p of route) if (dist(v.pos, p) >= 2) return p;
+  return dist(v.pos, target) > 1e-3 ? target : route.at(-1) ?? target;
+}
+
 /** Is the crew backing the vehicle out to cover right now (spec §10)? It fires on the move. */
 /** Cover uses a real route and the hull's driving axis. Large turns pivot first; smaller ones
  * drive a tightening arc. Reverse is deliberate and signed, never a sideways vector to cover. */
@@ -501,7 +515,12 @@ function driveToCover(state: BattleState, rng: Rng, dt: number, v: Vehicle, def:
   if (!wp || transportHolds(state, v)) { v.speed = 0; return; }
   const desired = angleTo(v.pos, wp);
   const rearFacing = wrapAngle(desired + Math.PI);
-  if (track.backing && Math.abs(wrapAngle(rearFacing - angleTo(v.pos, threatPos))) > DEG30) track.backing = false;
+  // front toward the threat (see the backing decision in stepOneVehicleMind): the driving
+  // direction flips only when the route swings well past square to the threat (hysteresis, so a
+  // tile-by-tile route never has a slow hull pivoting end for end every few metres)
+  const offThreat = Math.abs(wrapAngle(angleTo(v.pos, coverLookahead(v, route, track.target ?? wp)) - angleTo(v.pos, threatPos)));
+  if (track.backing && offThreat < Math.PI / 2 - COVER_FLIP_HYST_RAD) track.backing = false;
+  else if (!track.backing && offThreat > Math.PI / 2 + COVER_FLIP_HYST_RAD) track.backing = true;
   const desiredHull = track.backing ? rearFacing : desired;
   const tx = Math.floor(v.pos.x), ty = Math.floor(v.pos.y);
   const tile = tileAt(state.map, tx, ty);
@@ -885,9 +904,16 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
         const hullErr = bearing != null ? Math.abs(wrapAngle(bearing - v.hullFacing)) : Infinity;
         const turretErr = targetPos != null ? Math.abs(wrapAngle(angleTo(v.pos, targetPos) - v.turretFacing)) : Infinity;
         const heldArc = targetPos != null && (ownTeam?.order?.type === 'defend' || ownTeam?.order?.type === 'ambush');
-        const worthHull = heldArc
-          && (hullErr / hullTurnRad(def) < turretErr / turretTraverseRad(def, v, gunnerExp)
-            || (turretErr < COARSE_LAY_RAD && hullErr > COARSE_LAY_RAD));
+        // the gun is laid (or laying) on the commander's top ARMOUR threat (a tank or AT gun that
+        // can hurt us, mind spec §10): the front armour goes to it too. Without this the hull
+        // stopped helping the moment the gunner took the target over, and a Tiger (7 deg/s turret)
+        // engaged from behind finished the duel with its tail and engine deck to the enemy gun.
+        const armourThreat = layPos != null && !!mind && mind.threatLevel >= 0.7 && mind.threatDir != null
+          && Math.abs(wrapAngle(angleTo(v.pos, layPos) - mind.threatDir!)) <= ARMOUR_THREAT_MATCH_RAD;
+        const turretErrToBearing = armourThreat ? Math.abs(wrapAngle(bearing! - v.turretFacing)) : turretErr;
+        const worthHull = (heldArc || armourThreat)
+          && (hullErr / hullTurnRad(def) < turretErrToBearing / turretTraverseRad(def, v, gunnerExp)
+            || (turretErrToBearing < COARSE_LAY_RAD && hullErr > COARSE_LAY_RAD));
         const threat = bearing != null && targetPos == null && layPos == null; // from the commander's threat sense only
         // a casemate gun (StuG, Marder, SU-76/85) swings only a few degrees either way: to bring it
         // onto a target outside that arc the driver turns the whole vehicle, whatever the order

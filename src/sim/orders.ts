@@ -575,17 +575,18 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
     if (vehicle) {
       vehicle.path = [];
       vehicle.targetPoint = order.target;
-      // G23: the hull and turret adopt the order bearing right away so the deploy-screen
-      // sprite matches the arc the UI draws (arc pivots on team/gun facing). Without this the
-      // hull keeps its spawn heading until the battle starts and a hull-toward-threat step.
-      if (dist(vehicle.pos, order.target) > 1e-3) {
+      // G23: DURING DEPLOYMENT the hull and turret adopt the order bearing right away so the
+      // deploy-screen sprite matches the arc the UI draws (arc pivots on team/gun facing). Once
+      // the battle runs a vehicle never snaps: the driver swings the hull and the gunner the
+      // turret at their real rates (stepVehicles' standing branch, heldArc) toward the arc.
+      if (state.phase === 'deploy' && dist(vehicle.pos, order.target) > 1e-3) {
         vehicle.hullFacing = angleTo(vehicle.pos, order.target);
         vehicle.turretFacing = vehicle.hullFacing;
       }
     }
-    // crew-served guns pivot to the arc direction immediately too (they otherwise slew only
-    // through the crew's lay tasks once the sim runs).
-    if (!isVehicleTeam && team.crewWeapon && dist(team.crewWeapon.pos, order.target) > 1e-3) {
+    // crew-served guns pivot to the arc direction immediately too, during deployment only; in
+    // battle the crew slews the gun onto team.facing through its lay tasks (crewWeapon.ts).
+    if (state.phase === 'deploy' && !isVehicleTeam && team.crewWeapon && dist(team.crewWeapon.pos, order.target) > 1e-3) {
       team.crewWeapon.facing = angleTo(team.crewWeapon.pos, order.target);
     }
   }
