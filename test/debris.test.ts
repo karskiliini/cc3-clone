@@ -52,13 +52,14 @@ describe('corpses are thrown by later blasts (§8)', () => {
 });
 
 describe('severe blasts break a body up (§8)', () => {
-  it('thresholds: mortar ~1 m, 75 mm+ ~2 m, satchel; never a hand grenade', () => {
-    expect(severeRadiusM(WEAPONS.mortar81)).toBe(1);
+  it('thresholds: mortar 1.5 m near-direct floor, 75 mm+ ~2 m, satchel 2.5 m, grenade 1.5 m near-direct, small arms never', () => {
+    expect(severeRadiusM(WEAPONS.mortar81)).toBe(1.5); // lethality 0.6 > 0: the near-direct floor applies
     expect(severeRadiusM(WEAPONS.kwk40_75 ?? WEAPONS.f34_76)).toBe(2);
-    expect(severeRadiusM(WEAPONS.satchel)).toBeGreaterThan(0);
-    expect(severeRadiusM(WEAPONS.grenade)).toBe(0);
-    expect(severeRadiusM(WEAPONS.kar98k)).toBe(0);
+    expect(severeRadiusM(WEAPONS.satchel)).toBe(2.5);
+    expect(severeRadiusM(WEAPONS.grenade)).toBe(1.5); // user rule: a near-direct grenade hit blows the man apart
+    expect(severeRadiusM(WEAPONS.kar98k)).toBe(0); // no HE, no fragments
     expect(isSevereBlast(WEAPONS.mortar81, 0.4)).toBe(true);
+    expect(isSevereBlast(WEAPONS.mortar81, 0.7)).toBe(true); // inside the 1.5 m floor
     expect(isSevereBlast(WEAPONS.mortar81, 1)).toBe(false);
   });
 

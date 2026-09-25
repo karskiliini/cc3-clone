@@ -139,7 +139,27 @@ function seekForSoldier(state: BattleState, rng: Rng, s: Soldier): void {
       return;
     }
   }
-  if (threats.length === 0) return;
+  if (threats.length === 0) {
+    // No contact yet: settled men still occupy the best nearby omni-cover (foxhole/trench/
+    // crater/building) — the user rule "always choose to enter the cover". Directional
+    // seeking stays threat-driven; this only uses terrain cover, so open ground is neutral.
+    const isSettledNow = s.activity === 'defending' || s.activity === 'ambushing' || s.activity === 'idle' || s.activity === 'hiding';
+    if (!isSettledNow || s.path.length > 0) return;
+    if (team?.crewWeapon && !team.crewWeapon.abandoned) return; // an emplaced crew stays with its gun
+    const anchor = mind.anchor ?? s.pos;
+    const cur = omniCoverAt(state.map, s.pos);
+    let bestTile: Vec2 | null = null;
+    let bestScore = -Infinity;
+    for (const tile of tilesWithinRadius(anchor, 6)) {
+      const tx = Math.floor(tile.x), ty = Math.floor(tile.y);
+      if (!inBounds(state.map, tx, ty) || !isPassable(state.map, tx, ty, 'infantry')) continue;
+      if (occupiedByTeammate(state, team, s, tile)) continue;
+      const sc = omniCoverAt(state.map, tile) - 0.03 * dist(anchor, tile);
+      if (sc > bestScore) { bestScore = sc; bestTile = tile; }
+    }
+    if (bestTile && bestScore - cur >= 0.15 && dist(anchor, bestTile) <= 6) moveTo(state, s, bestTile);
+    return;
+  }
 
   // --- Pinned/cowering: crawl within 3 tiles if it helps by >=0.2.
   if (mind.state === 'pinned' || mind.state === 'cowering') {

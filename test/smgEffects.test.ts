@@ -16,7 +16,7 @@ function drawnEffects(cam: Camera, flashes: Flash[] = [], tracers: Tracer[] = []
   state.flashes = flashes; state.tracers = tracers;
   const flames: { x: number; y: number }[] = [], moves: { x: number; y: number }[] = [], lines: { x: number; y: number }[] = [];
   const ctx = {
-    save() {}, restore() {}, beginPath() {}, rect() {}, clip() {}, fill() {}, stroke() {}, rotate() {}, ellipse() {}, drawImage() {},
+    save() {}, restore() {}, beginPath() {}, rect() {}, clip() {}, fill() {}, stroke() {}, rotate() {}, ellipse() {}, drawImage() {}, setLineDash() {}, arc() {},
     translate(x: number, y: number) { flames.push({ x, y }); },
     moveTo(x: number, y: number) { moves.push({ x, y }); },
     lineTo(x: number, y: number) { lines.push({ x, y }); },
@@ -53,8 +53,11 @@ describe('SMG muzzle effect origins', () => {
     expect(origin.moves[0].x).toBeCloseTo(screen.x);
     expect(origin.moves[0].y).toBeCloseTo(screen.y - Math.sin(Math.PI / 15) * 10 * height);
     const end = drawnEffects(cam, [], [{ ...ray, t: 0.25 }]);
-    expect(end.lines[0].x).toBeCloseTo(target.x);
-    expect(end.lines[0].y).toBeCloseTo(target.y);
+    // Contract: the round reaches the ground endpoint (impact point) at the end of its
+    // travel — a drawn point coincides with the target regardless of draw order (the
+    // dotted-trail rework draws head-first, the streak era drew tail-first).
+    const atTarget = [...end.moves, ...end.lines].some((p) => Math.abs(p.x - target.x) < 1 && Math.abs(p.y - target.y) < 1);
+    expect(atTarget).toBe(true);
     const legacy = drawnEffects(cam, [], [{ ...ray, fromHeightM: undefined }]);
     expect(legacy.moves[0]).toEqual(screen);
   });

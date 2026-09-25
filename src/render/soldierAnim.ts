@@ -93,7 +93,10 @@ export function isMoving(s: Soldier, speedMps?: number, time?: number): boolean 
 /** `time` (and the measured `speedMps`) let a man dazed by a blast (sim/daze.ts) read as what he
  * is doing: `panicked` while he drags himself to cover, `cowering` while he lies still. */
 export function moodFor(s: Soldier, time?: number, speedMps?: number): Mood {
-  if (time !== undefined && s.dazedUntil != null && time < s.dazedUntil && s.health !== 'dead' && s.health !== 'incapacitated'
+  // An unconscious man lies completely still: no tremble, no mood jitter — his mind may still
+  // read shaken/panicked, but he is out cold and must not move.
+  if (s.health === 'incapacitated') return 'calm';
+  if (time !== undefined && s.dazedUntil != null && time < s.dazedUntil && s.health !== 'dead'
     && s.activity !== 'surrendered') {
     return isMoving(s, speedMps, time) ? 'panicked' : 'cowering';
   }

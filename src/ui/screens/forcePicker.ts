@@ -2,15 +2,20 @@
 // forcePicker.ts — the two-column "force pool / active roster" requisition
 // widget shared by Battle mode's requisition step and the Operation briefing.
 // Click a pool row to add that team, click a roster row to select it, click
-// it again (or Retire) to send it back. Draws/updates in MENU-local space.
+// it again (or Retire) to send it back. In campaign mode (Operation) the roster
+// rows are persistent campaign teams: purchases mint new ones from the live
+// requisition balance, and Refit / Upgrade / Retire (vehicle) act on the
+// selected team. Draws/updates in MENU-local space.
 // ============================================================================
-import type { InputState, Rect, Side, TeamDef, TeamType, Vec2 } from '@/shared/types';
+import type { CampaignState, InputState, Rect, Side, TeamDef, TeamType, Vec2 } from '@/shared/types';
 import { pointInRect } from '@/shared/math';
 import { drawDarkPanel, drawSmallMetalButton, drawVerticalStencil, UI } from '@/ui/chrome';
 import { getTeamIcon } from '@/render/sprites';
 import { TEAM_DEFS, VEHICLE_DEFS, teamsForYear } from '@/data/units';
 import { WEAPONS } from '@/data/weapons';
 import { experienceLevel, typicalExperience } from '@/data/experience';
+import { addTeam, refitTeam, retireVehicle, upgradeTeam } from '@/campaign/roster';
+import { Rng } from '@/shared/rng';
 import { wrapText, truncateText } from './common';
 
 /** Short flavour text per team type, shown in the info panel for the selected pool row. */
@@ -27,6 +32,8 @@ export const TEAM_FLAVOR: Record<TeamType, string> = {
   halftrack: 'A lightly armored transport that moves infantry quickly and mounts a machine gun. Not built to trade fire with real armor.',
   command: 'Commanders provide leadership; command staffs add firepower and make nearby teams more effective. Anchor assaults and defenses.',
   engineer: 'Combat engineers carry satchel charges for clearing bunkers and fortified buildings, alongside their personal weapons.',
+  rocket: 'Rocket artillery: salvo indirect fire with devastating first impact, then a long reload and a vulnerable gun line. Shoot and scoot.',
+  transport: 'An unarmed utility vehicle: ferries ammunition and supplies to guns and tanks. Not a fighting unit.',
 };
 
 const ARMOR_TYPES = new Set<TeamType>(['tank', 'spg', 'halftrack']);
@@ -44,6 +51,8 @@ const CATEGORY_LABEL: Record<TeamType, string> = {
   halftrack: 'Halftrack',
   command: 'Command Team',
   engineer: 'Engineers',
+  rocket: 'Rocket Artillery',
+  transport: 'Utility Vehicle',
 };
 
 /** 'Rifle Infantry (Kar98k, MG34)' for infantry; the category alone for vehicles
@@ -103,6 +112,12 @@ export class ForcePicker {
   year: number;
   points: number;
   rosterIds: string[];
+  /** campaign team uids parallel to rosterIds in campaign mode (G3) */
+  campaignUids: string[] | null = null;
+  /** campaign state for purchase/refit/upgrade/retire mutations (G3) */
+  campaignState: CampaignState | null = null;
+  /** slot count by difficulty (G3); falls back to the battle-mode default */
+  maxSlotsOverride: number | null = null;
   category: 'regular' | 'armor' = 'regular';
 
   private poolIds: string[] = [];
@@ -118,6 +133,8 @@ export class ForcePicker {
   private armorBtn: Rect = { x: 170, y: 96, w: 104, h: 22 };
   private poolRect: Rect = { x: 60, y: 128, w: 324, h: 7 * ROW_H + 2 };
   private infoRect: Rect = { x: 60, y: 346, w: 324, h: 146 };
+  private upgradeBtn: Rect = { x: 506, y: 96, w: 80, h: 22 };
+  private refitBtn: Rect = { x: 592, y: 96, w: 72, h: 22 };
   private retireBtn: Rect = { x: 670, y: 96, w: 70, h: 22 };
   private rosterRect: Rect = { x: 416, y: 128, w: 324, h: 7 * ROW_H + 2 };
   private pointsRect: Rect = { x: 416, y: 346, w: 324, h: 34 };
@@ -142,8 +159,55 @@ export class ForcePicker {
     return this.rosterIds.reduce((sum, id) => sum + (TEAM_DEFS[id]?.cost ?? 0), 0);
   }
 
+  private get maxRoster(): number {
+    return this.maxSlotsOverride ?? MAX_ROSTER;
+  }
+
+  private get campaignMode(): boolean {
+    return !!this.campaignState && !!this.campaignUids;
+  }
+
   remaining(): number {
+    // Campaign mode: the display shows the campaign's live requisition balance —
+    // acquisitions and refits deduct it, seeded/owned roster rows are pre-paid and cost
+    // nothing here (G3 force pool, item 041). Battle mode keeps points minus spent.
+    if (this.campaignState && this.campaignUids) return this.campaignState.requisition;
     return this.points - this.spent();
+  }
+
+  /** The campaign team behind the selected roster row (campaign mode only). */
+  private selectedCampaignTeam() {
+    if (!this.campaignState || !this.campaignUids || this.rosterSelected < 0) return undefined;
+    const uid = this.campaignUids[this.rosterSelected];
+    return this.campaignState.teams.find((t) => t.uid === uid);
+  }
+
+  /** Whether the selected roster row's team has an upgrade path available this year (G3b). */
+  private selectedCanUpgrade(): boolean {
+    const team = this.selectedCampaignTeam();
+    const def = team ? TEAM_DEFS[team.defId] : null;
+    const next = def?.upgradesTo ? TEAM_DEFS[def.upgradesTo] : null;
+    return !!next && next.years.includes(this.year);
+  }
+
+  /** Retire: in battle mode it drops the row; in campaign mode it retires the selected
+   * team's vehicle (the crew fights on foot), so it only applies to vehicle teams. */
+  private canRetire(): boolean {
+    if (this.rosterSelected < 0) return false;
+    if (!this.campaignMode) return true;
+    const team = this.selectedCampaignTeam();
+    return !!team?.vehicleDefId && !team.vehicleRetired;
+  }
+
+  /** Resolves a roster row's team def. Battle-mode rows carry raw defIds; campaign-mode
+   * rows carry campaign team uids (G3), which resolve through the campaign roster so
+   * purchased teams (item 041) render with their own identity. */
+  private rosterDefAt(idx: number): TeamDef | null {
+    const direct = TEAM_DEFS[this.rosterIds[idx]];
+    if (direct) return direct;
+    if (!this.campaignState) return null;
+    const team = this.campaignState.teams.find((t) => t.uid === this.rosterIds[idx]);
+    return team ? TEAM_DEFS[team.defId] ?? null : null;
   }
 
   private rowAt(list: Rect, scroll: number, p: Vec2): number {
@@ -163,15 +227,45 @@ export class ForcePicker {
       } else if (pointInRect(p, this.armorBtn) && this.category !== 'armor') {
         this.category = 'armor';
         this.refreshPool();
-      } else if (pointInRect(p, this.retireBtn) && this.rosterSelected >= 0) {
-        this.rosterIds.splice(this.rosterSelected, 1);
+      } else if (pointInRect(p, this.retireBtn) && this.canRetire()) {
+        if (this.campaignState && this.campaignUids) retireVehicle(this.campaignState, this.campaignUids[this.rosterSelected]);
+        else this.rosterIds.splice(this.rosterSelected, 1);
+        this.rosterSelected = -1;
+      } else if (pointInRect(p, this.upgradeBtn) && this.campaignState && this.campaignUids && this.selectedCanUpgrade()) {
+        upgradeTeam(this.campaignState, this.campaignUids[this.rosterSelected], this.year);
+        this.rosterSelected = -1;
+      } else if (pointInRect(p, this.refitBtn) && this.campaignState && this.selectedCampaignTeam()) {
+        const team = this.selectedCampaignTeam()!;
+        refitTeam(this.campaignState, team.uid, {
+          repair: !!team.vehicleDamage,
+          replace: true,
+          required: TEAM_DEFS[team.defId]?.soldiers.length ?? 0,
+        });
         this.rosterSelected = -1;
       } else if (poolRow >= 0 && poolRow < this.poolIds.length) {
         this.poolSelected = poolRow;
         const def = TEAM_DEFS[this.poolIds[poolRow]];
-        if (def && this.rosterIds.length < MAX_ROSTER && this.remaining() >= def.cost) this.rosterIds.push(def.id);
+        if (def && this.rosterIds.length < this.maxRoster && this.remaining() >= def.cost) {
+          if (this.campaignState && this.campaignUids) {
+            // G3 force pool (item 041): a purchase mints a persistent campaign team,
+            // pays its acquisition from the live requisition balance, and fields it
+            // immediately — both parallel lists carry the new uid so the operation's
+            // Next selects it into the battle.
+            const campaign = this.campaignState;
+            const team = addTeam(campaign, def.id, def.name, def.soldiers, def.vehicleDefId,
+              new Rng(campaign.seed + campaign.teams.length * 31));
+            campaign.requisition -= def.cost;
+            this.campaignUids.push(team.uid);
+            this.rosterIds.push(team.uid);
+          } else {
+            this.rosterIds.push(def.id);
+          }
+        }
       } else if (rosterRow >= 0 && rosterRow < this.rosterIds.length) {
         if (rosterRow === this.rosterSelected) {
+          // Campaign mode: the two lists are parallel — removing a roster row un-fields
+          // the team for this battle but it stays in the kampfgruppe for later ops.
+          this.campaignUids?.splice(rosterRow, 1);
           this.rosterIds.splice(rosterRow, 1);
           this.rosterSelected = -1;
         } else {
@@ -203,7 +297,7 @@ export class ForcePicker {
       const idx = this.poolScroll + i;
       const def = TEAM_DEFS[this.poolIds[idx]];
       if (!def) continue;
-      const affordable = def.cost <= this.remaining() && this.rosterIds.length < MAX_ROSTER;
+      const affordable = def.cost <= this.remaining() && this.rosterIds.length < this.maxRoster;
       drawTeamRow(ctx, this.poolRect, this.poolRect.y + 1 + i * ROW_H, def, {
         selected: idx === this.poolSelected, hot: idx === hotPool, dim: !affordable, right: String(def.cost),
       });
@@ -232,15 +326,20 @@ export class ForcePicker {
     ctx.font = UI.label;
     ctx.textAlign = 'left';
     ctx.fillStyle = UI.text;
-    ctx.fillText(`${this.rosterIds.length} / ${MAX_ROSTER} teams`, this.rosterRect.x + 2, this.rosterRect.y - 12);
-    if (this.rosterSelected >= 0) {
+    ctx.fillText(`${this.rosterIds.length} / ${this.maxRoster} teams`, this.rosterRect.x + 2, this.rosterRect.y - 12);
+    // only the actions that apply to the selected row are shown
+    if (this.canRetire()) {
       drawSmallMetalButton(ctx, this.retireBtn, 'Retire', { hot: pointInRect(this.mouse, this.retireBtn) });
+    }
+    if (this.selectedCampaignTeam()) {
+      drawSmallMetalButton(ctx, this.refitBtn, 'Refit', { hot: pointInRect(this.mouse, this.refitBtn) });
+      if (this.selectedCanUpgrade()) drawSmallMetalButton(ctx, this.upgradeBtn, 'Upgrade', { hot: pointInRect(this.mouse, this.upgradeBtn) });
     }
     drawDarkPanel(ctx, this.rosterRect);
     const hotRoster = this.rowAt(this.rosterRect, this.rosterScroll, this.mouse);
     for (let i = 0; i < visible && this.rosterScroll + i < this.rosterIds.length; i++) {
       const idx = this.rosterScroll + i;
-      const def = TEAM_DEFS[this.rosterIds[idx]];
+      const def = this.rosterDefAt(idx);
       if (!def) continue;
       drawTeamRow(ctx, this.rosterRect, this.rosterRect.y + 1 + i * ROW_H, def, {
         selected: idx === this.rosterSelected, hot: idx === hotRoster, dim: false, men: def.soldiers.length,

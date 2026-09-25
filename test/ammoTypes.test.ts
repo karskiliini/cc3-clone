@@ -159,13 +159,20 @@ describe('the round is chosen at load', () => {
     expect(soldierRounds(g.state, g.gunner).apcr).toBe(0);
   });
 
-  it('a tank loads by type too: HE for infantry, and its counts add up to mainAmmo', () => {
+  it('a tank loads by type too: HE for infantry (a group; item 018), and its counts add up to mainAmmo', () => {
     const state = makeState(1943);
     const t = addTank(state, 'pz4gh', { x: 200, y: 300 }, 0);
-    const e = soldier(900, 900, 'soviet', { x: 200, y: 250 }, 'mosin');
-    state.soldiers.set(900, e);
-    state.teams.set(900, mkTeam(900, 'rifle', [900], 'soviet', e.pos));
-    state.spotted.german.add(900);
+    // item 018: the main gun fires HE at infantry only for a GROUP (3+ spotted men clustered) —
+    // a lone rifleman is the machine guns' business, so the test lays out a group.
+    const ids: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      const id = 900 + i;
+      const e = soldier(id, 900, 'soviet', { x: 200 + i * 0.8, y: 250 }, 'mosin');
+      state.soldiers.set(id, e);
+      state.spotted.german.add(id);
+      ids.push(id);
+    }
+    state.teams.set(900, mkTeam(900, 'rifle', ids, 'soviet', { x: 200, y: 250 }));
     const r0 = { ...vehicleRounds(state, t.v) };
     expect(r0.ap + r0.apcr + r0.he + r0.smoke).toBe(t.v.mainAmmo);
     run(state, new Rng(1), 6);

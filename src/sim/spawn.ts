@@ -79,7 +79,7 @@ export function naturalFormation(def: TeamDef, rng: Rng): Vec2[] {
   const placed: Vec2[] = [];
   const type = def.type;
 
-  if (type === 'mg' || type === 'mortar' || type === 'atgun') {
+  if (type === 'mg' || type === 'mortar' || type === 'atgun' || type === 'rocket') {
     let w = def.soldiers.findIndex((sd) => HEAVY_CLS.has(WEAPONS[sd.weaponId]?.cls ?? ''));
     if (w < 0) w = 0;
     const slots: Vec2[] = new Array(n);
@@ -375,6 +375,9 @@ export function spawnTeam(state: BattleState, def: TeamDef, side: Side, pos: Vec
   const positions = vehicle ? null : layoutTeamPositions(state.map, pos, offsets);
   let totalExp = 0;
   def.soldiers.forEach((sd, i) => {
+    // campaign identity (G1): uids come from the BattleConfig roster payload, in team order
+    const roster = state.config.rosterUids?.[side];
+    const uid = roster?.[state.teams.size]?.[i];
     const weapon = WEAPONS[sd.weaponId];
     const ammo = weapon ? weapon.ammo : 0;
     const reserveMul = weapon && RELOAD_HEAVY.has(weapon.cls) ? 12 : 6;
@@ -388,6 +391,7 @@ export function spawnTeam(state: BattleState, def: TeamDef, side: Side, pos: Vec
 
     const soldier: Soldier = {
       id: state.nextId++,
+      uid,
       teamId,
       side,
       name: randomName(side, rng),

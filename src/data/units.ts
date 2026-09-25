@@ -27,6 +27,76 @@ function v(d: VehicleDef): VehicleDef { return d; }
  * transmission, no side fuel); `weakSpots`: plates an ace gunner knows, effective mm by aim point. */
 export const VEHICLE_DEFS: Record<string, VehicleDef> = {
   // ------------------------------------------------------------- German
+  tiger2: v({
+    id: 'tiger2', name: 'Tiger II', kind: 'tank', lengthM: 7.3, widthM: 3.7,
+    speedRoadMs: 9, speedOffroadMs: 4, turretTraverseDegS: 6, turretTraverseHandDegS: 2, hullTurnDegS: 9, readyRack: 5,
+    armor: { front: 180, side: 80, rear: 80, top: 40 },
+    mainWeaponId: 'kwk43_88', coaxWeaponId: 'coax_mg34', bowWeaponId: 'bow_mg34', hasTurret: true, crew: 5, mainAmmo: 50,
+    layout: { transmission: 'front' }, weakSpots: { lowerHull: 90, gunMantlet: 120 },
+  }),
+  pantherD: v({
+    id: 'pantherD', name: 'Panther D', kind: 'tank', lengthM: 6.9, widthM: 3.3,
+    speedRoadMs: 12, speedOffroadMs: 5, turretTraverseDegS: 15, turretTraverseHandDegS: 3, hullTurnDegS: 16, readyRack: 6,
+    armor: { front: 100, side: 40, rear: 40, top: 16 },
+    mainWeaponId: 'kwk42_75', coaxWeaponId: 'coax_mg34', bowWeaponId: 'bow_mg34', hasTurret: true, crew: 5, mainAmmo: 79,
+    layout: { transmission: 'front' }, weakSpots: { gunMantlet: 80, sideHull: 40 },
+  }),
+  pantherA: v({
+    id: 'pantherA', name: 'Panther A', kind: 'tank', lengthM: 6.9, widthM: 3.4,
+    speedRoadMs: 12, speedOffroadMs: 5, turretTraverseDegS: 18, turretTraverseHandDegS: 3, hullTurnDegS: 16, readyRack: 6,
+    armor: { front: 110, side: 45, rear: 40, top: 16 },
+    mainWeaponId: 'kwk42_75', coaxWeaponId: 'coax_mg34', bowWeaponId: 'bow_mg34', hasTurret: true, crew: 5, mainAmmo: 79,
+    layout: { transmission: 'front' }, weakSpots: { gunMantlet: 75, sideHull: 40 },
+  }),
+  pz4g: v({
+    id: 'pz4g', name: 'PzKw IV G', kind: 'tank', lengthM: 5.9, widthM: 2.9,
+    speedRoadMs: 11, speedOffroadMs: 5, turretTraverseDegS: 14, turretTraverseHandDegS: 4, hullTurnDegS: 18, readyRack: 8,
+    armor: { front: 60, side: 30, rear: 20, top: 12 },
+    mainWeaponId: 'kwk40_l43', coaxWeaponId: 'coax_mg34', bowWeaponId: 'bow_mg34', hasTurret: true, crew: 5, mainAmmo: 87,
+    layout: { transmission: 'front' }, weakSpots: { turretRing: 45 },
+  }),
+  stug4: v({
+    id: 'stug4', name: 'StuG IV', kind: 'spg', lengthM: 5.9, widthM: 2.9,
+    speedRoadMs: 11, speedOffroadMs: 5, turretTraverseDegS: 5, turretTraverseHandDegS: 5, hullTurnDegS: 18, gunArcDeg: 12, readyRack: 8,
+    armor: { front: 80, side: 30, rear: 20, top: 16 },
+    mainWeaponId: 'stuk40', coaxWeaponId: 'coax_mg34', hasTurret: false, crew: 4, mainAmmo: 63,
+    layout: { transmission: 'front' }, weakSpots: { lowerHull: 50 },
+  }),
+  hetzer: v({
+    id: 'hetzer', name: 'Hetzer', kind: 'spg', lengthM: 4.9, widthM: 2.6,
+    speedRoadMs: 11, speedOffroadMs: 5, turretTraverseDegS: 5, turretTraverseHandDegS: 5, hullTurnDegS: 25, gunArcDeg: 10, readyRack: 6,
+    armor: { front: 60, side: 20, rear: 12, top: 8 },
+    mainWeaponId: 'stuk39_75', coaxWeaponId: 'coax_mg34', hasTurret: false, crew: 4, mainAmmo: 41,
+    layout: { transmission: 'front' }, weakSpots: { gunMantlet: 60 },
+  }),
+  flammpanzer3: v({
+    id: 'flammpanzer3', name: 'Flammpanzer III', kind: 'tank', lengthM: 6.3, widthM: 2.9,
+    speedRoadMs: 11, speedOffroadMs: 5, turretTraverseDegS: 8, turretTraverseHandDegS: 8, hullTurnDegS: 20, readyRack: 0,
+    armor: { front: 50, side: 30, rear: 30, top: 12 },
+    mainWeaponId: 'flamewerfer', coaxWeaponId: 'coax_mg34', bowWeaponId: 'bow_mg34', hasTurret: true, crew: 3, mainAmmo: 60,
+    layout: { transmission: 'front' },
+  }),
+  kettenkrad: v({
+    id: 'kettenkrad', name: 'Kettenkrad SdKfz 2', kind: 'halftrack', lengthM: 3.0, widthM: 1.6,
+    speedRoadMs: 12, speedOffroadMs: 6, turretTraverseDegS: 60, turretTraverseHandDegS: 60, hullTurnDegS: 0, turnRadiusM: 3.5,
+    armor: { front: 0, side: 0, rear: 0, top: 0 },
+    mainWeaponId: null, coaxWeaponId: null, hasTurret: false, crew: 3, mainAmmo: 0,
+    layout: { transmission: 'front', openTop: true, bowMg: false },
+  }),
+  kubelwagen: v({
+    id: 'kubelwagen', name: 'Kübelwagen Type 82', kind: 'halftrack', lengthM: 3.1, widthM: 1.6,
+    speedRoadMs: 15, speedOffroadMs: 7, turretTraverseDegS: 60, turretTraverseHandDegS: 60, hullTurnDegS: 0, turnRadiusM: 4,
+    armor: { front: 0, side: 0, rear: 0, top: 0 },
+    mainWeaponId: null, coaxWeaponId: null, hasTurret: false, crew: 4, mainAmmo: 0,
+    layout: { transmission: 'front', openTop: true, bowMg: false },
+  }),
+  sdkfz251_rocket: v({
+    id: 'sdkfz251_rocket', name: 'SdKfz 251/1 (Wurfrahmen)', kind: 'halftrack', lengthM: 5.8, widthM: 2.1,
+    speedRoadMs: 14, speedOffroadMs: 6, turretTraverseDegS: 60, turretTraverseHandDegS: 60, hullTurnDegS: 0, turnRadiusM: 5.5,
+    armor: { front: 14, side: 8, rear: 8, top: 6 },
+    mainWeaponId: 'nebel41', coaxWeaponId: 'coax_mg34', hasTurret: false, gunArcDeg: 20, crew: 3, mainAmmo: 6,
+    layout: { transmission: 'front', openTop: true, bowMg: false },
+  }),
   pz3j: v({
     id: 'pz3j', name: 'PzKw III J', kind: 'tank', lengthM: 5.6, widthM: 2.9,
     speedRoadMs: 11, speedOffroadMs: 5, turretTraverseDegS: 8, turretTraverseHandDegS: 8, hullTurnDegS: 20, readyRack: 6,
@@ -85,6 +155,69 @@ export const VEHICLE_DEFS: Record<string, VehicleDef> = {
   }),
 
   // ------------------------------------------------------------- Soviet
+  is3: v({
+    id: 'is3', name: 'IS-3', kind: 'tank', lengthM: 6.9, widthM: 3.1,
+    speedRoadMs: 10, speedOffroadMs: 5, turretTraverseDegS: 12, turretTraverseHandDegS: 3, hullTurnDegS: 8, readyRack: 4,
+    armor: { front: 150, side: 90, rear: 60, top: 30 },
+    mainWeaponId: 'd25t_122', coaxWeaponId: 'coax_dt', hasTurret: true, crew: 4, mainAmmo: 28,
+    weakSpots: { lowerHull: 100 },
+  }),
+  is1: v({
+    id: 'is1', name: 'IS-1', kind: 'tank', lengthM: 6.8, widthM: 3.1,
+    speedRoadMs: 10, speedOffroadMs: 5, turretTraverseDegS: 13, turretTraverseHandDegS: 3, hullTurnDegS: 13, readyRack: 5,
+    armor: { front: 110, side: 90, rear: 60, top: 30 },
+    mainWeaponId: 'd5t_85', coaxWeaponId: 'coax_dt', hasTurret: true, crew: 4, mainAmmo: 59,
+    weakSpots: { lowerHull: 100 },
+  }),
+  su152: v({
+    id: 'su152', name: 'SU-152', kind: 'spg', lengthM: 6.8, widthM: 3.3,
+    speedRoadMs: 9, speedOffroadMs: 4, turretTraverseDegS: 5, turretTraverseHandDegS: 5, hullTurnDegS: 11, gunArcDeg: 12, readyRack: 4,
+    armor: { front: 65, side: 60, rear: 60, top: 20 },
+    mainWeaponId: 'ml20_152', coaxWeaponId: null, hasTurret: false, crew: 5, mainAmmo: 20,
+    layout: { sideFuel: true, bowMg: false },
+  }),
+  su100: v({
+    id: 'su100', name: 'SU-100', kind: 'spg', lengthM: 6.1, widthM: 3.0,
+    speedRoadMs: 14, speedOffroadMs: 7, turretTraverseDegS: 5, turretTraverseHandDegS: 5, hullTurnDegS: 18, gunArcDeg: 10, readyRack: 5,
+    armor: { front: 75, side: 45, rear: 45, top: 20 },
+    mainWeaponId: 'd10_100', coaxWeaponId: null, hasTurret: false, crew: 4, mainAmmo: 33,
+    layout: { sideFuel: true, bowMg: false },
+  }),
+  su122: v({
+    id: 'su122', name: 'SU-122', kind: 'spg', lengthM: 6.1, widthM: 3.0,
+    speedRoadMs: 14, speedOffroadMs: 7, turretTraverseDegS: 5, turretTraverseHandDegS: 5, hullTurnDegS: 18, gunArcDeg: 10, readyRack: 5,
+    armor: { front: 45, side: 45, rear: 40, top: 20 },
+    mainWeaponId: 'm30_122', coaxWeaponId: null, hasTurret: false, crew: 5, mainAmmo: 40,
+    layout: { sideFuel: true, bowMg: false },
+  }),
+  t28: v({
+    id: 't28', name: 'T-28', kind: 'tank', lengthM: 7.4, widthM: 2.9,
+    speedRoadMs: 8, speedOffroadMs: 3, turretTraverseDegS: 8, turretTraverseHandDegS: 8, hullTurnDegS: 14, readyRack: 6,
+    armor: { front: 30, side: 25, rear: 20, top: 10 },
+    mainWeaponId: 'kt28_76', coaxWeaponId: 'coax_dt', hasTurret: true, crew: 6, mainAmmo: 70,
+    layout: { twoManTurret: true, bowMg: false, radio: false },
+  }),
+  ot34: v({
+    id: 'ot34', name: 'OT-34 (flame T-34)', kind: 'tank', lengthM: 6.7, widthM: 3.0,
+    speedRoadMs: 14, speedOffroadMs: 7, turretTraverseDegS: 25, turretTraverseHandDegS: 6, hullTurnDegS: 20, readyRack: 6,
+    armor: { front: 60, side: 45, rear: 40, top: 20 },
+    mainWeaponId: 'flamewerfer', coaxWeaponId: 'coax_dt', hasTurret: true, crew: 4, mainAmmo: 60,
+    layout: { twoManTurret: true, sideFuel: true }, weakSpots: { driverPlate: 45 },
+  }),
+  sherman76: v({
+    id: 'sherman76', name: 'M4A2 Sherman 76 (Lend-Lease)', kind: 'tank', lengthM: 6.3, widthM: 2.6,
+    speedRoadMs: 13, speedOffroadMs: 6, turretTraverseDegS: 20, turretTraverseHandDegS: 5, hullTurnDegS: 16, readyRack: 7,
+    armor: { front: 65, side: 40, rear: 40, top: 20 },
+    mainWeaponId: 'm3_76_long', coaxWeaponId: 'coax_dt', bowWeaponId: 'bow_dt', hasTurret: true, crew: 5, mainAmmo: 71,
+    layout: { sideFuel: true }, weakSpots: { turretRing: 60 },
+  }),
+  bm13: v({
+    id: 'bm13', name: 'BM-13 Katyusha', kind: 'halftrack', lengthM: 6.5, widthM: 2.3,
+    speedRoadMs: 15, speedOffroadMs: 7, turretTraverseDegS: 60, turretTraverseHandDegS: 60, hullTurnDegS: 0, turnRadiusM: 5.5,
+    armor: { front: 0, side: 0, rear: 0, top: 0 },
+    mainWeaponId: 'bm13', coaxWeaponId: null, hasTurret: false, gunArcDeg: 10, crew: 5, mainAmmo: 8,
+    layout: { transmission: 'front', openTop: true, bowMg: false },
+  }),
   t26: v({
     id: 't26', name: 'T-26', kind: 'tank', lengthM: 4.6, widthM: 2.4,
     speedRoadMs: 8, speedOffroadMs: 4, turretTraverseDegS: 10, turretTraverseHandDegS: 10, hullTurnDegS: 22, readyRack: 6,
@@ -160,6 +293,7 @@ const Y42_45 = [1942, 1943, 1944, 1945];
 const Y42_43 = [1942, 1943];
 const Y43_45 = [1943, 1944, 1945];
 const Y44_45 = [1944, 1945];
+const Y41_45 = [1941, 1942, 1943, 1944, 1945];
 const Y41_43 = [1941, 1942, 1943];
 const ALL_YEARS = [1941, 1942, 1943, 1944, 1945];
 
@@ -175,7 +309,7 @@ function t(d: TeamDef): TeamDef { return d; }
 export const TEAM_DEFS: Record<string, TeamDef> = {
   // ================================================================ GERMAN
   ger_rifle_41: t({
-    id: 'ger_rifle_41', name: 'Rifle Squad', type: 'rifle', side: 'german', years: Y41_42, cost: 30,
+    id: 'ger_rifle_41', name: 'Rifle Squad', type: 'rifle', side: 'german', years: Y41_42, cost: 30, upgradesTo: 'ger_rifle_43',
     soldiers: [
       { rank: 'Uffz', weaponId: 'mp40' },
       { rank: 'Gefr', weaponId: 'mg34' },
@@ -210,7 +344,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     iconId: 'smg',
   }),
   ger_mg34_hmg: t({
-    id: 'ger_mg34_hmg', name: 'MG34 HMG', type: 'mg', side: 'german', years: Y41_43, cost: 25,
+    id: 'ger_mg34_hmg', name: 'MG34 HMG', type: 'mg', side: 'german', years: Y41_43, cost: 25, upgradesTo: 'ger_mg42_hmg',
     soldiers: [
       { rank: 'Uffz', weaponId: 'kar98k' },
       { rank: 'Gefr', weaponId: 'mg34_hmg' },
@@ -237,7 +371,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     iconId: 'mortar',
   }),
   ger_pak38: t({
-    id: 'ger_pak38', name: '5cm PaK 38', type: 'atgun', side: 'german', years: Y41_42, cost: 30,
+    id: 'ger_pak38', name: '5cm PaK 38', type: 'atgun', side: 'german', years: Y41_42, cost: 30, upgradesTo: 'ger_pak40',
     soldiers: [
       { rank: 'Uffz', weaponId: 'kar98k' },
       { rank: 'Gefr', weaponId: 'pak38' },
@@ -294,7 +428,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     iconId: 'engineer',
   }),
   ger_pz3j: t({
-    id: 'ger_pz3j', name: 'PzKw III J', type: 'tank', side: 'german', years: Y41_42, cost: 50,
+    id: 'ger_pz3j', name: 'PzKw III J', type: 'tank', side: 'german', years: Y41_42, cost: 50, upgradesTo: 'ger_pz4gh',
     soldiers: [
       { rank: 'Uffz', weaponId: 'pistol_p38' }, { rank: 'Gefr', weaponId: 'pistol_p38' },
       { rank: 'Gefr', weaponId: 'pistol_p38' }, { rank: 'Schtz', weaponId: 'pistol_p38' }, { rank: 'Schtz', weaponId: 'pistol_p38' },
@@ -302,7 +436,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     vehicleDefId: 'pz3j', iconId: 'tank',
   }),
   ger_pz4f1: t({
-    id: 'ger_pz4f1', name: 'PzKw IV F1', type: 'tank', side: 'german', years: Y41, cost: 45,
+    id: 'ger_pz4f1', name: 'PzKw IV F1', type: 'tank', side: 'german', years: Y41, cost: 45, upgradesTo: 'ger_pz4gh',
     soldiers: [
       { rank: 'Uffz', weaponId: 'pistol_p38' }, { rank: 'Gefr', weaponId: 'pistol_p38' },
       { rank: 'Gefr', weaponId: 'pistol_p38' }, { rank: 'Schtz', weaponId: 'pistol_p38' }, { rank: 'Schtz', weaponId: 'pistol_p38' },
@@ -333,6 +467,93 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     ],
     vehicleDefId: 'panther', iconId: 'tank',
   }),
+  ger_tiger2: t({
+    id: 'ger_tiger2', name: 'Tiger II', type: 'tank', side: 'german', years: Y44_45, cost: 130, quality: 'elite',
+    soldiers: [
+      { rank: 'Uffz', weaponId: 'pistol_p38' }, { rank: 'Gefr', weaponId: 'pistol_p38' },
+      { rank: 'Gefr', weaponId: 'pistol_p38' }, { rank: 'Schtz', weaponId: 'pistol_p38' }, { rank: 'Schtz', weaponId: 'pistol_p38' },
+    ],
+    vehicleDefId: 'tiger2', iconId: 'tank',
+  }),
+  ger_pantherD: t({
+    id: 'ger_pantherD', name: 'Panther D', type: 'tank', side: 'german', years: [1943], cost: 80, quality: 'seasoned',
+    soldiers: [
+      { rank: 'Uffz', weaponId: 'pistol_p38' }, { rank: 'Gefr', weaponId: 'pistol_p38' },
+      { rank: 'Gefr', weaponId: 'pistol_p38' }, { rank: 'Schtz', weaponId: 'pistol_p38' }, { rank: 'Schtz', weaponId: 'pistol_p38' },
+    ],
+    vehicleDefId: 'pantherD', iconId: 'tank',
+  }),
+  ger_pantherA: t({
+    id: 'ger_pantherA', name: 'Panther A', type: 'tank', side: 'german', years: Y43_45, cost: 78, quality: 'seasoned',
+    soldiers: [
+      { rank: 'Uffz', weaponId: 'pistol_p38' }, { rank: 'Gefr', weaponId: 'pistol_p38' },
+      { rank: 'Gefr', weaponId: 'pistol_p38' }, { rank: 'Schtz', weaponId: 'pistol_p38' }, { rank: 'Schtz', weaponId: 'pistol_p38' },
+    ],
+    vehicleDefId: 'pantherA', iconId: 'tank',
+  }),
+  ger_pz4g: t({
+    id: 'ger_pz4g', name: 'PzKw IV G', type: 'tank', side: 'german', years: Y42_43, cost: 50, upgradesTo: 'ger_pz4gh',
+    soldiers: [
+      { rank: 'Uffz', weaponId: 'pistol_p38' }, { rank: 'Gefr', weaponId: 'pistol_p38' },
+      { rank: 'Gefr', weaponId: 'pistol_p38' }, { rank: 'Schtz', weaponId: 'pistol_p38' }, { rank: 'Schtz', weaponId: 'pistol_p38' },
+    ],
+    vehicleDefId: 'pz4g', iconId: 'tank',
+  }),
+  ger_stug4: t({
+    id: 'ger_stug4', name: 'StuG IV', type: 'spg', side: 'german', years: Y43_45, cost: 58, quality: 'seasoned',
+    soldiers: [
+      { rank: 'Uffz', weaponId: 'pistol_p38' }, { rank: 'Gefr', weaponId: 'pistol_p38' },
+      { rank: 'Gefr', weaponId: 'pistol_p38' }, { rank: 'Schtz', weaponId: 'pistol_p38' },
+    ],
+    vehicleDefId: 'stug4', iconId: 'spg',
+  }),
+  ger_hetzer: t({
+    id: 'ger_hetzer', name: 'Hetzer', type: 'spg', side: 'german', years: Y44_45, cost: 45, quality: 'seasoned',
+    soldiers: [
+      { rank: 'Uffz', weaponId: 'pistol_p38' }, { rank: 'Gefr', weaponId: 'pistol_p38' },
+      { rank: 'Gefr', weaponId: 'pistol_p38' }, { rank: 'Schtz', weaponId: 'pistol_p38' },
+    ],
+    vehicleDefId: 'hetzer', iconId: 'spg',
+  }),
+  ger_flamm3: t({
+    id: 'ger_flamm3', name: 'Flammpanzer III', type: 'tank', side: 'german', years: Y41_43, cost: 45,
+    soldiers: [
+      { rank: 'Uffz', weaponId: 'pistol_p38' }, { rank: 'Gefr', weaponId: 'pistol_p38' },
+      { rank: 'Schtz', weaponId: 'pistol_p38' },
+    ],
+    vehicleDefId: 'flammpanzer3', iconId: 'tank',
+  }),
+  ger_kettenkrad: t({
+    id: 'ger_kettenkrad', name: 'Kettenkrad', type: 'transport', side: 'german', years: ALL_YEARS, cost: 8,
+    soldiers: [
+      { rank: 'Gefr', weaponId: 'mp40' }, { rank: 'Schtz', weaponId: 'kar98k' }, { rank: 'Schtz', weaponId: 'kar98k' },
+    ],
+    vehicleDefId: 'kettenkrad', iconId: 'halftrack',
+  }),
+  ger_kubelwagen: t({
+    id: 'ger_kubelwagen', name: 'Kübelwagen', type: 'transport', side: 'german', years: ALL_YEARS, cost: 8,
+    soldiers: [
+      { rank: 'Gefr', weaponId: 'mp40' }, { rank: 'Schtz', weaponId: 'kar98k' },
+      { rank: 'Schtz', weaponId: 'kar98k' }, { rank: 'Schtz', weaponId: 'kar98k' },
+    ],
+    vehicleDefId: 'kubelwagen', iconId: 'halftrack',
+  }),
+  ger_251_rocket: t({
+    id: 'ger_251_rocket', name: 'SdKfz 251/1 (Wurfrahmen)', type: 'rocket', side: 'german', years: Y43_45, cost: 35,
+    soldiers: [
+      { rank: 'Uffz', weaponId: 'pistol_p38' }, { rank: 'Gefr', weaponId: 'kar98k' }, { rank: 'Schtz', weaponId: 'kar98k' },
+    ],
+    vehicleDefId: 'sdkfz251_rocket', iconId: 'halftrack',
+  }),
+  ger_nebel: t({
+    id: 'ger_nebel', name: '15cm Nebelwerfer', type: 'rocket', side: 'german', years: Y43_45, cost: 40,
+    soldiers: [
+      { rank: 'Uffz', weaponId: 'kar98k' },
+      { rank: 'Gefr', weaponId: 'nebel41' },
+      { rank: 'Schtz', weaponId: 'kar98k' }, { rank: 'Schtz', weaponId: 'kar98k' },
+    ],
+    iconId: 'rocket',
+  }),
   ger_tiger: t({
     id: 'ger_tiger', name: 'Tiger I', type: 'tank', side: 'german', years: Y43_45, cost: 90, quality: 'elite',
     soldiers: [
@@ -359,7 +580,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
 
   // ================================================================ SOVIET
   sov_rifle_41: t({
-    id: 'sov_rifle_41', name: 'Rifle Squad', type: 'rifle', side: 'soviet', years: Y41_42, cost: 28,
+    id: 'sov_rifle_41', name: 'Rifle Squad', type: 'rifle', side: 'soviet', years: Y41_42, cost: 28, upgradesTo: 'sov_rifle_43',
     soldiers: [
       { rank: 'Serzh', weaponId: 'ppsh41' },
       { rank: 'Efr', weaponId: 'dp28' },
@@ -411,7 +632,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     iconId: 'mortar',
   }),
   sov_45mm_at: t({
-    id: 'sov_45mm_at', name: '45mm AT Gun', type: 'atgun', side: 'soviet', years: Y41_43, cost: 25,
+    id: 'sov_45mm_at', name: '45mm AT Gun', type: 'atgun', side: 'soviet', years: Y41_43, cost: 25, upgradesTo: 'sov_zis3',
     soldiers: [
       { rank: 'Serzh', weaponId: 'mosin' },
       { rank: 'Efr', weaponId: 'm1937_45mm' },
@@ -459,21 +680,21 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     iconId: 'engineer',
   }),
   sov_t26: t({
-    id: 'sov_t26', name: 'T-26', type: 'tank', side: 'soviet', years: Y41, cost: 35,
+    id: 'sov_t26', name: 'T-26', type: 'tank', side: 'soviet', years: Y41, cost: 35, upgradesTo: 'sov_t70',
     soldiers: [
       { rank: 'Serzh', weaponId: 'pistol_tt' }, { rank: 'Ryad', weaponId: 'pistol_tt' }, { rank: 'Ryad', weaponId: 'pistol_tt' },
     ],
     vehicleDefId: 't26', iconId: 'tank',
   }),
   sov_bt7: t({
-    id: 'sov_bt7', name: 'BT-7', type: 'tank', side: 'soviet', years: Y41, cost: 35,
+    id: 'sov_bt7', name: 'BT-7', type: 'tank', side: 'soviet', years: Y41, cost: 35, upgradesTo: 'sov_t34_76',
     soldiers: [
       { rank: 'Serzh', weaponId: 'pistol_tt' }, { rank: 'Ryad', weaponId: 'pistol_tt' }, { rank: 'Ryad', weaponId: 'pistol_tt' },
     ],
     vehicleDefId: 'bt7', iconId: 'tank',
   }),
   sov_t34_76: t({
-    id: 'sov_t34_76', name: 'T-34/76', type: 'tank', side: 'soviet', years: Y41_43, cost: 60,
+    id: 'sov_t34_76', name: 'T-34/76', type: 'tank', side: 'soviet', years: Y41_43, cost: 60, upgradesTo: 'sov_t34_85',
     soldiers: [
       { rank: 'Serzh', weaponId: 'pistol_tt' }, { rank: 'Ryad', weaponId: 'pistol_tt' },
       { rank: 'Ryad', weaponId: 'pistol_tt' }, { rank: 'Ryad', weaponId: 'pistol_tt' },
@@ -481,7 +702,7 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
     vehicleDefId: 't34_76', iconId: 'tank',
   }),
   sov_kv1: t({
-    id: 'sov_kv1', name: 'KV-1', type: 'tank', side: 'soviet', years: Y41_42, cost: 80, quality: 'seasoned',
+    id: 'sov_kv1', name: 'KV-1', type: 'tank', side: 'soviet', years: Y41_42, cost: 80, quality: 'seasoned', upgradesTo: 'sov_is2',
     soldiers: [
       { rank: 'Serzh', weaponId: 'pistol_tt' }, { rank: 'Ryad', weaponId: 'pistol_tt' },
       { rank: 'Ryad', weaponId: 'pistol_tt' }, { rank: 'Ryad', weaponId: 'pistol_tt' }, { rank: 'Ryad', weaponId: 'pistol_tt' },
@@ -502,6 +723,103 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
       { rank: 'Ryad', weaponId: 'pistol_tt' }, { rank: 'Ryad', weaponId: 'pistol_tt' }, { rank: 'Ryad', weaponId: 'pistol_tt' },
     ],
     vehicleDefId: 't34_85', iconId: 'tank',
+  }),
+  sov_is3: t({
+    id: 'sov_is3', name: 'IS-3', type: 'tank', side: 'soviet', years: [1945], cost: 125, quality: 'elite',
+    soldiers: [
+      { rank: 'Lt', weaponId: 'pistol_tt' }, { rank: 'Sgt', weaponId: 'pistol_tt' },
+      { rank: 'Pvt', weaponId: 'pistol_tt' }, { rank: 'Pvt', weaponId: 'pistol_tt' },
+    ],
+    vehicleDefId: 'is3', iconId: 'tank',
+  }),
+  sov_is1: t({
+    id: 'sov_is1', name: 'IS-1', type: 'tank', side: 'soviet', years: Y44_45, cost: 90, quality: 'elite',
+    soldiers: [
+      { rank: 'Lt', weaponId: 'pistol_tt' }, { rank: 'Sgt', weaponId: 'pistol_tt' },
+      { rank: 'Pvt', weaponId: 'pistol_tt' }, { rank: 'Pvt', weaponId: 'pistol_tt' },
+    ],
+    vehicleDefId: 'is1', iconId: 'tank',
+  }),
+  sov_su152: t({
+    id: 'sov_su152', name: 'SU-152', type: 'spg', side: 'soviet', years: Y43_45, cost: 95, quality: 'seasoned',
+    soldiers: [
+      { rank: 'Lt', weaponId: 'pistol_tt' }, { rank: 'Sgt', weaponId: 'pistol_tt' },
+      { rank: 'Pvt', weaponId: 'pistol_tt' }, { rank: 'Pvt', weaponId: 'pistol_tt' }, { rank: 'Pvt', weaponId: 'pistol_tt' },
+    ],
+    vehicleDefId: 'su152', iconId: 'spg',
+  }),
+  sov_su100: t({
+    id: 'sov_su100', name: 'SU-100', type: 'spg', side: 'soviet', years: Y44_45, cost: 70, quality: 'seasoned',
+    soldiers: [
+      { rank: 'Lt', weaponId: 'pistol_tt' }, { rank: 'Sgt', weaponId: 'pistol_tt' },
+      { rank: 'Pvt', weaponId: 'pistol_tt' }, { rank: 'Pvt', weaponId: 'pistol_tt' },
+    ],
+    vehicleDefId: 'su100', iconId: 'spg',
+  }),
+  sov_su122: t({
+    id: 'sov_su122', name: 'SU-122', type: 'spg', side: 'soviet', years: Y43_45, cost: 65,
+    soldiers: [
+      { rank: 'Lt', weaponId: 'pistol_tt' }, { rank: 'Sgt', weaponId: 'pistol_tt' },
+      { rank: 'Pvt', weaponId: 'pistol_tt' }, { rank: 'Pvt', weaponId: 'pistol_tt' }, { rank: 'Pvt', weaponId: 'pistol_tt' },
+    ],
+    vehicleDefId: 'su122', iconId: 'spg',
+  }),
+  sov_t28: t({
+    id: 'sov_t28', name: 'T-28', type: 'tank', side: 'soviet', years: [1941], cost: 40,
+    soldiers: [
+      { rank: 'Lt', weaponId: 'pistol_tt' }, { rank: 'Sgt', weaponId: 'pistol_tt' },
+      { rank: 'Pvt', weaponId: 'pistol_tt' }, { rank: 'Pvt', weaponId: 'pistol_tt' },
+      { rank: 'Pvt', weaponId: 'pistol_tt' }, { rank: 'Pvt', weaponId: 'pistol_tt' },
+    ],
+    vehicleDefId: 't28', iconId: 'tank',
+  }),
+  sov_ot34: t({
+    id: 'sov_ot34', name: 'OT-34 Flamethrower Tank', type: 'tank', side: 'soviet', years: Y42_45, cost: 62,
+    soldiers: [
+      { rank: 'Lt', weaponId: 'pistol_tt' }, { rank: 'Sgt', weaponId: 'pistol_tt' },
+      { rank: 'Pvt', weaponId: 'pistol_tt' }, { rank: 'Pvt', weaponId: 'pistol_tt' },
+    ],
+    vehicleDefId: 'ot34', iconId: 'tank',
+  }),
+  sov_sherman76: t({
+    id: 'sov_sherman76', name: 'M4A2 Sherman 76', type: 'tank', side: 'soviet', years: Y44_45, cost: 70,
+    soldiers: [
+      { rank: 'Lt', weaponId: 'pistol_tt' }, { rank: 'Sgt', weaponId: 'pistol_tt' },
+      { rank: 'Pvt', weaponId: 'pistol_tt' }, { rank: 'Pvt', weaponId: 'pistol_tt' }, { rank: 'Pvt', weaponId: 'pistol_tt' },
+    ],
+    vehicleDefId: 'sherman76', iconId: 'tank',
+  }),
+  sov_katyusha: t({
+    id: 'sov_katyusha', name: 'BM-13 Katyusha', type: 'rocket', side: 'soviet', years: Y41_45, cost: 40,
+    soldiers: [
+      { rank: 'Sgt', weaponId: 'pistol_tt' }, { rank: 'Pvt', weaponId: 'mosin' },
+      { rank: 'Pvt', weaponId: 'mosin' }, { rank: 'Pvt', weaponId: 'mosin' }, { rank: 'Pvt', weaponId: 'mosin' },
+    ],
+    vehicleDefId: 'bm13', iconId: 'halftrack',
+  }),
+  sov_dshk: t({
+    id: 'sov_dshk', name: 'DShK 12.7mm HMG', type: 'mg', side: 'soviet', years: Y42_45, cost: 30,
+    soldiers: [
+      { rank: 'Sgt', weaponId: 'mosin' }, { rank: 'Pvt', weaponId: 'dshk_hmg' },
+      { rank: 'Pvt', weaponId: 'mosin' }, { rank: 'Pvt', weaponId: 'mosin' },
+    ],
+    iconId: 'mg',
+  }),
+  sov_m2_hmg: t({
+    id: 'sov_m2_hmg', name: 'M2 .50 HMG (Lend-Lease)', type: 'mg', side: 'soviet', years: Y43_45, cost: 30,
+    soldiers: [
+      { rank: 'Sgt', weaponId: 'mosin' }, { rank: 'Pvt', weaponId: 'm2_hmg' },
+      { rank: 'Pvt', weaponId: 'mosin' }, { rank: 'Pvt', weaponId: 'mosin' },
+    ],
+    iconId: 'mg',
+  }),
+  sov_mortar120: t({
+    id: 'sov_mortar120', name: '120mm Mortar PM-38', type: 'mortar', side: 'soviet', years: Y43_45, cost: 35,
+    soldiers: [
+      { rank: 'Sgt', weaponId: 'mosin' }, { rank: 'Pvt', weaponId: 'mortar120' },
+      { rank: 'Pvt', weaponId: 'mosin' }, { rank: 'Pvt', weaponId: 'mosin' }, { rank: 'Pvt', weaponId: 'mosin' },
+    ],
+    iconId: 'mortar',
   }),
   sov_is2: t({
     id: 'sov_is2', name: 'IS-2', type: 'tank', side: 'soviet', years: Y44_45, cost: 95, quality: 'elite',

@@ -7,11 +7,11 @@ import { angleTo, dist } from '@/shared/math';
 import { inBounds, coverAt, concealmentAt, groundAtTile } from './map';
 import { isPassable } from './path';
 import { spaceOutVehicles } from './spawn';
+import { hasLOS, hasLineOfFire, EYE_VEHICLE_M } from './los';
 import { mainGunUsable } from './vehicleDamage';
-import { hasLOS } from './los';
 import { VEHICLE_DEFS } from '@/data/units';
 import { WEAPONS } from '@/data/weapons';
-import { mortarBeliefAimFor } from './combat';
+import { mortarBeliefAimFor, vehicleAreaTarget } from './combat';
 import { canTeamMount, passengerCapacity, passengersAboard, roomLeft } from './transport';
 import { growthHeightAt } from './growth';
 import { armorFacingFor, bestRoundAgainst } from './ballistics';
@@ -516,17 +516,26 @@ function stepDefenceAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
     return dist(ownZoneCentre, { x: a.x, y: a.y }) - dist(ownZoneCentre, { x: b.x, y: b.y });
   });
   const ownedVLs = allVLsSorted.filter((vl) => vl.owner === side);
+  const enemyZone = state.map.def.deployZones[enemy];
+  const inEnemyZone = (vl: VictoryLocation): boolean =>
+    vl.x >= enemyZone.x && vl.x <= enemyZone.x + enemyZone.w &&
+    vl.y >= enemyZone.y && vl.y <= enemyZone.y + enemyZone.h;
 
   /** Team `preferredIdx` picks its primary target at a fixed slot in the invariant `allVLsSorted`
    * list, then walks forward (wrapping) to the nearest slot matching `wantOwnedBySide` — so a
    * team's objective only moves when ITS OWN target's ownership changes, not whenever some other
-   * VL elsewhere on the map is captured/lost. */
+   * VL elsewhere on the map is captured/lost. Defenders additionally never garrison a VL that
+   * sits inside the enemy's deployment zone: that is a walk-in kill box (korsun's Orchard
+   * Crossroads sat inside the German jump-off ground and defenders marched 100+ tiles of open
+   * snow to die there before contact), so hold everything ELSE and let the attacker have it. */
   function pickVL(preferredIdx: number, wantOwnedBySide: boolean): VictoryLocation | null {
     const n = allVLsSorted.length;
     if (n === 0) return null;
     for (let i = 0; i < n; i++) {
       const vl = allVLsSorted[(preferredIdx + i) % n];
-      if ((vl.owner === side) === wantOwnedBySide) return vl;
+      if ((vl.owner === side) !== wantOwnedBySide) continue;
+      if (wantOwnedBySide && inEnemyZone(vl)) continue;
+      return vl;
     }
     return null;
   }
@@ -826,6 +835,8 @@ export interface AttackPlan {
   objectivesTaken: number;
   /** squads left behind to hold a captured victory location (VL id -> team id) */
   garrison: Map<number, number>;
+  /** since when each vehicle has had nothing it can fight or fire at (item 038 blind loop) */
+  blind: Map<number, number>;
 }
 
 interface SideMemory { contacts: Map<number, Contact>; plan: AttackPlan | null }
@@ -1151,7 +1162,7 @@ function chooseStation(state: BattleState, rng: Rng, anchor: Vec2, watch: Vec2[]
     if (!inBounds(state.map, x, y) || !isPassable(state.map, x, y, 'vehicle')) continue;
     const p = { x: x + 0.5, y: y + 0.5 };
     let score = -r * 0.4;
-    for (const o of others) if (dist(o, p) < 6) score -= 6;
+    if (others.some((o) => dist(o, p) < 2.5)) continue; // item 038: never station on a neighbour's spot
     if (score + 14 < bestScore) continue;
     let exposed = 0;
     for (const a of avoid) if (hasLOS(state.map, a, p)) exposed++;
@@ -1159,6 +1170,7 @@ function chooseStation(state: BattleState, rng: Rng, anchor: Vec2, watch: Vec2[]
     let sees = 0;
     for (const w of watch) if (hasLOS(state.map, p, w)) sees++;
     score += Math.min(2, sees) * 7;
+    if (sees === 0) score -= 20; // item 038: a station that sees nothing is dead ground
     if (score > bestScore) { bestScore = score; best = p; }
   }
   return best;
@@ -1189,6 +1201,12 @@ function chooseRefuge(state: BattleState, rng: Rng, from: Vec2, home: Vec2, avoi
 function wrapAngleLocal(a: number): number { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
 
 export const OUTCLASSED_DASH_TILES = 15;
+/** A hunt/fire position may be this far from the vehicle (item 038): beyond that the tank advances
+ * toward contact rather than driving half the map for one shot. */
+export const HUNT_MAX_TRAVEL_TILES = 40;
+/** Item 038: a vehicle that has had nothing it can fight or fire at for this long moves to a
+ * position that restores sight instead of sitting blind. */
+export const BLIND_REPOSITION_S = 12;
 export const TANK_HUNT_LEASH_TILES = 40; // 80 m from the nearest friendly squad (the defence: from the point it guards)
 function chooseFirePosition(state: BattleState, rng: Rng, v: Vehicle, ev: Vehicle, avoid: Vec2[], others: Vec2[], friends: Vec2[], maxTravelTiles = Infinity): Vec2 | null {
   let best: Vec2 | null = null;
@@ -1222,9 +1240,12 @@ function chooseFirePosition(state: BattleState, rng: Rng, v: Vehicle, ev: Vehicl
 
 /** Overwatch post for a support weapon: cover with a line of fire to the objective, 80-260 m out
  * and no further forward than the squads' forming-up distance. */
-function chooseOverwatch(state: BattleState, rng: Rng, from: Vec2, objective: Vec2, minTiles: number): Vec2 | null {
+function chooseOverwatch(state: BattleState, rng: Rng, from: Vec2, objective: Vec2, minTiles: number, opts?: { vehicleMover?: boolean }): Vec2 | null {
   const dNow = dist(from, objective);
-  if (dNow >= minTiles && dNow * TILE_M <= 320 && hasLOS(state.map, from, objective)) return from;
+  const sightOk = (p: Vec2) => opts?.vehicleMover
+    ? hasLineOfFire(state.map, p, objective, { eyeM: EYE_VEHICLE_M })
+    : hasLOS(state.map, p, objective);
+  if (dNow >= minTiles && dNow * TILE_M <= 320 && sightOk(from)) return from;
   const back = angleTo(objective, from);
   let best: Vec2 | null = null;
   let bestScore = -Infinity;
@@ -1236,7 +1257,7 @@ function chooseOverwatch(state: BattleState, rng: Rng, from: Vec2, objective: Ve
     const p = { x: x + 0.5, y: y + 0.5 };
     let score = coverAt(state.map, p) * 5 - dist(from, p) * 0.15;
     if (score + 8 < bestScore) continue;
-    if (!hasLOS(state.map, p, objective)) continue;
+    if (!sightOk(p)) continue;
     score += 8;
     if (score > bestScore) { bestScore = score; best = p; }
   }
@@ -1271,7 +1292,7 @@ function newPlan(state: BattleState, assault: Team[]): AttackPlan {
     phase: 'prep', phaseSince: state.time, objectiveId: null, objectiveSince: state.time, budgetS: 0, fup: null,
     bound: { mover: 0, since: state.time, targets: new Map(), settled: false },
     element: new Map(), failed: new Map(), posts: new Map(), missions: new Map(), smoked: new Set(),
-    startMen: Math.max(1, men), objectivesTaken: 0, garrison: new Map(),
+    startMen: Math.max(1, men), objectivesTaken: 0, garrison: new Map(), blind: new Map(),
   };
 }
 
@@ -1635,7 +1656,11 @@ function stepAttackMortar(
     const defenders = Array.from(mem.contacts.values()).filter((c) => c.vehicleId == null && state.time - c.at <= 120 && dist(c.pos, objective) * TILE_M <= 90);
     // smoke once per objective, when the squads are about to cross the last stretch under observed fire
     const smokeKey = `${t.id}:${plan.objectiveId}`;
-    if ((plan.phase === 'assault' || plan.phase === 'allIn') && lead && leadDistM <= 130 && leadDistM >= 45 && defenders.length && !plan.smoked.has(smokeKey)) {
+    // lead within 25-130 m: the old 45 m floor meant a lead squad already at the trench lip
+    // (or, on korsun, one dead inside the belt) starved the FOLLOWING squads of smoke, so the
+    // assault crossed the last 45 m of open snow bare and was shredded (smokeRounds=0 in 2 of 3
+    // korsun runs). 25 m keeps a screen in front of the close-in squads too.
+    if ((plan.phase === 'assault' || plan.phase === 'allIn') && lead && leadDistM <= 130 && leadDistM >= 25 && defenders.length && !plan.smoked.has(smokeKey)) {
       const c = defenders.sort((a, b) => dist(a.pos, lead.pos) - dist(b.pos, lead.pos) || a.teamId - b.teamId)[0];
       const ang = angleTo(c.pos, lead.pos);
       const p = { x: c.pos.x + Math.sin(ang) * 8, y: c.pos.y - Math.cos(ang) * 8 }; // 16 m in front of them
@@ -1664,9 +1689,18 @@ function stepAttackMortar(
         .sort((a, b) => rank(a) - rank(b) || a.teamId - b.teamId)[0];
       if (c) mission = { pos: { ...c.pos }, until: state.time + 45, smoke: false, teamId: isSpottedNow(c, state) ? c.teamId : null };
     }
-    if (!mission && plan.phase !== 'hold' && leadDistM > 90 && mortarRoundsLeft(state, t) > 18) {
-      // nothing seen yet: the likely cover on the objective gets the preparation
-      const spots = suspectedPositions(state, objective).filter((p) => !friendlyWithin(myTeams, p, SAFE_TILES));
+    if (!mission && plan.phase !== 'hold' && mortarRoundsLeft(state, t) > 18) {
+      // nothing seen yet: the likely cover on the objective gets the preparation. The old
+      // `leadDistM > 90` gate meant a close objective (the relief's first, the crossroads 20
+      // tiles from the German line) got no prep at all: the mortar sat on 39 rounds all battle
+      // while the squads walked into an un-blinded trench belt and died in the first 200 s
+      // (korsun harness: mortarShots A=0, smokeRounds 0, all 34-37 attacker falls by 200 s).
+      // SAFE_TILES (25 = 50 m) is right for aimed fire missions, but the suspected spots sit on
+      // the objective itself, which the assault's own squads often approach to within 20-45 m
+      // (korsun: the crossroads lay inside the German zone) — at 50 m every spot got filtered
+      // away and the mortar sat on its full rack all battle. 20 tiles (40 m) keeps the rounds
+      // off the squads' heads while letting the prep land on the objective.
+      const spots = suspectedPositions(state, objective).filter((p) => !friendlyWithin(myTeams, p, 20));
       if (spots.length) mission = { pos: spots[(t.id + Math.floor(state.time / 60)) % spots.length], until: state.time + 60, smoke: false, teamId: null, suspected: true };
     }
     if (mission) plan.missions.set(t.id, mission); else plan.missions.delete(t.id);
@@ -1702,11 +1736,16 @@ function stepAttackVehicle(
   const avoid = weapon ? duelThreats(state, mem, vehicle) : Array.from(mem.contacts.values()).filter((c) => c.antiTank && state.time - c.at <= 90).map((c) => c.pos);
   const exposedTo = avoid.filter((a) => hasLOS(state.map, a, vehicle.pos));
 
+  // item 038: the sight of enemy armour is needed both by the fight branch below and by the
+  // blind-reposition loop further down; compute it once.
+  const spottedArmour = weapon && weapon.penetrationMm > 0 ? nearestSpottedVehicle(state, side, weapon.rangeM, vehicle.pos) : null;
+  const seesArmour = !!spottedArmour && hasLOS(state.map, vehicle.pos, spottedArmour.pos);
+
   // 1. enemy armour in sight that it can fight: halt and fight it
   if (weapon && weapon.penetrationMm > 0) {
-    const ev = nearestSpottedVehicle(state, side, weapon.rangeM, vehicle.pos);
+    const ev = spottedArmour;
     // (not while another gun that beats it has it in its sights: then it gets out of that first)
-    if (ev && hasLOS(state.map, vehicle.pos, ev.pos) && (!canMove || (!losesDuel(state, vehicle, ev) && !exposedTo.length))) {
+    if (ev && seesArmour && (!canMove || (!losesDuel(state, vehicle, ev) && !exposedTo.length))) {
       plan.posts.delete(HUNT_KEY + team.id);
       tryIssueOrder(state, battle, track, team, { type: 'fire', target: { ...ev.pos }, targetTeamId: ev.teamId, issuedAt: state.time });
       return;
@@ -1739,6 +1778,8 @@ function stepAttackVehicle(
       .sort((a, b) => dist(a.pos, anchorBase) - dist(b.pos, anchorBase) || a.teamId - b.teamId)
       .slice(0, 2).map((c) => c.pos);
     watch.push(objective);
+    // item 038: the tank also wants sight of enemy armour — those are the contacts that kill it
+    for (const c of mem.contacts.values()) if (c.vehicleId != null && state.time - c.at <= 60) watch.push(c.pos);
     const p = chooseStation(state, rng, anchor, watch, avoid, stations, exploiting ? 4 : 12);
     if (p) { post = { objectiveId: plan.objectiveId ?? -1, pos: p, at: state.time }; plan.posts.set(team.id, post); }
   }
@@ -1763,7 +1804,7 @@ function stepAttackVehicle(
         // a tank that cannot hurt it from the front does not drive round it in the open: it takes a
         // flank shot only from a position a short dash away (the enemy comes past; it lies in wait)
         const frontal = bestRoundAgainst(weapon, Math.max(50, dist(vehicle.pos, prey.pos) * TILE_M), VEHICLE_DEFS[prey.defId]!.armor.front, state.config.year).chance;
-        const p = chooseFirePosition(state, rng, vehicle, prey, avoid.filter((a) => dist(a, prey.pos) > 2), stations, friends, frontal < 0.25 ? OUTCLASSED_DASH_TILES : Infinity);
+        const p = chooseFirePosition(state, rng, vehicle, prey, avoid.filter((a) => dist(a, prey.pos) > 2), stations, friends, frontal < 0.25 ? OUTCLASSED_DASH_TILES : HUNT_MAX_TRAVEL_TILES);
         hunt = p ? { objectiveId: prey.teamId, pos: p, at: state.time } : undefined;
         if (hunt) plan.posts.set(HUNT_KEY + team.id, hunt); else plan.posts.delete(HUNT_KEY + team.id);
       }
@@ -1822,6 +1863,32 @@ function stepAttackVehicle(
       if (!hasLOS(state.map, vehicle.pos, p)) continue;
       tryIssueOrder(state, battle, track, team, { type: 'fire', target: { ...p }, issuedAt: state.time });
       return;
+    }
+  }
+
+  // 4b. item 038: a vehicle that can neither fight what it sees nor fire at anything it believes
+  // in does not sit in dead ground. After a while it moves to a position that restores sight —
+  // overwatch toward the freshest known contact, else toward the objective (advance to contact).
+  const canFight = seesArmour || (!!e && eM <= 350 && hasLOS(state.map, vehicle.pos, e.pos));
+  const canShell = !canFight && !!vehicleAreaTarget(state, vehicle, weapon?.rangeM ?? 400);
+  if (canFight || canShell) plan.blind.delete(team.id);
+  else if (canMove && plan.phase !== 'hold') {
+    const since = plan.blind.get(team.id);
+    if (since == null) plan.blind.set(team.id, state.time);
+    else if (state.time - since >= BLIND_REPOSITION_S && atStation && vehicle.path.length === 0) {
+      const fresh = Array.from(mem.contacts.values())
+        .filter((c) => state.time - c.at <= 60)
+        .sort((a, b) => b.at - a.at || a.teamId - b.teamId);
+      const watchPoint = fresh[0]?.pos ?? objective;
+      // item 038: an armoured overwatch post is only worth holding with a clear gun line (the
+      // tank can see but not shoot = hull-down): require the gun to reach the watch point.
+      const post = chooseOverwatch(state, rng, vehicle.pos, watchPoint, 6, { vehicleMover: true });
+      if (post && dist(post, vehicle.pos) > 4) {
+        plan.blind.delete(team.id);
+        team.aiObjective = post;
+        tryIssueOrder(state, battle, track, team, { type: 'move', target: post, issuedAt: state.time });
+        return;
+      }
     }
   }
 

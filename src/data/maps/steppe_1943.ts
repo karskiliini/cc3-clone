@@ -220,6 +220,22 @@ export const steppe_1943: MapDef = {
     german: { x: 100, y: 16, w: 28, h: 28 },
     soviet: { x: 100, y: 100, w: 28, h: 26 },
   },
+  // COA overlays (G21): the Soviet storm walks up the kolkhoz to the trench line, armour rides
+  // the centre spine, rocket fires from the southern swell; the Germans hold the trench belt and
+  // counterattack armour down the slope onto the kolkhoz.
+  coa: {
+    stages: ['Overwatch', 'Obstacles', 'Cut Fence', 'Reduce trenches', 'Assault kolkhoz'],
+    german: [
+      { pts: [{ x: 20, y: 34 }, { x: 62, y: 30 }, { x: 112, y: 28 }, { x: 162, y: 30 }, { x: 206, y: 34 }], kind: 'defenses' },
+      { pts: [{ x: 176, y: 22 }, { x: 136, y: 48 }, { x: 108, y: 66 }], kind: 'armor' },
+      { pts: [{ x: 64, y: 16 }, { x: 62, y: 80 }], kind: 'firesupport' },
+    ],
+    soviet: [
+      { pts: [{ x: 112, y: 112 }, { x: 84, y: 96 }, { x: 64, y: 84 }], kind: 'assault' },
+      { pts: [{ x: 126, y: 112 }, { x: 116, y: 70 }, { x: 106, y: 42 }], kind: 'armor' },
+      { pts: [{ x: 108, y: 132 }, { x: 102, y: 32 }], kind: 'firesupport' },
+    ],
+  },
   decor,
   vectors,
 };

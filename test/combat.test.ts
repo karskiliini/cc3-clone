@@ -181,7 +181,9 @@ describe('applyHESplash', () => {
     const withSuppression = (suppression: number): number => {
       const state = makeState();
       const shooter = makeSoldier({ id: 1, side: 'german', pos: { x: 5, y: 5 }, suppression });
-      const enemy = makeSoldier({ id: 2, side: 'soviet', pos: { x: 6, y: 5 } });
+      // 3 tiles away: outside G19's 1.5-tile hand-to-hand range so the melee brawl RNG
+      // draws don't perturb this fire-rate measurement
+      const enemy = makeSoldier({ id: 2, side: 'soviet', pos: { x: 8, y: 5 } });
       state.soldiers.set(shooter.id, shooter);
       state.soldiers.set(enemy.id, enemy);
       state.teams.set(1, makeTeam(1, 'german', [shooter.id]));

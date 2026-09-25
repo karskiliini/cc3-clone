@@ -1,42 +1,48 @@
 // ============================================================================
-// combatMessages.ts — the "Combat Messages" column (x 620..800, y 632..768):
-// last 4 messages, each in its own sunken box (team name + coloured body line,
-// no index numbers — ref_cc3_1479 has none), up/down arrow buttons, and the
-// red title under it. Consecutive identical lines collapse into one row with
-// a "(×N)" repeat count instead of posting as separate rows.
+// combatMessages.ts — the "Combat Messages" column, measured from the
+// original's frames (cc3-full-11/12.jpg, logical 1024x768):
+//   three message boxes x 333..416 at y 671/692/713 (17 tall each), the
+//   strip's message box x 334..416 y 739..750 (11 tall), the scroll arrows in
+//   the 420..432 column (panel: 674..687 up, 712..725 down; strip: 740..752),
+//   the running message number "(N)" inside each box's top-right, and the
+//   red "Combat Messages" title centred under the strip box (y ~753).
+// Boxes: dark-maroon interior with a light border (no bevel). Sender white,
+// body yellow for status/warn reports and white for event reports — the
+// original shows "Taking cover from enemy fire." yellow and "Chinikov is
+// panicking." white (cc3-full-12.jpg).
+// Consecutive identical lines collapse into one row; the number shown is the
+// collapsed row's last raw message's running number.
 // ============================================================================
 import type { Rect, InputState, BattleState, BattleMessage, Team } from '@/shared/types';
 import { HUD } from '@/render/palette';
 import { clamp } from '@/shared/math';
-import { drawHudBevel, hitRect, setHudFont, clipTextToWidth } from './hudChrome';
+import { hitRect, setHudFont, clipTextToWidth, teamDisplayName } from './hudChrome';
 
-/** Wheel-scroll area: the message column plus its arrow buttons (panel + strip rows). */
-export const COMBAT_MESSAGES_RECT: Rect = { x: 620, y: 632, w: 182, h: 122 };
-const BOX_X = 622;
-const BOX_W = 160;
-const BOX_H = 24;
-/** Top of each visible message box: three in the panel (2px gaps as in ref_cc3_1482, spread to
- * fill y 632..728) and a 4th in the bottom strip, above the title. */
-const ROW_YS = [634, 665, 696, 729];
-const VISIBLE_ROWS = ROW_YS.length;
-const ARROW_W = 12;
-const ARROW_H = 14;
-const UP_RECT: Rect = { x: 786, y: ROW_YS[0] + (BOX_H - ARROW_H) / 2, w: ARROW_W, h: ARROW_H };
-const DOWN_RECT: Rect = { x: 786, y: ROW_YS[VISIBLE_ROWS - 1] + (BOX_H - ARROW_H) / 2, w: ARROW_W, h: ARROW_H };
-/** Red title centred under the column (original: x 640..760, bottom of the strip). */
-const TITLE_CX = 702;
-const TITLE_Y = 754;
+/** Wheel-scroll area: the message boxes plus their arrow columns. */
+export const COMBAT_MESSAGES_RECT: Rect = { x: 333, y: 670, w: 94, h: 98 };
+const PANEL_X = 333;
+const PANEL_W = 83;
+const BOX_H = 21;
+const ROW_YS = [671, 692, 713];
+const VISIBLE_ROWS = 4; // three panel boxes + the bottom-strip box
+/** The newest message lives in the bottom strip row (the original's layout). */
+const STRIP_BOX: Rect = { x: 334, y: 739, w: 82, h: 11 };
+/** Scroll arrows (refs12/13): pale squares right of the panel boxes at the
+ * row-1/row-2 seam and just under row 3; the strip's own red up-arrow. */
+const PANEL_UP: Rect = { x: 418.5, y: 682.5, w: 6.5, h: 9 };
+const PANEL_DOWN: Rect = { x: 418.5, y: 725, w: 6.5, h: 9 };
+const STRIP_UP: Rect = { x: 420, y: 740, w: 12, h: 12 };
+/** Red title centred under the strip message box. */
+const TITLE_CX = 388;
+const TITLE_Y = 753;
 
 function msgColor(kind: BattleMessage['kind']): string {
   switch (kind) {
     case 'warn':
       return HUD.yellow;
-    case 'bad':
-      return HUD.red;
-    case 'good':
-      return HUD.green;
     default:
-      return HUD.green;
+      // the original draws event reports ("Chinikov is panicking.") plain white
+      return HUD.text;
   }
 }
 
@@ -46,9 +52,9 @@ function msgColor(kind: BattleMessage['kind']): string {
  * "Report" when no team is identifiable. */
 export function splitMessage(text: string, teams: Team[]): { who: string; body: string } {
   const nl = text.indexOf('\n');
-  if (nl >= 0) {
-    const who = text.slice(0, nl);
-    let body = text.slice(nl + 1);
+  if (nl > 0) {
+    const who = text.slice(0, nl).trim();
+    let body = text.slice(nl + 1).trim();
     // Defensive (round5 critique #6): a producer that (accidentally) repeats the team name at the
     // start of the body — the name is already drawn as its own line above this one — gets it
     // stripped here so a duplicate is never shown, regardless of which sim module wrote it.
@@ -62,10 +68,9 @@ export function splitMessage(text: string, teams: Team[]): { who: string; body: 
       if (!best || t.name.length > best.name.length) best = t;
     }
   }
-  if (!best) return { who: 'Report', body: text };
-  let body = text.slice(best.name.length);
-  if (body.startsWith(':')) body = body.slice(1);
-  return { who: best.name, body: body.trim() || text };
+  if (!best) return { who: 'Report', body: text.replace(/\s+/g, ' ') };
+  const body = text.slice(best.name.length).replace(/^\s*[:—-]\s*/, '');
+  return { who: best.name, body: body.trimStart() };
 }
 
 export interface CollapsedMessage {
@@ -76,34 +81,91 @@ export interface CollapsedMessage {
    * line — e.g. a knocked-out report — could post twice in a row with nothing to tell them apart
    * but two identical rows). 1 = not repeated. */
   count: number;
+  /** the collapsed row's last raw message's 1-based running number — the original shows "(N)"
+   * in each box's top-right (cc3-full-12.jpg: "(1)", "(2)"). */
+  num: number;
 }
 
 /** Splits every raw message and merges consecutive duplicates (same who+body+kind) into one row
  * with a repeat count, so the log never shows the same line twice in a row. */
 export function collapseMessages(messages: readonly BattleMessage[], teams: Team[]): CollapsedMessage[] {
   const out: CollapsedMessage[] = [];
-  for (const m of messages) {
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
     const { who, body } = splitMessage(m.text, teams);
     const last = out[out.length - 1];
     if (last && last.who === who && last.body === body && last.kind === m.kind) {
       last.count++;
+      last.num = i + 1;
     } else {
-      out.push({ who, body, kind: m.kind, count: 1 });
+      out.push({ who, body, kind: m.kind, count: 1, num: i + 1 });
     }
   }
   return out;
 }
 
-function drawArrowButton(ctx: CanvasRenderingContext2D, r: Rect, dir: 'up' | 'down', hot: boolean, enabled: boolean): void {
-  drawHudBevel(ctx, r, hot, HUD.face);
+/** One scroll arrow. Panel arrows are pale squares with a darker glyph
+ * (refs12/13); the strip's own up-arrow is red with a steel glyph. */
+function drawArrowButton(ctx: CanvasRenderingContext2D, r: Rect, dir: 'up' | 'down', hot: boolean, enabled: boolean, red = false): void {
+  ctx.fillStyle = red ? (hot ? '#a82014' : '#8c1810') : hot ? '#cabb9e' : '#b8a68e';
+  ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.strokeStyle = enabled ? HUD.bevelLight : HUD.bevelDark;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
   const cx = Math.round(r.x + r.w / 2);
   const cy = Math.round(r.y + r.h / 2);
-  ctx.fillStyle = enabled ? HUD.text : HUD.dim;
+  ctx.fillStyle = red ? (enabled ? '#c8c8c0' : '#606058') : enabled ? '#6a5844' : '#8a7c68';
   ctx.beginPath();
-  if (dir === 'up') { ctx.moveTo(cx - 4, cy + 2); ctx.lineTo(cx + 4, cy + 2); ctx.lineTo(cx, cy - 3); }
-  else { ctx.moveTo(cx - 4, cy - 2); ctx.lineTo(cx + 4, cy - 2); ctx.lineTo(cx, cy + 3); }
+  if (dir === 'up') { ctx.moveTo(cx, cy - 3.5); ctx.lineTo(cx - 3.5, cy + 1); ctx.lineTo(cx, cy - 1); ctx.lineTo(cx + 3.5, cy + 1); }
+  else { ctx.moveTo(cx, cy + 3.5); ctx.lineTo(cx - 3.5, cy - 1); ctx.lineTo(cx, cy + 1); ctx.lineTo(cx + 3.5, cy - 1); }
   ctx.closePath();
   ctx.fill();
+}
+
+function drawBox(ctx: CanvasRenderingContext2D, r: Rect): void {
+  ctx.fillStyle = '#2e0e0a';
+  ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.strokeStyle = HUD.bevelLight;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+}
+
+/** Panel boxes carry two rows (sender + body, refs12); the strip box is a
+ * single 11px row — sender and body run together after the (N) number. */
+function drawMessage(ctx: CanvasRenderingContext2D, box: Rect, m: CollapsedMessage, withCount: boolean, compact = false): void {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(box.x + 1, box.y + 1, box.w - 2, box.h - 2);
+  ctx.clip();
+  setHudFont(ctx, 'mini');
+  const body = m.count > 1 ? `${m.body} (x${m.count})` : m.body;
+  if (compact) {
+    let x = box.x + 2;
+    if (withCount) {
+      ctx.fillStyle = HUD.text;
+      const label = `(${m.num}) `;
+      ctx.fillText(label, x, box.y + 2);
+      x += ctx.measureText(label).width;
+    }
+    ctx.fillStyle = HUD.text;
+    ctx.fillText(clipTextToWidth(ctx, m.who, Math.min(28, box.w - 4 - (x - box.x))), x, box.y + 2);
+    x += Math.min(28, box.w - 4 - (x - box.x)) + 2;
+    ctx.fillStyle = msgColor(m.kind);
+    ctx.fillText(clipTextToWidth(ctx, body.replace(/\s+/g, ' '), Math.max(8, box.x + box.w - 2 - x)), x, box.y + 2);
+    ctx.restore();
+    return;
+  }
+  const nameW = withCount ? box.w - 22 : box.w - 4;
+  ctx.fillStyle = HUD.text;
+  ctx.fillText(clipTextToWidth(ctx, m.who, nameW), box.x + 2, box.y + 2);
+  if (withCount) {
+    ctx.fillStyle = HUD.text;
+    const label = `(${m.num})`;
+    ctx.fillText(label, box.x + box.w - ctx.measureText(label).width - 3, box.y + 2);
+  }
+  ctx.fillStyle = msgColor(m.kind);
+  ctx.fillText(clipTextToWidth(ctx, body.replace(/\s+/g, ' '), box.w - 4), box.x + 2, box.y + 11.5);
+  ctx.restore();
 }
 
 export class CombatMessages {
@@ -111,6 +173,7 @@ export class CombatMessages {
   private scroll = 0;
   private hoverUp = false;
   private hoverDown = false;
+  private hoverStrip = false;
 
   private maxScroll(total: number): number {
     return Math.max(0, total - VISIBLE_ROWS);
@@ -120,8 +183,9 @@ export class CombatMessages {
     const teams = Array.from(state.teams.values());
     const total = collapseMessages(state.messages, teams).length;
     const maxScroll = this.maxScroll(total);
-    this.hoverUp = hitRect(input.mouse, UP_RECT);
-    this.hoverDown = hitRect(input.mouse, DOWN_RECT);
+    this.hoverUp = hitRect(input.mouse, PANEL_UP);
+    this.hoverDown = hitRect(input.mouse, PANEL_DOWN);
+    this.hoverStrip = hitRect(input.mouse, STRIP_UP);
     if (hitRect(input.mouse, COMBAT_MESSAGES_RECT) && input.wheel !== 0) {
       // wheel up (negative) reveals older messages, like the up arrow
       this.scroll = clamp(this.scroll - Math.sign(input.wheel), 0, maxScroll);
@@ -129,8 +193,9 @@ export class CombatMessages {
     for (const c of input.clicks) {
       if (c.button !== 0) continue;
       const p = { x: c.x, y: c.y };
-      if (hitRect(p, UP_RECT)) this.scroll = clamp(this.scroll + 1, 0, maxScroll);
-      else if (hitRect(p, DOWN_RECT)) this.scroll = clamp(this.scroll - 1, 0, maxScroll);
+      if (hitRect(p, PANEL_UP)) this.scroll = clamp(this.scroll + 1, 0, maxScroll);
+      else if (hitRect(p, PANEL_DOWN)) this.scroll = clamp(this.scroll - 1, 0, maxScroll);
+      else if (hitRect(p, STRIP_UP)) this.scroll = clamp(this.scroll + 1, 0, maxScroll);
     }
     this.scroll = clamp(this.scroll, 0, maxScroll);
   }
@@ -142,33 +207,26 @@ export class CombatMessages {
     const maxScroll = this.maxScroll(total);
     const endIdx = total - this.scroll; // exclusive
     const startIdx = Math.max(0, endIdx - VISIBLE_ROWS);
-
-    for (let row = 0; row < VISIBLE_ROWS; row++) {
-      const box: Rect = { x: BOX_X, y: ROW_YS[row], w: BOX_W, h: BOX_H };
-      drawHudBevel(ctx, box, true, HUD.black);
+    // The window is 4 slots: the three sunken boxes left of the bottom strip show the OLDER
+    // messages, the bottom-strip box shows the newest (the original's layout).
+    for (let row = 0; row < 3; row++) {
+      const box: Rect = { x: PANEL_X, y: ROW_YS[row], w: PANEL_W, h: BOX_H };
+      drawBox(ctx, box);
       const idx = startIdx + row;
-      if (idx >= endIdx) continue;
-      const m = collapsed[idx];
-      // The original (ref_cc3_1479) has no running index numbers in this panel — round5 critique
-      // #6/#10 flagged our "(35)(36)(37)" as debug-looking output, so this row is just who + body.
-      const body = m.count > 1 ? `${m.body} (×${m.count})` : m.body;
-
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(box.x + 1, box.y + 1, box.w - 2, box.h - 2);
-      ctx.clip();
-      setHudFont(ctx, 'small');
-      ctx.fillStyle = HUD.text;
-      ctx.fillText(clipTextToWidth(ctx, m.who, box.w - 6), box.x + 3, box.y + 1);
-      ctx.fillStyle = msgColor(m.kind);
-      ctx.fillText(clipTextToWidth(ctx, body.replace(/\s+/g, ' '), box.w - 6), box.x + 3, box.y + 12);
-      ctx.restore();
+      if (idx >= endIdx - 1) continue;
+      drawMessage(ctx, box, collapsed[idx], true);
+    }
+    // the newest message in the bottom-strip box, the original's prominent slot
+    if (endIdx > startIdx) {
+      drawBox(ctx, STRIP_BOX);
+      drawMessage(ctx, STRIP_BOX, collapsed[endIdx - 1], true, true);
     }
 
-    drawArrowButton(ctx, UP_RECT, 'up', this.hoverUp, this.scroll < maxScroll);
-    drawArrowButton(ctx, DOWN_RECT, 'down', this.hoverDown, this.scroll > 0);
+    drawArrowButton(ctx, PANEL_UP, 'up', this.hoverUp, this.scroll < maxScroll);
+    drawArrowButton(ctx, PANEL_DOWN, 'down', this.hoverDown, this.scroll > 0);
+    drawArrowButton(ctx, STRIP_UP, 'up', this.hoverStrip, this.scroll < maxScroll, true);
 
-    setHudFont(ctx, 'map');
+    setHudFont(ctx, 'micro');
     ctx.fillStyle = HUD.titleRed;
     ctx.textAlign = 'center';
     ctx.fillText('Combat Messages', TITLE_CX, TITLE_Y);

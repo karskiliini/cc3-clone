@@ -10,6 +10,7 @@ import {
 } from '@/render/sprites';
 import { drawVehicleSprite } from '@/render/unitRender';
 import { loadAtlas, vehicleDefAtlasName } from '@/render/spriteAtlas';
+import { VEHICLE_DEFS } from '@/data/units';
 import { drawText, textWidth, FONT_SMALL_H, FONT_BIG_H } from '@/render/pixelfont';
 import { PALETTE, TERRAIN_COLORS, SIDE_COLOR, ORDER_COLOR } from '@/render/palette';
 
@@ -135,10 +136,7 @@ function zoomCompareCell(row: HTMLElement, label: string, s1: HTMLCanvasElement,
 // Blender atlases (tools/blender/vehicles.py), drawn exactly as in battle by drawVehicleSprite:
 // every vehicle at 1x and 2x, facings N / NE / E / S / SW (turret slewed on E), ok, ko, thrown
 // track and blown turret, summer and winter (whitewash).
-const VEHICLE_IDS = [
-  'pz3j', 'pz4f1', 'pz4gh', 'stug3g', 'panther', 'tiger', 'sdkfz251', 'marder3',
-  't26', 'bt7', 't34_76', 't34_85', 'kv1', 'is2', 't70', 'su76', 'su85',
-];
+const VEHICLE_IDS = Object.keys(VEHICLE_DEFS); // every vehicle in the game
 /** a scale-2 atlas decodes to ~100 MB: only a few vehicles at 2x here */
 const VEHICLE_IDS_2X = ['pz4gh', 'panther', 'sdkfz251', 't34_85', 'kv1', 'su76'];
 async function vehicleSections(): Promise<void> {

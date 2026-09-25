@@ -11,12 +11,12 @@ import { TerrainRenderer } from '@/render/terrainRender';
 import { centerCamera, clampCamera } from '@/engine/camera';
 import { hitRect } from './hudChrome';
 
-const MM_W = 168;
-const MM_H = 118;
-const MM_X = 0;
-const MM_Y = 512;
-const THUMB_W = 164;
-const THUMB_H = 114;
+const MM_W = 88;
+const MM_H = 76;
+const MM_X = 2;
+const MM_Y = 592;
+const THUMB_W = 84;
+const THUMB_H = 72;
 
 const FRIENDLY_DOT = '#4a7fd0';
 
@@ -67,8 +67,18 @@ export class Minimap {
    * recentred). Panning continues every frame the button stays held, even
    * once the pointer drags outside the minimap's own rect. */
   update(input: InputState, cam: Camera, mapWidth: number, mapHeight: number): boolean {
+    let recentred = false;
     for (const c of input.clicks) {
-      if (c.button === 0 && hitRect({ x: c.x, y: c.y }, this.rect)) this.dragging = true;
+      if (c.button === 0 && hitRect({ x: c.x, y: c.y }, this.rect)) {
+        // A plain click on the minimap jumps the camera there at once (like the
+        // original); holding continues as a drag-to-pan afterwards.
+        this.dragging = true;
+        const wx = (c.x - this.originX()) / this.scaleX;
+        const wy = (c.y - this.originY()) / this.scaleY;
+        centerCamera(cam, { x: wx, y: wy });
+        clampCamera(cam, mapWidth, mapHeight);
+        recentred = true;
+      }
     }
     if (this.dragging) {
       if (!input.buttons.left) {
@@ -78,10 +88,10 @@ export class Minimap {
         const wy = (input.mouse.y - this.originY()) / this.scaleY;
         centerCamera(cam, { x: wx, y: wy });
         clampCamera(cam, mapWidth, mapHeight);
-        return true;
+        recentred = true;
       }
     }
-    return false;
+    return recentred;
   }
 
   draw(ctx: CanvasRenderingContext2D, terrain: TerrainRenderer, state: BattleState, cam: Camera, playerSide: Side): void {

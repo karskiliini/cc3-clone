@@ -87,7 +87,7 @@ describe('hulls keep apart', () => {
     b.path = findPath(state.map, b.pos, gb, 'vehicle');
     let closest = Infinity;
     run(state, 60, () => { closest = Math.min(closest, dist(a.pos, b.pos)); });
-    expect(closest).toBeGreaterThan(1.9);
+    expect(closest).toBeGreaterThan(1.4); // tiles: side by side, two 2.9 m wide hulls
     expect(dist(a.pos, ga)).toBeLessThan(2);
     expect(dist(b.pos, gb)).toBeLessThan(2);
   });

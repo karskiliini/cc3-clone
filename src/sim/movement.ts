@@ -1,11 +1,13 @@
 import type { BattleState, GameMap, Soldier, Vec2 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
-import { angleTo, dist, facingFromAngle, pointInRect, vadd, vnorm, vscale, vsub } from '@/shared/math';
-import { coverAt, groundHeightAt, tileAt } from './map';
+import { angleTo, dist, facingAngle, facingFromAngle, pointInRect, vadd, vnorm, vscale, vsub } from '@/shared/math';
+import { coverAt, groundHeightAt, inBounds, tileAt } from './map';
 import { TERRAIN_PROPS } from './terrain';
-import { findPath } from './path';
+import { findPath, isPassable } from './path';
 import { isFirstFireFrozen } from './mind';
+import { soldierMineCheck, clearMineNear } from './mines';
+import { cutWireNear, wireSpeedMul } from './wire';
 import { stepCrewWeapons, isHeldForPacking, isHaulingGun } from './crewWeapon';
 import { stepOrderWaypoints } from './orders';
 import { isDazed, stepDazed } from './daze';
@@ -72,7 +74,7 @@ export function stepMovement(state: BattleState, rng: Rng, dt: number): void {
     // just out of a vehicle in a panic: a short dash clear of it before his mind takes over again
     if (s.bailRun) {
       if (state.time >= s.bailRun.until || dist(s.pos, s.bailRun.to) < 0.2 || (s.stunnedUntil != null && state.time < s.stunnedUntil)) s.bailRun = undefined;
-      else { s.path = [s.bailRun.to]; s.stance = 'standing'; moveAlongPath(state, s, SPEEDS.panicked, dt); s.animFrame = Math.floor(state.time / 0.15) % 2; continue; }
+      else { s.path = [s.bailRun.to]; s.stance = 'standing'; moveAlongPath(state, s, SPEEDS.panicked, dt, rng); s.animFrame = Math.floor(state.time / 0.15) % 2; continue; }
     }
     // knocked down by a blast (spec 2026-09-17 §4): lies where he landed until the stun ends
     if (s.stunnedUntil != null && state.time < s.stunnedUntil) { s.animFrame = 0; continue; }
@@ -88,7 +90,7 @@ export function stepMovement(state: BattleState, rng: Rng, dt: number): void {
     // leaping out of a vehicle's way (spec 2026-09-17 §7): a short sprint whatever else he was doing
     if (s.dodgeUntil != null) {
       if (state.time >= s.dodgeUntil || s.path.length === 0) s.dodgeUntil = undefined;
-      else { moveAlongPath(state, s, DODGE_SPEED_MS, dt); s.animFrame = Math.floor(state.time / 0.15) % 2; continue; }
+      else { moveAlongPath(state, s, DODGE_SPEED_MS, dt, rng); s.animFrame = Math.floor(state.time / 0.15) % 2; continue; }
     }
 
     // Pause the movement order while the man raises and steadies his weapon. Keeping his path
@@ -108,7 +110,7 @@ export function stepMovement(state: BattleState, rng: Rng, dt: number): void {
     if (downHold) s.animFrame = 0;
     else if (speed != null && s.path.length > 0 && !isHeldForPacking(state, s) && !isHaulingGun(state, s)) {
       const fatigueFast = s.mind.state !== 'panicked' && s.mind.state !== 'broken' && s.fatigue > 70 && s.activity === 'movingFast';
-      moveAlongPath(state, s, fatigueFast ? SPEEDS.moving : speed, dt);
+      moveAlongPath(state, s, fatigueFast ? SPEEDS.moving : speed, dt, rng);
       if (Math.floor(state.time / 0.3) % 2 === 0) s.animFrame = 0; else s.animFrame = 1;
     }
 
@@ -117,6 +119,9 @@ export function stepMovement(state: BattleState, rng: Rng, dt: number): void {
     else if (s.activity === 'movingFast') s.fatigue = Math.min(100, s.fatigue + 0.5 * dt);
     else if (s.activity === 'moving') s.fatigue = Math.min(100, s.fatigue + 0.5 * dt);
     else if (s.activity === 'idle') s.fatigue = Math.max(0, s.fatigue - 1 * dt);
+
+    // G7: engineers hold still and work — cut wire, dig mines (defending/idle only)
+    stepEngineerWork(state, s, rng);
   }
   separateSoldiers(state, dt);
 }
@@ -135,10 +140,45 @@ function applyMindStanceAndFacing(state: BattleState, s: Soldier): void {
     s.stance = 'crouching';
   }
 }
+/** User rule: soldiers are never STATIONED on top of each other. A man in motion is never blocked
+ * or shoved — he may pass another man in the open (only in emergencies may he crawl over a prone
+ * comrade, or vault a crawled one at the run) — but when he COMES TO REST on top of a live
+ * comrade, he is nudged sideways off him (perpendicular to his travel, never back the way he
+ * came). Bodies (dead) never block anything. */
+const SOLDIER_BODY_RADIUS_TILES = 0.45;
 
-function moveAlongPath(state: BattleState, s: Soldier, speedMs: number, dt: number): void {
+function resolveSoldierOverlap(state: BattleState, s: Soldier, rng: Rng): void {
+  if (s.vehicleId != null) return;
+  if (s.path.length > 0) return; // in motion: passing is allowed, only rest is resolved
+  for (const o of state.soldiers.values()) {
+    if (o.id === s.id || o.vehicleId != null) continue;
+    if (o.health === 'dead') continue; // bodies can be crawled over freely
+    if (o.path.length > 0) continue; // the other man is walking: he will move off himself
+    const d = dist(s.pos, o.pos);
+    if (d >= SOLDIER_BODY_RADIUS_TILES * 2) continue;
+    // nudge the resting mover sideways off the man he stopped on: perpendicular to the direction
+    // he was travelling (his facing), so he steps ASIDE rather than back the way he came
+    const side = rng.chance(0.5) ? 1 : -1;
+    const travelRad = facingAngle(s.facing);
+    const perp = { x: -Math.cos(travelRad) * side, y: -Math.sin(travelRad) * side };
+    let spot = vadd(s.pos, vscale(perp, SOLDIER_BODY_RADIUS_TILES * 2));
+    const tx = Math.floor(spot.x), ty = Math.floor(spot.y);
+    if (!inBounds(state.map, tx, ty) || !isPassable(state.map, tx, ty, 'infantry')) {
+      spot = vadd(s.pos, vscale(perp, -SOLDIER_BODY_RADIUS_TILES * 2));
+    }
+    s.pos = spot;
+    return; // one resolution per step: the next tick sorts any further pair
+  }
+}
+
+/** Test hook: the overlap resolver is private to the movement step. */
+export const resolveSoldierOverlapForTest = resolveSoldierOverlap;
+
+function moveAlongPath(state: BattleState, s: Soldier, speedMs: number, dt: number, rng: Rng): void {
   const tile = tileAt(state.map, Math.floor(s.pos.x), Math.floor(s.pos.y));
   let mul = TERRAIN_PROPS[tile].speedMul;
+  // G7: intact wire is a crawl (CC3); cut wire is normal ground
+  mul *= wireSpeedMul(state.map, s.pos.x, s.pos.y);
   // slope: slower up, a touch faster down, judged on the leg currently being walked
   if (s.path.length > 0) mul *= gradeSpeedMul(state.map, s.pos, s.path[0]);
   let remaining = (infantrySpeedMs(s, speedMs) * mul * dt) / TILE_M;
@@ -158,7 +198,21 @@ function moveAlongPath(state: BattleState, s: Soldier, speedMs: number, dt: numb
     }
   }
 
+  resolveSoldierOverlap(state, s, rng);
+  soldierMineCheck(state, s, rng);
+  stepEngineerWork(state, s, rng);
   if (s.path.length === 0) onArrive(state, s);
+}
+
+/** G7: engineer teams standing still (or arriving) cut wire and clear mines, one tile
+ * per call; the caller repeats each step so ~1 tile/second. */
+function stepEngineerWork(state: BattleState, s: Soldier, rng: Rng): void {
+  const team = state.teams.get(s.teamId);
+  if (!team || team.type !== 'engineer') return;
+  if (s.health === 'dead' || s.health === 'incapacitated') return;
+  if (s.activity === 'moving' || s.activity === 'movingFast') return;
+  if (cutWireNear(state, s)) return;
+  if (rng.chance(0.05)) clearMineNear(state, s); // slower work: a dig per couple of seconds
 }
 
 function onArrive(state: BattleState, s: Soldier): void {

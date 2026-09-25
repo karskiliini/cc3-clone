@@ -663,8 +663,7 @@ export class ElevationPainter implements ElevationApi {
     }
   }
 
-  terrace(rect: Rect, m: number): void {
-    const feather = 2;
+  terrace(rect: Rect, m: number, feather = 2): void {
     const x0 = Math.max(0, Math.floor(rect.x - feather)), x1 = Math.min(this.w - 1, Math.ceil(rect.x + rect.w + feather));
     const y0 = Math.max(0, Math.floor(rect.y - feather)), y1 = Math.min(this.h - 1, Math.ceil(rect.y + rect.h + feather));
     for (let y = y0; y <= y1; y++) {

@@ -1,6 +1,6 @@
 # Multiplayer plan: peer lockstep vs authoritative server
 
-Status: planning only (backlog items 011–013). Written 2026-09-25 against `origin/main` at 3843bb5.
+Status: planning only (backlog items 042–044; numbered 011–013 when written, renumbered in the 2026-09-25 merge). Written 2026-09-25 against `origin/main` at 3843bb5.
 No game code has been changed for this document.
 
 The request: plan multiplayer for two architectures.
@@ -101,12 +101,12 @@ command stream. Option 2 does not require this, except for replays. The items be
 |---|---|---|---|---|
 | D1 | `src/sim/vehicleExplosion.ts:198` (`leaveCrater` without the `applyBlastDamage` that follows it at `combat.ts:592-594`). The render and UI also call `syncCraterMarks` at `src/render/depthOverlay.ts:187` and `src/ui/elevationReadout.ts:22`. | A vehicle-explosion crater mark stays unapplied to the height field until the sim's next HE blast (`structures.ts:176`). If one player has the depth map or elevation readout open, the renderer applies it early. LOS and cover then read a different height field on that client, which is a **real desync**. | Call `syncCraterMarks` inside `leaveCrater` (sim-side, always). Make the render callers read-only. | S |
 | D2 | `src/render/unitRender.ts:735-741` | While drawing crew weapons, the renderer rewrites `state.flashes[].pos/facing`, `state.tracers[].from` and `state.projectiles[].from` to snap them to the muzzle. How often this runs depends on frame rate. The sim reads `tracer.from` for `t === 0` tracers (`structures.ts:163-167`), which render never sees today, so it is harmless now but fragile. It would also break any state hash that includes effects. | Keep the muzzle snap as a render-local offset, or move it into the sim where the flash, tracer or projectile is created. Rule: render never writes to `BattleState`. | S |
-| D3 | `src/ui/screens/battle.ts:432,434,448,565,603`, `ui/screens/deploy.ts:223,229` call `addMessage(state, …)`. `sim/combat.ts:452-466` reads `state.messages.includes(prev.msg)`, and `battle.ts:189` trims the list to 200. | UI-only messages (speed, overlay toggles, control groups, "Flee?") go into sim state and change when sim-side kill reports stop coalescing. The effect is limited to message text, but it diverges between clients. | Move messages to a per-viewer log (`messages` tagged by side), keep UI notices in a HUD-local list, and exclude messages from the hash. | S (part of 011) |
-| D4 | `battle.ts:218-222` (`issueOrder` applies immediately, consuming RNG) and `battle.ts:140-147` (frame-driven accumulator, `loop.ts:4` clamps dt to 0.1 s) | Orders land at whatever frame the click happens, so the RNG stream depends on local frame timing. | Queue commands per tick and apply them at the start of `subStep` in a canonical order (tick, side, sequence). Add `advanceTick()` for lockstep. Single-player uses the same queue with zero delay. | M (part of 012) |
+| D3 | `src/ui/screens/battle.ts:432,434,448,565,603`, `ui/screens/deploy.ts:223,229` call `addMessage(state, …)`. `sim/combat.ts:452-466` reads `state.messages.includes(prev.msg)`, and `battle.ts:189` trims the list to 200. | UI-only messages (speed, overlay toggles, control groups, "Flee?") go into sim state and change when sim-side kill reports stop coalescing. The effect is limited to message text, but it diverges between clients. | Move messages to a per-viewer log (`messages` tagged by side), keep UI notices in a HUD-local list, and exclude messages from the hash. | S (part of 042) |
+| D4 | `battle.ts:218-222` (`issueOrder` applies immediately, consuming RNG) and `battle.ts:140-147` (frame-driven accumulator, `loop.ts:4` clamps dt to 0.1 s) | Orders land at whatever frame the click happens, so the RNG stream depends on local frame timing. | Queue commands per tick and apply them at the start of `subStep` in a canonical order (tick, side, sequence). Add `advanceTick()` for lockstep. Single-player uses the same queue with zero delay. | M (part of 043) |
 | D5 | Transcendental math in the sim: 149 calls to `Math.sin/cos/atan2/exp/pow/log/hypot/…` across 30 files (heaviest: `mapdsl.ts` 29, `ai.ts` 20, `spawn.ts` 12, `combat.ts` 11, `vehicle.ts` 10), plus `Rng.gauss` (`rng.ts:17`) | ECMAScript leaves these implementation-approximated. V8 (Chrome, Edge, Node) and SpiderMonkey both use fdlibm ports. JavaScriptCore (Safari) uses the system libm, so results can differ in the last bit, and chaotic sim feedback amplifies that into a desync. `+ − × ÷ sqrt` and `Math.fround` are exact IEEE and safe. **Unknown until measured.** | Measure first (P5). If engines disagree, add `src/shared/dmath.ts` (a pure-TS fdlibm port of about 400 lines), route the sim through it, and add a lint/grep test that bans `Math.<transcendental>` under `src/sim`. | S to measure; L if a port is needed |
 | D6 | About 45 module-level `WeakMap`/`Map` side-state stores in the sim, for example `ai.ts:284,285,315,832`, `mind.ts:105`, `morale.ts:32`, `combat.ts:75,194,452,1334,1745`, `orders.ts:94,97,126,179,449`, `vehicle.ts:46,119,217,480,514,586,844-851`, `medic.ts:41-44`, `items.ts:128`, `pickup.ts:51`, `trees.ts:59,75`, `structures.ts:96`, `growth.ts:34`, `infantryAim.ts:11`, `hastyFire.ts:22`, `heightField.ts:68`, `coverSeek.ts:91`, `aimPoint.ts:63`. `path.ts:95-100` also has module scratch buffers. | These are deterministic, because they are keyed per battle or object and filled in sim order, so **they do not break lockstep**. They do make `BattleState` non-serializable. Snapshots, save games, mid-battle join and "resync from the host" cannot capture them, and a state hash over `BattleState` alone misses divergence hiding in them. `orders.ts:94,97,126` key by object identity (`Order`, `Vec2[]`), so a deserialized order silently loses its side-state. | For lockstep, do nothing now: resync by replaying from tick 0 (see M5). Migrating them into serializable state is XL and only needed for true snapshot save/load. | XL (deferred) |
 | D7 | `Rng.s` is private (`rng.ts:3`) | A state hash cannot include the RNG position, which is the cheapest and strongest desync detector. | Add `Rng.state()` and `Rng.setState()`. | S |
-| D8 | `Battle` constructor always runs `aiDeploy` for the non-player side (`battle.ts:88-89`), consuming RNG | With two human sides, both clients must agree that neither side is AI-deployed. | This comes for free once `controllers` replaces `playerSide` (011). | — |
+| D8 | `Battle` constructor always runs `aiDeploy` for the non-player side (`battle.ts:88-89`), consuming RNG | With two human sides, both clients must agree that neither side is AI-deployed. | This comes for free once `controllers` replaces `playerSide` (042). | — |
 
 **Checked and safe:**
 
@@ -329,9 +329,9 @@ a third lockstep referee. That hybrid validates results but still does not hide 
 
 ## 7. Phased plan
 
-### Phase P: prerequisites that help both options (backlog 011 = P1–P2, 012 = P3–P5)
+### Phase P: prerequisites that help both options (backlog 042 = P1–P2, 043 = P3–P5)
 
-- **P1. Command layer and tick queue (011, size M).** Add `type Command = order | deployTeam |
+- **P1. Command layer and tick queue (042, size M).** Add `type Command = order | deployTeam |
   offerTruce | flee | setSpeed | pause | resume | ready | setController`, and
   `Battle.submit(cmd, side, applyAtTick?)`. Commands are applied at the start of `subStep` in the
   order (tick, side, sequence). The UI never calls `issueOrder`, `flee` or `deployTeam` directly.
@@ -339,24 +339,24 @@ a third lockstep referee. That hybrid validates results but still does not hide 
   *Done when:* a grep shows no UI or render call into sim mutators other than `submit`
   (`flee(state…)` and `issueOrder` are gone from `src/ui`), the full test suite passes, and
   single-player plays the same.
-- **P2. Side controllers and per-side perspective (011, size M).** Replace `playerSide` and
+- **P2. Side controllers and per-side perspective (042, size M).** Replace `playerSide` and
   `aiBothSides` in the sim with `controllers: Record<Side, 'human' | 'ai'>`. The local viewer's side
   becomes UI state. Messages carry a `side` tag, UI notices move to a HUD list, results are computed
   per side, and a truce with two humans needs both offers. All call sites are in §1.
   *Done when:* a test battle with two human sides runs with no AI orders issued; the German and Soviet
   message logs each contain only their own side's reports; the debrief grades each side from its own
   perspective; and the harness still passes with both sides on AI.
-- **P3. Determinism fixes (012, size S).** Fix D1 (sync craters in the sim), D2 (render never writes
+- **P3. Determinism fixes (043, size S).** Fix D1 (sync craters in the sim), D2 (render never writes
   state), D3 (via P2) and D7 (`Rng.state()`). Add a regression test that runs the depth-overlay and
   elevation-readout sync mid-battle and asserts an unchanged hash chain.
-- **P4. State hash, command log and replay runner (012, size M).** Add
+- **P4. State hash, command log and replay runner (043, size M).** Add
   `hashState(battle): number` (§3) and `ReplayLog`. Add a Node runner that replays a log and prints
   the hash chain. Single-player records every battle, and the debrief offers "Save replay (.json)" and
   "Watch replay".
   *Done when:* a scripted single-player battle, re-run from its log in a separate Node process (a
   fresh module graph, not the same process), produces an identical hash chain at every tick; and the
   harness determinism test also compares hash chains.
-- **P5. Cross-engine check (012, size S; a follow-up L if it fails).** Add `tools/determinism.html`,
+- **P5. Cross-engine check (043, size S; a follow-up L if it fails).** Add `tools/determinism.html`,
   which runs every map for 10 sim-minutes AI vs AI and prints the hash chain. Run it in Chrome,
   Firefox, Safari and Node.
   *Done when:* all four engines produce identical chains for 5 maps × 2 seeds, or a divergence is
@@ -364,7 +364,7 @@ a third lockstep referee. That hybrid validates results but still does not hide 
   a test bans `Math.(sin|cos|tan|atan2|asin|acos|exp|log|pow|hypot|cbrt)` under `src/sim`, and the
   check is re-run until it passes.
 
-### Phase M: lockstep multiplayer (013; each milestone is a separate commit and verification)
+### Phase M: lockstep multiplayer (044; each milestone is a separate commit and verification)
 
 - **M1. Lockstep session over an abstract transport (M).** Add `LockstepSession` with input delay D,
   bundle and ack handling, stall and resume, a hash exchange every 10 ticks, and desync capture.

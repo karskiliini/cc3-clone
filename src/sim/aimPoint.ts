@@ -3,7 +3,7 @@
 // recruit; a disabling or a killing spot for men who know their trade). Pure functions of the
 // state: no dice here, the dice are in combat.ts / vehicleDamage.ts.
 import type {
-  AimPoint, BattleState, RoundCounts, RoundType, Soldier, Vec2, Vehicle, VehicleDef, WeaponDef,
+  AimPoint, BattleState, RoundCounts, RoundType, Soldier, Terrain, Vec2, Vehicle, VehicleDef, WeaponDef,
 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import { angleTo, clamp, dist, wrapAngle } from '@/shared/math';
@@ -12,6 +12,7 @@ import { WEAPONS } from '@/data/weapons';
 import { apcrIssued, bestRoundAgainst, expectedPenetrationChance } from './ballistics';
 import { expectedArmorMm } from './vehicleDamage';
 import { addMessage } from './messages';
+import { bresenhamTiles } from './los';
 
 // ------------------------------------------------------------------ round counts
 /** Splits a total into the weapon's load: APCR and smoke are absolute counts (they were scarce),
@@ -239,3 +240,37 @@ function isStopped(v: Vehicle): boolean {
 
 /** Longest a veteran waits for a flank presentation. */
 export const AIM_HOLD_MAX_S = 4;
+
+// ------------------------------------------------------------------ moving-target lead
+/** A moving target is harder to hit in proportion to its speed: the gunner must take correct
+ * lead, and taking lead costs him. 1 at rest, ~0.55 at a fast advance (11 m/s road). Deterministic
+ * — no rng draw, so hit-chance banding stays repeatable for tests. */
+export function leadFactor(speedMs: number): number {
+  return 1 / (1 + speedMs / 14);
+}
+
+/** Vegetation a direct-fire AT round must not be launched through. Walls stop or deflect shells,
+ * and a bazooka/panzerschreck round bursts on anything it cannot pass. Exported for the shot-path
+ * gate in combat.ts and its tests. */
+export interface ShotBlock {
+  tile: Vec2;
+  /** 'wood' = stops/bursts AT rockets, shells punch through; 'hard' = stops everything */
+  kind: 'wood' | 'hard';
+}
+
+const AT_ROCKET_BLOCKING = new Set<Terrain>(['hedge', 'buildingWood', 'fence']);
+const SHELL_BLOCKING = new Set<Terrain>(['buildingWood', 'stonewall', 'buildingStone']);
+
+/** The first blocker a straight shot from `from` to `to` crosses, ignoring the endpoints' own
+ * tiles (a firer in woods shoots out of them; the target's cover is its own business). */
+export function shotBlocker(map: { tiles: Terrain[]; width: number }, from: Vec2, to: Vec2, atRocket: boolean): ShotBlock | null {
+  const tiles = bresenhamTiles(Math.floor(from.x), Math.floor(from.y), Math.floor(to.x), Math.floor(to.y));
+  for (let i = 1; i < tiles.length - 1; i++) {
+    const t = tiles[i];
+    const terrain = map.tiles[t.y * map.width + t.x];
+    if (atRocket ? AT_ROCKET_BLOCKING.has(terrain) : SHELL_BLOCKING.has(terrain)) {
+      return { tile: t, kind: terrain === 'buildingWood' || terrain === 'hedge' || terrain === 'fence' ? 'wood' : 'hard' };
+    }
+  }
+  return null;
+}

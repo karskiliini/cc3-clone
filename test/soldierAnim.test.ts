@@ -215,6 +215,15 @@ describe('frames', () => {
     }
     expect(moved).toBeGreaterThan(10);
   });
+  it('an unconscious man lies completely still: no tremble whatever his mind state', () => {
+    for (const st of ['shaken', 'cowering', 'panicked', 'pinned'] as MentalState[]) {
+      const un = sol({ health: 'incapacitated' }, st);
+      for (let i = 0; i < 100; i++) {
+        expect(trembleOffset(un, i * 0.137)).toEqual({ x: 0, y: 0 });
+        expect(moodFor(un, i * 0.137)).toBe('calm');
+      }
+    }
+  });
 });
 
 describe('physical gait phase', () => {
@@ -350,7 +359,6 @@ describe('ragdoll flight (pure half)', () => {
 });
 
 // ------------------------------------------------------------------ hatch climbs ---
-// @ts-expect-error -- node builtins carry no type declarations in this project (no @types/node)
 import * as nodeFs from 'node:fs';
 const { readFileSync, readdirSync } = nodeFs as { readFileSync(p: string, enc: string): string; readdirSync(p: string): string[] };
 import { hatchClimbAnim, hatchClimbFrame, resolveEntryKey } from '@/render/soldierAnim';

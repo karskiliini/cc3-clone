@@ -1,6 +1,7 @@
 // ============================================================================
 // common.ts — the poster menu frame shared by every menu screen (main menu,
-// battle setup, requisition, operation, options, debrief): the letterboxed
+// battle setup, requisition, operation, COA, briefing, roster, boot camp,
+// history, options, debrief): the letterboxed
 // 800x600 MENU area centred in the 1024x768 canvas, its bottom button strip,
 // and canvas text helpers. Menu screens draw and hit-test in MENU-local
 // coordinates (0..800, 0..600).
@@ -50,6 +51,7 @@ export function drawMenuFrame(ctx: CanvasRenderingContext2D, title: string, body
 // -------------------------------------------------------------- BottomStrip --
 const STRIP_Y = 562;
 const BACK_R: Rect = { x: 16, y: STRIP_Y, w: 92, h: 22 };
+const SOLDIERS_R: Rect = { x: 354, y: STRIP_Y, w: 92, h: 22 };
 const NEXT_R: Rect = { x: 692, y: STRIP_Y, w: 92, h: 22 };
 
 export interface BottomStripConfig {
@@ -57,14 +59,24 @@ export interface BottomStripConfig {
   back?: boolean;
   /** Label of the right-hand forward button; omitted = no forward button. */
   next?: string;
+  /** Show the centre "Soldiers" button (the campaign roster) — only where a campaign exists. */
+  soldiers?: boolean;
+}
+
+export interface BottomStripResult {
+  back: boolean;
+  next: boolean;
+  soldiers: boolean;
 }
 
 /** The control strip along the bottom of the menu screens: only the buttons that do
- * something on this screen — "← Back" on the left, the forward action on the right.
+ * something on this screen — "← Back" on the left, "Soldiers" in the middle while a
+ * campaign is running, the forward action on the right. ESC is Back.
  * `update` expects MENU-local input (see `toMenuInput`). */
 export class BottomStrip {
   back: boolean;
   next: string | undefined;
+  soldiers: boolean;
   /** false greys the forward button out (e.g. Next with an empty roster). */
   nextEnabled = true;
   private mouse = { x: -1, y: -1 };
@@ -72,27 +84,38 @@ export class BottomStrip {
   constructor(cfg: BottomStripConfig) {
     this.back = cfg.back ?? true;
     this.next = cfg.next;
+    this.soldiers = cfg.soldiers ?? false;
   }
 
-  update(input: InputState): { back: boolean; next: boolean } {
+  update(input: InputState): BottomStripResult {
     this.mouse = input.mouse;
     let back = false;
     let next = false;
+    let soldiers = false;
     for (const c of input.clicks) {
       if (c.button !== 0) continue;
       if (this.back && pointInRect(c, BACK_R)) back = true;
+      else if (this.soldiers && pointInRect(c, SOLDIERS_R)) soldiers = true;
       else if (this.next && this.nextEnabled && pointInRect(c, NEXT_R)) next = true;
     }
     if (this.back && input.keysPressed.has('escape')) back = true;
-    return { back, next };
+    return { back, next, soldiers };
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
     if (this.back) drawSmallMetalButton(ctx, BACK_R, '← Back', { hot: pointInRect(this.mouse, BACK_R) });
+    if (this.soldiers) drawSmallMetalButton(ctx, SOLDIERS_R, 'Soldiers', { hot: pointInRect(this.mouse, SOLDIERS_R) });
     if (this.next) {
       drawSmallMetalButton(ctx, NEXT_R, this.next, { hot: pointInRect(this.mouse, NEXT_R), disabled: !this.nextEnabled });
     }
   }
+}
+
+/** Hover/selection highlight behind one row of a menu list (same look as the force picker's rows). */
+export function drawListRow(ctx: CanvasRenderingContext2D, r: Rect, opts: { hot?: boolean; selected?: boolean } = {}): void {
+  if (!opts.hot && !opts.selected) return;
+  ctx.fillStyle = opts.selected ? 'rgba(200,50,30,0.38)' : 'rgba(255,255,255,0.06)';
+  ctx.fillRect(Math.round(r.x), Math.round(r.y), Math.round(r.w), Math.round(r.h));
 }
 
 // --------------------------------------------------------------------- text --

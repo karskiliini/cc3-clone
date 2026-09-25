@@ -161,6 +161,20 @@ function pickFriendlySoldierScreen(state: BattleState, cam: Camera, screenPt: Ve
   return bestTeam;
 }
 
+/** Centroid of one side's alive teams (vehicle anchor for vehicle teams), for
+ * opening the deploy/battle camera on where the units actually are instead of
+ * the geometric centre of a deploy zone that may be far taller than the view. */
+export function friendlyCentroid(state: BattleState, side: Side): Vec2 {
+  let cx = 0, cy = 0, n = 0;
+  for (const t of state.teams.values()) {
+    if (t.side !== side || t.outOfAction) continue;
+    const p = t.vehicleId != null ? state.vehicles.get(t.vehicleId)?.pos : t.pos;
+    if (!p) continue;
+    cx += p.x; cy += p.y; n++;
+  }
+  return n > 0 ? { x: cx / n, y: cy / n } : { x: state.map.width / 2, y: state.map.height / 2 };
+}
+
 /** Screen-space team bounding circle: centre = centroid of the team's alive
  * soldiers (or vehicle position), radius = the furthest member from that
  * centre plus a fixed px margin, so a click anywhere near a spread-out
@@ -203,15 +217,34 @@ function pointInRotatedRectScreen(p: Vec2, centre: Vec2, halfLenPx: number, half
  * radius (independent of zoom), then any friendly team's screen-space
  * bounding circle, then any friendly vehicle's rotated hull rectangle
  * (+ slop). Returns the hit team, or null.
+ *
+ * `opts.circleFallback: false` skips the bounding-circle stage — used where a
+ * press on "empty ground" must stay empty (deploy marquee); file formations
+ * make column teams' circles swallow big empty areas between soldiers.
  */
-export function pickFriendlyTeamScreen(state: BattleState, cam: Camera, screenPt: Vec2, side: Side): Team | null {
+export function pickFriendlyTeamScreen(state: BattleState, cam: Camera, screenPt: Vec2, side: Side, opts?: { circleFallback?: boolean }): Team | null {
   const soldierHit = pickFriendlySoldierScreen(state, cam, screenPt, side);
   if (soldierHit) return soldierHit;
 
-  for (const team of state.teams.values()) {
-    if (team.side !== side || team.outOfAction) continue;
-    const circle = teamBoundingCircleScreen(state, cam, team);
-    if (circle && Math.hypot(screenPt.x - circle.c.x, screenPt.y - circle.c.y) <= circle.r) return team;
+  if (opts?.circleFallback !== false) {
+    // Tightest fit wins, not first-match nor deepest: adjacent file-formations
+    // overlap heavily, and both first-match (lower team id) and deepest (big
+    // columns swallow small clusters under them) mis-resolve ambiguous clicks.
+    // Smallest containing circle = the cluster the cursor is actually inside.
+    let bestTeam: Team | null = null;
+    let bestR = Infinity;
+    let bestDepth = -Infinity;
+    for (const team of state.teams.values()) {
+      if (team.side !== side || team.outOfAction) continue;
+      const circle = teamBoundingCircleScreen(state, cam, team);
+      if (!circle) continue;
+      const depth = circle.r - Math.hypot(screenPt.x - circle.c.x, screenPt.y - circle.c.y);
+      if (depth < 0) continue;
+      if (circle.r < bestR || (circle.r === bestR && depth > bestDepth)) {
+        bestR = circle.r; bestDepth = depth; bestTeam = team;
+      }
+    }
+    if (bestTeam) return bestTeam;
   }
 
   const pxPerTile = TILE_PX * cam.zoom;

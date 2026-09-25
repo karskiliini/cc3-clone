@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { Battle } from '@/sim/battle';
 import { applyOrder } from '@/sim/orders';
 import { isPassable } from '@/sim/path';
-import { pickOrderMarker, orderLinePoints } from '@/render/orderMarkers';
+import { pickOrderMarker } from '@/render/orderMarkers';
 import { SIM_DT, TILE_PX } from '@/shared/types';
 import type { BattleConfig, BattleState, Camera, Team, Vec2 } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
@@ -99,13 +99,6 @@ describe('order markers', () => {
     return { battle, st, teams, cam: { x: 0, y: 0, zoom: 1 } };
   }
   const screen = (p: Vec2): Vec2 => ({ x: p.x * TILE_PX, y: p.y * TILE_PX });
-
-  it('the drawn point list is team, waypoints (in order), then target', () => {
-    const { st, teams } = markerState();
-    const t = teams[0];
-    t.order = { type: 'move', target: { x: 30, y: 30 }, waypoints: [{ x: 10, y: 10 }, { x: 20, y: 20 }], issuedAt: st.time };
-    expect(orderLinePoints(t)).toEqual([t.pos, { x: 10, y: 10 }, { x: 20, y: 20 }, { x: 30, y: 30 }]);
-  });
 
   it('pickOrderMarker: hit, miss, nearest of two, waypoint hit, ignores enemy teams', () => {
     const { st, teams, cam } = markerState();

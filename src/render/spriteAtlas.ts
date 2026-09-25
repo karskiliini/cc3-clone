@@ -15,6 +15,7 @@
 // ============================================================================
 import type { Season, Side } from '@/shared/types';
 import { resolveEntryKey } from '@/render/soldierAnim';
+import { VEHICLE_DEFS } from '@/data/units';
 
 export interface AtlasEntry {
   start: number; frames: number; fps: number; loop: boolean;
@@ -131,6 +132,32 @@ export function vehicleDefAtlasName(defId: string, scale: 1 | 2, season: Season 
   return `vehicles_${defId}${seasonKey(season) === 'winter' ? '_winter' : ''}_${scale}`;
 }
 
+/** Vehicles still waiting for their own Blender model are drawn as the closest existing one,
+ * scaled to their own length, instead of not at all. A vehicle's own atlas wins as soon as it
+ * exists. */
+export const VEHICLE_STAND_IN: Readonly<Record<string, string>> = {
+  tiger2: 'tiger', pantherD: 'panther', pantherA: 'panther', pz4g: 'pz4gh', flammpanzer3: 'pz3j',
+  stug4: 'stug3g', hetzer: 'stug3g', sdkfz251_rocket: 'sdkfz251', kubelwagen: 'sdkfz251', kettenkrad: 'sdkfz251',
+  is1: 'is2', is3: 'is2', ot34: 't34_76', t28: 't34_76', sherman76: 't34_76',
+  su100: 'su85', su122: 'su85', su152: 'su85', bm13: 'sdkfz251',
+};
+
+/** Crew weapons waiting for their own model: the 15 cm Nebelwerfer 41 is a wheeled carriage with
+ * split trails, like the PaK 38. */
+export const WEAPON_STAND_IN: Readonly<Record<string, string>> = { nebel41: 'pak38' };
+
+/** Which vehicle's art draws `defId` (itself, or its stand-in while its own atlas is missing) and
+ * at what size relative to that art. */
+export function vehicleArtFor(defId: string): { artId: string; scale: number } {
+  const stand = VEHICLE_STAND_IN[defId];
+  if (!stand) return { artId: defId, scale: 1 };
+  const own = slots.get(vehicleDefAtlasName(defId, 1));
+  if (!own) void loadAtlas(vehicleDefAtlasName(defId, 1)); // it may have been rendered by now
+  if (own?.state === 'ready') return { artId: defId, scale: 1 };
+  const a = VEHICLE_DEFS[defId], b = VEHICLE_DEFS[stand];
+  return { artId: stand, scale: a && b ? a.lengthM / b.lengthM : 1 };
+}
+
 /** The atlases that may hold this vehicle at this zoom, preferred first: its winter atlas in a
  * winter battle, its own per-vehicle atlas (both fetched on first use, so a battle only loads the
  * vehicles present), else a combined `vehicles_<scale>` atlas. */
@@ -212,7 +239,8 @@ export function requestBattleAtlases(
 ): Promise<void> {
   // the combat-FX flipbooks too, so the first muzzle puff or burst of the battle is not skipped
   const names = [...battleAtlasNames(sides, season), 'fx_s', 'fx_m', 'fx_l'];
-  for (const def of vehicleDefs) {
+  for (const d of vehicleDefs) {
+    const def = VEHICLE_STAND_IN[d] ?? d;
     names.push(vehicleDefAtlasName(def, 1));
     if (seasonKey(season) === 'winter') names.push(vehicleDefAtlasName(def, 1, 'winter'));
   }
@@ -319,6 +347,9 @@ export function drawVehiclePart(
   variant?: 'blown' | 'trackL' | 'trackR',
   season: Season = 'summer',
 ): boolean {
+  const art = vehicleArtFor(defId);
+  defId = art.artId;
+  zoom *= art.scale;
   const atlases = vehicleAtlasesFor(defId, zoom, season);
   const base = `${defId}.${part}.${state === 'ok' ? 'ok' : 'ko'}`;
   const keys = variant ? [`${defId}.${part}.${variant}`, base] : [base];
@@ -378,8 +409,10 @@ export function drawWeaponState(
   if (!atlas) return null;
   const dirs = atlas.meta.dirs;
   const dir = ((Math.round((rad / (Math.PI * 2)) * dirs) % dirs) + dirs) % dirs;
+  // a crew weapon still waiting for its own model draws as its stand-in (see VEHICLE_STAND_IN)
+  const art = Object.keys(atlas.meta.entries).some((k) => k.startsWith(`${weaponId}.`)) ? weaponId : (WEAPON_STAND_IN[weaponId] ?? weaponId);
   for (const st of states) {
-    const key = `${weaponId}.${st}`;
+    const key = `${art}.${st}`;
     if (atlas.meta.entries[key] && drawAtlasFrame(ctx, atlas, key, dir, 0, x, y, zoom)) return st;
   }
   return null;

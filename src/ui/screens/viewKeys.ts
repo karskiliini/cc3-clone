@@ -1,5 +1,5 @@
 // Pure keyboard helpers shared by the battle and deployment screens (node-testable).
-import type { GameSettings, Vec2 } from '@/shared/types';
+import type { GameSettings, Order, OrderType, Vec2 } from '@/shared/types';
 
 /** '§' (the key left of 1; '½' with Shift) toggles the depth map view. Returns true when handled. */
 export function handleDepthMapKey(keysPressed: ReadonlySet<string>, settings: GameSettings): boolean {
@@ -36,4 +36,24 @@ export function offsetOrderPoints(target: Vec2, waypoints: readonly Vec2[], offs
     target: { x: target.x + offset.x, y: target.y + offset.y },
     waypoints: waypoints.map((w) => ({ x: w.x + offset.x, y: w.y + offset.y })),
   };
+}
+
+/** Marker drag-n-drop (user request): releasing a dragged order marker re-issues the team's
+ * order at the drop point, keeping the order type. Dragging the ENDPOINT preserves the
+ * earlier Shift-click waypoints — the drag edits only the final leg. Dragging a WAYPOINT
+ * dot rewrites that waypoint in place (same chain length). Returns the order to issue,
+ * or null when the marker no longer matches the team's order (stale drag). */
+export function reissueOrderOnMarkerDrag(
+  current: Order | null,
+  drag: { kind: 'target' | 'waypoint'; index: number; orderType: OrderType },
+  dropPoint: Vec2,
+): Order | null {
+  if (!current || current.type !== drag.orderType) return null;
+  if (drag.kind === 'waypoint') {
+    if (current.type !== 'move' && current.type !== 'moveFast' && current.type !== 'sneak') return null;
+    const wps = current.waypoints;
+    if (!wps || drag.index >= wps.length) return null;
+    return { ...current, waypoints: wps.map((w, i) => (i === drag.index ? dropPoint : w)) };
+  }
+  return { ...current, target: dropPoint };
 }

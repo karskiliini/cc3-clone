@@ -124,11 +124,11 @@ export function dropKit(state: BattleState, rng: Rng, s: Soldier, weaponOnly = f
 }
 
 // ------------------------------------------------------------------ per-step sweep
-interface DropTrack { prevState: Map<number, MentalState>; bareHeaded: Set<number> }
+interface DropTrack { prevState: Map<number, MentalState>; bareHeaded: Set<number>; wasStunned: Set<number> }
 const tracks = new WeakMap<BattleState, DropTrack>();
 function getTrack(state: BattleState): DropTrack {
   let t = tracks.get(state);
-  if (!t) { t = { prevState: new Map(), bareHeaded: new Set() }; tracks.set(state, t); }
+  if (!t) { t = { prevState: new Map(), bareHeaded: new Set(), wasStunned: new Set() }; tracks.set(state, t); }
   return t;
 }
 
@@ -157,6 +157,18 @@ export function stepItemDrops(state: BattleState, rng: Rng): void {
         dropKit(state, rng, s, true);
       }
     }
+    // Knocked down (blast/vehicle impact — lying stunned): often loses his grip on the
+    // weapon, which is then seen on the ground beside him. Rolled ONCE on entering the
+    // stun (wasStunned gate — never per step), so the chance stays the stated chance.
+    // He can pick it (or better) back up when he recovers — pickup.ts handles that.
+    const stunned = s.stunnedUntil != null && state.time < s.stunnedUntil;
+    const was = track.wasStunned.has(s.id);
+    if (stunned && !was && prev !== undefined && !s.kitDropped && isPersonalWeapon(state, s)
+      && WEAPONS[s.weaponId].cls !== 'grenade'
+      && rng.chance(panicDropChance(s.experience) * 0.8)) {
+      dropKit(state, rng, s, true);
+    }
+    if (stunned) track.wasStunned.add(s.id); else track.wasStunned.delete(s.id);
   }
 }
 

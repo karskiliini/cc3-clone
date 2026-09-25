@@ -60,15 +60,15 @@ describe('battle control groups', () => {
     const { teams, frame, click, fire } = setup();
     frame(['a'], ['control']);
     frame(['0', 'mod+0']);
-    click(135, 640); // second team replaces the original three-team group
+    click(100, 675); // second team replaces the original three-team group
     frame(['0', 'mod+0']);
-    click(260, 640);
+    click(165, 675);
     frame(['0']);
     fire();
     expect(teams.map((t) => t.order?.type)).toEqual(['defend', 'fire', 'defend']);
     click(500, 400); // clear the selection away from the fire-order marker
     frame(['0', 'mod+0']);
-    click(260, 640);
+    click(165, 675);
     frame(['0']); // empty group leaves this current selection intact
     frame(['m']);
     click(400, 300);
@@ -78,13 +78,13 @@ describe('battle control groups', () => {
   it('recalls groups from the HUD and cancels an old pending order when switching groups', () => {
     const { teams, frame, click, fire } = setup();
     frame(['a'], ['control']);
-    click(830, 660, ['control']);
-    click(10, 640);
+    click(136, 745, ['control']);
+    click(10, 675);
     frame(['v']);
-    click(830, 660);
+    click(136, 745);
     click(400, 300);
     expect(teams.map((t) => t.order?.type)).toEqual(['defend', 'defend', 'defend']);
-    click(830, 660);
+    click(136, 745);
     fire();
     expect(teams.map((t) => t.order?.type)).toEqual(['fire', 'fire', 'fire']);
   });
@@ -93,7 +93,7 @@ describe('battle control groups', () => {
     const { battle, teams, frame, click, fire } = setup();
     frame(['a'], ['control']);
     frame(['2', 'mod+2']);
-    click(10, 640);
+    click(10, 675);
     teams[0].outOfAction = true;
     battle.state.teams.delete(teams[1].id);
     frame(['2']);
@@ -101,7 +101,7 @@ describe('battle control groups', () => {
     expect(teams.map((t) => t.order?.type)).toEqual(['defend', 'defend', 'fire']);
     teams[0].outOfAction = false;
     teams[2].outOfAction = true;
-    click(10, 640);
+    click(10, 675);
     frame(['2']);
     fire();
     expect(teams[0].order?.type).toBe('fire');

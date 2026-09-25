@@ -250,6 +250,22 @@ export const winter_1941: MapDef = {
     german: { x: 32, y: 60, w: 28, h: 28 },
     soviet: { x: 122, y: 60, w: 28, h: 28 },
   },
+  // COA overlays (G21): the drive goes over the Skhodnya bridge for the church, a rifle column
+  // crosses downstream, fires from the village; the Soviets hold a trench line east of the
+  // river and counterattack armour back at the bridge.
+  coa: {
+    stages: ['Overwatch', 'Obstacles', 'Cut Fence', 'Reduce', 'Assault'],
+    german: [
+      { pts: [{ x: 42, y: 70 }, { x: 72, y: 78 }, { x: 100, y: 80 }, { x: 112, y: 58 }], kind: 'armor' },
+      { pts: [{ x: 64, y: 88 }, { x: 98, y: 80 }], kind: 'assault' },
+      { pts: [{ x: 56, y: 100 }, { x: 98, y: 80 }], kind: 'firesupport' },
+    ],
+    soviet: [
+      { pts: [{ x: 136, y: 62 }, { x: 156, y: 72 }, { x: 148, y: 92 }, { x: 128, y: 98 }], kind: 'defenses' },
+      { pts: [{ x: 150, y: 52 }, { x: 124, y: 66 }, { x: 106, y: 79 }], kind: 'armor' },
+      { pts: [{ x: 152, y: 84 }, { x: 106, y: 80 }], kind: 'firesupport' },
+    ],
+  },
   decor,
   vectors,
 };

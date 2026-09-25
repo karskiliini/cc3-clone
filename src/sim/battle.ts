@@ -1,5 +1,6 @@
 import type {
-  BattleConfig, BattleEvent, BattleState, Order, Rect, Side, Soldier, Team, Vec2,
+  BattleConfig, BattleEvent, BattleReport, BattleState, Order, Rect, Side, Soldier,
+  SoldierOutcome, Team, TeamOutcome, Vec2,
 } from '@/shared/types';
 import {
   AI_INTERVAL, EXPLOSION_LIFE_HE, EXPLOSION_LIFE_SMALL, EXPLOSION_LIFE_SMOKE,
@@ -20,6 +21,7 @@ import { stepSmoke } from './smoke';
 import { stepCombat, stepPendingBursts } from './combat';
 import { stepTreeFires } from './trees';
 import { stepAI, aiDeploy } from './ai';
+import { stepSubordinateInitiative } from './initiative';
 import { stepMorale } from './morale';
 import { addMessage } from './messages';
 import { stepMinds } from './mind';
@@ -37,6 +39,10 @@ const DEPLOY_SPACING_TILES = 6;
 /** Seconds the leader's shouted order confirmation takes to land (B7): the team's order
  * markers stay ghosted until then — the shout is visible, audible feedback of latency. */
 export const ORDER_SHOUT_CONFIRM_S = 0.8;
+
+/** The AI will not sue for a truce in the opening minutes (manual: a ceasefire needs a
+ * fought engagement behind it; mirrors victory.ts's MIN_CEASEFIRE_TIME_S intent). */
+const TRUCE_OFFER_MIN_TIME_S = 120;
 
 export class Battle {
   state: BattleState;
@@ -168,7 +174,6 @@ export class Battle {
     stepCombat(state, this.rng, dt);
     stepMorale(state, this.rng, dt);
     // kit as objects (spec 2026-09-17 §9): casualties leave theirs, able men pick things up
-    // (the stepItemDrops call was lost in the f01a0b3 patch merge; restored)
     stepItemDrops(state, this.rng);
     stepPendingBursts(state, this.rng);
     stepTreeFires(state, this.rng, dt);
@@ -183,6 +188,8 @@ export class Battle {
       const aiSide = otherSide(state.config.playerSide);
       stepAI(state, this.rng, this, aiSide);
       this.evaluateTruce();
+      this.maybeAiTruceOffer();
+      this.subordinateInitiative();
       if (state.config.aiBothSides) stepAI(state, this.rng, this, state.config.playerSide);
     }
 
@@ -273,19 +280,79 @@ export class Battle {
     this.evaluateTruce();
   }
 
+  /** A side accepts a standing offer from the other (the Truce button does this when the
+   * AI has asked; battle.ts's UI handler can also set the flags directly). */
+  acceptTruce(side: Side): void {
+    const s = this.state.sides;
+    const other = otherSide(side);
+    if (!s[other].truceOffered) return;
+    s[side].truceAccepted = true;
+    s[other].truceAccepted = true;
+    addMessage(this.state, 'Truce agreed.', 'info');
+  }
+
+  /** The Truce button: accepts a standing enemy offer, otherwise offers/withdraws our own. */
+  pressTruce(side: Side): void {
+    if (this.state.sides[otherSide(side)].truceOffered && !this.state.sides[side].truceAccepted) {
+      this.acceptTruce(side);
+    } else {
+      this.offerTruce(side);
+    }
+  }
+
   /** A standing truce offer is re-evaluated by the AI side every AI tick (manual: both sides must agree). */
   private evaluateTruce(): void {
     const state = this.state;
-    const ai = otherSide(state.config.playerSide);
-    const player = state.config.playerSide;
-    if (!state.sides[player].truceOffered || state.sides[ai].truceAccepted) return;
     const s = state.sides;
-    const losing = s[ai].morale < 50 || s[ai].score < s[player].score || s[ai].losses > s[player].losses * 1.5;
-    if (losing) {
-      s[ai].truceOffered = true;
-      s[ai].truceAccepted = true;
-      addMessage(state, 'The enemy has accepted the truce.', 'info');
+    const player = state.config.playerSide;
+    const ai = otherSide(player);
+    // player's standing offer, evaluated against the AI's situation (unchanged rule set)
+    if (s[player].truceOffered && !s[ai].truceAccepted) {
+      const losing = s[ai].morale < 50 || s[ai].score < s[player].score || s[ai].losses > s[player].losses * 1.5;
+      if (losing) {
+        s[ai].truceOffered = true;
+        s[ai].truceAccepted = true;
+        addMessage(state, 'The enemy has accepted the truce.', 'info');
+      }
     }
+    // AI's standing offer: withdraw it if the situation recovers
+    if (s[ai].truceOffered && !s[ai].truceAccepted && !s[player].truceAccepted) {
+      const aiLosing = s[ai].morale < 50 || s[ai].score < s[player].score || s[ai].losses > s[player].losses * 1.5;
+      if (!aiLosing) {
+        s[ai].truceOffered = false;
+        addMessage(state, 'The enemy has withdrawn its truce offer.', 'info');
+      }
+    }
+  }
+
+  /** G18 subordinate initiative: once per AI tick, an idle confident player-side team
+   * may act on its own and take the nearest enemy-held VL (E13 flavour). The commander
+   * is told in the message log; he overrules by simply issuing a new order. */
+  private subordinateInitiative(): void {
+    // item 024: the 'Never Act On Initiative' realism toggle silences team initiative
+    if (this.state.config.neverActOnInitiative) return;
+    const res = stepSubordinateInitiative(this.state, this.rng, (teamId, target) => {
+      this.issueOrder(teamId, { type: 'moveFast', target: { ...target }, issuedAt: this.state.time });
+    });
+    if (res) {
+      const team = this.state.teams.get(res.teamId);
+      if (team) addMessage(this.state, `${team.name} is acting on its own initiative — moving on the objective.`, 'info');
+      this.state.events.push({ kind: 'subordinateInitiative', teamId: res.teamId, pos: res.target });
+    }
+  }
+
+  /** AI side asks for a truce when it is clearly losing (called each AI tick; roadmap G14). */
+  private maybeAiTruceOffer(): void {
+    const state = this.state;
+    const player = state.config.playerSide;
+    const ai = otherSide(player);
+    const s = state.sides;
+    if (state.phase !== 'running' || s[ai].truceOffered || s[ai].truceAccepted) return;
+    if (state.time < TRUCE_OFFER_MIN_TIME_S) return;
+    const badlyLosing = s[ai].morale < 25 && (s[ai].losses > s[player].losses * 1.5 || s[ai].score < s[player].score * 0.5);
+    if (!badlyLosing) return;
+    s[ai].truceOffered = true;
+    addMessage(state, 'The enemy requests a truce — press TRUCE to accept.', 'info');
   }
 
   selectableTeams(side: Side): Team[] {
@@ -332,4 +399,39 @@ export class Battle {
     this.state.events = [];
     return ev;
   }
+
+  /** End-of-battle export for the campaign layer (G1): a read-only snapshot of every
+   * player-side team and soldier. Pure — does not touch the sim state. */
+  battleReport(): BattleReport {
+    const side = this.state.config.playerSide;
+    const teams: TeamOutcome[] = [];
+    for (const team of this.state.teams.values()) {
+      if (team.side !== side) continue;
+      const soldiers: SoldierOutcome[] = [];
+      for (const id of team.soldierIds) {
+        const s = this.state.soldiers.get(id);
+        if (!s) continue;
+        soldiers.push({
+          uid: s.uid ?? `b${id}`,
+          name: s.name,
+          rank: s.rank,
+          weaponId: s.weaponId,
+          health: s.health === 'dead' ? 'dead' : s.health === 'wounded' ? 'wounded' : 'ok',
+          kills: s.kills,
+          experience: s.experience,
+          isLeader: !!s.isLeader,
+        });
+      }
+      // vehicle damage carry-over (G3): the hull the team brings to the next battle
+      let vehicleDamage: TeamOutcome['vehicleDamage'] | undefined;
+      const veh = team.vehicleId != null ? this.state.vehicles.get(team.vehicleId) : null;
+      if (veh) {
+        if (veh.state === 'immobilized' || veh.state === 'knockedOut' || veh.state === 'abandoned') vehicleDamage = 'immobilised';
+        else if (veh.hits > 0) vehicleDamage = 'damaged';
+      }
+      teams.push({ defId: team.defId, kills: team.kills, soldiers, vehicleDamage });
+    }
+    return { result: this.state.result ?? 'draw', fledSide: this.state.fledSide ?? null, teams };
+  }
 }
+

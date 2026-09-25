@@ -1,9 +1,12 @@
+import { wireAt, consumeWire, WIRE_INTACT, VEHICLE_BREAK_CHANCE } from './wire';
+import { TILE_M, otherSide } from '@/shared/types';
 import type { BattleState, Soldier, Team, Vec2, Vehicle, VehicleDef, WeaponDef } from '@/shared/types';
-import { TILE_M } from '@/shared/types';
-import type { Rng } from '@/shared/rng';
-import { angleTo, dist, turnTowards, vadd, vnorm, vscale, vsub, wrapAngle } from '@/shared/math';
+import { Rng } from '@/shared/rng';
+import { angleTo, clamp, dist, turnTowards, vadd, vnorm, vscale, vsub, wrapAngle } from '@/shared/math';
 import { idx, inBounds, setTile, tileAt } from './map';
 import { TERRAIN_PROPS } from './terrain';
+import { vehicleMineCheck } from './mines';
+import { startFireBail } from './vehicleDamage';
 import { VEHICLE_DEFS } from '@/data/units';
 import { WEAPONS } from '@/data/weapons';
 import { EYE_VEHICLE_M, hasLOS, hasLineOfFire, losTrace } from './los';
@@ -11,8 +14,9 @@ import { gradeSpeedMul, GRADE_UPHILL_VEHICLE } from './movement';
 import { findPath, isPassable } from './path';
 import { addStress, addOrMergeBelief } from './mind';
 import { bestRoundAgainst } from './ballistics';
+import { crewServedClass } from './crewWeapon';
 import {
-  bailOut, crewEffects, damageSpeedMul, isImmobile, mainGunUsable, stepCrewSeats, stepVehicleDamage, trackPullRad, turretFrozen,
+  bailOut, crewEffects, damageSpeedMul, isImmobile, mainGunUsable, stepCrewSeats, stepVehicleDamage, trackPullRad, turretFrozen, worsen,
 } from './vehicleDamage';
 import { cookOffLive, stepCookOff, stepFragmentLandings } from './vehicleExplosion';
 import { vehicleRounds } from './aimPoint';
@@ -45,6 +49,10 @@ const K_TURN_SPEED_MUL = 0.35;
 export const FROZEN_TURRET_HULL_LAY = 0.5;
 const frozenRel = new WeakMap<Vehicle, number>();
 const BURN_TO_KO_S = 30;
+/** Engine-deck fire (vehicleDamage.ts): after this many seconds it may escalate to the full
+ * 'burning' state, or die out — the crew fighting the fire. */
+const ENGINE_FIRE_ESCALATE_S = 8;
+const ENGINE_FIRE_DIE_S = 14;
 const DEG30 = (30 * Math.PI) / 180;
 
 // ============================================================================
@@ -175,7 +183,6 @@ export function shotsWithin(firstShotS: number, cycleS: number, horizonS = DUEL_
   return 1 + Math.floor((horizonS - firstShotS) / Math.max(1, cycleS));
 }
 
-
 function gatherArmorThreats(state: BattleState, v: Vehicle): ArmorThreat[] {
   const out: ArmorThreat[] = [];
   for (const id of state.spottedVehicles[v.side]) {
@@ -206,6 +213,11 @@ function gatherArmorThreats(state: BattleState, v: Vehicle): ArmorThreat[] {
 
 
 
+/** A fleeing vehicle's reverse cycle. `fleeAnchor` is where THIS flight began: once the vehicle
+ * has reversed FLEE_MAX_DISTANCE_TILES away from it the flight is over — it holds and fights (or
+ * the crew bails) instead of hopping to a new cover tile. Without the anchor a threatened tank
+ * could walk backward across the whole map one 20 s cycle at a time (user report: it ended up
+ * far off the fight, which is not a real fighting withdrawal). */
 interface ReverseTrack {
   target: Vec2 | null;
   route: Vec2[];
@@ -213,7 +225,10 @@ interface ReverseTrack {
   fleeingSince: number | null;
   cooldownUntil: number;
   searchAfter?: number;
+  fleeAnchor?: Vec2;
 }
+/** How far a single flight may carry a vehicle from where it began (tiles, straight-line). */
+export const FLEE_MAX_DISTANCE_TILES = 30;
 const reverseTracks = new WeakMap<BattleState, Map<number, ReverseTrack>>();
 function getReverseTrack(state: BattleState, vehicleId: number): ReverseTrack {
   let m = reverseTracks.get(state);
@@ -232,6 +247,14 @@ function findVehicleCoverRoute(state: BattleState, v: Vehicle, threatPos: Vec2):
   const map = state.map;
   const cx = Math.floor(v.pos.x), cy = Math.floor(v.pos.y);
   const candidates: { target: Vec2; distance: number }[] = [];
+  // item 038: a cover spot another vehicle already occupies (or drives to) is not available —
+  // two tanks converging on the same spot used to stand nose-to-nose forever.
+  const taken: Vec2[] = [];
+  for (const o of state.vehicles.values()) {
+    if (o.id === v.id) continue;
+    if (o.state === 'ok' || o.state === 'immobilized') taken.push(o.pos);
+  }
+  const tooClose = (tile: Vec2) => taken.some((o) => dist(o, tile) < 2.5);
   for (let dy = -12; dy <= 12; dy++) {
     for (let dx = -12; dx <= 12; dx++) {
       if (dx * dx + dy * dy > 144) continue;
@@ -239,6 +262,7 @@ function findVehicleCoverRoute(state: BattleState, v: Vehicle, threatPos: Vec2):
       if (!inBounds(map, tx, ty)) continue;
       if (!isPassable(map, tx, ty, 'vehicle')) continue;
       const tile = { x: tx + 0.5, y: ty + 0.5 };
+      if (tooClose(tile)) continue;
       const trace = losTrace(map, tile, threatPos);
       if (trace.clear) continue;
       if (!trace.blockedAt || dist(tile, trace.blockedAt) > 4) continue;
@@ -368,6 +392,16 @@ function stepOneVehicleMind(state: BattleState, rng: Rng, dt: number, v: Vehicle
     track.fleeingSince = null;
   }
 
+  // The flight budget (user rule: hide in cover, do not drive indefinitely far). Once the vehicle
+  // is FLEE_MAX_DISTANCE_TILES from where this flight began, the flight is over: it holds and
+  // fights from where it stands (or the crew bails, per the bail paths below). The anchor is set
+  // when the cycle starts, so a cooldown re-engage gets a fresh flight — but each flight is
+  // bounded, and the 20 s reverse cap bounds how far each one can reach.
+  if (shouldFlee && track.fleeingSince != null) {
+    track.fleeAnchor ??= { ...v.pos };
+    if (dist(v.pos, track.fleeAnchor) >= FLEE_MAX_DISTANCE_TILES) shouldFlee = false;
+  } else if (!shouldFlee) track.fleeAnchor = undefined;
+
   if (!shouldFlee || !top) {
     track.target = null;
     track.route = [];
@@ -404,6 +438,60 @@ function stepOneVehicleMind(state: BattleState, rng: Rng, dt: number, v: Vehicle
 
 function clamp01to100(x: number): number { return x < 0 ? 0 : x > 100 ? 100 : x; }
 
+/** Reverses the vehicle toward `dest` while keeping its hull within 30 deg of `threatPos` (never
+ * exposing the flank to a live AT threat), at 60% of forward speed (spec §10). */
+const NO_RNG = new Rng(0);
+
+/** Test probe: one full vehicle step at a fixed dt (item 022). */
+export function stepTrackDriveProbe(state: BattleState, v: Vehicle, speedHintMs: number, dt: number): void {
+  void speedHintMs;
+  stepVehicles(state, NO_RNG, dt);
+}
+
+/** Test probe: run one reversing step with a fixed dt (item 022). */
+export function driveReversingProbe(state: BattleState, v: Vehicle, speedMs: number, threatPos: Vec2, dest: Vec2, dt: number): void {
+  driveReversing(state, NO_RNG, dt, v, speedMs, threatPos, dest);
+}
+
+function driveReversing(state: BattleState, rng: Rng, dt: number, v: Vehicle, speedMs: number, threatPos: Vec2, dest: Vec2): void {
+  const def = VEHICLE_DEFS[v.defId];
+  const towardDest = angleTo(v.pos, dest);
+  // a wheel-steered halftrack cannot pivot to face the threat: it just backs away, steering its
+  // tail toward the cover as fast as its speed lets it
+  const wheeled = def?.turnRadiusM != null;
+  const desiredHull = wheeled ? wrapAngle(towardDest + Math.PI) : angleTo(v.pos, threatPos);
+  if (def) turnHull(state, v, def, desiredHull, dt, wheeled ? speedMs * 0.6 * damageSpeedMul(v) : undefined);
+
+  // Reversing means the vehicle's rear (hullFacing + PI) leads toward dest; only reverse while the
+  // hull stays within 30 deg of the threat, i.e. never turn away from it to chase a better reverse
+  // heading — the vehicle simply backs up along whatever line the hull-toward-threat constraint allows.
+  const hullFacesThreat = Math.abs(wrapAngle(v.hullFacing - desiredHull)) <= DEG30;
+  if (!hullFacesThreat && !wheeled) { v.speed = 0; return; }
+
+  const revSpeed = speedMs * 0.6 * damageSpeedMul(v);
+  v.speed = revSpeed;
+  const distTiles = (revSpeed * dt) / TILE_M;
+  // item 022: a tank moves only along its tracks — reversing drives BACKWARD along the hull's
+  // rear axis, never a straight line to the destination. The driver shapes the course by
+  // steering the hull (turnHull above); the tracks follow where the hull points.
+  const rear = { x: -Math.sin(v.hullFacing), y: Math.cos(v.hullFacing) };
+  const next = vadd(v.pos, vscale(rear, distTiles));
+  // A fleeing vehicle never leaves the battlefield: backing past the map edge stops the hull at
+  // the border (it stands there, still facing the threat, until the 10 s cooldown cycle forces a
+  // re-engage). Without this a panic reverse could drive the tank clean off the visible map.
+  if (!inBounds(state.map, Math.floor(next.x), Math.floor(next.y))) {
+    v.speed = 0;
+    return;
+  }
+  const remaining = dist(v.pos, dest);
+  if (remaining <= distTiles && !hullBlocked(state, v, dest)) { v.pos = { ...dest }; v.speed = 0; }
+  else if (hullBlocked(state, v, next)) v.speed = 0; // reversing into another hull blocks the same
+  else v.pos = next;
+  stepOverrun(state, rng, v, wrapAngle(v.hullFacing + Math.PI));
+}
+
+
+/** Is the crew backing the vehicle out to cover right now (spec §10)? It fires on the move. */
 /** Cover uses a real route and the hull's driving axis. Large turns pivot first; smaller ones
  * drive a tightening arc. Reverse is deliberate and signed, never a sideways vector to cover. */
 function driveToCover(state: BattleState, rng: Rng, dt: number, v: Vehicle, def: VehicleDef, threatPos: Vec2, track: ReverseTrack): void {
@@ -435,6 +523,9 @@ function driveToCover(state: BattleState, rng: Rng, dt: number, v: Vehicle, def:
   const advance = Math.min(dist(v.pos, wp), speed * dt / TILE_M);
   const next = { x: v.pos.x + Math.sin(direction) * advance, y: v.pos.y - Math.cos(direction) * advance };
   if (!isPassable(state.map, Math.floor(next.x), Math.floor(next.y), 'vehicle')) { v.speed = 0; return; }
+  // item 038: the cover drive's old terrain-only check let two hulls drive into overlap — block
+  // against live hulls too (wrecks are solid but the collision step's separation handles them).
+  if (hullBlocker(state, v, next) != null) { v.speed = 0; return; }
   v.speed = track.backing ? -speed : speed;
   if (v.holdUntil != null && state.time < v.holdUntil) {
     stepOverrun(state, rng, v, direction);
@@ -464,12 +555,9 @@ function hullRadiusTiles(v: Vehicle): number {
  * from where it is now: one it already overlaps (they started too close) only blocks it from
  * closing in further, so the two can always drive apart. */
 export function vehicleBlockingAt(state: BattleState, v: Vehicle, p: Vec2): Vehicle | null {
-  const r = hullRadiusTiles(v);
   for (const o of state.vehicles.values()) {
     if (o === v) continue;
-    const gap = r + hullRadiusTiles(o);
-    const dNext = dist(o.pos, p);
-    if (dNext < gap && dNext < dist(o.pos, v.pos) - 1e-6) return o;
+    if (hullsOverlap(v, p, o) && dist(o.pos, p) < dist(o.pos, v.pos) - 1e-6) return o;
   }
   return null;
 }
@@ -563,14 +651,13 @@ function straightDrivable(state: BattleState, v: Vehicle, b: Vec2, maxCost: numb
   const a = v.pos;
   const d = dist(a, b);
   const n = Math.max(1, Math.ceil(d / 0.3));
-  const r = hullRadiusTiles(v);
-  const others = [...state.vehicles.values()].filter((o) => o !== v && dist(o.pos, a) < d + r + hullRadiusTiles(o) + 1);
+  const others = [...state.vehicles.values()].filter((o) => o !== v && dist(o.pos, a) < d + hullRadiusTiles(v) + hullRadiusTiles(o) + 2);
   for (let i = 1; i <= n; i++) {
     const p = { x: a.x + ((b.x - a.x) * i) / n, y: a.y + ((b.y - a.y) * i) / n };
     const x = Math.floor(p.x), y = Math.floor(p.y);
     if (!isPassable(state.map, x, y, 'vehicle')) return false;
     if (TERRAIN_PROPS[tileAt(state.map, x, y)].vehicleCost > maxCost) return false;
-    for (const o of others) if (dist(o.pos, p) < r + hullRadiusTiles(o) && dist(o.pos, p) < dist(o.pos, a)) return false;
+    for (const o of others) if (hullsOverlap(v, p, o) && dist(o.pos, p) < dist(o.pos, a)) return false;
   }
   return true;
 }
@@ -584,7 +671,10 @@ function pursuePath(state: BattleState, v: Vehicle, def: VehicleDef): void {
   const offBow = (p: Vec2): number => Math.abs(wrapAngle(angleTo(v.pos, p) - v.hullFacing));
   const pinned = state.teams.get(v.teamId)?.order?.waypoints ?? [];
   const isPinned = (p: Vec2): boolean => pinned.some((w) => dist(w, p) <= 1);
-  while (path.length > 1 && dist(v.pos, path[0]) < PASSED_TILES && offBow(path[0]) > Math.PI / 2 && !isPinned(path[0])) path.shift();
+  // a waypoint under the hull is reached (its bearing is meaningless that close: chasing it only
+  // spins the tank on the spot); one fallen behind is passed
+  while (path.length > 1 && (dist(v.pos, path[0]) < WAYPOINT_REACH_TILES
+    || (dist(v.pos, path[0]) < PASSED_TILES && offBow(path[0]) > Math.PI / 2 && !isPinned(path[0])))) path.shift();
   let skip = 0, maxCost = TERRAIN_PROPS[tileAt(state.map, Math.floor(v.pos.x), Math.floor(v.pos.y))].vehicleCost;
   for (let i = 0; i < path.length && dist(v.pos, path[i]) <= LOOKAHEAD_TILES; i++) {
     maxCost = Math.max(maxCost, TERRAIN_PROPS[tileAt(state.map, Math.floor(path[i].x), Math.floor(path[i].y))].vehicleCost);
@@ -598,7 +688,11 @@ function pursuePath(state: BattleState, v: Vehicle, def: VehicleDef): void {
 /** Moves `v` to `next` unless another hull is in the way (then see onHullBlocked). */
 function driveTo(state: BattleState, v: Vehicle, next: Vec2): boolean {
   const blocker = vehicleBlockingAt(state, v, next);
-  if (blocker) { onHullBlocked(state, v, blocker); return false; }
+  if (blocker) {
+    onHullBlocked(state, v, blocker); // parked on the goal: arrived; else wait, then route round
+    if (v.path.length > 0) armGiveWay(state, v, blocker); // still stuck on a parked friend: back up
+    return false;
+  }
   blockedSince.delete(v);
   v.pos = next;
   return true;
@@ -660,8 +754,8 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
   stepVehicleMinds(state, rng, dt);
   stepTransport(state, dt); // passengers boarding and leaving
   stepVehicleCrews(state, rng, dt); // hatch queues, climbs, crews going back (spec 2026-09-17 §10)
-
   stepFragmentLandings(state, rng); // heavy wreckage coming down (sim/vehicleExplosion.ts)
+  stepVehicleCollisions(state, rng, dt); // hulls block each other; rams damage (user rule)
   for (const v of state.vehicles.values()) {
     stepVehicleDamage(state, rng, v); // a crew getting out of a burning vehicle
     if (v.state === 'burning') {
@@ -669,6 +763,24 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
       stepCookOff(state, rng, v); // rounds popping, then perhaps the rest (or the fuel tank)
       // the fire lasts as long as something aboard may still blow up
       if (v.burnTimer >= BURN_TO_KO_S && !cookOffLive(v)) v.state = 'knockedOut';
+    } else if (v.engineOnFire && v.state !== 'knockedOut') {
+      // engine-deck fire (vehicleDamage.ts): burns hot for a while, then either dies out
+      // (the crew saved the tank) or escalates to the full 'burning' state.
+      v.engineFireTimer = (v.engineFireTimer ?? 0) + dt;
+      if (v.engineFireTimer >= ENGINE_FIRE_ESCALATE_S && rng.chance(dt * 0.08)) {
+        v.engineOnFire = false;
+        v.engineFireTimer = 0;
+        v.fire = { t0: state.time };
+        v.state = 'burning';
+        v.burnTimer = 0;
+        v.path = []; v.speed = 0;
+        startFireBail(state, v, state.teams.get(v.teamId));
+      } else if (v.engineFireTimer >= ENGINE_FIRE_DIE_S && rng.chance(dt * 0.05)) {
+        v.engineOnFire = false;
+        v.engineFireTimer = 0;
+        const team = state.teams.get(v.teamId);
+        if (team && team.side === state.config.playerSide) addMessage(state, `${team.name}\nEngine fire out.`, 'good');
+      }
     }
     // A burning, knocked-out or abandoned vehicle is dead weight: it never drives, and any path
     // left over from an order or a reverse-to-cover is dropped. Immobilized is NOT in this list.
@@ -731,6 +843,29 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     // a short halt for an aimed shot (sim/combat.ts): the vehicle stands, keeps its route, and
     // drives on when the round is away
     const fireHalt = v.fireHaltUntil != null && state.time < v.fireHaltUntil;
+    // item 038: hull-down creep — the tank has a laid target it can see but not reach with the
+    // gun (the crest is in the way); it creeps forward toward the aim until the gun line clears.
+    if (v.creepForGun && v.creepAim != null && canDrive && (!v.creepUntil || state.time < v.creepUntil)) {
+      const aim = v.creepAim;
+      turnHull(state, v, def, angleTo(v.pos, aim), dt);
+      const headingErr = Math.abs(wrapAngle(angleTo(v.pos, aim) - v.hullFacing));
+      const crawlMs = headingErr <= TRACK_STRAIGHT_RAD ? Math.min(0.8, def.speedOffroadMs) : 0;
+      const stepTiles = (crawlMs * dt) / TILE_M;
+      const fwd = { x: Math.sin(v.hullFacing), y: -Math.cos(v.hullFacing) };
+      const next = vadd(v.pos, vscale(fwd, stepTiles));
+      const nx = Math.floor(next.x), ny = Math.floor(next.y);
+      if (stepTiles > 0 && inBounds(map, nx, ny) && isPassable(map, nx, ny, 'vehicle') && !hullBlocked(state, v, next)) {
+        v.pos = next;
+        v.speed = crawlMs;
+      } else {
+        v.speed = 0;
+        // aligned but cannot advance (blocked or impassable ahead): give up this creep
+        if (crawlMs > 0) v.creepForGun = false;
+      }
+      continue;
+    }
+    if (v.creepForGun) { v.creepForGun = false; v.creepAim = undefined; }
+
     if (canDrive && v.path.length === 0 && !fireHalt) seekFiringSpot(state, v, def);
     if (v.path.length === 0 || !canDrive || fireHalt) {
       v.speed = 0;
@@ -775,6 +910,35 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     pursuePath(state, v, def);
     if (v.path.length === 0) { v.speed = 0; continue; }
     const wp = v.path[0];
+    // G7: intact wire blocks the tracks; tracks can force through (consuming it)
+    if (wireAt(map, wp.x, wp.y) === WIRE_INTACT) {
+      if (rng.chance(VEHICLE_BREAK_CHANCE * dt / 0.1)) {
+        consumeWire(map, Math.floor(wp.y) * map.width + Math.floor(wp.x));
+        addMessage(state, 'Wire crushed under the tracks.');
+      } else continue; // held up this step
+    }
+    // item 038 give-way: a hull blocked for too long by a parked own-side vehicle backs up
+    // briefly along its own axis, then re-approaches the route.
+    if (v.giveWayUntil != null) {
+      if (state.time < v.giveWayUntil) {
+        const spd = def.speedOffroadMs * 0.5;
+        const stepTiles = (spd * dt) / TILE_M;
+        const back = { x: -Math.sin(v.hullFacing), y: Math.cos(v.hullFacing) };
+        const next = vadd(v.pos, vscale(back, stepTiles));
+        const nx = Math.floor(next.x), ny = Math.floor(next.y);
+        if (inBounds(map, nx, ny) && isPassable(map, nx, ny, 'vehicle') && !hullBlocked(state, v, next)) {
+          v.pos = next;
+          v.speed = -spd;
+        } else {
+          v.speed = 0; // nowhere to back into: try the forward route from where it stands
+        }
+        stepOverrun(state, rng, v, wrapAngle(v.hullFacing + Math.PI));
+        continue;
+      }
+      v.giveWayUntil = undefined;
+      v.blockedSince = undefined;
+    }
+
     const desired = angleTo(v.pos, wp);
     const tx = Math.floor(v.pos.x), ty = Math.floor(v.pos.y);
     const tile = tileAt(map, tx, ty);
@@ -821,9 +985,10 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
       if (v.path.length === 1 && !driveTo(state, v, { x: wp.x, y: wp.y })) continue;
       v.path.shift();
     } else if (headingErr <= TRACK_STRAIGHT_RAD) {
-      // lined up: drive at the waypoint (the residual error is turned out as it goes)
-      const dir = vnorm(vsub(wp, v.pos));
-      if (!driveTo(state, v, vadd(v.pos, vscale(dir, distTiles)))) continue;
+      // item 022: lined up — drive along the hull axis (the residual error is turned out as it
+      // goes); never a straight line to the waypoint, tracks only go where the hull points
+      const fwd = { x: Math.sin(v.hullFacing), y: -Math.cos(v.hullFacing) };
+      if (!driveTo(state, v, vadd(v.pos, vscale(fwd, distTiles)))) continue;
     } else {
       const fwd = { x: Math.sin(v.hullFacing), y: -Math.cos(v.hullFacing) };
       const next = vadd(v.pos, vscale(fwd, distTiles));
@@ -836,6 +1001,7 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     if (props.crushable) crushTile(map, tx, ty);
     treeCrushByVehicle(map, tx, ty, def.lengthM);
     stepOverrun(state, rng, v, angleTo(v.pos, wp));
+    vehicleMineCheck(state, v, rng);
   }
 
 }
@@ -876,11 +1042,200 @@ function stepWheeledDrive(state: BattleState, rng: Rng, dt: number, v: Vehicle, 
     }
   } else {
     next = vadd(v.pos, vscale(vnorm(vsub(wp, v.pos)), Math.min(d, stepTiles)));
+    // never step off the map: at the border the hull stops (the waypoint itself is on-map)
+    if (!inBounds(map, Math.floor(next.x), Math.floor(next.y))) { v.speed = 0; return false; }
   }
   if (!driveTo(state, v, next)) return false;
   v.speed = backing ? -speedMs : speedMs;
   stepOverrun(state, rng, v, backing ? wrapAngle(v.hullFacing + Math.PI) : v.hullFacing);
   return true;
+}
+
+/** Hulls closer than this (m, centre to centre) take the ram damage roll. */
+const COLLIDE_DIST_M = 4.5;
+/** Minimum combined speed (m/s) for damage: a gentle nudge is not a ram. */
+const COLLIDE_MIN_SPEED_MS = 1.0;
+/** Hard block distance (m): below this the hulls are TOUCHING, so movement stops. Slightly under
+ * the damage threshold so a ram at speed closes through it and the damage roll still sees speed. */
+const COLLIDE_BLOCK_M = 3.5;
+const COLLIDE_COOLDOWN_S = 2;
+
+/** Hull-to-hull collision (user rule): vehicles block each other, and a ram at speed damages
+ * both — running gear and transmission first, the heavier vehicle comes off better. The faster
+ * hull is stopped dead; one rng draw stream only when a ram actually lands (guarded), cooldown
+ * stamp per pair keeps the stream order stable. */
+export function stepVehicleCollisions(state: BattleState, rng: Rng, dt: number): void {
+  void dt;
+  const list = [...state.vehicles.values()].filter((v) => v.state === 'ok' || v.state === 'immobilized');
+  for (let i = 0; i < list.length; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      const a = list[i], b = list[j];
+      const dM = dist(a.pos, b.pos) * TILE_M;
+      if (dM >= COLLIDE_DIST_M || hullGapM(a, a.pos, b) > HULL_CONTACT_M) continue; // not touching
+      // how fast the two hulls come together: each one's velocity along its own heading (signed
+      // speed: reversing counts), projected on the line between the centres. Two tanks driving
+      // side by side, or one pulling away from the other, are not closing at all.
+      const ux = (b.pos.x - a.pos.x) / (dM / TILE_M || 1), uy = (b.pos.y - a.pos.y) / (dM / TILE_M || 1);
+      const va = { x: Math.sin(a.hullFacing) * a.speed, y: -Math.cos(a.hullFacing) * a.speed };
+      const vb = { x: Math.sin(b.hullFacing) * b.speed, y: -Math.cos(b.hullFacing) * b.speed };
+      const closing = Math.max(0, (va.x - vb.x) * ux + (va.y - vb.y) * uy);
+      // hard block: the faster hull is stopped — never ride over another. Item 038: its route is
+      // kept (a hull-blocked tank waits in its lane; two tanks parked close used to cancel each
+      // other's routes every tick and never moved again).
+      const faster = Math.abs(a.speed) >= Math.abs(b.speed) ? a : b;
+      if (Math.abs(faster.speed) > 0.05) faster.speed = 0;
+      // item 038 escape: hulls inside the block radius gently separate (no damage) — the cover
+      // drive's terrain-only check can park two hulls on one spot, and a back-up cannot start
+      // from inside the other's ellipse.
+      if (hullBlocker(state, a, b.pos) != null || hullBlocker(state, b, a.pos) != null) {
+        separateHulls(state, a, b);
+      }
+      if (closing < COLLIDE_MIN_SPEED_MS) continue;
+      if (state.time - (a.lastCollideAt ?? -1e9) < COLLIDE_COOLDOWN_S
+        || state.time - (b.lastCollideAt ?? -1e9) < COLLIDE_COOLDOWN_S) continue;
+      a.lastCollideAt = state.time; b.lastCollideAt = state.time;
+      collideDamage(state, rng, a, b, closing);
+    }
+  }
+}
+
+/** Gentle deterministic separation for hulls inside each other's footprint (item 038). Each live
+ * hull moves along the line between the centres, away from the other, at up to 0.5 m/s; when one
+ * cannot move (immobilized), the other takes the whole step. Deterministic candidate directions
+ * (0, ±45, ±90, ±135 deg around the separation line) pick the first landing that clears. */
+const SEPARATE_MAX_STEP_M = 0.05;
+function separateHulls(state: BattleState, a: Vehicle, b: Vehicle): void {
+  const dx = b.pos.x - a.pos.x, dy = b.pos.y - a.pos.y;
+  const dT = Math.hypot(dx, dy) || 1e-6; // tiles
+  const ux = dx / dT, uy = dy / dT; // direction a -> b
+  const aDef = VEHICLE_DEFS[a.defId], bDef = VEHICLE_DEFS[b.defId];
+  if (!aDef || !bDef) return;
+  const relA = Math.abs(wrapAngle(Math.atan2(dx, -dy) - a.hullFacing));
+  const relB = Math.abs(wrapAngle(Math.atan2(-dx, dy) - b.hullFacing));
+  const rA = aDef.widthM / 2 + (aDef.lengthM / 2 - aDef.widthM / 2) * Math.abs(Math.cos(relA));
+  const rB = bDef.widthM / 2 + (bDef.lengthM / 2 - bDef.widthM / 2) * Math.abs(Math.cos(relB));
+  const needM = rA + rB; // required centre separation in metres
+  if (dT * TILE_M >= needM) return;
+  const aMovable = a.state === 'ok' && crewEffects(state, a).canDrive;
+  const bMovable = b.state === 'ok' && crewEffects(state, b).canDrive;
+  if (!aMovable && !bMovable) return;
+  const totalM = needM - dT * TILE_M;
+  const eachM = aMovable && bMovable ? totalM / 2 : totalM;
+  const stepEach = Math.min(SEPARATE_MAX_STEP_M, eachM) / TILE_M;
+  const stepBoth = Math.min(SEPARATE_MAX_STEP_M * 2, totalM) / TILE_M;
+  // candidate directions away from the partner (a gets -u, b gets +u): 0..90 deg rotations only,
+  const angles = [0, Math.PI / 4, -Math.PI / 4, Math.PI / 3, -Math.PI / 3, Math.PI / 2, -Math.PI / 2];
+  const tryMove = (v: Vehicle, partner: Vehicle, baseUx: number, baseUy: number, step: number) => {
+    const d0 = dist(v.pos, partner.pos);
+    for (const ang of angles) {
+      const c = Math.cos(ang), s = Math.sin(ang);
+      const mx = baseUx * c - baseUy * s, my = baseUx * s + baseUy * c;
+      const nx = v.pos.x + mx * step, ny = v.pos.y + my * step;
+      // the pair: only strict separation progress counts — inside the footprint the landing may
+      // stay inside (it separates over ticks); refusing it would freeze overlapped hulls forever
+      if (dist({ x: nx, y: ny }, partner.pos) <= d0) continue;
+      // third hulls: the landing must clear their footprint outright
+      const fx = Math.floor(nx), fy = Math.floor(ny);
+      if (!inBounds(state.map, fx, fy) || !isPassable(state.map, fx, fy, 'vehicle')) continue;
+      if (hullBlocker(state, v, { x: nx, y: ny }, partner) != null) continue;
+      v.pos = { x: nx, y: ny };
+      return true;
+    }
+    return false;
+  };
+  const movedA = aMovable ? tryMove(a, b, -ux, -uy, stepEach) : false;
+  const movedB = bMovable ? tryMove(b, a, ux, uy, stepEach) : false;
+  if (!movedA && bMovable) tryMove(b, a, ux, uy, stepBoth);
+  if (!movedB && aMovable) tryMove(a, b, -ux, -uy, stepBoth);
+}
+
+const GIVEWAY_DELAY_S = 2.5;
+const GIVEWAY_BACK_S = 1.5;
+/** Item 038 give-way: a hull blocked for GIVEWAY_DELAY_S against a parked own-side vehicle arms a
+ * short back-up so the pair can shuffle apart instead of standing nose-to-nose forever. Only live
+ * own-side hulls trigger it: a wreck never moves (re-route or hold is the only answer there) and
+ * an enemy hull is a stand-off, not traffic. */
+function armGiveWay(state: BattleState, v: Vehicle, blocker: Vehicle | null): void {
+  if (blocker == null) return;
+  if (blocker.state !== 'ok' && blocker.state !== 'immobilized') return;
+  if (Math.abs(blocker.speed) > 0.05) return; // the blocker is moving: it will clear
+  if (state.teams.get(blocker.teamId)?.side !== state.teams.get(v.teamId)?.side) return;
+  if (v.blockedSince == null) v.blockedSince = state.time;
+  else if (state.time - v.blockedSince > GIVEWAY_DELAY_S && v.giveWayUntil == null) {
+    v.giveWayUntil = state.time + GIVEWAY_BACK_S;
+    v.blockedSince = undefined;
+  }
+}
+
+/** Would moving `v` to `next` overlap another vehicle's hull FOOTPRINT (user rule: never
+ * stationed on top of each other)? Ellipse approximation: separation measured along the line
+ * between the centres must exceed the sum of the two hulls' radii in that direction (radius
+ * interpolated between half-width and half-length by the angle to the other hull). Wrecks block
+ * too — they are solid obstacles. */
+function hullBlocker(state: BattleState, v: Vehicle, next: Vec2, exclude?: Vehicle): Vehicle | null {
+  for (const o of state.vehicles.values()) {
+    if (o.id === v.id || (exclude && o.id === exclude.id)) continue;
+    if (hullsOverlap(v, next, o)) return o;
+  }
+  return null;
+}
+
+/** Would `v`, standing at `at`, overlap `o`'s hull? Each footprint is an ellipse: its radius along
+ * the line between the centres runs from half-width (side to side) to half-length (nose to tail). */
+function hullsOverlap(v: Vehicle, at: Vec2, o: Vehicle): boolean {
+  // a driver keeps clear of another hull: within contact distance counts as in the way, so only a
+  // deliberate ram (or a shove) ever brings two hulls together at speed
+  return hullGapM(v, at, o) < HULL_CONTACT_M;
+}
+
+/** Metres of clear ground between `v` (standing at `at`) and `o` along the line between their
+ * centres; negative when the footprints overlap. */
+function hullGapM(v: Vehicle, at: Vec2, o: Vehicle): number {
+  const def = VEHICLE_DEFS[v.defId], od = VEHICLE_DEFS[o.defId];
+  if (!def || !od) return Infinity;
+  const dx = (at.x - o.pos.x) * TILE_M, dy = (at.y - o.pos.y) * TILE_M;
+  const d = Math.hypot(dx, dy);
+  if (d < 1e-3) return -1;
+  const relV = Math.abs(wrapAngle(Math.atan2(dx, -dy) - v.hullFacing));
+  const relO = Math.abs(wrapAngle(Math.atan2(-dx, dy) - o.hullFacing));
+  const rV = def.widthM / 2 + (def.lengthM / 2 - def.widthM / 2) * Math.abs(Math.cos(relV));
+  const rO = od.widthM / 2 + (od.lengthM / 2 - od.widthM / 2) * Math.abs(Math.cos(relO));
+  return d - (rV + rO);
+}
+
+/** Hulls closer than this (m) are in contact: they block each other and can ram. */
+const HULL_CONTACT_M = 0.3;
+
+function hullBlocked(state: BattleState, v: Vehicle, next: Vec2): boolean {
+  return hullBlocker(state, v, next) != null;
+}
+
+/** Damage both hulls of a ram. Mass proxy (hull footprint) decides who suffers more; the systems
+ * hit are the ones geometry says would meet: tracks, transmission, engine. `worsen` returns false
+ * for an already-wrecked system, so the roll cascades to the next candidate instead of wasting. */
+function collideDamage(state: BattleState, rng: Rng, a: Vehicle, b: Vehicle, closingMs: number): void {
+  const da = VEHICLE_DEFS[a.defId], db = VEHICLE_DEFS[b.defId];
+  if (!da || !db) return;
+  const massA = da.lengthM * da.widthM, massB = db.lengthM * db.widthM;
+  // the closing speed BEFORE the block gate zeroed the hulls: that is the impact energy
+  const relativeSpeed = closingMs;
+  for (const [v, own, other] of [[a, massA, massB], [b, massB, massA]] as const) {
+    const severity = clamp((other / (own + other)) * (relativeSpeed / 8), 0, 1);
+    const targets: ('trackL' | 'trackR' | 'transmission' | 'engine')[] = ['trackL', 'trackR', 'transmission', 'engine'];
+    let done = 0;
+    for (const sys of targets) {
+      if (done >= (severity > 0.5 ? 2 : 1)) break;
+      if (!rng.chance(severity)) continue;
+      const to: 'damaged' | 'destroyed' = severity > 0.75 && rng.chance(0.4) ? 'destroyed' : 'damaged';
+      if (worsen(v, sys, to)) done++;
+    }
+    if (done > 0) {
+      v.speed = 0;
+      const team = state.teams.get(v.teamId);
+      if (team && team.side === state.config.playerSide) addMessage(state, `${team.name}\nCollision! Running gear damaged.`, 'bad');
+      state.events.push({ kind: 'armorClank', pos: { ...v.pos }, side: otherSide(v.side) });
+    }
+  }
 }
 
 // ------------------------------------------------------------------ overrun (spec 2026-09-17 §7)
@@ -1008,6 +1363,28 @@ export function stepOverrun(state: BattleState, rng: Rng, v: Vehicle, dirRad: nu
     s.dodgeUntil = state.time + 1.2;
     if (!friendly) addStress(s.mind, OVERRUN_DODGE_STRESS);
   }
+
+  // item 028: a hull rolling over an enemy crew-served gun smashes it. The gun can never fire
+  // or be re-manned; its crew are handled as men above (dodge or be run down). A friendly gun
+  // under the hull stops the vehicle like a friendly man does (holdForFriendly already fires
+  // for the crewmen) — we never crush our own gun.
+  for (const team of state.teams.values()) {
+    const cw = team.crewWeapon;
+    if (!cw || cw.destroyed || team.side === v.side) continue;
+    if (!crewServedClass(cw.weaponId)) continue;
+    if (Math.abs(cw.pos.x - v.pos.x) > reach || Math.abs(cw.pos.y - v.pos.y) > reach) continue;
+    const local = hullLocalM(v, dirRad, cw.pos);
+    if (Math.abs(local.x) > halfW || Math.abs(local.y) > halfL) continue;
+    cw.destroyed = true;
+    cw.abandoned = true;
+    cw.mission = undefined;
+    cw.workers = {};
+    cw.open = [];
+    const t = state.teams.get(v.teamId);
+    const gun = state.teams.get(team.id);
+    if (team.side === state.config.playerSide) addMessage(state, `${gun?.name ?? 'Report'}\nOur gun was run over and smashed!`, 'bad');
+    else addMessage(state, `${t?.name ?? 'Report'}\nEnemy gun run over and smashed.`, 'good');
+  }
 }
 
 
@@ -1074,3 +1451,6 @@ function stepOverrunLookahead(state: BattleState, rng: Rng, v: Vehicle, def: Veh
     addStress(s.mind, OVERRUN_DODGE_STRESS);
   }
 }
+
+
+

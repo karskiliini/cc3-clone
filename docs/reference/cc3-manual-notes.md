@@ -372,3 +372,90 @@ Different terrain provides varying concealment and protection:
 ---
 
 **Manual Coverage**: This summary captures approximately 90-95% of the original user manual, covering all major gameplay mechanics, unit descriptions, battle interface, command systems, and strategic/tactical information. Some historical context paragraphs and advanced customization features may not be fully detailed, but all core gameplay elements are documented.
+
+## Manual deep dive (2026-09-22, artifact://1059 full text vs the notes above)
+
+Load-bearing rules the sections above did not capture:
+
+### Input card (back cover)
+- Z=Move, X=Move Fast, C=Sneak, V=Fire, B=Smoke, N=Defend, M=Ambush. SPACEBAR shows command
+  radii; arrows scroll; ESC quits without saving; F3/PAUSE pause; F5 team monitor, F6 inset map,
+  F7 soldier monitor, F8 options; right-click during aiming cancels the order line before the dot.
+- CTRL+number saves a group to that number; CTRL+K killed/incapacitated, CTRL+T trees,
+  CTRL+S sound, CTRL+M music, CTRL+V video toggles.
+- Web-build deliverability: every bound key preventDefaults against its browser default
+  (arrows/space/tab, F-keys, Ctrl+S/T/K/M/V, Ctrl+number) — F3/F5/F6/F7/F8 and the Ctrl chords
+  are cancelled and reach the game. **Exception: CTRL+T is reserved by Chrome/Firefox at the
+  browser level (new tab) — the keydown never reaches the page, so tree display has no live
+  binding in a web build** (the handler exists and fires under any shell that captures keys
+  first, e.g. a native/fullscreen wrapper). Everything else on the input card is deliverable.
+
+### Fire model constants
+- Targeting-dot kill bands: green 100–60 %, yellow 59–30 %, red 29–10 %, black 9–0 %.
+- Indirect lines: brown = no LOS (low accuracy), orange = clear LOS (high accuracy). Mortar/rocket
+  teams draw orange/brown, never red/green; out of rounds they fall back to the direct palette.
+- LOS is per-soldier (each man individually); partial-team fire is expected ("if only one soldier
+  begins shooting, he is probably the only one with a clear line of sight").
+- Small-arms fire suppresses crews into buttoned-up hatches → worse spotting; open-topped vehicles
+  (Marder) are extra vulnerable to close infantry. Ambush stops ongoing firing and holds until
+  the enemy is within 30 m.
+
+### Movement / tanks
+- Move = reverse when retreating (front armour to the enemy); Move Fast turns the hull (rear
+  exposed). A moving tank is harder to hit but fires less accurately.
+- Fatigue: Move Fast tires much faster; heavy-weapon teams (mortars, MG, flamethrower) fatigue on
+  movement and lose effectiveness; break long moves into waypoint segments.
+- Orders can be REFUSED (low morale / under fire); right-click any soldier issues to the whole
+  team; arrival defaults: Sneak→Ambush, Move→Defend.
+- Deployment: only one initial order per team (Move may carry waypoints); a second order or
+  redeploy cancels the first; illegal drops snap back; group-drag keeps relative positions, and
+  teams that would land off-map do not move.
+
+### Command / morale / scoring
+- Rank adds a team slot (e.g. lieutenant→captain: 13→14 teams; cap 15) AND raises scoring
+  expectations. Battle score = base (highest at lowest rank) + force strength + casualties + land
+  gained; tournament score = battle score × realism factor. Expected-VL arrows: took = expected ±N
+  (N = deviation, 3 expected/2 took → one down arrow).
+- Campaign win = more total promotion points at the end; promotion points are awarded per
+  operation; the Debriefing shows the running total and the points to the next rank.
+- SPACEBAR command radii; troops outside any radius degrade. Morale improves from successful
+  ambushes and tank kills; panic spreads between neighbouring teams; keep away from corpse fields.
+
+### Battle end / prisoners
+- Truce needs BOTH sides; if one side then holds every VL on the map, it wins. Flee = immediate
+  end, enemy takes the whole map; you can also flee by moving every team off the left/right edge.
+- Own surrendered men can be recovered by reaching them before they exit; a soldier may rejoin
+  his group without encouragement given time; commander proximity helps.
+
+### Operations / editor (thin sections, now noted)
+- Operation structure: ≤5 maps per operation, game length ≤15 days; day requisition points accrue
+  every day regardless of advance; map requisition points only when advancing to the next map;
+  deployment zones are editable only on the FIRST map — later maps inherit the previous battle's
+  outcome territory.
+- End-of-map victory: German/Russian Offensive needs the winner to hold ≥80 % of victory
+  locations; Meeting Engagement 50 % each. Editor bounds: 1–8 victory locations per map.
+- Artillery barrage: German 150 mm fire is accurate; Russian Katyushas cluster but are much less
+  accurate; up to four target coordinates; more targets = more dispersed; barrages can destroy
+  buildings and tanks.
+- Requisition: year/season filters the force pool (Summer 1942 excludes Tiger and IS-3);
+  "Restrict Players to Historical Rarity" toggle; ammo levels Full/80/60 % with heavier loads
+  slowing movement; realism options are set per side (rating = checkbox count).
+
+### Unit tactics
+- Snipers: cannot capture or hold victory locations; prefer shooting leaders; may refuse a shot
+  that would reveal their position.
+- Flamethrower: <50 m range; one rifle bullet can destroy the unit; its death explodes and can
+  kill nearby troops. AT teams: engage tanks from <100 m, ideally side/rear; effective vs enemy AT
+  guns too (gun shields stop small arms only).
+- Mortars: useless at close range; rounds can burst in treetops; space multiple mortar teams far
+  apart to frustrate counterfire; out-of-ammo teams become infantry.
+- Cover taxonomy: light (tall grass/bushes: concealment, no protection), medium (trees/crests/
+  embankments: frontal protection only), heavy (buildings/foxholes: multi-angle protection).
+- Assault doctrine: suppress 30–60 s before the assault; one mortar smokes while the other keeps
+  suppressing. Tanks cannot flatten buildings (track/gun barrel/cellar risk) but may fell trees.
+- Between battles: refit, add units, or rest teams for later refit; requisition points can be
+  saved across battles. Surviving units keep experience; wiped-out non-command teams are gone
+  for the operation.
+
+Scope nuance: the notes say AT teams move to the highest floor; the manual says teams "other than
+AT guns" — an equipment-class exclusion, not a team-type one.

@@ -178,6 +178,22 @@ export const forest_1944: MapDef = {
     german: { x: 50, y: 58, w: 28, h: 28 },
     soviet: { x: 132, y: 58, w: 28, h: 28 },
   },
+  // COA overlays (G21): Bagration walks two columns through the trees to the bridge and the
+  // ford with fires from the clearing edge; the German crossing garrison holds both banks and
+  // counterattacks armour up from the hunting lodge.
+  coa: {
+    stages: ['Overwatch', 'Wood clearing', 'Reduce strongpoint', 'Bridge or ford', 'Assault crossing'],
+    german: [
+      { pts: [{ x: 72, y: 46 }, { x: 100, y: 52 }], kind: 'defenses' },
+      { pts: [{ x: 74, y: 108 }, { x: 96, y: 116 }], kind: 'defenses' },
+      { pts: [{ x: 46, y: 46 }, { x: 76, y: 56 }, { x: 100, y: 55 }], kind: 'armor' },
+    ],
+    soviet: [
+      { pts: [{ x: 146, y: 74 }, { x: 124, y: 62 }, { x: 104, y: 54 }], kind: 'assault' },
+      { pts: [{ x: 150, y: 90 }, { x: 122, y: 110 }, { x: 98, y: 117 }], kind: 'armor' },
+      { pts: [{ x: 162, y: 64 }, { x: 104, y: 55 }], kind: 'firesupport' },
+    ],
+  },
   decor,
   vectors,
 };

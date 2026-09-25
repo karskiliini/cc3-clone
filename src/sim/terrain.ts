@@ -24,7 +24,7 @@ export const TERRAIN_PROPS: Record<Terrain, TerrainProps> = {
   scatteredtrees: props({ cover: 0.25, concealment: 0.3, infantryCost: 1.3, vehicleCost: 2.5 }),
   buildingWood: props({ cover: 0.6, concealment: 0.7, blocksLOS: true, infantryCost: 1.5, vehicleCost: Infinity }),
   buildingStone: props({ cover: 0.85, concealment: 0.7, blocksLOS: true, infantryCost: 3, vehicleCost: Infinity }),
-  floor: props({ cover: 0.5, concealment: 0.6, blocksLOS: false, infantryCost: 1.1, vehicleCost: Infinity }),
+  floor: props({ cover: 0.5, concealment: 0.85, blocksLOS: false, infantryCost: 1.1, vehicleCost: Infinity }),
   rubble: props({ cover: 0.5, concealment: 0.4, infantryCost: 1.8, vehicleCost: 3 }),
   stonewall: props({ cover: 0.7, concealment: 0.3, blocksLOS: true, infantryCost: 2.5, vehicleCost: Infinity }),
   hedge: props({ cover: 0.3, concealment: 0.6, blocksLOS: false, infantryCost: 2, vehicleCost: 3, crushable: true }),

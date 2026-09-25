@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Battle } from '@/sim/battle';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BattleScreen } from '@/ui/screens/battle';
+import { Battle } from '@/sim/battle';
 import { createInput } from '@/engine/input';
 import { game } from '@/game';
 
@@ -10,7 +10,7 @@ let events: EventTarget;
 
 beforeEach(() => {
   events = new EventTarget();
-  vi.stubGlobal('window', events);
+  (globalThis as { window?: EventTarget }).window = events; // bun:test's vi shim lacks stubGlobal
   game.settings.showUnitVision = false;
   game.settings.showDepthMap = false;
   game.cam = { x: 0, y: 0, zoom: 1 };
@@ -18,7 +18,7 @@ beforeEach(() => {
 afterEach(() => {
   game.settings = { ...settings };
   game.cam = { ...camera };
-  vi.unstubAllGlobals();
+  delete (globalThis as { window?: unknown }).window;
 });
 
 function event(type: string, props: Record<string, unknown> = {}) {

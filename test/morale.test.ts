@@ -315,6 +315,58 @@ describe('status vocabulary (round5 critique #9)', () => {
     stepMorale(state, rng, 0.1);
     expect(team.status).toBe('Moving');
   });
+  it('a firing team under recent incoming fire reads "Returning Fire" (vision review round6)', () => {
+    const state = makeState();
+    const rng = new Rng(1);
+    const team = state.teams.get(1)!;
+    for (const s of state.soldiers.values()) {
+      s.activity = 'firing';
+      s.mind.lastIncomingAt = state.time - 2; // took incoming fire moments ago
+    }
+    stepMorale(state, rng, 0.1);
+    expect(team.status).toBe('Returning Fire');
+  });
+
+  it('a firing team with no recent incoming fire keeps "Firing"', () => {
+    const state = makeState();
+    const rng = new Rng(1);
+    const team = state.teams.get(1)!;
+    for (const s of state.soldiers.values()) {
+      s.activity = 'firing';
+      s.mind.lastIncomingAt = state.time - 30;
+    }
+    stepMorale(state, rng, 0.1);
+    expect(team.status).toBe('Firing');
+  });
+
+  it('a Fire-order team that sees something in range but is not engaging reads "Not Firing"', () => {
+    const state = makeState();
+    const rng = new Rng(1);
+    const team = state.teams.get(1)!;
+    team.order = { type: 'fire', target: { x: 9, y: 9 }, issuedAt: 0 };
+    for (const s of state.soldiers.values()) {
+      s.activity = 'idle';
+      s.mind.beliefs = [{ pos: { x: 7, y: 5 }, count: 2, confidence: 0.9, kind: 'seen', time: 0, deadSeen: 0 }];
+    }
+    stepMorale(state, rng, 0.1);
+    expect(team.status).toBe('Not Firing');
+  });
+
+  it('a Fire-order team with no visible target within weapon range keeps "Can\'t See"', () => {
+    const state = makeState();
+    const rng = new Rng(1);
+    const team = state.teams.get(1)!;
+    team.order = { type: 'fire', target: { x: 9, y: 9 }, issuedAt: 0 };
+    // belief present but far beyond the Kar98k's 400 m: 30 tiles = 60 m at TILE_M 2... so park it
+    // beyond the believable sight: drop confidence instead (beyond-sight beliefs are still in
+    // range for rifles, so the range gate alone cannot distinguish here)
+    for (const s of state.soldiers.values()) {
+      s.activity = 'idle';
+      s.mind.beliefs = [{ pos: { x: 35, y: 5 }, count: 2, confidence: 0.2, kind: 'fired', time: 0, deadSeen: 0 }];
+    }
+    stepMorale(state, rng, 0.1);
+    expect(team.status).toBe("Can't See");
+  });
 });
 
 describe('vehicle gun status words', () => {
@@ -352,5 +404,35 @@ describe('vehicle gun status words', () => {
     // halted again (stale crew activity): the gun word is back
     v.path = []; v.speed = 0;
     expect(word()).toBe('Loading');
+  });
+});
+
+describe('prisoner capture messages (G17)', () => {
+  it('an enemy surrender reports to the player as a capture; own surrender reports as a loss', () => {
+    const state = makeState();
+    // enemy soldier in a soviet team, broken + surrounded + out of ammo
+    const enemy = makeSoldier(9, 2, { side: 'soviet', ammo: 0, ammoReserve: 0, morale: 10 });
+    enemy.mind.state = 'broken';
+    enemy.mind.surrounded = true;
+    const eteam: Team = { ...state.teams.get(1)!, id: 2, side: 'soviet', name: 'Rifle Squad B', soldierIds: [9], leaderId: 9 };
+    state.teams.set(2, eteam);
+    state.soldiers.set(9, enemy);
+
+    stepMorale(state, new Rng(1), 0.1);
+    expect(enemy.activity).toBe('surrendered');
+    const good = state.messages.find((m) => m.text.includes('surrenders to your forces'));
+    expect(good).toBeDefined();
+
+    // own side: broken man surrenders — bad news
+    state.messages.length = 0;
+    for (const id of [1, 2, 3]) {
+      const s = state.soldiers.get(id)!;
+      s.ammo = 0; s.ammoReserve = 0; s.morale = 5;
+      s.mind.state = 'broken'; s.mind.surrounded = true;
+    }
+    stepMorale(state, new Rng(1), 0.1);
+    expect(state.soldiers.get(1)!.activity).toBe('surrendered');
+    const bad = state.messages.find((m) => m.text.includes('surrenders.'));
+    expect(bad).toBeDefined();
   });
 });

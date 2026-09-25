@@ -182,6 +182,22 @@ export const berlin_1945: MapDef = {
     soviet: { x: 127, y: 65, w: 28, h: 28 },
     german: { x: 37, y: 65, w: 28, h: 28 },
   },
+  // COA overlays (G21): assault groups fight street by street for the Ministry with armour at
+  // the platz and fires from the east; the Germans hold the western barricade line and the
+  // ministry block, reserve armour rolling down from the north.
+  coa: {
+    stages: ['Overwatch', 'Rubble crossing', 'Reduce strongpoints', 'Assault ministry', 'Consolidate'],
+    german: [
+      { pts: [{ x: 58, y: 82 }, { x: 44, y: 98 }, { x: 34, y: 130 }], kind: 'defenses' },
+      { pts: [{ x: 92, y: 46 }, { x: 112, y: 48 }, { x: 118, y: 58 }], kind: 'defenses' },
+      { pts: [{ x: 64, y: 30 }, { x: 86, y: 44 }, { x: 102, y: 50 }], kind: 'armor' },
+    ],
+    soviet: [
+      { pts: [{ x: 142, y: 80 }, { x: 120, y: 62 }, { x: 108, y: 54 }], kind: 'assault' },
+      { pts: [{ x: 146, y: 92 }, { x: 133, y: 70 }, { x: 129, y: 64 }], kind: 'armor' },
+      { pts: [{ x: 156, y: 62 }, { x: 110, y: 52 }], kind: 'firesupport' },
+    ],
+  },
   decor,
   vectors,
 };

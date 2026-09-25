@@ -11,6 +11,7 @@
 import type { BattleState, GameMap, Terrain, Vec2 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import { VEHICLE_DEFS } from '@/data/units';
+import { dist } from '@/shared/math';
 
 export const GROWTH_RES = 4; // samples per tile edge (0.5 m), same grid as the height field
 export const GROWTH_HEIGHT_M: Partial<Record<Terrain, number>> = { tallgrass: 1.0, crops: 1.2 };
@@ -145,13 +146,20 @@ export function stepGrowth(state: BattleState): void {
     const hx = Math.sin(v.hullFacing) * (len / 2 / TILE_M), hy = -Math.cos(v.hullFacing) * (len / 2 / TILE_M);
     const tA = map.tiles[Math.floor(v.pos.y + hy) * map.width + Math.floor(v.pos.x + hx)];
     const tB = map.tiles[Math.floor(v.pos.y - hy) * map.width + Math.floor(v.pos.x - hx)];
+    // G8: vehicles on snow or mud leave persistent track ruts (render-only marks)
+    if (t === 'snow' || t === 'mud' || tA === 'snow' || tA === 'mud' || tB === 'snow' || tB === 'mud') {
+      const marks = map.craterMarks ??= [];
+      const m = { x: v.pos.x, y: v.pos.y, sizeM: wid + TRACK_WIDTH_M * 2, kind: 'track' as const };
+      // one rut stamp per ~1.5 m of travel, not per step
+      if (!marks.some((k) => k.kind === 'track' && dist(k, m) < 1.5)) marks.push(m);
+    }
     if (!GROWTH_HEIGHT_M[t] && !GROWTH_HEIGHT_M[tA] && !GROWTH_HEIGHT_M[tB]) continue;
     flattenUnderVehicle(map, v.pos, v.hullFacing, len, wid);
   }
   const marks = map.craterMarks;
   if (marks && marks.length) {
-    f = getGrowth(map);
-    for (let k = f.marksApplied; k < marks.length; k++) flattenByBlast(map, marks[k], marks[k].sizeM);
-    f.marksApplied = marks.length;
+    const g = getGrowth(map);
+    for (let k = g.marksApplied; k < marks.length; k++) if (marks[k].kind !== 'track') flattenByBlast(map, marks[k], marks[k].sizeM);
+    g.marksApplied = marks.length;
   }
 }

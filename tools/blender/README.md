@@ -9,7 +9,6 @@ following the atlas contract in `docs/superpowers/specs/2026-09-17-soldier-anima
 | `common.py` | shared scene: ortho camera tilted 12° toward screen-north, sun az 315°/el 45° + sky fill, transparent film, shadow catcher, 2× supersample + downsample, `render_cell` / `render_grid`, `AtlasPacker` (PNG + JSON). API documented in its docstring. |
 | `kit.py` | reusable kit models (weapons, helmets, packs, crew props) – the same builders feed the soldier figure and the ground items. |
 | `soldiers.py` | the infantryman rig, all poses/animations, soldier atlases and body-part atlases. |
-| `smg.py` | supplementary SMG aimed/hip firing poses, with independent upper-body aim and planted legs. |
 | `items.py` | ground items atlas (`items_<scale>`). |
 | `contact_sheet.py` | contact sheets over the game's painted grass/snow (plain python3 + Pillow). |
 | `vehicles.py`, `vehicles_common.py` | tanks and vehicles (per-vehicle atlases, see below); `vehicles_common.py` also serves `weapons.py` (crew weapons). |
@@ -28,8 +27,6 @@ blender -b -P tools/blender/soldiers.py -- --side german --season summer --scale
 blender -b -P tools/blender/soldiers.py -- --kind parts --side soviet         # only the parts atlases
 blender -b -P tools/blender/soldiers.py -- --pack-only                        # re-pack atlases from the cache
 blender -b -P tools/blender/soldiers.py -- --list                             # print entry keys + frame counts
-blender -b -P tools/blender/smg.py -- --jobs 2                                # all 8 supplementary SMG atlases
-blender -b -P tools/blender/smg.py -- --check-poses                           # verify planted legs + barrel headings
 ```
 
 `--only` takes comma separated fnmatch patterns or key prefixes and re-renders just those entries,

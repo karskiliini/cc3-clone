@@ -14,7 +14,7 @@ export function hitRect(p: Vec2, r: Rect): boolean {
 
 /** Sets ctx.font/textBaseline for HUD text. Uses real system fonts (Arial/
  * Helvetica/sans-serif), per the brief — the bitmap font is not used here. */
-export type HudFontKind = 'label' | 'map' | 'small' | 'tiny';
+export type HudFontKind = 'label' | 'map' | 'small' | 'tiny' | 'micro' | 'mini' | 'scale';
 export function setHudFont(ctx: CanvasRenderingContext2D, kind: HudFontKind = 'label'): void {
   switch (kind) {
     case 'map':
@@ -25,6 +25,15 @@ export function setHudFont(ctx: CanvasRenderingContext2D, kind: HudFontKind = 'l
       break;
     case 'tiny':
       ctx.font = 'bold 9px Arial, Helvetica, sans-serif';
+      break;
+    case 'micro':
+      ctx.font = 'bold 7px Arial, Helvetica, sans-serif';
+      break;
+    case 'mini':
+      ctx.font = 'bold 6px Arial, Helvetica, sans-serif';
+      break;
+    case 'scale':
+      ctx.font = '4px Arial, Helvetica, sans-serif';
       break;
     default:
       ctx.font = 'bold 11px Arial, Helvetica, sans-serif';
@@ -110,10 +119,10 @@ export function fitHudText(
   }
 }
 
-/** Team name-bar colour: driven by team state first (dead/broken -> dark
- * red, suppressed/panicking -> yellow), falling back to a role colour for
- * teams that are otherwise fine — command teams read cyan/teal in the
- * original regardless of activity, everyone else green. */
+/** Team name-bar colour: driven by team state (dead/broken -> dark red,
+ * suppressed/panicking -> yellow, per the morale ramp) — the original paints
+ * every healthy team's bar the same bright green, command teams included
+ * (refs11 "Group Leader", refs12). No role-colour fallback. */
 export function teamBarColor(team: Team): string {
   switch (team.status) {
     case 'Destroyed':
@@ -130,7 +139,6 @@ export function teamBarColor(team: Team): string {
     default:
       break;
   }
-  if (team.type === 'command') return HUD.cyan;
   return HUD.green;
 }
 
@@ -139,6 +147,10 @@ export function teamStatusTextColor(word: TeamStatusWord): string {
   switch (word) {
     case 'Firing':
     case 'Cowering': // shown as 'Seeking Cover'
+    // movement words: the original paints these sage green too (refs13: 'Moving'
+    // under the green bar reads green, same as Firing)
+    case 'Moving':
+    case 'Moving Fast':
       return HUD.statusGreen;
     case 'Pinned':
     case 'Stunned': // most of the team knocked down / dazed by a blast (sim/daze.ts)
@@ -172,6 +184,15 @@ export function teamStatusLabel(word: TeamStatusWord): string {
   return STATUS_DISPLAY[word] ?? word;
 }
 
+/** Team names as the original shows them in the strip/grid/messages: caliber
+ * AFTER the type with a dash ("Mortar-82mm", "AT Gun-45mm" — refs11 strip),
+ * while our unit defs read historically ("82mm Mortar"). Purely presentational
+ * reorder; the sim keeps its def names. */
+export function teamDisplayName(name: string): string {
+  const m = /^([\d.]+)\s*(cm|mm)\s+(.+)$/.exec(name);
+  return m ? `${m[3]}-${m[1]}${m[2]}` : name;
+}
+
 function triangle(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number, dir: 'up' | 'down', color: string): void {
   ctx.fillStyle = color;
   ctx.beginPath();
@@ -201,13 +222,14 @@ export function drawHudScrollArrows(ctx: CanvasRenderingContext2D, r: Rect, upHo
 
 // ----------------------------------------------------------------- icons ---
 /** Uniform tone per team type for the otherwise-monochrome grid/glyph icons
- * (infantry read khaki/olive, vehicles read steel-blue, command reads cyan)
+ * (infantry read khaki/olive, vehicles read steel-blue — the refs11/12 icons are
+ * all khaki-toned figures, the command officer included)
  * — applied as a colour tint over the icon's opaque pixels only. */
 const ICON_TINT: Record<string, string> = {
   rifle: '#9a9a6a', smg: '#9a9a6a', mg: '#9a9a6a', mortar: '#9a9a6a',
   atgun: '#9a9a6a', sniper: '#9a9a6a', atteam: '#9a9a6a', engineer: '#9a9a6a',
   tank: '#7a8fa8', spg: '#7a8fa8', halftrack: '#7a8fa8',
-  command: HUD.cyan,
+  command: '#9a9a6a',
 };
 
 const tintCache = new WeakMap<HTMLCanvasElement, Map<string, HTMLCanvasElement>>();

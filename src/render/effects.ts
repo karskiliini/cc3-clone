@@ -16,6 +16,7 @@ import { tileAt } from '@/sim/map';
 import type { Terrain } from '@/shared/types';
 
 // ------------------------------------------------------------------- flashes
+
 /** Soldier atlases are viewed twelve degrees away from vertical, at ten pixels per metre. */
 const MUZZLE_HEIGHT_PX_PER_M = Math.sin(12 * Math.PI / 180) * 10;
 
@@ -87,9 +88,41 @@ function drawTracers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     let color = '#ffe08a';
     let width = 2;
     let coreColor: string | null = null;
-    if (t.kind === 'mg') { color = '#ffd070'; width = 2.5; }
+    if (t.kind === 'flame') { color = '#ff9030'; width = 5; coreColor = '#ffe8a0'; }
+    else if (t.kind === 'mg') { color = '#ffd070'; width = 2.5; }
     else if (t.kind === 'shell') { color = '#ffb060'; width = 3; coreColor = '#fff6d0'; }
+    else if (t.kind === 'rocket') { color = '#cfc9bb'; width = 5; coreColor = '#ffb060'; }
     if (t.deflected) { color = '#ff9850'; width = 1.5; coreColor = null; }
+    // vision review round6: the original's small-arms tracers are thin RED-ORANGE dotted arcs,
+    // not pale-yellow streaks — only the shells keep the solid streak look.
+    if (t.kind === 'bullet' || t.kind === 'mg') {
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.setLineDash([3 * cam.zoom, 5 * cam.zoom]);
+      ctx.strokeStyle = 'rgba(40,18,4,0.4)';
+      ctx.lineWidth = 3;
+      ctx.globalAlpha = fadeOut;
+      ctx.beginPath();
+      ctx.moveTo(hx, hy);
+      ctx.lineTo(tbx, tby);
+      ctx.stroke();
+      ctx.setLineDash([2 * cam.zoom, 6 * cam.zoom]);
+      ctx.strokeStyle = t.kind === 'mg' ? '#ff5a1e' : '#ff7a30';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(hx, hy);
+      ctx.lineTo(tbx, tby);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // bright leading dot at the round's front
+      ctx.fillStyle = '#ffcf9a';
+      ctx.globalAlpha = fadeOut;
+      ctx.beginPath();
+      ctx.arc(hx, hy, 1.6 * cam.zoom, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      continue;
+    }
     ctx.save();
     ctx.lineCap = 'round';
     // wf19: a thin dark under-stroke so the streak keeps its edge on bright grass and snow
@@ -531,11 +564,11 @@ export function drawEffects(ctx: CanvasRenderingContext2D, cam: Camera, state: B
   drawStructureFx(ctx, cam, state);
   drawExplosions(ctx, cam, state);
   drawFires(ctx, cam, state);
-  drawSparks(ctx, cam, state);
   drawProjectiles(ctx, cam, state);
   drawTracers(ctx, cam, state);
   drawVegetationImpacts(ctx, cam, state);
   drawFlashes(ctx, cam, state);
+  drawSparks(ctx, cam, state);
 
   ctx.restore();
 }

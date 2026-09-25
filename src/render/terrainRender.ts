@@ -120,7 +120,7 @@ const SUMMER_CROPS_RAMP = ['#86660f', '#9e7b16', '#b48e1e', '#c8a128', '#d8b234'
 const RUBBLE_RAMP = ['#6e675c', '#7a7266', '#847c70', '#8a8276'];
 // Summer grass patch ramps (same dark->light positions as the grass ramp so the fine/clump
 // texture carries straight across a patch edge): warm ochre dry-grass and darker brown earth.
-const SUMMER_OCHRE_PATCH: RGB[] = [[112, 98, 40], [130, 114, 48], [148, 130, 58], [164, 146, 70], [180, 162, 86]].map(([r, g, b]) => ({ r, g, b }));
+const SUMMER_OCHRE_PATCH: RGB[] = [[90, 78, 32], [104, 91, 38], [118, 104, 46], [131, 117, 56], [144, 130, 69]].map(([r, g, b]) => ({ r, g, b }));
 const SPECKLE_BROWN: RGB = { r: 94, g: 66, b: 34 }; // ~#6a4a24 warm dirt
 const SPECKLE_OCHRE: RGB = { r: 140, g: 114, b: 54 }; // ~#9a7a38 dry grass
 const SUMMER_BROWN_PATCH: RGB[] = [[88, 76, 40], [102, 88, 46], [116, 100, 54], [130, 114, 64], [144, 128, 76]].map(([r, g, b]) => ({ r, g, b }));
@@ -139,8 +139,8 @@ const LOCAL_RAMPS: Partial<Record<Season, Partial<Record<Terrain, string[]>>>> =
     // wf18: sunlit late-summer meadow — a mid olive-green (G a touch above R), ~18% brighter than
     // the round-5 brown-olive. The warmth now comes from stamped straw tufts, dry patches and
     // bare-earth scuffs (see the mark layers in paintGroundAndFeatures), not from the base tone.
-    grass: ['#4a501a', '#5a611f', '#6a6f24', '#7d7c2a', '#939036'],
-    tallgrass: ['#4c5823', '#5c6829', '#6e7831', '#80883b'],
+    grass: ['#584a17', '#6a561b', '#785e20', '#83641f', '#8d6c25'],
+    tallgrass: ['#5a5218', '#6a601d', '#786c23', '#867a2b'],
     crops: SUMMER_CROPS_RAMP,
     mud: MUD_RAMP,
     dirtroad: SUMMER_ROAD_RAMP,
@@ -632,6 +632,8 @@ const CROP_PITCH = 3.6;
 const CROP_STRAW_LIGHT: RGB = { r: 236, g: 206, b: 112 };
 const CROP_STUBBLE: RGB = { r: 184, g: 164, b: 100 };
 const CROP_TRACK_EARTH: RGB = { r: 112, g: 88, b: 44 };
+/** individual plant dot colour inside a crop row (ref: rows of separate plants over bare earth) */
+const CROP_PLANT: RGB = { r: 152, g: 150, b: 62 };
 const GRASS_TUFTS = (seed: number): TuftStyle => ({
   cell: 3.4, seed: seed + 9201, minLen: 1.5, maxLen: 3.9, minAspect: 0.35, maxAspect: 0.75, crisp: 2.4,
   amp: 0.2, flat: 0.5, lightFrac: 0.5, warmFrac: 0.22, coolFrac: 0.22, tint: 0.34,
@@ -979,7 +981,7 @@ function paintGroundAndFeatures(
               const tri = 1 - Math.abs(2 * ph - 1);                       // 0 furrow .. 1 ridge top
               const dab = valueNoise(along / 5.5 + ri * 17.3, ri * 0.61, wobSeed + 5);
               const flank = (0.5 - ph) * (cosT - sinT >= 0 ? 1 : -1);     // + on the NW-facing flank
-              let rowShade = (tri - 0.5) * 0.3 + flank * 0.16 + (dab - 0.5) * 0.3 + 0.02;
+              let rowShade = (tri - 0.5) * 0.14 + flank * 0.1 + (dab - 0.5) * 0.3 + 0.02;
               color2 = cropBase;
               // tramlines: paired wheel tracks every ~90 px across the rows, in ~60% of the slots
               const slot = Math.floor(perp / 92), pm = perp - slot * 92;
@@ -1004,6 +1006,16 @@ function paintGroundAndFeatures(
               }
               color2 = shade(color2, rowShade);
               if (rowShade > 0.1) color2 = lerpRGB(color2, CROP_STRAW_LIGHT, (rowShade - 0.1) * 1.4);
+              // individual plants: a short bright dot inside each row segment — the reference's
+              // fields read as rows of separate plants with bare earth between them, not as
+              // continuous ridge/furrow bands
+              {
+                const ps = along / 4.0;
+                const pi = Math.floor(ps), pp = ps - pi;
+                const jig = hash2(pi, ri, wobSeed + 9);
+                const plantAmt = smooth01(pp, 0.05, 0.8) * (0.4 + 0.6 * jig);
+                color2 = lerpRGB(color2, CROP_PLANT, plantAmt * 0.65);
+              }
               // mown margin: short pale stubble with only a ghost of the rows, then the dark
               // standing edge of the crop just inside it
               if (cropEdge < 0.61) {
@@ -2733,6 +2745,9 @@ function paintLineVector(ctx: CanvasRenderingContext2D, v: MapVectorFeature, x0:
 
 // ============================================================================
 export class TerrainRenderer {
+  /** CTRL+T (manual input card): hide tree canopies so units under them are
+   * plainly visible. The toggle is a battle-view readability aid, not a map edit. */
+  showTrees = true;
   private map: GameMap;
   private seed: number;
   private chunksX: number;
@@ -3336,17 +3351,19 @@ export class TerrainRenderer {
     // edge right at the seam (round-3 critique #1's "trees near a boundary" case). paintTrees is
     // a pure function of (wx,wy) via hash2, so redrawing the same source tile from both chunks
     // reproduces the identical tree in both, harmlessly clipped by each canvas's own bounds.
-    for (let ty = -1; ty <= CHUNK_TILES; ty++) {
-      const wy = y0 + ty;
-      if (wy < 0 || wy >= map.height) continue;
-      for (let tx = -1; tx <= CHUNK_TILES; tx++) {
-        const wx = x0 + tx;
-        if (wx < 0 || wx >= map.width) continue;
-        paintTrees(ctx, map, wx, wy, tx * TILE_PX, ty * TILE_PX, season, this.seed, zoom);
+    if (this.showTrees) {
+      for (let ty = -1; ty <= CHUNK_TILES; ty++) {
+        const wy = y0 + ty;
+        if (wy < 0 || wy >= map.height) continue;
+        for (let tx = -1; tx <= CHUNK_TILES; tx++) {
+          const wx = x0 + tx;
+          if (wx < 0 || wx >= map.width) continue;
+          paintTrees(ctx, map, wx, wy, tx * TILE_PX, ty * TILE_PX, season, this.seed, zoom);
+        }
       }
-    }
 
-    paintWoodsChunk(ctx, map, x0, y0, season, this.seed, zoom);
+      paintWoodsChunk(ctx, map, x0, y0, season, this.seed, zoom);
+    }
 
 
     // ------------------------------------------------------------ decor
@@ -3470,7 +3487,7 @@ export class TerrainRenderer {
   }
 
   private drawDecor(ctx: CanvasRenderingContext2D, x0: number, y0: number): void {
-    const decor = this.map.def.decor;
+    const decor = this.map.decor ?? this.map.def.decor;
     if (!decor || !decor.length) return;
     for (const d of decor) {
       if (d.kind === 'shellhole' || d.kind === 'foxhole') continue; // earthwork pass
@@ -3623,7 +3640,11 @@ export class TerrainRenderer {
           if (other) { otherZoomChunk = other.canvas; break; }
         }
         if (otherZoomChunk) {
+          // Placeholder blits run while the real bake catches up. Smoothing them keeps a
+          // scrolled-in view soft (a blur) instead of a 10x nearest-neighbour block mosaic.
+          ctx.imageSmoothingEnabled = true;
           ctx.drawImage(otherZoomChunk, left, top, dw, dh);
+          ctx.imageSmoothingEnabled = false;
         } else {
           const sx = cx * CHUNK_TILES * LOWRES_PX_PER_TILE;
           const sy = cy * CHUNK_TILES * LOWRES_PX_PER_TILE;
@@ -3632,7 +3653,11 @@ export class TerrainRenderer {
           const sh = Math.min(full, lowRes.height - sy);
           // partial edge chunks: scale the destination by the same fraction so the low-res map
           // isn't stretched over the whole chunk rect
-          if (sw > 0 && sh > 0) ctx.drawImage(lowRes, sx, sy, sw, sh, left, top, dw * (sw / full), dh * (sh / full));
+          if (sw > 0 && sh > 0) {
+            ctx.imageSmoothingEnabled = true;
+            ctx.drawImage(lowRes, sx, sy, sw, sh, left, top, dw * (sw / full), dh * (sh / full));
+            ctx.imageSmoothingEnabled = false;
+          }
         }
       }
     }

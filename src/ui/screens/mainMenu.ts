@@ -4,7 +4,9 @@ import { drawMetalButton, drawLabel, UI } from '@/ui/chrome';
 import { pointInRect } from '@/shared/math';
 import { drawMenuFrame, toMenuInput } from './common';
 import { BattleSetupScreen } from './battleSetup';
+import { BootCampScreen } from './bootCampPicker';
 import { OperationScreen } from './operation';
+import { HistoryScreen } from './history';
 import { OptionsScreen } from './options';
 
 interface MenuButtonSpec {
@@ -16,12 +18,14 @@ interface MenuButtonSpec {
 const BTN_W = 310;
 const BTN_H = 50;
 
-/** The title screen: three banner buttons stepped down across the fire glow, as in CC3. */
+/** The title screen: banner buttons stepped down across the fire glow, as in CC3. */
 export class MainMenuScreen implements Screen {
   private buttons: MenuButtonSpec[] = [
-    { label: 'Play A Game', rect: { x: 414, y: 170, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new BattleSetupScreen()) },
-    { label: 'Operation', rect: { x: 438, y: 262, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OperationScreen()) },
-    { label: 'Options', rect: { x: 462, y: 354, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OptionsScreen(this, false)) },
+    { label: 'Play A Game', rect: { x: 402, y: 150, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new BattleSetupScreen()) },
+    { label: 'Boot Camp (Training)', rect: { x: 418, y: 222, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new BootCampScreen()) },
+    { label: 'Operation', rect: { x: 434, y: 294, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OperationScreen()) },
+    { label: 'History', rect: { x: 450, y: 366, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new HistoryScreen()) },
+    { label: 'Options', rect: { x: 466, y: 438, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OptionsScreen(this, false)) },
   ];
   private hotIndex = -1;
 

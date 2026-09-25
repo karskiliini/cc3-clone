@@ -1,4 +1,4 @@
-import type { Screen, GameSettings, OperationState, BattleConfig } from '@/shared/types';
+import type { Screen, GameSettings, OperationState, BattleConfig, CampaignState } from '@/shared/types';
 import type { Battle } from '@/sim/battle';
 import type { Sfx } from '@/audio/sfx';
 import { createCamera } from '@/engine/camera';
@@ -45,6 +45,8 @@ export class Game {
   cam = createCamera();
   audio?: Sfx;
   operation: OperationState | null = null;
+  /** persistent campaign roster (G1); filled by the requisition screen, folded after battles */
+  campaign: CampaignState | null = null;
   battleConfig: BattleConfig | null = null;
   battle: Battle | null = null;
 

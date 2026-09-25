@@ -1,5 +1,6 @@
-import type { CursorKind, InputState, OrderType, Screen, Side, Team, Vec2 } from '@/shared/types';
+import type { CursorKind, GameSettings, InputState, BattleState, OrderType, Rect, Screen, Side, Team, Vec2, Camera } from '@/shared/types';
 import { ORDER_DOT_COLOR, ORDER_HOTKEYS, ORDER_TYPES, TILE_PX, VIEW_H, VIEW_W, otherSide } from '@/shared/types';
+import { COMMAND_RADIUS_TILES } from '@/sim/command';
 import { game } from '@/game';
 import type { Battle } from '@/sim/battle';
 import { teamCanFire, teamHasSmoke } from '@/sim/team';
@@ -13,9 +14,9 @@ import { drawUnits } from '@/render/unitRender';
 import { drawEffects } from '@/render/effects';
 import { VisibilityOverlay } from '@/render/visibilityOverlay';
 import { DepthOverlay } from '@/render/depthOverlay';
-import { pickOrderMarker } from '@/render/orderMarkers';
-import { GAME_SPEEDS, cycleTeamKey, handleDepthMapKey, handleSpeedKey, offsetOrderPoints } from './viewKeys';
-import { hitRect } from '@/ui/hud/hudChrome';
+import { pickOrderMarker, drawOrderBall } from '@/render/orderMarkers';
+import { GAME_SPEEDS, cycleTeamKey, handleDepthMapKey, handleSpeedKey, offsetOrderPoints, reissueOrderOnMarkerDrag } from './viewKeys';
+import { hitRect, setHudFont } from '@/ui/hud/hudChrome';
 import { drawLOSLine } from '@/ui/losTool';
 import { elevationTextAt } from '@/ui/elevationReadout';
 import { HOVER_TONE_COLOR, drawPointerReadout, hoverInfoAt, type HoverInfo, type ReadoutLine } from '@/ui/hoverInfo';
@@ -24,21 +25,23 @@ import { BlastFx } from '@/render/blastFx';
 import { transportAt } from '@/sim/transport';
 import { isRemountTarget } from '@/sim/vehicleCrew';
 import { drawText, textWidth } from '@/render/pixelfont';
+import { MainMenuScreen } from '@/ui/screens/mainMenu';
 import { drawTargetHighlight, targetCursorKind, targetStatusText, targetableEnemyAt, teamObserver, type TargetHover } from '@/ui/targetHover';
 import { TeamGrid } from '@/ui/hud/teamGrid';
 import { CombatMessages } from '@/ui/hud/combatMessages';
+import { teamSmokeMinRangeM, drawAimRangeFeedback } from '@/ui/losTool';
+import { aimLineProfile, aimPointClass } from '@/sim/losProfile';
 import { BottomStrip } from '@/ui/hud/bottomStrip';
 import { SoldierMonitorPopup } from '@/ui/hud/soldierMonitor';
 import { Minimap } from '@/ui/hud/minimap';
 import { drawHudBase } from '@/ui/hud/hudChrome';
 import { CommandMenu } from '@/ui/commandMenu';
-import { OrderBar } from '@/ui/hud/orderBar';
-import { ControlGroupBar } from '@/ui/hud/controlGroupBar';
 import { ControlGroups, controlGroupKeyAction } from '@/ui/controlGroups';
+import { ControlGroupBar } from '@/ui/hud/controlGroupBar';
 import { drawTextCentered, FONT_BIG_H } from '@/render/pixelfont';
 import { PALETTE } from '@/render/palette';
 import {
-  updateCameraEdgeScrollAndKeys, makeEdgeScrollState, pickFriendlyTeamScreen,
+  updateCameraEdgeScrollAndKeys, makeEdgeScrollState, pickFriendlyTeamScreen, friendlyCentroid,
   makeDragPanState, updateModernDragPan, type EdgeScrollState, type DragPanState,
 } from './battleInput';
 import { DebriefScreen } from './debrief';
@@ -53,11 +56,11 @@ const DOUBLE_CLICK_MS = 350;
 const HOVER_RING_R = 14;
 const FLEE_CONFIRM_MS = 2000;
 
-/** Big gold word on a 60%-black box, centred in the map viewport — used for
- * the PAUSED overlay and the end-of-battle result word. */
+/** Big gold word on a small 60%-black box, centred in the map viewport — used for
+ * the PAUSED overlay and the end-of-battle result word. CC3 shows no whole-view dim
+ * for the pause: the banner alone marks it, and a full-view fill made every paused
+ * frame measure a fake global ×0.65 tint against reference frames. */
 function drawCenteredOverlayBanner(ctx: CanvasRenderingContext2D, word: string): void {
-  ctx.fillStyle = 'rgba(0,0,0,0.35)';
-  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   const boxW = 200;
   const boxH = 24;
   const boxX = Math.round(VIEW_W / 2 - boxW / 2);
@@ -88,6 +91,19 @@ interface LeftDrag {
   moved: number;
 }
 
+/** Press on an order endpoint marker starts dragging that marker; on release the
+ * marker's order is re-issued at the drop point (waypoints cleared — a drag
+ * redefines the endpoint, keeping the order type). */
+interface MarkerDrag {
+  teamId: number;
+  kind: 'target' | 'waypoint';
+  index: number;
+  orderType: OrderType;
+  startX: number;
+  startY: number;
+  moved: number;
+}
+
 export class BattleScreen implements Screen {
   private battle: Battle;
   private terrain: TerrainRenderer;
@@ -95,10 +111,9 @@ export class BattleScreen implements Screen {
   private combatMessages = new CombatMessages();
   private bottomStrip = new BottomStrip('battle');
   private soldierMonitor = new SoldierMonitorPopup();
-  private minimap = new Minimap();
   private commandMenu = new CommandMenu();
-  private orderBar = new OrderBar();
   private controlGroupBar = new ControlGroupBar();
+  private minimap = new Minimap();
   private controlGroups = new ControlGroups();
   private visionOverlay = new VisibilityOverlay();
   private depthOverlay = new DepthOverlay();
@@ -108,6 +123,9 @@ export class BattleScreen implements Screen {
   private hoveredOrderMarker: { teamId: number; kind: 'target' | 'waypoint'; index: number } | null = null;
   private selectedTeamId: number | null = null;
   private selectedTeamIds: number[] = [];
+  /** How many teams the player currently has selected (boot camp reads this to
+   * teach lesson 1's "select your rifle team" step). */
+  get selectionCount(): number { return this.selectedTeamIds.length; }
   private pendingOrder: OrderType | null = null;
   /** Fire order pending and the pointer is over an enemy team that can be targeted right now. */
   private targetHover: TargetHover | null = null;
@@ -116,8 +134,11 @@ export class BattleScreen implements Screen {
   /** Move-type order pending over a vehicle a selected team can board: a transport with room, or
    * the crew's own abandoned vehicle. */
   private mountHover: { pos: Vec2; halfM: number; label: string } | null = null;
+  private markerDrag: MarkerDrag | null = null;
   private pendingWaypoints: Vec2[] = [];
   private paused = false;
+  /** countdown to the next camera-proximity wounded moan (battle.ts audio sweep) */
+  private moanTimer = 2;
   /** Real seconds elapsed since the battle ended, driving the debrief transition below — must be
    * wall-clock dt, not state.time, since the sim stops advancing state.time once phase !== 'running'. */
   private endedElapsed = 0;
@@ -137,6 +158,13 @@ export class BattleScreen implements Screen {
   private showMinimap = true;
   private showSoldierMonitor = true;
   private showDead = true;
+  /** SPACEBAR (manual input card): overlay circles around every operational
+   * command team showing its radio range; teams outside any radius fight and
+   * recover morale degraded (command.ts). */
+  private showCommandRadii = false;
+  /** ESC (manual input card): quit the current battle without saving. Non-null
+   * shows the confirm modal and freezes the sim. */
+  private quitConfirm: 'yes' | 'no' | null = null;
 
   /** `terrain` is the deploy screen's renderer, handed over so its baked chunks carry into battle
    * instead of re-baking the whole map on Begin. */
@@ -153,8 +181,8 @@ export class BattleScreen implements Screen {
     if (this.entered) return;
     this.entered = true;
     const map = this.battle.state.map;
-    const zone = map.def.deployZones[this.battle.playerSide()];
-    centerCamera(game.cam, { x: zone.x + zone.w / 2, y: zone.y + zone.h / 2 });
+    const centroid = friendlyCentroid(this.battle.state, this.battle.playerSide());
+    centerCamera(game.cam, centroid);
     clampCamera(game.cam, map.width, map.height);
   }
 
@@ -240,6 +268,11 @@ export class BattleScreen implements Screen {
     const state = battle.state;
     const cam = game.cam;
 
+    if (this.quitConfirm) {
+      this.updateQuitConfirm(input);
+      return;
+    }
+
     if (!this.paused && state.phase === 'running') {
       battle.step(dt * game.settings.speed);
     }
@@ -286,6 +319,9 @@ export class BattleScreen implements Screen {
     // onto a row/release gesture); pressing elsewhere starts a pan-or-click
     // gesture resolved on release; right-clicking again while the menu is
     // open closes it (so does Escape, handled below).
+    // While an order is being placed (manual input card: "Right-click mouse:
+    // Cancel an order line without placing the order dot"), the right press
+    // cancels the aiming line instead of opening the menu or panning.
     for (const c of input.clicks) {
       if (c.button !== 2) continue;
       if (this.commandMenu.isOpen) {
@@ -293,10 +329,17 @@ export class BattleScreen implements Screen {
         continue;
       }
       if (this.overHud({ x: c.x, y: c.y })) continue;
+      if (this.pendingOrder) {
+        this.pendingOrder = null;
+        this.pendingWaypoints = [];
+        continue;
+      }
       const hitTeam = pickFriendlyTeamScreen(state, cam, { x: c.x, y: c.y }, battle.playerSide());
       this.rightDrag = { active: true, startX: c.x, startY: c.y, lastX: c.x, lastY: c.y, moved: 0, startTime: state.time, menuOpenedOnPress: false };
       if (hitTeam) {
-        this.setSelection([hitTeam.id]);
+        // The original issues a right-click order to the WHOLE current selection; only an
+        // unselected team re-targets the menu. Pressing a selected member keeps the group intact.
+        if (!this.selectedTeamIds.includes(hitTeam.id)) this.setSelection([hitTeam.id]);
         this.commandMenu.open({ x: c.x, y: c.y }, hitTeam, {
           canSmoke: teamHasSmoke(state, hitTeam),
           canFire: teamCanFire(state, hitTeam),
@@ -346,8 +389,12 @@ export class BattleScreen implements Screen {
     }
 
     if (input.keysPressed.has('escape')) {
-      if (this.commandMenu.isOpen) this.commandMenu.close();
-      else { this.pendingOrder = null; this.pendingWaypoints = []; }
+      if (this.quitConfirm) { this.quitConfirm = null; }
+      else if (this.commandMenu.isOpen) this.commandMenu.close();
+      else if (this.pendingOrder) { this.pendingOrder = null; this.pendingWaypoints = []; }
+      // deploy/running both count as "the battle" (manual: ESC quits the current
+      // battle without saving); ended falls through — the debrief is imminent.
+      else if (state.phase !== 'ended') this.quitConfirm = 'no';
     }
 
     // left mouse: press starts a potential drag (box-select), release decides
@@ -361,6 +408,12 @@ export class BattleScreen implements Screen {
       if (c.button === 0 && !this.overHud({ x: c.x, y: c.y }) && !this.commandMenu.isOpen && !menuWasOpen && !modernPanning) {
         const marker = !this.pendingOrder ? pickOrderMarker(state, cam, { x: c.x, y: c.y }, battle.playerSide()) : null;
         if (marker) {
+          // press on a marker: drag it (user request — drag-n-drop the bubble), also select the team
+          const team = state.teams.get(marker.teamId);
+          const orderType = team?.order?.type;
+          if (team && orderType) {
+            this.markerDrag = { teamId: marker.teamId, kind: marker.kind, index: marker.index, orderType, startX: c.x, startY: c.y, moved: 0 };
+          }
           // clicking a marker selects its team (Shift adds) — no deselect, no marquee
           if (input.keysDown.has('shift')) this.addToSelection([marker.teamId]); else this.setSelection([marker.teamId]);
           continue;
@@ -371,8 +424,29 @@ export class BattleScreen implements Screen {
     if (this.leftDrag.active && input.buttons.left && !modernPanning) {
       this.leftDrag.moved = Math.max(this.leftDrag.moved, Math.hypot(input.mouse.x - this.leftDrag.startX, input.mouse.y - this.leftDrag.startY));
     }
+    if (this.markerDrag && input.buttons.left && !modernPanning) {
+      this.markerDrag.moved = Math.max(this.markerDrag.moved, Math.hypot(input.mouse.x - this.markerDrag.startX, input.mouse.y - this.markerDrag.startY));
+    }
     for (const r of input.releases) {
-      if (r.button !== 0 || !this.leftDrag.active) continue;
+      if (r.button !== 0) continue;
+      // Marker drag-n-drop: release re-issues the dragged order at the drop point.
+      if (this.markerDrag) {
+        const drag = this.markerDrag;
+        this.markerDrag = null;
+        if (!this.overHud({ x: r.x, y: r.y }) && drag.moved >= DRAG_THRESHOLD_PX) {
+          const world = screenToWorld(cam, { x: r.x, y: r.y });
+          const team = state.teams.get(drag.teamId);
+          // Item 017: dragging the ENDPOINT edits only the final leg — earlier Shift-click
+          // waypoints survive. Dragging a WAYPOINT dot rewrites that point in place.
+          const reissue = team ? reissueOrderOnMarkerDrag(team.order, drag, world) : null;
+          if (reissue) {
+            battle.issueOrder(drag.teamId, { ...reissue, issuedAt: state.time });
+            game.audio?.play('click');
+          }
+        }
+        continue;
+      }
+      if (!this.leftDrag.active) continue;
       // Ending on HUD (bottom panel, minimap, soldier monitor) abandons the gesture untouched.
       if (this.overHud({ x: r.x, y: r.y })) {
         this.leftDrag.active = false;
@@ -471,16 +545,6 @@ export class BattleScreen implements Screen {
       }
     }
 
-    // Order bar: a modern, no-right-click-required way to pick an order —
-    // same order set/colours/hotkeys as the classic menu.
-    const orderBarResult = this.orderBar.update(input, { enabled: this.selectedTeamIds.length > 0, pending: this.pendingOrder });
-    if (orderBarResult === 'cancel') {
-      this.pendingOrder = null;
-      this.pendingWaypoints = [];
-    } else if (orderBarResult) {
-      this.pendingOrder = orderBarResult;
-      this.pendingWaypoints = [];
-    }
 
     // Shift release commits the last placed point, after processing any final click and
     // cancellation in this frame. The pointer's current position is not another waypoint.
@@ -543,28 +607,27 @@ export class BattleScreen implements Screen {
     const selTeamForMonitor = this.selectedTeamId != null ? state.teams.get(this.selectedTeamId) ?? null : null;
     if (this.showSoldierMonitor) this.soldierMonitor.update(input, state, selTeamForMonitor);
 
-    if (this.fleeArmedUntil !== 0 && performance.now() >= this.fleeArmedUntil) this.fleeArmedUntil = 0;
-    this.bottomStrip.setFleeArmed(this.fleeArmedUntil !== 0);
+    const now = performance.now();
+    if (this.fleeArmedUntil !== 0 && now >= this.fleeArmedUntil) this.fleeArmedUntil = 0;
     const action = this.bottomStrip.update(input);
+    this.bottomStrip.setFleeArmed(this.fleeArmedUntil !== 0);
     // Hand cursor only over real controls: a hot bottom-strip button, a filled (actionable) team
-    // box, an order-bar button, or the minimap — not the whole bottom panel.
+    // box, an order-bar button, a control-group tile, or the minimap — not the whole bottom panel.
     const roster = this.rosterTeams(battle.playerSide());
     const gridHover = this.teamGrid['hoverIndex'];
     const m = input.mouse;
     const r = this.minimap.rect;
     this.hudHover = !this.commandMenu.isOpen && (
       this.bottomStrip['hover'].size > 0
-      || (this.showTeamGrid && gridHover >= 0 && gridHover < roster.length && !roster[gridHover].outOfAction)
-      || this.orderBar.isHovering()
       || this.controlGroupBar.isHovering()
       || (this.showMinimap && m.x >= r.x && m.x < r.x + r.w && m.y >= r.y && m.y < r.y + r.h));
     if (action === 'truce') {
-      battle.offerTruce(battle.playerSide());
+      // Truce button: accept a standing enemy offer, otherwise offer/withdraw our own
+      battle.pressTruce(battle.playerSide());
     } else if (action === 'flee') {
       // Per the manual, Flee ends the battle immediately with the enemy taking the map — it is
       // not a per-team retreat order. Two-step: the first click arms it for 2 s so an overshoot
       // from the adjacent order bar can't forfeit the battle.
-      const now = performance.now();
       if (now < this.fleeArmedUntil) {
         this.fleeArmedUntil = 0;
         flee(state, battle.playerSide());
@@ -593,8 +656,18 @@ export class BattleScreen implements Screen {
     if (input.keysPressed.has('f7')) this.showSoldierMonitor = !this.showSoldierMonitor;
     if (input.keysPressed.has('f8')) { game.setScreen(new OptionsScreen(this, true)); return; }
     if (input.keysDown.has('control') && input.keysPressed.has('k')) this.showDead = !this.showDead;
+    if (input.keysDown.has('control') && input.keysPressed.has('t')) {
+      this.terrain.showTrees = !this.terrain.showTrees;
+      addMessage(state, `Trees ${this.terrain.showTrees ? 'shown' : 'hidden'}`, 'info');
+    }
+    if (input.keysDown.has('control') && input.keysPressed.has('s') && game.audio) {
+      game.audio.setMuted(!game.audio.isMuted());
+      addMessage(state, `Sound ${game.audio.isMuted() ? 'off' : 'on'}`, 'info');
+    }
 
-    if (input.keysPressed.has(' ')) this.paused = !this.paused;
+    // SPACEBAR (manual input card): show each command radius. Pause stays on
+    // F3/PAUSE; space no longer toggles it.
+    if (input.keysPressed.has(' ')) this.showCommandRadii = !this.showCommandRadii;
     if (input.keysPressed.has('+') || input.keysPressed.has('=')) {
       const idx = GAME_SPEEDS.indexOf(game.settings.speed);
       game.settings.speed = GAME_SPEEDS[Math.min(GAME_SPEEDS.length - 1, idx + 1)];
@@ -603,6 +676,14 @@ export class BattleScreen implements Screen {
       const idx = GAME_SPEEDS.indexOf(game.settings.speed);
       game.settings.speed = GAME_SPEEDS[Math.max(0, idx - 1)];
     }
+    if (input.keysPressed.has('i')) {
+      const modes: NonNullable<GameSettings['infoBarMode']>[] = ['morale', 'experience', 'name', 'cover'];
+      const cur = game.settings.infoBarMode ?? 'morale';
+      game.settings.infoBarMode = modes[(modes.indexOf(cur) + 1) % modes.length];
+      addMessage(state, `Info bar: ${game.settings.infoBarMode}`, 'info');
+      game.saveSettings();
+    }
+
     if (input.keysPressed.has('l')) {
       if (input.keysDown.has('shift')) {
         game.settings.unitLabels = !game.settings.unitLabels;
@@ -644,7 +725,51 @@ export class BattleScreen implements Screen {
       }),
       cam,
     );
+
+    // wounded men moan when the camera is near (user: audible men are findable) — a slow
+    // sweep so a dozen casualties do not become a chorus; one moan at most per pass.
+    this.moanTimer -= dt;
+    if (this.moanTimer <= 0 && !this.paused && state.phase === 'running') {
+      this.moanTimer = 3 + Math.random() * 3;
+      let best: { d: number; pos: Vec2 } | null = null;
+      for (const s of state.soldiers.values()) {
+        if (s.health !== 'wounded' || s.side !== battle.playerSide()) continue;
+        const d = Math.hypot(s.pos.x - cam.x, s.pos.y - cam.y);
+        if (d <= 12 && (!best || d < best.d)) best = { d, pos: s.pos };
+      }
+      if (best) game.audio?.play('moan', Math.max(0.15, 1 - best.d / 12));
+    }
   }
+
+  /** SPACEBAR overlay (manual input card): a gold dashed circle around every
+   * operational command team, at its radio range. Teams outside every radius
+   * fight degraded (command.ts). Legend echoes the toggle so the mode is
+   * obvious. */
+  private drawCommandRadii(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
+    const px = TILE_PX * cam.zoom;
+    const r = COMMAND_RADIUS_TILES * px;
+    const side = this.battle.playerSide();
+    let any = false;
+    for (const t of state.teams.values()) {
+      if (t.side !== side || t.type !== 'command' || t.outOfAction) continue;
+      const cmd = state.soldiers.get(t.leaderId);
+      if (!cmd || cmd.health === 'dead' || cmd.health === 'incapacitated') continue;
+      const c = worldToScreen(cam, cmd.pos);
+      ctx.strokeStyle = 'rgba(240,216,64,0.55)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([7, 5]);
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      any = true;
+    }
+    if (any) {
+      const label = 'Command radii (SPACEBAR)';
+      drawText(ctx, label, VIEW_W - 10 - textWidth(label, 'small'), VIEW_H - 36, '#f0d840');
+    }
+  }
+
 
   draw(ctx: CanvasRenderingContext2D): void {
     const battle = this.battle;
@@ -662,12 +787,15 @@ export class BattleScreen implements Screen {
     if (shake.x || shake.y) ctx.translate(shake.x, shake.y);
     this.terrain.draw(ctx, cam);
     this.terrain.drawOverlays(ctx, cam, state);
+    if (this.showCommandRadii) this.drawCommandRadii(ctx, cam, state);
     if (game.settings.showDepthMap) this.depthOverlay.draw(ctx, cam);
     else if (game.settings.showUnitVision ?? true) this.visionOverlay.draw(ctx, cam, state, this.selectedTeamIds);
     // tall growth: flattened wakes under the units, standing blades over their lower edges
     this.grassFx.update(state, battle.playerSide());
     if (!game.settings.showDepthMap) this.grassFx.drawTrails(ctx, cam);
-    drawUnits(ctx, cam, state, battle.playerSide(), this.selectedTeamIds, game.settings, this.showDead, this.hoveredOrderMarker, this.hoverTeamId);
+    drawUnits(ctx, cam, state, battle.playerSide(), this.selectedTeamIds, game.settings, this.showDead, this.hoveredOrderMarker, this.hoverTeamId, this.soldierMonitor.watchedSoldierId());
+    // The original's drag feel: the dragged marker's ball follows the cursor while held.
+    if (this.markerDrag) drawOrderBall(ctx, game.input.state.mouse, 3.2 * 1.4);
     this.grassFx.drawStanding(ctx, cam, state, battle.playerSide());
     drawEffects(ctx, cam, state);
     this.blastFx.draw(ctx, cam, state.time);
@@ -693,6 +821,18 @@ export class BattleScreen implements Screen {
       }
     }
 
+    // Range feedback while aiming without LOS lines: the manual's range indicator is how the
+    // player knows a Fire/Smoke target is in range at all, so with lines off we still draw the
+    // cursor label (no line) for the selected team.
+    if (aimingFire && selTeam && !(game.settings.losLines ?? true)) {
+      const to = screenToWorld(cam, game.input.state.mouse);
+      const obs = teamObserver(state, selTeam);
+      if (obs) {
+        const prof = aimLineProfile(state.map, obs.from, to, { eyeM: obs.eyeM });
+        drawAimRangeFeedback(ctx, cam, obs.from, to, state, selTeam, this.pendingOrder, aimPointClass(prof), !!this.targetHover);
+      }
+    }
+
     // Aiming line, like the original: while a Fire or Smoke order is being placed, the line from
     // each selected team to the pointer is coloured by what that team can actually see along it
     // (bright green clear, dark green obscured, red blocked). No key needs to be held.
@@ -707,7 +847,8 @@ export class BattleScreen implements Screen {
         if (!obs) continue;
         const { from, eyeM } = obs;
         drawLOSLine(ctx, cam, state.map, from, to, { state, team: t }, { eyeM },
-          { label: primary, alpha: primary ? 1 : 0.6, fireOrder: this.pendingOrder === 'fire', bigCursor: !!this.targetHover });
+          { label: primary, alpha: primary ? 1 : 0.6, fireOrder: this.pendingOrder === 'fire', bigCursor: !!this.targetHover,
+            minRangeM: this.pendingOrder === 'smoke' ? teamSmokeMinRangeM(state, t) : null });
       }
     }
 
@@ -735,13 +876,50 @@ export class BattleScreen implements Screen {
     // hover ring: a subtle highlight under the friendly team the pointer is over
     if (this.hoverTeamId != null && this.hoverTeamId !== this.selectedTeamId) {
       const hoverTeam = state.teams.get(this.hoverTeamId);
+      const selectedHover = this.hoverTeamId === this.selectedTeamId;
       if (hoverTeam) {
         const p = worldToScreen(cam, hoverTeam.pos);
-        ctx.strokeStyle = 'rgba(255,255,255,0.45)';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, HOVER_RING_R, 0, Math.PI * 2);
-        ctx.stroke();
+        // item 029: hovering a tank shows where it is actually going (its sim path) and what
+        // it is shooting at — the order line only covers issued orders, not the pending hull path.
+        if (hoverTeam.vehicleId != null) {
+          const veh = state.vehicles.get(hoverTeam.vehicleId);
+          if (veh && veh.path.length > 0) {
+            const pts = [veh.pos, ...veh.path].map((w) => worldToScreen(cam, w));
+            ctx.strokeStyle = '#9af09a'; // distinct from the blue order line it often parallels
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 3]);
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(pts[0].x, pts[0].y);
+            for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            const end = pts[pts.length - 1];
+            ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+            ctx.beginPath();
+            ctx.arc(end.x, end.y, 3, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+          const atkV = veh?.targetVehicleId != null ? state.vehicles.get(veh.targetVehicleId) : undefined;
+          const atkS = veh?.targetSoldierId != null ? state.soldiers.get(veh.targetSoldierId) : undefined;
+          const atkPos = atkV?.pos ?? (atkS && atkS.health !== 'dead' ? atkS.pos : undefined);
+          if (veh && atkPos) {
+            const q = worldToScreen(cam, atkPos);
+            ctx.strokeStyle = 'rgba(255,120,90,0.75)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(q.x, q.y);
+            ctx.stroke();
+          }
+        }
+        if (!selectedHover) {
+          ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, HOVER_RING_R, 0, Math.PI * 2);
+          ctx.stroke();
+        }
       }
     }
 
@@ -774,6 +952,20 @@ export class BattleScreen implements Screen {
       drawPointerReadout(ctx, cam, mouse, lines, { bigCursor: !!this.targetHover, hover: this.hoverInfo });
     }
 
+    // Battle clock: the original shows a red HH:MM.S timer dead-centre at the top of the map
+    // view (ref e06 ~"09:37.6" / "15:00.0"). Drawn here so the visibility overlay and unit art
+    // never cover it.
+    {
+      const mm = Math.floor(state.time / 60);
+      const ss = state.time - mm * 60;
+      const text = `${String(mm).padStart(2, '0')}:${ss < 10 ? '0' : ''}${ss.toFixed(1)}`;
+      setHudFont(ctx, 'map');
+      ctx.fillStyle = '#d81c1c';
+      ctx.textAlign = 'center';
+      ctx.fillText(text, VIEW_W / 2, 4);
+      ctx.textAlign = 'left';
+    }
+
     ctx.restore();
 
     // Minimap and soldier monitor sit over the map viewport itself.
@@ -783,11 +975,11 @@ export class BattleScreen implements Screen {
     drawHudBase(ctx);
     if (this.showTeamGrid) this.teamGrid.draw(ctx, this.rosterTeams(battle.playerSide()), state, this.selectedTeamIds);
     this.combatMessages.draw(ctx, state);
-    this.bottomStrip.draw(ctx, state, selTeam);
+    this.bottomStrip.draw(ctx, state, selTeam, this.soldierMonitor.watchedSoldierForTeam(state, selTeam));
     this.controlGroupBar.draw(ctx, this.controlGroups.slots(this.selectedTeamIds));
-    this.orderBar.draw(ctx, { enabled: this.selectedTeamIds.length > 0, pending: this.pendingOrder });
 
     if (this.commandMenu.isOpen) this.commandMenu.draw(ctx);
+    if (this.quitConfirm) this.drawQuitConfirm(ctx);
 
     if (this.paused) {
       drawCenteredOverlayBanner(ctx, 'PAUSED');
@@ -795,6 +987,61 @@ export class BattleScreen implements Screen {
     if (state.phase === 'ended') {
       const word = (state.result ?? 'draw').toUpperCase();
       drawCenteredOverlayBanner(ctx, word);
+    }
+  }
+
+
+  private quitConfirmRects(): { yes: Rect; no: Rect } {
+    const w = 300;
+    const x = (VIEW_W - w) / 2;
+    const y = VIEW_H / 2 - 44;
+    return {
+      yes: { x: x + 24, y: y + 54, w: 118, h: 30 },
+      no: { x: x + 158, y: y + 54, w: 118, h: 30 },
+    };
+  }
+
+  private updateQuitConfirm(input: InputState): void {
+    const r = this.quitConfirmRects();
+    for (const c of input.clicks) {
+      if (c.button !== 0) continue;
+      if (hitRect({ x: c.x, y: c.y }, r.yes)) { this.doQuit(); return; }
+      if (hitRect({ x: c.x, y: c.y }, r.no)) { this.quitConfirm = null; return; }
+    }
+    if (input.keysPressed.has('y')) { this.doQuit(); return; }
+    if (input.keysPressed.has('n') || input.keysPressed.has('escape')) this.quitConfirm = null;
+  }
+
+  /** ESC quit (manual input card): the battle is abandoned without a save and
+   * without a debrief — casualties, results and the chronicle are not recorded.
+   * The operation keeps its current battle index, so the player can re-fight it
+   * from Continue Operation, exactly like the original's quit without saving. */
+  private doQuit(): void {
+    game.audio?.play('click');
+    game.setScreen(new MainMenuScreen());
+  }
+
+  private drawQuitConfirm(ctx: CanvasRenderingContext2D): void {
+    const w = 300;
+    const x = (VIEW_W - w) / 2;
+    const y = VIEW_H / 2 - 44;
+    ctx.fillStyle = 'rgba(6,8,4,0.78)';
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    ctx.fillStyle = '#14110c';
+    ctx.fillRect(x, y, w, 96);
+    ctx.strokeStyle = '#c8a028';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x + 1.5, y + 1.5, w - 3, 96 - 3);
+    drawTextCentered(ctx, 'QUIT CURRENT BATTLE', x + w / 2, y + 20, '#f0d840');
+    drawTextCentered(ctx, 'WITHOUT SAVING?', x + w / 2, y + 36, '#f0d840');
+    const r = this.quitConfirmRects();
+    for (const [rect, label, hot] of [[r.yes, 'YES', this.quitConfirm === 'yes'], [r.no, 'NO', this.quitConfirm === 'no']] as const) {
+      ctx.fillStyle = hot ? '#5a2020' : '#2a2018';
+      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      ctx.strokeStyle = hot ? '#f0d840' : '#8a7848';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
+      drawTextCentered(ctx, label, rect.x + rect.w / 2, rect.y + 19, '#f0e8d8');
     }
   }
 

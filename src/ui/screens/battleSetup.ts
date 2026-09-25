@@ -63,6 +63,10 @@ class BattleRequisitionScreen implements Screen {
         ...this.cfgBase,
         forces: { [this.picker.side]: [...this.picker.rosterIds], [this.enemySide]: this.enemyForces } as Record<Side, string[]>,
       };
+      // a custom battle is not part of a running operation: its debrief must not advance
+      // the operation (Operation → Continue reloads it from storage)
+      game.operation = null;
+      game.campaign = null;
       game.battleConfig = cfg;
       game.battle = new Battle(cfg);
       game.setScreen(new DeployScreen(game.battle));
@@ -81,10 +85,12 @@ class BattleRequisitionScreen implements Screen {
   }
 }
 
-const MAP_ROW_H = 28;
+const MAP_ROW_H = 24;
 const MAP_LIST: Rect = { x: 17, y: 89, w: 358, h: MAPS.length * MAP_ROW_H };
-const THUMB: Rect = { x: 46, y: MAP_LIST.y + MAP_LIST.h + 12, w: 300, h: 176 };
-const SETTINGS: Rect = { x: 396, y: 88, w: 388, h: 188 };
+const THUMB: Rect = { x: 46, y: MAP_LIST.y + MAP_LIST.h + 14, w: 300, h: 176 };
+const SETTINGS: Rect = { x: 396, y: 88, w: 388, h: 232 };
+const DESC: Rect = { x: 396, y: 332, w: 388, h: 212 };
+const CUSTOM_KEY = 'cc3.custom';
 const CTRL_X = 540;
 const CTRL_W = 228;
 const rowY = (i: number) => SETTINGS.y + 16 + i * 44;
@@ -105,11 +111,53 @@ export class BattleSetupScreen implements Screen {
   private yearPlusR: Rect = { x: CTRL_X + CTRL_W - 30, y: rowY(1), w: 30, h: 24 };
   private diffR: Rect = { x: CTRL_X, y: rowY(2), w: CTRL_W, h: 24 };
   private durR: Rect = { x: CTRL_X, y: rowY(3), w: CTRL_W, h: 24 };
+  private saveR: Rect = { x: CTRL_X, y: rowY(4), w: CTRL_W / 2 - 4, h: 24 };
+  private loadR: Rect = { x: CTRL_X + CTRL_W / 2 + 4, y: rowY(4), w: CTRL_W / 2 - 4, h: 24 };
+  private hasSaved = false;
 
   private strip = new BottomStrip({ next: 'Next →' });
 
   constructor() {
     this.year = yearForMapId(MAPS[0].id);
+    try {
+      this.hasSaved = localStorage.getItem(CUSTOM_KEY) !== null;
+    } catch {
+      this.hasSaved = false;
+    }
+  }
+
+  /** Custom-scenario preset (roadmap G15): map/side/year/difficulty/duration persisted to
+   * localStorage so a favourite setup can be re-fought; forces are drawn fresh from the
+   * year's default OOB at load time. */
+  private saveSetup(): void {
+    try {
+      localStorage.setItem(CUSTOM_KEY, JSON.stringify({
+        mapId: MAPS[this.mapSelected].id,
+        playerSide: this.playerSide,
+        year: this.year,
+        difficulty: this.difficulty,
+        durationMin: this.durationMin,
+      }));
+      this.hasSaved = true;
+    } catch {
+      // quota/private mode: saving is a nicety
+    }
+  }
+
+  private loadSetup(): void {
+    try {
+      const raw = localStorage.getItem(CUSTOM_KEY);
+      if (!raw) return;
+      const p = JSON.parse(raw) as { mapId?: string; playerSide?: Side; year?: number; difficulty?: 'easy' | 'normal' | 'hard'; durationMin?: number };
+      const idx = MAPS.findIndex((m) => m.id === p.mapId);
+      if (idx >= 0) this.mapSelected = idx;
+      if (p.playerSide === 'german' || p.playerSide === 'soviet') this.playerSide = p.playerSide;
+      this.year = clamp(p.year ?? 1941, 1941, 1945);
+      if (p.difficulty && DIFFICULTIES.includes(p.difficulty)) this.difficulty = p.difficulty;
+      if (p.durationMin && DURATIONS.includes(p.durationMin)) this.durationMin = p.durationMin;
+    } catch {
+      // a corrupt preset is ignored
+    }
   }
 
   private getThumb(id: string): HTMLCanvasElement | null {
@@ -146,6 +194,10 @@ export class BattleSetupScreen implements Screen {
         this.difficulty = DIFFICULTIES[(DIFFICULTIES.indexOf(this.difficulty) + 1) % DIFFICULTIES.length];
       } else if (pointInRect(c, this.durR)) {
         this.durationMin = DURATIONS[(DURATIONS.indexOf(this.durationMin) + 1) % DURATIONS.length];
+      } else if (pointInRect(c, this.saveR)) {
+        this.saveSetup();
+      } else if (this.hasSaved && pointInRect(c, this.loadR)) {
+        this.loadSetup();
       }
     }
 
@@ -163,6 +215,11 @@ export class BattleSetupScreen implements Screen {
         seed: Date.now() & 0xffff,
         durationS: this.durationMin >= 999 ? 999 * 60 : this.durationMin * 60,
         difficulty: this.difficulty,
+        // item 024: realism toggles ride into the battle config
+        alwaysSeeEnemy: game.settings.alwaysSeeEnemy,
+        neverActOnInitiative: game.settings.neverActOnInitiative,
+        alwaysFullEnemyInfo: game.settings.alwaysFullEnemyInfo,
+        alwaysObeyOrders: game.settings.alwaysObeyOrders,
       };
       game.setScreen(new BattleRequisitionScreen(this, cfgBase, forces[this.playerSide], enemySide, forces[enemySide]));
     }
@@ -180,8 +237,8 @@ export class BattleSetupScreen implements Screen {
           ctx.fillStyle = i === this.mapSelected ? 'rgba(200,50,30,0.38)' : 'rgba(255,255,255,0.06)';
           ctx.fillRect(MAP_LIST.x, ry, MAP_LIST.w, MAP_ROW_H);
         }
-        drawLabel(ctx, map.name, MAP_LIST.x + 12, ry + 19, 'bold 13px Arial, Helvetica, sans-serif', i === this.mapSelected ? UI.gold : UI.text);
-        drawLabel(ctx, String(yearForMapId(map.id)), MAP_LIST.x + MAP_LIST.w - 12, ry + 19, UI.body, UI.dim, 'right');
+        drawLabel(ctx, map.name, MAP_LIST.x + 12, ry + 17, 'bold 13px Arial, Helvetica, sans-serif', i === this.mapSelected ? UI.gold : UI.text);
+        drawLabel(ctx, String(yearForMapId(map.id)), MAP_LIST.x + MAP_LIST.w - 12, ry + 17, UI.body, UI.dim, 'right');
       });
 
       const def = MAPS[this.mapSelected];
@@ -190,11 +247,14 @@ export class BattleSetupScreen implements Screen {
       ctx.strokeStyle = 'rgba(210,190,170,0.45)';
       ctx.lineWidth = 1;
       ctx.strokeRect(THUMB.x + 0.5, THUMB.y + 0.5, THUMB.w - 1, THUMB.h - 1);
+
+      drawDarkPanel(ctx, DESC);
+      drawLabel(ctx, def.name, DESC.x + 16, DESC.y + 24, UI.heading, UI.gold);
       ctx.font = UI.body;
       ctx.fillStyle = UI.text;
-      let ty = THUMB.y + THUMB.h + 22;
-      for (const line of wrapText(ctx, def.description, 332).slice(0, 4)) {
-        ctx.fillText(line, 30, ty);
+      let ty = DESC.y + 48;
+      for (const line of wrapText(ctx, def.description, DESC.w - 32).slice(0, 10)) {
+        ctx.fillText(line, DESC.x + 16, ty);
         ty += 16;
       }
 
@@ -212,6 +272,9 @@ export class BattleSetupScreen implements Screen {
       drawSmallMetalButton(ctx, this.diffR, DIFFICULTY_LABEL[this.difficulty], { hot: hot(this.diffR) });
       label(3, 'Battle Length');
       drawSmallMetalButton(ctx, this.durR, durationLabel(this.durationMin), { hot: hot(this.durR) });
+      label(4, 'Custom Setup');
+      drawSmallMetalButton(ctx, this.saveR, 'Save', { hot: hot(this.saveR) });
+      if (this.hasSaved) drawSmallMetalButton(ctx, this.loadR, 'Load', { hot: hot(this.loadR) });
 
       this.strip.draw(ctx);
     });

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { atlasCellCount, validateAtlasMeta, type AtlasEntry, type AtlasMeta } from '@/render/spriteAtlas';
-// @ts-expect-error -- this project does not install declarations for Node builtins.
 import * as nodeFs from 'node:fs';
 
 const fs = nodeFs as {

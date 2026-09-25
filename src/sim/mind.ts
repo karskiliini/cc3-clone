@@ -16,6 +16,7 @@ import { addMessage } from './messages';
 import { applyOrderToSoldier, orderRoutePoints, routeVia } from './orders';
 import { DAZE_VETERAN_EXP, isDazed } from './daze';
 import { blastExposure } from './blastExposure';
+import { inCommand } from './command';
 
 // ---------------------------------------------------------------- motivation
 /** Motivation seed from experience (proxy for conscript/regular/elite quality bands) + leadership. */
@@ -163,7 +164,10 @@ export function addOrMergeBelief(
     best.confidence = Math.max(best.confidence, confidence);
     best.count = Math.max(best.count, count);
     if (kind === 'seen') best.kind = 'seen';
-    best.time = time;
+    // item 039: a second-hand report (shareBeliefs, every 2 s) refreshes knowledge but not the
+    // sighting itself — the threat floor decays with belief staleness, so a re-shared 'reported'
+    // belief must not keep the 3/s stress decay alive forever; a real sighting does refresh it
+    if (kind !== 'reported') best.time = time;
     return;
   }
   if (mind.beliefs.length >= MAX_BELIEFS) {
@@ -231,10 +235,15 @@ function shareBeliefs(state: BattleState, soldier: Soldier, team: Team | undefin
     const shares = (isLeader && dM <= 30) || dM <= 10;
     if (!shares) continue;
     for (const b of soldier.mind.beliefs) {
-      addOrMergeBelief(o.mind, b.pos, 'reported', b.confidence * 0.7, b.count, state.time);
+      addOrMergeBelief(o.mind, b.pos, 'reported', b.confidence * 0.7, b.count, b.time);
     }
   }
 }
+
+// item 039: how long a belief keeps the threat floor up (0.4) and over how long after that the
+// floor fades to zero — a stale report must not hold the stress decay at 3/s with no incoming fire
+const BELIEF_THREAT_FULL_S = 30;
+const BELIEF_THREAT_MAX_S = 60;
 
 // -------------------------------------------------------------- threat level
 function decayThreatAndBeliefs(state: BattleState, dt: number, soldier: Soldier, t: SoldierTrack): void {
@@ -242,11 +251,21 @@ function decayThreatAndBeliefs(state: BattleState, dt: number, soldier: Soldier,
   mind.threatLevel = Math.max(0, mind.threatLevel - 0.1 * dt);
 
   let strongest: EnemyBelief | null = null;
+  let strongestAge = Infinity;
   for (const b of mind.beliefs) {
-    if (b.confidence > 0.5 && (!strongest || b.confidence > strongest.confidence)) strongest = b;
+    if (b.confidence <= 0.5) continue;
+    const age = state.time - b.time;
+    if (age > BELIEF_THREAT_MAX_S) continue;
+    if (!strongest || b.confidence > strongest.confidence) { strongest = b; strongestAge = age; }
   }
   if (strongest) {
-    mind.threatLevel = Math.max(mind.threatLevel, 0.4);
+    // item 039: a fresh sighting holds the threat at 0.4, and the floor decays away over the next
+    // 30 s — a minute-old report no longer feeds the stress decay (3/s instead of 6/s) or the
+    // fear loop, so broken men can actually recover once the fight moves away from them
+    const floor = strongestAge <= BELIEF_THREAT_FULL_S
+      ? 0.4
+      : 0.4 * (1 - (strongestAge - BELIEF_THREAT_FULL_S) / (BELIEF_THREAT_MAX_S - BELIEF_THREAT_FULL_S));
+    mind.threatLevel = Math.max(mind.threatLevel, Math.max(0, floor));
     mind.threatDir = angleTo(soldier.pos, strongest.pos);
   }
   if (mind.threatLevel <= 0.2) mind.threatDir = null;
@@ -492,6 +511,18 @@ export function onFired(state: BattleState, rng: Rng, soldier: Soldier): void {
 const AT_WEAPON_CLASSES = new Set<WeaponClass>(['atgun', 'atrocket', 'atrifle']);
 
 function teamHasAT(state: BattleState, team: Team): boolean {
+  // item 039: a gun crew's own piece is AT-capable even though its men carry carbines/pistols —
+  // the crew of an intact AT gun must not loop in tank stress; a destroyed/abandoned piece no longer counts
+  if (team.crewWeapon && !team.crewWeapon.destroyed) {
+    const cw = WEAPONS[team.crewWeapon.weaponId];
+    if (cw && AT_WEAPON_CLASSES.has(cw.cls)) return true;
+  }
+  // a vehicle team's main gun counts (a tank crew facing an enemy tank has a way to fight back)
+  const v = team.vehicleId != null ? state.vehicles.get(team.vehicleId) : undefined;
+  if (v) {
+    const vw = WEAPONS[VEHICLE_DEFS[v.defId]?.mainWeaponId ?? ''];
+    if (vw && AT_WEAPON_CLASSES.has(vw.cls)) return true;
+  }
   for (const id of team.soldierIds) {
     const s = state.soldiers.get(id);
     if (!s || s.health === 'dead' || s.health === 'incapacitated') continue;
@@ -751,7 +782,7 @@ function stepOneMind(state: BattleState, rng: Rng, dt: number, s: Soldier, track
   const leaderAlive = !!leader && leader.health !== 'dead' && leader.health !== 'incapacitated';
   const leaderNear15 = leaderAlive && leader ? dist(leader.pos, s.pos) * TILE_M <= 15 : false;
   let mDelta = 0;
-  if (leaderNear15 && state.sides[s.side].morale > 50) mDelta += 0.02 * dt;
+  if (leaderNear15 && inCommand(state, s) && state.sides[s.side].morale > 50) mDelta += 0.02 * dt;
   if (!leaderAlive) mDelta -= 0.05 * dt;
   if (mind.helpless) mDelta -= 0.1 * dt;
   mind.motivation = clamp(mind.motivation + mDelta, 0, 100);

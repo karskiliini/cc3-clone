@@ -20,14 +20,9 @@ order first (hotkey, order bar, or right-click menu), then click the target.
 
 - Select: left click a soldier or a team box; drag a rectangle on the map for group select;
   Shift adds to the selection; Ctrl+A selects all; double-click a team box to centre on it.
-- Control groups (in battle): **Ctrl+1–9 / Ctrl+0** assigns the selection; **1–9 / 0** recalls it.
-  The numbered HUD buttons show each group's team count and highlight the active group. Click to recall,
-  Ctrl-click to assign; assigning an empty selection clears the group. Cmd works in place of Ctrl.
-  Groups automatically drop lost teams, and recalling an empty group preserves the current selection.
 - Orders: press **Z** Move, **X** Move Fast, **C** Sneak, **V** Fire, **B** Smoke, **N** Defend,
   **M** Ambush (or click the order bar in the bottom strip, or right-click for the classic menu),
-  then click the target. For Move, Move Fast, and Sneak, hold Shift and click to add waypoints;
-  release Shift to finish at the last placed waypoint, with no extra click. Esc cancels.
+  then click the target. Shift-click adds waypoints (visited in click order before the final click). Esc cancels.
   Order endpoints stay marked on the map; hover one to see its line to the team, click it to select that team.
 - Scroll: two-finger scroll / mouse wheel pans; pinch or Ctrl+wheel zooms around the pointer;
   middle-drag or Space+drag pans; screen edges and the arrow keys scroll too.
@@ -72,8 +67,6 @@ order first (hotkey, order bar, or right-click menu), then click the target.
 - Vehicles: a Move order clicked on a friendly halftrack with room makes the team mount it (the vehicle is
   bracketed in green and the pointer says Mount); any new order to the passengers makes them dismount. A crew that
   bailed out can be sent back to its own serviceable vehicle the same way (Re-man), if their nerves allow it.
-  Panicked crews take time to climb out and drop down, lie prone in shock, then crawl toward nearby cover.
-  Tanks turn and drive along a route into cover; they reverse only when the route is behind the hull.
 - Elevation: the ground height under the pointer is always shown beside it, with the height of whatever
   stands there or is dug in (for example `12.4 m +6.0` on a roof, `12.4 m -1.2` in a foxhole).
 - Tall grass and crops stand about a metre high and limit sight by that height. Vehicles press them down as

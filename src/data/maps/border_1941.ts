@@ -226,6 +226,22 @@ export const border_1941: MapDef = {
     german: { x: 24, y: 50, w: 26, h: 50 },
     soviet: { x: 114, y: 50, w: 26, h: 50 },
   },
+  // COA overlays (G21): the spearhead drives east along the crossroads road for the bridge,
+  // a platoon takes the north farm, fires from the ridge; the Soviet border guard holds the
+  // stream line and feeds a reserve armour counterattack at the crossroads.
+  coa: {
+    stages: ['Overwatch', 'Obstacles', 'Cut Fence', 'Reduce', 'Assault'],
+    german: [
+      { pts: [{ x: 30, y: 78 }, { x: 70, y: 76 }, { x: 100, y: 75 }, { x: 149, y: 74 }], kind: 'armor' },
+      { pts: [{ x: 34, y: 58 }, { x: 60, y: 44 }, { x: 82, y: 40 }], kind: 'assault' },
+      { pts: [{ x: 36, y: 96 }, { x: 68, y: 82 }, { x: 100, y: 78 }], kind: 'firesupport' },
+    ],
+    soviet: [
+      { pts: [{ x: 56, y: 52 }, { x: 84, y: 62 }, { x: 84, y: 94 }, { x: 58, y: 112 }], kind: 'defenses' },
+      { pts: [{ x: 130, y: 74 }, { x: 112, y: 75 }, { x: 102, y: 75 }], kind: 'armor' },
+      { pts: [{ x: 142, y: 66 }, { x: 104, y: 76 }], kind: 'firesupport' },
+    ],
+  },
   decor,
   vectors,
 };

@@ -44,6 +44,22 @@ function teamMaxRangeM(state: BattleState, team: Team): number {
   return best || 300;
 }
 
+/** For a pending Smoke order: the nearest smoke-capable weapon's minimum range, in metres.
+ * Mortars and rocket launchers cannot fire below their minimum; infantry grenades can. Returns
+ * null when the team has no minimum-range smoke weapon, so a too-close target is possible. */
+export function teamSmokeMinRangeM(state: BattleState, team: Team): number | null {
+  let min: number | null = null;
+  for (const id of team.soldierIds) {
+    const s = state.soldiers.get(id);
+    if (!s) continue;
+    const w = WEAPONS[s.weaponId];
+    if (!w || !w.smoke) continue;
+    const m = w.minRangeM ?? 0;
+    if (m > 0 && (min == null || m < min)) min = m;
+  }
+  return min;
+}
+
 function rangeColor(distM: number, maxRangeM: number): string {
   const ratio = distM / maxRangeM;
   if (ratio <= 0.6) return BRIGHT_GREEN;
@@ -98,7 +114,7 @@ export function drawLOSLine(
   to: Vec2,
   context?: { state: BattleState; team: Team },
   heights?: LosHeights,
-  opts?: { label?: boolean; alpha?: number; fireOrder?: boolean; bigCursor?: boolean },
+  opts?: { label?: boolean; alpha?: number; fireOrder?: boolean; minRangeM?: number | null; bigCursor?: boolean },
 ): void {
   let segs = aimLineProfile(map, from, to, heights);
   const estimated = !!opts?.fireOrder && !!context && aimPointClass(segs) === 'blocked'
@@ -150,18 +166,43 @@ export function drawLOSLine(
   ctx.beginPath(); ctx.arc(toPx.x, toPx.y, 3, 0, Math.PI * 2); ctx.fill();
 
   if (opts?.label ?? true) {
-    const word = estimated ? ' guesstimate' : endCls === 'clear' ? '' : endCls === 'obscured' ? ' obscured' : ' blocked';
-    const distLabel = `${Math.round(distM)} m${word}`;
-    const color = context ? rangeColor(distM, teamMaxRangeM(context.state, context.team)) : CLASS_COLOR[endCls];
-    ctx.font = 'bold 11px Arial, Helvetica, sans-serif';
-    ctx.textBaseline = 'top';
-    // clear of the big aiming cross (64 px) when it is up, else just by the pointer
-    const off = opts?.bigCursor ? 30 : 8;
-    const tx = Math.round(toPx.x) + off, ty = Math.round(toPx.y) - 6 - off;
-    ctx.fillStyle = 'rgba(0,0,0,0.75)';
-    ctx.fillText(distLabel, tx + 1, ty + 1);
-    ctx.fillStyle = estimated ? DARK_GREEN : endCls === 'blocked' ? RED : color;
-    ctx.fillText(distLabel, tx, ty);
+    drawAimRangeLabel(ctx, toPx, distM, estimated, endCls, opts?.minRangeM ?? null,
+      context ? rangeColor(distM, teamMaxRangeM(context.state, context.team)) : CLASS_COLOR[endCls], opts?.bigCursor);
   }
   ctx.restore();
+}
+
+/** The cursor range label for an aiming Fire/Smoke order: "N m" plus the class/too-close word,
+ * coloured by range quality. Drawn with the LOS line when losLines is on, and standalone when
+ * the player turned LOS lines off (the manual's range indicator is order feedback, not an
+ * optional decoration). */
+export function drawAimRangeLabel(
+  ctx: CanvasRenderingContext2D, toPx: Vec2, distM: number, estimated: boolean,
+  endCls: AimClass, minRangeM: number | null, color: string, bigCursor = false,
+): void {
+  const tooClose = minRangeM != null && distM < minRangeM;
+  const word = tooClose ? ' too close'
+    : estimated ? ' guesstimate' : endCls === 'clear' ? '' : endCls === 'obscured' ? ' obscured' : ' blocked';
+  const distLabel = `${Math.round(distM)} m${word}`;
+  ctx.font = 'bold 11px Arial, Helvetica, sans-serif';
+  ctx.textBaseline = 'top';
+  // clear of the big aiming cross (64 px) when it is up, else just by the pointer
+  const off = bigCursor ? 30 : 8;
+  const tx = Math.round(toPx.x) + off, ty = Math.round(toPx.y) - 6 - off;
+  ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  ctx.fillText(distLabel, tx + 1, ty + 1);
+  ctx.fillStyle = tooClose ? RED : estimated ? DARK_GREEN : endCls === 'blocked' ? RED : color;
+  ctx.fillText(distLabel, tx, ty);
+}
+
+/** Cursor-only range feedback for a pending Fire/Smoke order when LOS lines are off: the same
+ * label the aiming line draws, minus the line. `kind` picks the min-range check (only smoke
+ * weapons have one that matters; fire falls back to the team's best weapon range colour). */
+export function drawAimRangeFeedback(
+  ctx: CanvasRenderingContext2D, cam: Camera, from: Vec2, to: Vec2,
+  state: BattleState, team: Team, kind: string | null, endCls: AimClass = 'clear', bigCursor = false,
+): void {
+  const distM = dist(from, to) * TILE_M;
+  const minRangeM = kind === 'smoke' ? teamSmokeMinRangeM(state, team) : null;
+  drawAimRangeLabel(ctx, worldToScreen(cam, to), distM, false, endCls, minRangeM, rangeColor(distM, teamMaxRangeM(state, team)), bigCursor);
 }

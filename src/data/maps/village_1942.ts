@@ -188,6 +188,24 @@ export const village_1942: MapDef = {
     soviet: { x: 91, y: 12, w: 28, h: 28 },
     german: { x: 91, y: 102, w: 28, h: 28 },
   },
+  // German forward pillbox covering the church approach from the north (G7)
+  bunkers: [{ x: 106, y: 70, w: 2, h: 1, side: 'german' }],
+  // COA overlays (G21): the counterattack comes down the main street for the church, armour
+  // swings west for the mill, fires from the northern hill; the German village defence holds
+  // the northern edge and counterattacks armour back up the street.
+  coa: {
+    stages: ['Overwatch', 'Wire cutting', 'Reduce strongpoints', 'Assault main street', 'Consolidate'],
+    german: [
+      { pts: [{ x: 82, y: 66 }, { x: 112, y: 64 }, { x: 142, y: 70 }], kind: 'defenses' },
+      { pts: [{ x: 112, y: 124 }, { x: 110, y: 92 }, { x: 108, y: 68 }], kind: 'armor' },
+      { pts: [{ x: 122, y: 128 }, { x: 110, y: 72 }], kind: 'firesupport' },
+    ],
+    soviet: [
+      { pts: [{ x: 104, y: 22 }, { x: 107, y: 48 }, { x: 108, y: 62 }], kind: 'assault' },
+      { pts: [{ x: 78, y: 22 }, { x: 66, y: 50 }, { x: 58, y: 76 }], kind: 'armor' },
+      { pts: [{ x: 88, y: 24 }, { x: 104, y: 58 }], kind: 'firesupport' },
+    ],
+  },
   decor,
   vectors,
 };

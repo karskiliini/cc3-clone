@@ -244,6 +244,16 @@ function buildGrid(id: string): Grid {
       line(g, 13, gy - 8, 34, gy - 11, 'b', 2); // rocket tube on the shoulder
       put(g, 33, gy - 12, 'w'); put(g, 34, gy - 11, 'w'); put(g, 33, gy - 10, 'w'); // warhead
       break;
+    case 'rocket': {
+      // Six-tube rocket rack on a two-wheel carriage (Nebelwerfer), one crewman kneeling behind.
+      rect(g, 10, gy - 12, 24, gy - 4, 'a');
+      rect(g, 10, gy - 12, 24, gy - 12, 'A');
+      for (let i = 0; i < 3; i++) rect(g, 12 + i * 5, gy - 11, 13 + i * 5, gy - 5, 'k');
+      rect(g, 9, gy - 4, 25, gy - 1, 'k');
+      put(g, 12, gy - 1, 'r'); put(g, 22, gy - 1, 'r');
+      drawKneelingMan(g, 30, gy);
+      break;
+    }
     case 'tank':
       drawTankSide(g, ICON_W / 2, gy, true);
       break;

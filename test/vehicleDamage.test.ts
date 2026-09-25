@@ -7,7 +7,7 @@ import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';
 import {
   resolveVehicleHit, locateHit, isHullDown, TURRET_ZONES, seatOccupant, crewEffects, stepCrewSeats, ensureDamage,
-  vehicleDamageView, stepVehicleDamage, isImmobile, vehicleLayout, seatRoles, SEAT_SWAP_S,
+  vehicleDamageView, stepVehicleDamage, isImmobile, vehicleLayout, seatRoles, FIRE_BAIL_S, SEAT_SWAP_S,
   LOADER_DOWN_RELOAD_MUL, RADIO_OUT_ORDER_DELAY_S, sightAccuracyMul, sideShare, type HitLocation,
 } from '@/sim/vehicleDamage';
 import { applyHESplash, stepCombat } from '@/sim/combat';
@@ -91,8 +91,24 @@ describe('penetrations by zone', () => {
       if (r.outcome === 'explosion') continue;
       if (r.outcome !== 'fire') { expect(crew.every((c) => c.health === 'healthy')).toBe(true); continue; } // nobody sits in the engine bay
       fires++;
+      // engine-deck hits ignite the DECK (engineOnFire — the tank fights on; escalating to a
+      // full 'burning' happens in vehicle.ts's step), which keeps the crew aboard; other
+      // fires force them out within seconds.
+      // a deck fire escalates to a full 'burning' within ~8-14 s (vehicle.ts step); drive it
+      // there and confirm the crew is then forced out within seconds as for any other fire
+      if (v.engineOnFire) {
+        expect(v.state).not.toBe('burning');
+        for (let k = 0; k < 400 && !v.state.startsWith('burning'); k++) { state.time += 0.1; stepVehicles(state, rng, 0.1); }
+        if (!v.state.startsWith('burning')) continue; // fire died out — the crew saved the tank
+        state.time += FIRE_BAIL_S + 0.1;
+        stepVehicleDamage(state, rng, v);
+      } else {
+        state.time += FIRE_BAIL_S + 0.1;
+        stepVehicleDamage(state, rng, v);
+      }
       expect(v.state).toBe('burning');
-      expect(state.messages.some((m) => m.text.includes('Engine on fire — bail out!'))).toBe(v.side === state.config.playerSide);
+      expect(state.messages.some((m) => m.text.includes('Vehicle on fire — bail out!'))).toBe(v.side === state.config.playerSide);
+      state.time += FIRE_BAIL_S + 0.1;
       stepVehicleDamage(state, rng, v);
       expect(crew.some((c) => !!c.hatch || down(c))).toBe(true);
       const landed = new Set<number>();
