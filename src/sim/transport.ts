@@ -23,6 +23,11 @@ export const BOARD_S = 1.5;
 const DOOR_REACH_TILES = 0.9;
 /** The transport does not wait for stragglers longer than this. */
 export const WAIT_MAX_S = 45;
+/** ... nor while boarding has stalled: nobody has climbed in for this long (s) and nobody ordered
+ * aboard is within BOARD_NEAR_TILES of it. */
+export const BOARD_STALL_S = 10;
+const BOARD_NEAR_TILES = 12;
+const boardProgress = new WeakMap<Vehicle, { aboard: number; at: number }>();
 /** A Move order ending this close to a transport (m, beyond half its length) means "get in". */
 export const MOUNT_ORDER_RADIUS_M = 2.5;
 /** Passengers firing over the sides of a halted transport. */
@@ -328,17 +333,24 @@ function stepFollowers(state: BattleState, team: Team, v: Vehicle, tick: boolean
 export function transportHolds(state: BattleState, v: Vehicle): boolean {
   if (passengerCapacity(v) <= 0) return false;
   if (v.unloading) return true;
-  let boarding = false;
+  let boarding = false, nearest = Infinity, aboard = 0;
   for (const team of state.teams.values()) {
     if (team.transportId !== v.id) continue;
     for (const id of team.soldierIds) {
       const s = state.soldiers.get(id);
       if (!s) continue;
       if (s.hatch && s.hatch.passenger && s.hatch.vehicleId === v.id) return true;
-      if (team.order?.mountVehicleId === v.id && canBoard(state, s) && roomLeft(state, v) > 0) boarding = true;
+      if (s.seat === 'passenger' && s.vehicleId === v.id) aboard++;
+      if (team.order?.mountVehicleId === v.id && canBoard(state, s) && roomLeft(state, v) > 0) {
+        boarding = true;
+        nearest = Math.min(nearest, dist(s.pos, v.pos));
+      }
     }
   }
-  if (!boarding) { v.waitingSince = undefined; return false; }
+  if (!boarding) { v.waitingSince = undefined; boardProgress.delete(v); return false; }
+  const prog = boardProgress.get(v);
+  if (!prog || aboard > prog.aboard) boardProgress.set(v, { aboard, at: state.time });
+  else if (state.time - prog.at >= BOARD_STALL_S && nearest > BOARD_NEAR_TILES) return false; // nobody is coming
   if (v.waitingSince == null) {
     v.waitingSince = state.time;
     if (v.path.length > 0 && v.side === state.config.playerSide) addMessage(state, `${VEHICLE_DEFS[v.defId]?.name ?? 'Vehicle'}\nWaiting for passengers.`, 'info');
