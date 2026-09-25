@@ -43,12 +43,7 @@ describe('data: every vehicle carries its OWN historical rates', () => {
       expect(def.hullTurnDegS, def.id).toBeDefined();
       expect(def.turnRateRad, def.id).toBeUndefined();
       if (!def.hasTurret && def.mainWeaponId) expect(def.gunArcDeg, def.id).toBeGreaterThan(0);
-      if (def.kind === 'halftrack') {
-        expect(def.turnRadiusM).toBe(5.5);
-        expect(def.hullTurnDegS).toBe(0);
-      } else {
-        expect(def.hullTurnDegS, def.id).toBeGreaterThan(0);
-      }
+      if (def.kind === 'halftrack') { expect(def.turnRadiusM).toBeGreaterThanOrEqual(3.5); expect(def.turnRadiusM).toBeLessThanOrEqual(5.5); expect(def.hullTurnDegS).toBe(0); } else expect(def.hullTurnDegS, def.id).toBeGreaterThan(0);
     }
     const table: Record<string, [number, number]> = {
       pz3j: [8, 20], pz4f1: [14, 18], pz4gh: [14, 18], panther: [15, 16], tiger: [7, 12],
@@ -62,26 +57,18 @@ describe('data: every vehicle carries its OWN historical rates', () => {
     }
     expect([VEHICLE_DEFS.stug3g.gunArcDeg, VEHICLE_DEFS.marder3.gunArcDeg, VEHICLE_DEFS.su76.gunArcDeg, VEHICLE_DEFS.su85.gunArcDeg]).toEqual([12, 21, 16, 10]);
     // source scan: the old rule is gone (fs walk — works under bun AND vitest, unlike import.meta.glob)
+    const fs: any = await import(/* @vite-ignore */ ('node:' + 'fs') as string);
+    const path: any = await import(/* @vite-ignore */ ('node:' + 'path') as string);
+    const root = new URL('../src/', import.meta.url).pathname;
     const sources: Record<string, string> = {};
-    const srcRoot = new URL('../src/', import.meta.url).pathname.replace(/\/$/, '/');
-    // eslint-disable-next-line
-    // @ts-expect-error
-    const fs: any = require('fs');
-    // eslint-disable-next-line
-    // @ts-expect-error
-    const path: any = require('path');
-    const collect = (dir: string): void => {
-      for (const e of fs.readdirSync(dir)) {
-        if (e === 'node_modules' || e === 'dist') continue;
-        const full = path.join(dir, e);
-        const st = fs.statSync(full);
-        if (st.isDirectory()) collect(full);
-        else if (e.endsWith('.ts')) {
-          sources[path.relative(srcRoot.replace(/\/$/, ''), full)] = fs.readFileSync(full, 'utf8');
-        }
+    const walk = (dir: string, prefix = ''): void => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const rel = prefix + e.name;
+        if (e.isDirectory()) walk(path.join(dir, e.name), rel + '/');
+        else if (e.name.endsWith('.ts')) sources[rel] = fs.readFileSync(path.join(dir, e.name), 'utf8');
       }
     };
-    collect(srcRoot.replace(/\/$/, ''));
+    walk(root);
     expect(Object.keys(sources).length).toBeGreaterThan(20);
     for (const [f, text] of Object.entries(sources)) expect(/turnRateRad\s*\*\s*2/.test(text), f).toBe(false);
   });

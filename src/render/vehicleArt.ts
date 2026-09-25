@@ -569,7 +569,7 @@ function buildLightHull(w: number, h: number, side: Side, s = 1): Grid {
 
 /** Half-track: wheeled tapered nose, tracked rear two-thirds, open troop bay
  * (never a turret ring — must never read as a tank). */
-function buildHalftrackHull(w: number, h: number, s = 1): Grid {
+function buildHalftrackHull(w: number, h: number, s = 1, rocketRack = false): Grid {
   const g = blank(w, h);
   const noseH = Math.round(h * 0.2);
   const bx0 = Math.round(w * 0.12), bx1 = w - 1 - Math.round(w * 0.12);
@@ -583,6 +583,18 @@ function buildHalftrackHull(w: number, h: number, s = 1): Grid {
   const bayY0 = noseH + 1, bayY1 = h - Math.max(2, Math.round(h * 0.14));
   shadeRect(g, bx0, bayY0, bx1, bayY1);
   strokeRect(g, bx0, bayY0, bx1, bayY1, 'o');
+  // Rocket battery: angled launch rails across the bay instead of helmets
+  // (BM-13 Katyusha, SdKfz 251/1 Wurfrahmen).
+  if (rocketRack) {
+    const rails = s >= 2 ? 3 : 2;
+    for (let r = 0; r < rails; r++) {
+      const y = bayY0 + Math.round(((r + 0.5) * (bayY1 - bayY0)) / rails);
+      fillRect(g, bx0 + s, y - s, bx1 - s, y, 'd');
+      strokeRect(g, bx0 + s, y - s, bx1 - s, y, 'o');
+      // warhead tips poking off the rail fronts
+      if (y - s - 1 >= bayY0 - 1) for (let x = bx0 + 2 * s; x <= bx1 - 2 * s; x += 4 * s) put(g, x, y - s - 1, 'k');
+    }
+  } else {
   // Open troop bay: exactly 4 crew helmet dots (2x2), visible from above.
   for (let row = 0; row < 2; row++) {
     for (let col = 0; col < 2; col++) {
@@ -597,6 +609,7 @@ function buildHalftrackHull(w: number, h: number, s = 1): Grid {
         put(g, x - 1, y - 1, 'J');
       } else put(g, x, y, 'x');
     }
+  }
   }
   // Pintle-mounted MG shield at the front of the bay, with the barrel
   // poking forward over the nose.
@@ -822,9 +835,22 @@ interface VehSpec {
   hullCrossPos?: [number, number][];
   turretCrossPos?: [number, number];
   starPos?: [number, number];
+  /** Rocket battery: replace the troop bay with angled launch rails (BM-13
+   * Katyusha, SdKfz 251/1 Wurfrahmen). */
+  rocketRack?: boolean;
 }
 
-const SPEC: Record<string, VehSpec> = {
+export const SPEC: Record<string, VehSpec> = {
+  tiger2: { side: 'german', era: 'late', hullFamily: 'boxy', wideTracks: true, turret: 'tigerBox', barrelFrac: 0.65, barrelWpx: 3, muzzleBrake: true, turretWFrac: 0.6, turretSquare: true },
+  pantherD: { side: 'german', era: 'late', hullFamily: 'sloped', turret: 'pantherLong', barrelFrac: 0.7, barrelWpx: 3, muzzleBrake: true, mantletWpx: 7, turretWFrac: 0.46, turretElongate: 1.6 },
+  pantherA: { side: 'german', era: 'late', hullFamily: 'sloped', turret: 'pantherLong', barrelFrac: 0.7, barrelWpx: 3, muzzleBrake: true, mantletWpx: 7, turretWFrac: 0.46, turretElongate: 1.55 },
+  pz4g: { side: 'german', era: 'late', hullFamily: 'boxy', turret: 'germanBox', barrelFrac: 0.5, barrelWpx: 3, muzzleBrake: false, turretWFrac: 0.6 },
+  stug4: { side: 'german', era: 'late', hullFamily: 'casemate', turret: 'none', barrelFrac: 0.55, barrelWpx: 3 },
+  hetzer: { side: 'german', era: 'late', hullFamily: 'casemate', turret: 'none', barrelFrac: 0.6, barrelWpx: 3, casemateTaper: 0.5 },
+  flammpanzer3: { side: 'german', era: 'early', hullFamily: 'boxy', turret: 'germanBox', barrelFrac: 0.2, barrelWpx: 5, turretWFrac: 0.56 },
+  kettenkrad: { side: 'german', era: 'early', hullFamily: 'halftrack', turret: 'none', barrelFrac: 0, barrelWpx: 0 },
+  kubelwagen: { side: 'german', era: 'early', hullFamily: 'halftrack', turret: 'none', barrelFrac: 0, barrelWpx: 0 },
+  sdkfz251_rocket: { side: 'german', era: 'late', hullFamily: 'halftrack', turret: 'none', barrelFrac: 0, barrelWpx: 0, rocketRack: true },
   pz3j: { side: 'german', era: 'early', hullFamily: 'boxy', turret: 'germanBox', barrelFrac: 0.45, barrelWpx: 3, turretWFrac: 0.56 },
   pz4f1: { side: 'german', era: 'early', hullFamily: 'boxy', turret: 'germanBox', barrelFrac: 0.3, barrelWpx: 3, turretWFrac: 0.6 },
   pz4gh: { side: 'german', era: 'late', hullFamily: 'boxy', turret: 'germanBox', barrelFrac: 0.55, barrelWpx: 3, muzzleBrake: true, turretWFrac: 0.6 },
@@ -833,6 +859,15 @@ const SPEC: Record<string, VehSpec> = {
   tiger: { side: 'german', era: 'late', hullFamily: 'boxy', wideTracks: true, turret: 'tigerBox', barrelFrac: 0.6, barrelWpx: 3, muzzleBrake: true, turretWFrac: 0.62, turretSquare: true },
   sdkfz251: { side: 'german', era: 'early', hullFamily: 'halftrack', turret: 'none', barrelFrac: 0, barrelWpx: 0 },
   marder3: { side: 'german', era: 'early', hullFamily: 'casemate', turret: 'none', barrelFrac: 0.65, barrelWpx: 3 },
+  is3: { side: 'soviet', era: 'soviet', hullFamily: 'sloped', turret: 'sovietRound', barrelFrac: 0.7, barrelWpx: 3, muzzleBrake: true, mantletWpx: 6, turretWFrac: 0.52, turretElongate: 1.5 },
+  is1: { side: 'soviet', era: 'soviet', hullFamily: 'sloped', turret: 'sovietRound', barrelFrac: 0.65, barrelWpx: 3, mantletWpx: 6, turretWFrac: 0.5, turretElongate: 1.5 },
+  su152: { side: 'soviet', era: 'soviet', hullFamily: 'slab', turret: 'none', barrelFrac: 0.6, barrelWpx: 4, casemateTaper: 0.35 },
+  su100: { side: 'soviet', era: 'soviet', hullFamily: 'casemate', turret: 'none', barrelFrac: 0.75, barrelWpx: 3, casemateTaper: 0.28 },
+  su122: { side: 'soviet', era: 'soviet', hullFamily: 'casemate', turret: 'none', barrelFrac: 0.6, barrelWpx: 4, casemateTaper: 0.32 },
+  t28: { side: 'soviet', era: 'soviet', hullFamily: 'boxy', turret: 'sovietRound', barrelFrac: 0.4, barrelWpx: 3, turretWFrac: 0.5 },
+  ot34: { side: 'soviet', era: 'soviet', hullFamily: 'sloped', turret: 'sovietRound', barrelFrac: 0.3, barrelWpx: 5, turretWFrac: 0.52 },
+  sherman76: { side: 'soviet', era: 'soviet', hullFamily: 'boxy', turret: 'sovietRound', barrelFrac: 0.6, barrelWpx: 3, muzzleBrake: true, turretWFrac: 0.58 },
+  bm13: { side: 'soviet', era: 'soviet', hullFamily: 'halftrack', turret: 'none', barrelFrac: 0, barrelWpx: 0, rocketRack: true },
   t26: { side: 'soviet', era: 'soviet', hullFamily: 'light', turret: 'sovietRound', barrelFrac: 0.35, barrelWpx: 3, turretWFrac: 0.48 },
   bt7: { side: 'soviet', era: 'soviet', hullFamily: 'light', turret: 'sovietRound', barrelFrac: 0.4, barrelWpx: 3, turretWFrac: 0.48 },
   t34_76: { side: 'soviet', era: 'soviet', hullFamily: 'sloped', turret: 'sovietRound', barrelFrac: 0.5, barrelWpx: 3, turretWFrac: 0.52 },
@@ -1075,9 +1110,13 @@ export function composeVehicleFrame(art: VehiclePartArt, step: number, scale: nu
 }
 
 /** Approximate overall heights (m): drives the length of the cast shadow. */
-const HEIGHT_M: Record<string, number> = {
-  pz3j: 2.5, pz4f1: 2.68, pz4gh: 2.68, stug3g: 2.16, panther: 2.99, tiger: 3.0, sdkfz251: 1.75, marder3: 2.48,
-  t26: 2.24, bt7: 2.42, t34_76: 2.45, t34_85: 2.7, kv1: 2.71, is2: 2.73, t70: 2.04, su76: 2.1, su85: 2.45,
+export const HEIGHT_M: Record<string, number> = {
+  pz3j: 2.5, pz4f1: 2.68, pz4gh: 2.68, pz4g: 2.68, stug3g: 2.16, stug4: 2.2, hetzer: 2.1,
+  panther: 2.99, pantherD: 2.99, pantherA: 2.99, tiger: 3.0, tiger2: 3.09, flammpanzer3: 2.5,
+  sdkfz251: 1.75, sdkfz251_rocket: 2.0, marder3: 2.48, kettenkrad: 1.0, kubelwagen: 1.1,
+  t26: 2.24, bt7: 2.42, t34_76: 2.45, t34_85: 2.7, kv1: 2.71, is1: 2.73, is2: 2.73, is3: 2.9,
+  t70: 2.04, su76: 2.1, su85: 2.45, su100: 2.45, su122: 2.5, su152: 2.9, t28: 2.6, ot34: 2.45,
+  sherman76: 2.74, bm13: 2.5,
 };
 /** Height of the hull deck alone (what the hull's own shadow is cast from) and turret above it. */
 export function vehicleHeightM(defId: string): number { return HEIGHT_M[defId] ?? 2.5; }
@@ -1184,7 +1223,7 @@ function hullPart(defId: string, lengthM: number, widthM: number, state: 'ok' | 
   if (sc >= 2) {
     // 2x: author directly at the target resolution (no resample), so thin
     // detail — track links, hub bolts, rivets, weld seams — stays 1px crisp.
-    if (spec.hullFamily === 'halftrack') grid = buildHalftrackHull(w, h, sc);
+    if (spec.hullFamily === 'halftrack') grid = buildHalftrackHull(w, h, sc, !!spec.rocketRack);
     else if (spec.hullFamily === 'casemate') {
       const barrelLenPx = Math.round(h1 * spec.barrelFrac) * sc;
       grid = buildCasemateHull(w, h, barrelLenPx, spec.barrelWpx, { muzzleBrake: spec.muzzleBrake, taper: spec.casemateTaper, side: spec.side, s: sc });
@@ -1195,7 +1234,7 @@ function hullPart(defId: string, lengthM: number, widthM: number, state: 'ok' | 
         : buildLightHull(w, h, spec.side, sc);
     }
   } else if (spec.hullFamily === 'halftrack') {
-    grid = resize(buildHalftrackHull(HULL_CANON.halftrack.w, HULL_CANON.halftrack.h), w, h);
+    grid = resize(buildHalftrackHull(HULL_CANON.halftrack.w, HULL_CANON.halftrack.h, 1, !!spec.rocketRack), w, h);
   } else if (spec.hullFamily === 'casemate') {
     const canon = HULL_CANON.casemate;
     const barrelLenCanon = Math.round(canon.h * spec.barrelFrac);

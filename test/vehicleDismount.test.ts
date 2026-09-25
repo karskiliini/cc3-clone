@@ -155,6 +155,7 @@ describe('bailing out is seen and takes time', () => {
       const r = resolveVehicleHit(state, rng, v, { weapon: WEAPONS.kwk40_75, shooterPos: { x: 100, y: 200 }, shooterSide: 'german', distM: 200, location: { zone: 'engineDeck', face: 'rear' } });
       if (r.outcome !== 'fire') continue;
       fires++;
+      if (v.engineOnFire) { fires--; continue; } // deck fire: crew fights it, nobody bails yet
       expect(v.state).toBe('burning');
       expect(v.exiting?.fire).toBe(true);
       // Injured crew now struggle through each hatch before dropping down; a shared hatch

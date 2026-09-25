@@ -6,6 +6,7 @@ import type {
   Camera, BattleState, Side, GameSettings, Soldier, Team, Facing8,
 } from '@/shared/types';
 import { VIEW_W, VIEW_H } from '@/shared/types';
+import { hash2 } from '@/shared/rng';
 import { facingAngle } from '@/shared/math';
 import { worldToScreen } from '@/engine/camera';
 import { PALETTE, SIDE_COLOR } from '@/render/palette';
@@ -14,6 +15,8 @@ import { drawText, textWidth } from '@/render/pixelfont';
 import { VEHICLE_DEFS } from '@/data/units';
 import { teamBarColor } from '@/ui/hud/hudChrome';
 import { drawOrderMarkers } from '@/render/orderMarkers';
+import { coverAt } from '@/sim/map';
+import { game } from '@/game';
 import { getWeaponSprite } from '@/render/sprites';
 import { getCrewPoseSprite, type CrewPose, type SoldierPose } from '@/render/soldierArt';
 import { weaponMuzzleM, trailVariant, type WeaponVariant } from '@/render/weaponArt';
@@ -25,15 +28,14 @@ import { hatchWorld, isServiceable } from '@/sim/vehicleCrew';
 import { dist, facingFromAngle } from '@/shared/math';
 import {
   drawSoldier as drawAtlasSoldier, drawVehiclePart, drawWeapon as drawAtlasWeapon, drawWeaponState, requestBattleAtlases,
-  soldierAtlas, smgAtlas, vehicleAtlasHas, itemAtlas, partsAtlas, drawAtlasFrame, type Atlas,
+  soldierAtlas, vehicleAtlasHas, itemAtlas, partsAtlas, drawAtlasFrame, type Atlas,
 } from '@/render/spriteAtlas';
 import {
   frameFor, moodFor, pickAnimation, postureFor, transitionPosture, trembleOffset, entryKeyChain,
   crewTaskAnim, progressFrame, weaponStateChain, hatchClimbAnim, hatchClimbFrame,
-  SoldierMotion, smgCombatInterrupted, type AnimAction, type Posture,
+  type AnimAction, type Posture,
 } from '@/render/soldierAnim';
 import { ragdollSample, metresToPx } from '@/render/soldierAnim';
-import { smgPose } from '@/render/smgAnim';
 import type { Debris, GroundItem, Season } from '@/shared/types';
 import { WEAPONS } from '@/data/weapons';
 import { drawRagdollFlight, drawRagdollLanded, landedFacing8, ragdollBeginFrame, ragdollPhase } from '@/render/ragdoll';
@@ -52,18 +54,26 @@ function ensureAtlases(state: BattleState): void {
 
 /** Render-side memory per soldier: measured ground speed (for gait cadence) and the last posture
  * with its change time (for stand <-> prone transitions). Never read by the sim. */
-interface AnimTrack { motion: SoldierMotion; posture: Posture; since: number; prev?: Posture }
+interface AnimTrack { x: number; y: number; t: number; speed: number; measured: boolean; posture: Posture; since: number }
 /** Measured ground speed, or undefined until the first measurement (the path decides then). */
-const trackSpeed = (tr: AnimTrack): number | undefined => (tr.motion.measured ? tr.motion.speedMps : undefined);
-const animTracks = new WeakMap<Soldier, AnimTrack>();
+const trackSpeed = (tr: AnimTrack): number | undefined => (tr.measured ? tr.speed : undefined);
+const animTracks = new Map<number, AnimTrack>();
+let animTrackTime = -1;
 function animTrackFor(s: Soldier, time: number): AnimTrack {
-  let tr = animTracks.get(s);
-  if (!tr) { const posture = postureFor(s, time); tr = { motion: new SoldierMotion(s, time), posture, since: time - 10 }; animTracks.set(s, tr); return tr; }
-  tr.motion.update(s, time);
+  if (time < animTrackTime - 0.5) animTracks.clear(); // a new battle
+  animTrackTime = time;
+  let tr = animTracks.get(s.id);
+  if (!tr) { const posture = postureFor(s, time); tr = { x: s.pos.x, y: s.pos.y, t: time, speed: 0, measured: false, posture, since: time - 10 }; animTracks.set(s.id, tr); return tr; }
+  const dt = time - tr.t;
+  if (dt >= 0.1) {
+    const v = (Math.hypot(s.pos.x - tr.x, s.pos.y - tr.y) * TILE_M) / dt;
+    tr.speed = v > 12 ? tr.speed : tr.speed * 0.5 + v * 0.5; // ignore teleports (knockback, deploy)
+    tr.x = s.pos.x; tr.y = s.pos.y; tr.t = time; tr.measured = true;
+  }
   const posture = postureFor(s, time, trackSpeed(tr));
   if (posture !== tr.posture) {
     // keep the old posture visible in `transitionPosture` by remembering it in `prev`
-    tr.prev = tr.posture;
+    (tr as AnimTrack & { prev?: Posture }).prev = tr.posture;
     tr.posture = posture; tr.since = time;
   }
   return tr;
@@ -84,12 +94,12 @@ const CREW_KEYS: Record<CrewPose, string[]> = {
 
 /** Draw one living soldier from his side's atlas. False => no atlas / no usable entry. */
 function drawSoldierFromAtlas(
-  ctx: CanvasRenderingContext2D, atlas: Atlas | null, state: BattleState, s: Soldier, p: { x: number; y: number }, zoom: number,
+  ctx: CanvasRenderingContext2D, atlas: Atlas, state: BattleState, s: Soldier, p: { x: number; y: number }, zoom: number,
   crew: CrewSoldierDraw | undefined,
 ): boolean {
   const time = state.time;
   const tr = animTrackFor(s, time);
-  const prev = tr.prev ?? tr.posture;
+  const prev = (tr as AnimTrack & { prev?: Posture }).prev ?? tr.posture;
   const posture = transitionPosture(prev, tr.posture, time - tr.since);
   const target = s.targetSoldierId != null ? state.soldiers.get(s.targetSoldierId)?.pos : s.targetVehicleId != null ? state.vehicles.get(s.targetVehicleId)?.pos : null;
   const pick = pickAnimation(s, time, target, posture, trackSpeed(tr));
@@ -110,20 +120,6 @@ function drawSoldierFromAtlas(
       (entry) => (prog == null ? frameFor(s, time, 'idle', entry, 0, pick.mood) : progressFrame(prog, entry.frames)),
       p.x + j0.x, p.y + j0.y, zoom) != null;
   }
-  const smg = !crew && (pick.action === 'aim' || pick.action === 'fire') ? smgPose(s, time, posture) : null;
-  if (smg) {
-    if (smg.source === 'soldier') {
-      return drawAtlasSoldier(ctx, atlas, [smg.key, ...pick.keys], smg.bodyHeading, () => 0, p.x, p.y, zoom) != null;
-    }
-    const burstAtlas = smgAtlas(s.side, state.map.def.season, zoom);
-    if (drawAtlasSoldier(ctx, burstAtlas, [smg.key], smg.bodyHeading, () => smg.frame, p.x, p.y, zoom)) return true;
-    // The main sheet remains usable while the small supplementary atlas loads. Its alert
-    // low-ready frame keeps hip fire visibly lower than the shouldered aim / fire pose.
-    keys = smg.key.includes('.hip.') ? entryKeyChain(posture, 'idle', 'alert', 'smg')
-      : entryKeyChain(posture, pick.action === 'fire' ? 'fire' : 'aim', pick.mood, 'smg');
-    return drawAtlasSoldier(ctx, atlas, keys, smg.heading,
-      (entry) => Math.min(entry.frames - 1, smg.frame), p.x, p.y, zoom) != null;
-  }
   if (crew?.pose) {
     const mood = moodFor(s);
     keys = mood === 'calm' ? CREW_KEYS[crew.pose] : [...CREW_KEYS[crew.pose].map((k) => `${k}.${mood}`), ...CREW_KEYS[crew.pose]];
@@ -134,27 +130,29 @@ function drawSoldierFromAtlas(
     keys = entryKeyChain('crouched', 'idle', pick.mood, pick.weapon);
   }
   const j = trembleOffset(s, time, pick.mood);
-  return drawAtlasSoldier(ctx, atlas, keys, heading,
-    (entry) => frameFor(s, time, action, entry, trackSpeed(tr), pick.mood, tr.motion.gaitCycles), p.x + j.x, p.y + j.y, zoom) != null;
+  return drawAtlasSoldier(ctx, atlas, keys, heading, (entry) => frameFor(s, time, action, entry, tr.speed, pick.mood), p.x + j.x, p.y + j.y, zoom) != null;
 }
 
-
-/** wf19 team status bar: a slim 2 px morale-colour line with a dark hairline border, as wide as
- * the unit it belongs to, floating just above it. Only the SELECTED teams carry one (full
- * strength) plus the team under the pointer (dimmer) — the old always-on 30x4 saturated slabs
- * over every team were far heavier than the original's small, unobtrusive bars. Normal zoom only
- * (manual: "Team information bars only visible at normal zoom level"). */
+/** wf19/round6 team status bar, re-measured on the ref11 soldier column
+ * (orig-bars-zoom2): ~11-13 logical px wide, ~3 px tall, vivid green core
+ * (#22dd20/#39e039 sampled) with soft AA edges — no outline, no highlight —
+ * floating ~5 px above the top soldier. One over EVERY visible friendly team
+ * and tank. Colour still carries the team state (yellow pinned/cowering, red
+ * broken, dark-red destroyed); good morale is the bright green, not olive.
+ * Normal zoom only (manual: "Team information bars only visible at normal
+ * zoom level"). Enemy teams draw only under 'Always Have Full Enemy Info'
+ * (item 024). */
 function drawTeamBars(
   ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side,
-  selectedTeamIds: readonly number[], hoverTeamId: number | null,
+  mode: 'morale' | 'experience' | 'name' | 'cover' = 'morale',
 ): void {
   if (cam.zoom !== 1) return;
-  const ids = hoverTeamId != null && !selectedTeamIds.includes(hoverTeamId) ? [...selectedTeamIds, hoverTeamId] : selectedTeamIds;
-  for (const id of ids) {
-    const team = state.teams.get(id);
-    if (!team || team.side !== playerSide) continue;
+  for (const team of state.teams.values()) {
+    // item 024: 'Always Have Full Enemy Info' — enemy team bars draw like friendly ones
+    const enemyInfo = team.side !== playerSide && !!state.config.alwaysFullEnemyInfo;
+    if (team.side !== playerSide && !enemyInfo) continue;
     if (team.status === 'Destroyed' || team.status === 'Knocked Out') continue;
-    let x0 = Infinity, x1 = -Infinity, top = Infinity;
+    let x0 = Infinity, x1 = -Infinity, top = Infinity, bottom = -Infinity;
     const veh = team.vehicleId != null ? state.vehicles.get(team.vehicleId) : undefined;
     if (veh) {
       const def = VEHICLE_DEFS[veh.defId];
@@ -163,7 +161,7 @@ function drawTeamBars(
       // screen half-extents of the rotated hull box
       const c = Math.abs(Math.cos(veh.hullFacing)), sn = Math.abs(Math.sin(veh.hullFacing));
       const ex = halfW * c + halfL * sn, ey = halfW * sn + halfL * c;
-      x0 = p.x - ex * 0.8; x1 = p.x + ex * 0.8; top = p.y - ey;
+      x0 = p.x - ex * 0.8; x1 = p.x + ex * 0.8; top = p.y - ey; bottom = p.y + ey;
     } else {
       for (const sid of team.soldierIds) {
         const so = state.soldiers.get(sid);
@@ -172,24 +170,47 @@ function drawTeamBars(
         if (p.x < x0) x0 = p.x;
         if (p.x > x1) x1 = p.x;
         if (p.y < top) top = p.y;
+        if (p.y > bottom) bottom = p.y;
       }
       if (top === Infinity) continue;
-      x0 -= 5; x1 += 5; top -= 9;
+      x0 -= 4; x1 += 4; top -= 8;
     }
     const cx = (x0 + x1) / 2;
-    const w = Math.round(Math.max(14, Math.min(44, x1 - x0)));
-    const bx = Math.round(cx - w / 2), by = Math.round(top - 6);
-    if (bx > VIEW_W + 8 || bx + w < -8 || by > VIEW_H + 8 || by < -8) continue;
-    const hover = !selectedTeamIds.includes(id);
-    ctx.globalAlpha = hover ? 0.5 : 0.95;
-    ctx.fillStyle = 'rgba(10,10,8,0.9)';
-    ctx.fillRect(bx - 1, by - 1, w + 2, 4);
+    // original bars (orig-bars-zoom2, ref11 soldiers): ~11-13 game px wide, ~3 px
+    // vivid green core with soft AA edges — no outline, no white highlight, our
+    // 22-34 px outlined slab read double the size.
+    const w = Math.round(Math.max(10, Math.min(16, x1 - x0)));
+    let bx = Math.round(cx - w / 2), by = Math.round(top - 6);
+    // Cull only teams entirely off-view; partially visible ones keep a bar clamped
+    // to the visible edge (the original shows a bar on any team partly on screen).
+    if (x1 < 0 || x0 > VIEW_W || bottom < -8 || top > VIEW_H + 8) continue;
+    bx = Math.max(2, Math.min(bx, VIEW_W - w - 2));
+    by = Math.max(2, Math.min(by, VIEW_H - 5));
     ctx.fillStyle = teamBarColor(team);
     ctx.fillRect(bx, by, w, 2);
-    // a lighter top pixel row: reads as a fine enamel line rather than a flat slab
-    ctx.fillStyle = 'rgba(255,255,255,0.28)';
-    ctx.fillRect(bx, by, w, 1);
-    ctx.globalAlpha = 1;
+    ctx.fillStyle = 'rgba(200,251,205,0.55)';
+    ctx.fillRect(bx, by + 2, w, 1);
+    // G11 info-bar modes: a small readout under the slab (except the classic morale mode)
+    if (mode !== 'morale') {
+      ctx.font = '9px Arial, Helvetica, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = '#f0ead0';
+      if (mode === 'name') {
+        ctx.fillText(team.name, cx, by + 14);
+      } else {
+        let frac = 0;
+        if (mode === 'experience') frac = team.experience / 100;
+        else if (mode === 'cover') frac = coverAt(state.map, team.pos);
+        // a 2px gauge under the slab, amber fill on dark
+        ctx.fillStyle = 'rgba(10,10,8,0.9)';
+        ctx.fillRect(bx, by + 5, w, 2);
+        ctx.fillStyle = '#e0b040';
+        ctx.fillRect(bx, by + 5, Math.round(w * Math.max(0, Math.min(1, frac))), 2);
+      }
+      ctx.globalAlpha = 1;
+      ctx.textAlign = 'left';
+    }
   }
 }
 
@@ -211,11 +232,8 @@ function spriteDrawSize(sprite: HTMLCanvasElement, zoom: number, scale = 1): { d
   return { dw, dh };
 }
 
-function frameOf(soldier: Soldier, time: number): 0 | 1 {
-  if (!smgCombatInterrupted(soldier) && (soldier.aiming || (soldier.smgBurst && time < soldier.smgBurst.until))) return 0;
-  const tr = animTrackFor(soldier, time);
-  const pick = pickAnimation(soldier, time, null, tr.posture, trackSpeed(tr));
-  return frameFor(soldier, time, pick.action, { frames: 2, fps: 2, loop: true }, trackSpeed(tr), pick.mood, tr.motion.gaitCycles) as 0 | 1;
+function frameOf(soldier: Soldier): 0 | 1 {
+  return (Math.floor(soldier.animFrame) % 2 === 0 ? 0 : 1);
 }
 
 function visible(s: { x: number; y: number }, cam: Camera): boolean {
@@ -225,6 +243,8 @@ function visible(s: { x: number; y: number }, cam: Camera): boolean {
 
 function isEnemyVisible(state: BattleState, playerSide: Side, side: Side, id: number, vehicle: boolean): boolean {
   if (side === playerSide) return true;
+  // item 024: 'Always See Enemy' — the cheat sight shows every enemy unit
+  if (state.config.alwaysSeeEnemy) return true;
   const set = vehicle ? state.spottedVehicles[playerSide] : state.spotted[playerSide];
   return set.has(id);
 }
@@ -399,6 +419,11 @@ function drawCorpses(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
   if (!showDead) return;
   const season = state.map.def.season;
   const scale = unitSpriteScale(cam.zoom);
+  // a fallen man reads darker than the living: one filter around the whole corpse pass so a
+  // body is recognisable at a glance (hoisted outside the loop — the many `continue` paths
+  // must not leak the filter into later rendering)
+  ctx.save();
+  ctx.filter = 'brightness(0.62)';
   for (const s of state.soldiers.values()) {
     if (s.health !== 'dead' || s.dismembered) continue; // torn apart: his parts are state.debris
     if (!isEnemyVisible(state, playerSide, s.side, s.id, false)) continue;
@@ -435,6 +460,7 @@ function drawCorpses(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     const { dw, dh } = spriteDrawSize(sprite, cam.zoom, scale);
     ctx.drawImage(sprite, Math.round(p.x - dw / 2), Math.round(p.y - dh / 2), dw, dh);
   }
+  ctx.restore();
 }
 
 /** One whole vehicle at screen (cx,cy): soft ground shadow thrown to the screen SE (length by
@@ -480,17 +506,67 @@ export function drawVehicleSprite(
   }
 }
 
-/** Thin grey smoke trailing from the engine deck of a vehicle with a damaged engine. */
-function drawEngineSmoke(ctx: CanvasRenderingContext2D, veh: Vehicle, p: { x: number; y: number }, time: number, zoom: number, lengthM: number): void {
+/** Smoke from the engine deck, two visual states (user: damaged engines read as an element —
+ * dark, loud, harder to conceal):
+ * - damaged engine: near-black diesel puffs, size/alpha jittered per puff (hash of id+i), a
+ *   slight flicker in the spawn rhythm, drifting NE like the tree-fire smoke.
+ * - engine-deck fire (engineOnFire): flame licks on the deck (flickering orange/yellow
+ *   ellipses) plus a dense dark plume, visibly worse than the damaged state.
+ */
+function drawEngineSmoke(ctx: CanvasRenderingContext2D, veh: Vehicle, p: { x: number; y: number }, time: number, zoom: number, lengthM: number, deckFire: boolean): void {
   const back = lengthM * 0.32 * 10 * zoom;
   const ex = p.x - Math.sin(veh.hullFacing) * back, ey = p.y + Math.cos(veh.hullFacing) * back;
   ctx.save();
-  for (let i = 0; i < 4; i++) {
-    const phase = (time * 0.35 + i / 4 + (veh.id % 7) / 7) % 1;
-    ctx.globalAlpha = (1 - phase) * 0.3;
-    ctx.fillStyle = '#3a3a38';
+  // --- flames first (only the deck fire) ---
+  if (deckFire) {
+    for (let i = 0; i < 3; i++) {
+      const ph = hash2(veh.id, i, 53);
+      const fl = (time * 8 + ph * 6.28) % 6.28;
+      const flick = 0.7 + 0.3 * Math.sin(fl);
+      const fx = ex + (ph - 0.5) * 7 * zoom, fy = ey - ph * 3 * zoom;
+      const w = (2.4 + ph * 1.8) * zoom * flick, h = (5 + ph * 4) * zoom * flick;
+      ctx.fillStyle = i === 1 ? 'rgba(255,214,120,0.85)' : 'rgba(235,110,30,0.8)';
+      ctx.beginPath();
+      ctx.ellipse(fx, fy - h * 0.3, w, h, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // a few rising sparks
+    for (let i = 0; i < 4; i++) {
+      const ph = (time * (0.55 + hash2(veh.id, i, 61) * 0.4) + hash2(veh.id, i, 67)) % 1;
+      ctx.globalAlpha = (1 - ph) * 0.9;
+      ctx.fillStyle = '#ffc050';
+      ctx.beginPath();
+      ctx.arc(ex + (hash2(veh.id, i, 71) - 0.5) * 10 * zoom + ph * 6 * zoom, ey - ph * 30 * zoom, 1.2 * zoom, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+  // --- smoke plume ---
+  const count = deckFire ? 6 : 4;
+  for (let i = 0; i < count; i++) {
+    const h = hash2(veh.id, i, 73);
+    const rate = deckFire ? 0.55 : 0.35;
+    const flick = 0.85 + 0.3 * Math.sin(time * 3.1 + h * 6.28); // spawn-rhythm flicker
+    const phase = (time * rate * flick + h) % 1;
+    const size = deckFire ? 4 + phase * 10 : 3 + phase * 6;
+    ctx.globalAlpha = (1 - phase) * (deckFire ? 0.45 : 0.3);
+    ctx.fillStyle = deckFire ? '#1c1a18' : '#26261f';
     ctx.beginPath();
-    ctx.arc(ex + phase * 9 * zoom, ey - phase * 22 * zoom, (3 + phase * 6) * zoom, 0, Math.PI * 2);
+    ctx.arc(ex + phase * 9 * zoom + (h - 0.5) * 5 * zoom, ey - phase * 22 * zoom, size * zoom, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** Embers and a thin dark wisp from the exposed turret ring of a turret-blown hull. */
+function drawTurretRingFx(ctx: CanvasRenderingContext2D, veh: Vehicle, p: { x: number; y: number }, time: number, zoom: number): void {
+  ctx.save();
+  for (let i = 0; i < 3; i++) {
+    const ph = (time * (0.35 + hash2(veh.id, i, 79) * 0.3) + hash2(veh.id, i, 83)) % 1;
+    ctx.globalAlpha = (1 - ph) * 0.7;
+    ctx.fillStyle = ph < 0.3 ? '#ffb060' : '#55524c';
+    ctx.beginPath();
+    ctx.arc(p.x + (hash2(veh.id, i, 89) - 0.5) * 8 * zoom + ph * 5 * zoom, p.y - ph * 26 * zoom, (1 + ph * 3) * zoom, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
@@ -525,6 +601,45 @@ function drawOpenHatches(ctx: CanvasRenderingContext2D, cam: Camera, state: Batt
   });
 }
 
+/** Item 011: a wreck whose hatches burst — fire spews from each open hatch, licking up and back
+ * with the flicker. Deterministic per vehicle (seeded by its id) so the flames don't strobe. */
+function drawHatchFire(
+  ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, veh: Vehicle,
+  p: { x: number; y: number }, time: number,
+): void {
+  const def = VEHICLE_DEFS[veh.defId];
+  if (!def) return;
+  const lay = vehicleLayout(def);
+  const pxPerM = 10 * cam.zoom;
+  lay.hatches.forEach((h, i) => {
+    const w = worldToScreen(cam, hatchWorld(veh, def, h));
+    const phase = time * 6 + veh.id * 2.7 + i * 1.9;
+    const flicker = 0.75 + 0.25 * Math.sin(phase);
+    const h0 = (0.5 + 0.22 * Math.sin(phase * 1.7 + i)) * pxPerM;
+    const r = Math.max(1.5, 0.2 * pxPerM) * flicker;
+    ctx.save();
+    ctx.translate(w.x, w.y);
+    // flame column: layered ellipses, hot core to dark edge
+    for (const [scaleF, color] of [
+      [1.0, 'rgba(120,32,8,0.55)'], [0.72, 'rgba(226,102,16,0.72)'], [0.42, 'rgba(252,198,72,0.9)'],
+    ] as const) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.ellipse(0, -h0 * scaleF * 0.5, r * scaleF, h0 * scaleF, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  });
+  ctx.save();
+  // the hull itself glows around the engine deck
+  const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 4.5 * pxPerM);
+  glow.addColorStop(0, 'rgba(226,102,16,0.22)');
+  glow.addColorStop(1, 'rgba(226,102,16,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(p.x - 5 * pxPerM, p.y - 5 * pxPerM, 10 * pxPerM, 10 * pxPerM);
+  ctx.restore();
+}
+
 function drawVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side): void {
   const scale = unitSpriteScale(cam.zoom);
   for (const veh of state.vehicles.values()) {
@@ -539,17 +654,20 @@ function drawVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
     drawVehicleSprite(ctx, veh.defId, koLike ? 'knockedOut' : 'ok', p.x, p.y, veh.hullFacing, veh.turretFacing, cam.zoom, scale, dmg.turretBlown, dmg.brokenTrack,
       tl ? { x: tl.x, y: tl.y, dirRad: veh.turretLandingDir ?? veh.turretFacing + 2.3 } : undefined);
     if ((left || veh.exiting) && cam.zoom > 0.5) drawOpenHatches(ctx, cam, state, veh);
-    if (dmg.engineSmoke) drawEngineSmoke(ctx, veh, p, state.time, cam.zoom, VEHICLE_DEFS[veh.defId]?.lengthM ?? 6);
+    // item 011: a dead hull whose hatches blew shows fire spewing from the open hatches
+    if (dmg.hatchesBlown && cam.zoom > 0.4) drawHatchFire(ctx, cam, state, veh, p, state.time);
+    if (dmg.engineSmoke || dmg.engineFire) drawEngineSmoke(ctx, veh, p, state.time, cam.zoom, VEHICLE_DEFS[veh.defId]?.lengthM ?? 6, dmg.engineFire);
+    if (dmg.turretBlown && cam.zoom > 0.4) drawTurretRingFx(ctx, veh, p, state.time, cam.zoom);
   }
 }
 
-function drawSelectionRing(ctx: CanvasRenderingContext2D, p: { x: number; y: number }): void {
+/** The original's selection: a bright-yellow square bracket around the ONE watched soldier
+ * (picked by clicking his row in the soldier monitor), not rings under every soldier. */
+function drawWatchBracket(ctx: CanvasRenderingContext2D, p: { x: number; y: number }): void {
   ctx.save();
-  ctx.strokeStyle = PALETTE.gold;
+  ctx.strokeStyle = '#ffe93c';
   ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
-  ctx.stroke();
+  ctx.strokeRect(p.x - 8.5, p.y - 10.5, 17, 21);
   ctx.restore();
 }
 
@@ -669,7 +787,7 @@ function crewSoldierDraws(state: BattleState): Map<number, CrewSoldierDraw> {
           // (the sim keeps the haulers at their stations from the gun's axle pose)
           void towLengthM;
         }
-        out.set(s.id, { pose: carry[i], pos, facing: cls === 'atgun' ? f8 : s.facing, frame: frameOf(s, state.time) });
+        out.set(s.id, { pose: carry[i], pos, facing: cls === 'atgun' ? f8 : s.facing, frame: (Math.floor(s.animFrame) % 2 === 0 ? 0 : 1) });
       });
       continue;
     }
@@ -770,6 +888,27 @@ function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, state: Batt
       ctx.moveTo(bx + 0.5, by + 0.5);
       ctx.lineTo(bx + 0.5 + dir.x * 5, by + 0.5 + dir.y * 5);
       ctx.stroke();
+      continue;
+    }
+    if (cw.destroyed) {
+      // item 028: a run-over gun is a wreck — the packed look, tipped askew off its wheels,
+      // scorch and splinters where the tracks went over it. No crew pulls; the men are free.
+      const wp = worldToScreen(cam, cw.pos);
+      const sprite = getWeaponSprite(cw.weaponId, 'trailsClosed', cw.facing + 0.9, team.side, season, scale);
+      const { dw, dh } = spriteDrawSize(sprite, cam.zoom, scale);
+      ctx.save();
+      ctx.globalAlpha = 0.92;
+      ctx.drawImage(sprite, Math.round(wp.x - dw / 2), Math.round(wp.y - dh / 2), dw, dh);
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = '#1c1a16';
+      ctx.beginPath();
+      ctx.ellipse(wp.x, wp.y + dh * 0.18, dw * 0.32, dh * 0.12, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 0.8;
+      ctx.fillStyle = '#3a352c';
+      ctx.fillRect(Math.round(wp.x - dw * 0.18), Math.round(wp.y + dh * 0.05), Math.max(1, dw * 0.06), Math.max(1, dh * 0.05));
+      ctx.fillRect(Math.round(wp.x + dw * 0.1), Math.round(wp.y - dh * 0.02), Math.max(1, dw * 0.05), Math.max(1, dh * 0.04));
+      ctx.restore();
       continue;
     }
     if (cw.phase === 'packed' && !cw.abandoned && cls !== 'atgun') continue; // carried on the crew's backs
@@ -878,7 +1017,7 @@ export function drawSuppressionStipple(ctx: CanvasRenderingContext2D, p: { x: nu
   ctx.restore();
 }
 
-function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side, selectedTeamIds: readonly number[]): void {
+function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side, selectedTeamIds: readonly number[], watchedSoldierId: number | null): void {
   if (cam.zoom <= 0.5) {
     drawSoldierDotClusters(ctx, cam, state, playerSide);
     return;
@@ -907,18 +1046,18 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
     const crewDraw = s.health === 'incapacitated' ? undefined : crewDraws.get(s.id);
     const p = worldToScreen(cam, crewDraw ? crewDraw.pos : s.pos);
     const selected = selectedTeamIds.includes(s.teamId);
-    if (selected) drawSelectionRing(ctx, p);
+    if (s.id === watchedSoldierId) drawWatchBracket(ctx, p);
     const atlas = soldierAtlas(s.side, season, cam.zoom);
-    if (drawSoldierFromAtlas(ctx, atlas, state, s, p, cam.zoom, crewDraw)) {
+    if (atlas && drawSoldierFromAtlas(ctx, atlas, state, s, p, cam.zoom, crewDraw)) {
       drawSuppressionStipple(ctx, p, s, 9 * cam.zoom);
       if (selected) drawFacingTick(ctx, p, s.facing);
       continue;
     }
-    const stance: SoldierPose = crewDraw?.pose === 'mgProne' ? 'prone' : crewDraw?.stance ?? poseForSoldier(s, state.time);
+    const stance: SoldierPose = crewDraw?.pose === 'mgProne' ? 'prone' : crewDraw?.stance ?? poseForSoldier(s);
     const outline = s.side === playerSide ? 'friendly' : 'enemy';
     const sprite = crewDraw?.pose
       ? getCrewPoseSprite(s.side, season, crewDraw.pose, crewDraw.facing, crewDraw.frame, outline, scale)
-      : getSoldierSprite(s.side, season, stance, crewDraw ? crewDraw.facing : s.facing, frameOf(s, state.time), outline, scale);
+      : getSoldierSprite(s.side, season, stance, crewDraw ? crewDraw.facing : s.facing, frameOf(s), outline, scale);
     const { dw, dh } = spriteDrawSize(sprite, cam.zoom, scale);
     ctx.drawImage(sprite, Math.round(p.x - dw / 2), Math.round(p.y - dh / 2), dw, dh);
     drawSuppressionStipple(ctx, p, s, Math.max(dw, dh) * 0.6);
@@ -1008,6 +1147,7 @@ export function drawUnits(
   showDead = true,
   orderHover: { teamId: number } | null = null,
   hoverTeamId: number | null = null,
+  watchedSoldierId: number | null = null,
 ): void {
   ctx.save();
   ctx.beginPath();
@@ -1021,13 +1161,12 @@ export function drawUnits(
   drawLooseObjects(ctx, cam, state, false, showDead);
   drawVehicles(ctx, cam, state, playerSide);
   drawCrewWeapons(ctx, cam, state, playerSide);
-  drawSoldiers(ctx, cam, state, playerSide, selectedTeamIds);
+  drawSoldiers(ctx, cam, state, playerSide, selectedTeamIds, watchedSoldierId);
   drawLooseObjects(ctx, cam, state, true, showDead);
-  drawTeamBars(ctx, cam, state, playerSide, selectedTeamIds, hoverTeamId);
+  drawTeamBars(ctx, cam, state, playerSide, game.settings.infoBarMode ?? 'morale');
   drawFlags(ctx, cam, state);
   drawTeamLabels(ctx, cam, state, settings);
 
-  // order endpoints for every friendly team; lines for the selected / hovered ones (orderMarkers.ts)
   drawOrderMarkers(ctx, cam, state, playerSide, selectedTeamIds, orderHover);
 
   ctx.restore();

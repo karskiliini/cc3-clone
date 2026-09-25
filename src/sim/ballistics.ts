@@ -126,6 +126,7 @@ export function hitChance(
   return clamp(Math.max(p, closeFloor), 0.02, 0.95);
 }
 
+
 /** pen = roundPenetrationMm (AP: penetrationMm * max(0.4, 1 - dist/1000)); spread = gauss()*0.12;
  * penetrates if pen*(1+spread) > armorMm. Closed form: `expectedPenetrationChance` / penChance.ts. */
 export function penetrates(weapon: WeaponDef, distM: number, armorMm: number, rng: Rng, round: RoundType = 'ap'): boolean {

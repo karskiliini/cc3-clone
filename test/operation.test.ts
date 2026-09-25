@@ -3,6 +3,8 @@ import { advanceOperation } from '@/ui/screens/operation';
 import { OPERATION } from '@/data/operation';
 import { Battle } from '@/sim/battle';
 import { game } from '@/game';
+import { addTeam, newCampaign } from '@/campaign/roster';
+import { TEAM_DEFS } from '@/data/units';
 import type { BattleConfig, OperationState } from '@/shared/types';
 
 // Depends on '@/data/units' (TEAM_DEFS ids below), owned by other agents — ids verified against
@@ -24,6 +26,7 @@ describe('advanceOperation', () => {
   afterEach(() => {
     game.operation = null;
     game.battle = null;
+    game.campaign = null;
   });
 
   it('rebuilds the force pool from the just-fought battle: destroyed teams drop out, survivors keep their experience', () => {
@@ -51,6 +54,12 @@ describe('advanceOperation', () => {
     };
     game.operation = op;
     game.battle = battle;
+    // seed the campaign roster so advanceOperation can fold the report into it
+    game.campaign = newCampaign(1, 'german', op.requisition);
+    for (const t of germanTeams) {
+      const def = TEAM_DEFS[t.defId];
+      addTeam(game.campaign, t.defId, def.name, def.soldiers, def.vehicleDefId);
+    }
 
     advanceOperation('minorVictory');
 
@@ -58,12 +67,17 @@ describe('advanceOperation', () => {
     expect(op.index).toBe(1);
     expect(op.requisition).toBe(OPERATION[1].requisition.german);
 
-    // The destroyed team is gone; the surviving team is kept with its post-battle experience.
-    expect(op.forcePool.some((f) => f.defId === destroyedTeam.defId)).toBe(false);
-    const survivorEntry = op.forcePool.find((f) => f.defId === survivingTeam.defId);
+    // G3: the campaign roster is the single source of truth. The destroyed team's men are
+    // KIA in the campaign; the surviving team's men are healthy with post-battle experience.
+    const campaign = game.campaign!;
+    const destroyedUids = campaign.teams.filter((t) => t.defId === destroyedTeam.defId).flatMap((t) => t.soldierUids);
+    expect(destroyedUids.length).toBeGreaterThan(0);
+    expect(destroyedUids.every((uid) => campaign.soldiers[uid]?.health === 'kia')).toBe(true);
+    const survivorEntry = campaign.teams.find((t) => t.defId === survivingTeam.defId);
     expect(survivorEntry).toBeDefined();
-    expect(survivorEntry?.experience).toBe(77);
-    expect(survivorEntry?.alive).toBe(survivingTeam.soldierIds.length);
+    const survivorUids = survivorEntry!.soldierUids;
+    expect(survivorUids.length).toBe(survivingTeam.soldierIds.length);
+    expect(survivorUids.every((uid) => campaign.soldiers[uid]?.health === 'healthy')).toBe(true);
   });
 
   it('leaves the force pool untouched when there is no in-progress battle to rebuild it from', () => {

@@ -15,6 +15,10 @@ export const EYE_STANDING_M = 1.7;
 export const EYE_CROUCHING_M = 1.1;
 export const EYE_PRONE_M = 0.4;
 export const EYE_VEHICLE_M = 2.2;
+/** The vehicle main gun's muzzle height (m above the vehicle's own ground) - below the commander's
+ * 2.2 m eye: a tank in defilade behind a crest sees over it (the eye) while the gun line is still
+ * masked (the muzzle), which is what the hull-down creep engages on (item 038). */
+export const VEHICLE_GUN_M = 1.5;
 
 /** Eye height above the ground for a dismounted soldier in this stance. */
 export function eyeHeightM(stance: Stance): number {
@@ -53,7 +57,7 @@ export const LOW_GROWTH_HEIGHT_M: Partial<Record<Terrain, number>> = {
   snow: 0.15, mud: 0.15, crater: 0, trench: 0,
 };
 
-function bresenhamTiles(x0: number, y0: number, x1: number, y1: number): Vec2[] {
+export function bresenhamTiles(x0: number, y0: number, x1: number, y1: number): Vec2[] {
   const pts: Vec2[] = [];
   let x = x0, y = y0;
   const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
@@ -76,7 +80,7 @@ function chebyshevAdjacent(a: Vec2, b: Vec2): boolean {
   return Math.abs(a.x - b.x) <= 1 && Math.abs(a.y - b.y) <= 1;
 }
 
-export function losTrace(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeights, ignoreConcealment = false): LosResult {
+export function losTrace(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeights, ignoreConcealment = false, endBlocksSolid = false): LosResult {
   const fx = Math.floor(from.x), fy = Math.floor(from.y);
   const tx = Math.floor(to.x), ty = Math.floor(to.y);
   const startTile: Vec2 = { x: fx, y: fy };
@@ -109,7 +113,21 @@ export function losTrace(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeight
   for (let i = 1; i < tiles.length; i++) {
     const t = tiles[i];
     if (t.x === tx && t.y === ty) {
-      // end tile reached: visible (subject to accumulated concealment already tallied)
+      // end tile reached: visible (subject to accumulated concealment already tallied).
+      // The target's own tile never blocks or conceals itself.
+      if (endBlocksSolid) {
+        // Near-miss suppression gate: a solid end tile stops the round at its face, so a man
+        // standing inside a wall tile just beyond the impact is not pressured by it. Woods
+        // stays soft — rounds and sight both pass through vegetation.
+        const iEnd = inBounds(map, tx, ty) ? idx(map, tx, ty) : -1;
+        const endTerrain = iEnd >= 0 ? map.tiles[iEnd] : 'open';
+        if (endTerrain !== 'woods' && TERRAIN_PROPS[endTerrain].blocksLOS) {
+          const isWindow = map.windows[iEnd] === 1;
+          if (!(isWindow && (chebyshevAdjacent(t, startTile) || chebyshevAdjacent(t, endTile)))) {
+            return { clear: false, blockedAt: { x: t.x + 0.5, y: t.y + 0.5 }, visibility: 0 };
+          }
+        }
+      }
       const visibility = Math.max(0, 1 - accumulated) * losDistanceFactor(distM);
       return { clear: true, blockedAt: null, visibility };
     }
@@ -197,4 +215,11 @@ export function hasLOS(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeights)
  * Actual rounds still collide with vegetation (shotTrace.ts). This does not grant visibility. */
 export function hasLineOfFire(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeights): boolean {
   return losTrace(map, from, to, heights, true).clear;
+}
+
+/** Could a round fired from `from` actually arrive at a man standing at `to`? Like
+ * hasLineOfFire, but the man's own tile counts as solid when it is a hard LOS block
+ * (a wall face already stopped the round) — woods stays pass-through. */
+export function roundCanReach(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeights): boolean {
+  return losTrace(map, from, to, heights, true, true).clear;
 }

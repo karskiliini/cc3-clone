@@ -72,7 +72,7 @@ function gunLook(v: WeaponVariant): GunLook {
 /** Number of distinct rotations a weapon sprite is built for. */
 export const WEAPON_FACINGS = 16;
 
-type ArtKind = 'mortar' | 'lafette' | 'maxim' | 'pak38' | 'pak40' | 'at45' | 'zis3' | 'ptrd';
+type ArtKind = 'mortar' | 'lafette' | 'maxim' | 'pak38' | 'pak40' | 'at45' | 'zis3' | 'ptrd' | 'nebel';
 
 interface OpBase {
   c: string;
@@ -143,6 +143,7 @@ function artKindOf(weaponId: string): ArtKind | null {
     case 'm1937_45mm': return 'at45';
     case 'zis3': return 'zis3';
     case 'ptrd': return 'ptrd';
+    case 'nebel41': return 'nebel';
     default: return null;
   }
 }
@@ -379,6 +380,53 @@ function atGunOps(spec: AtSpec, v: WeaponVariant, pal: WeaponPalette): Op[] {
   return ops;
 }
 
+/** 15cm Nb.W. 41: six mortar-like tubes in a single plane on a two-wheel carriage with a low
+ * pivot plate — visually an AT gun whose barrel is a wide rack of parallel tubes. */
+function nebelOps(v: WeaponVariant, pal: WeaponPalette): Op[] {
+  const ops: Op[] = [];
+  const L = 22;
+  const look = gunLook(v);
+  // rocket crates beside the right trail once it is opened
+  if (look.crates) {
+    ops.push(...crateOps(8.6, 6.2, 5, 3.6, pal, true));
+    ops.push(...crateOps(9.1, 10.6, 5, 3.6, pal, false));
+  }
+  for (const sx of [-1, 1]) {
+    const a = 0.44 * (sx < 0 ? look.left : look.right);
+    const rx = sx * 1.3, ry = 1.5;
+    const ex = rx + sx * Math.sin(a) * L, ey = ry + Math.cos(a) * L;
+    ops.push(seg(rx, ry, ex, ey, 1.9, pal.gun, 2.2, { z1: 0.5 }));
+    if (look.spades) {
+      const px = Math.cos(a), py = -sx * Math.sin(a);
+      if (look.dug) ops.push(circ(ex + sx * Math.sin(a) * 1.1, ey + Math.cos(a) * 1.1, 2.0, pal.season === 'winter' ? '#8d8a80' : '#4d402b', 0.4, { flat: true }));
+      ops.push(seg(ex - px * 1.9, ey - py * 1.9, ex + px * 1.9, ey + py * 1.9, 1.2, look.dug ? mul(pal.gunDark, 0.8) : pal.gunDark, 1));
+    }
+  }
+  if (look.towEye) {
+    ops.push(seg(0, L + 1.2, 0, L + 3.0, 0.9, pal.gunDark, 1.4));
+    ops.push(circ(0, L + 3.0, 0.9, pal.black, 1.4, { ri: 0.4 }));
+  }
+  ops.push(seg(-5.4, 0, 5.4, 0, 1.5, pal.steel, 3));
+  for (const sx of [-1, 1]) {
+    const cx = sx * 5.4;
+    ops.push(rect(cx - 1.0, -3.7, cx + 1.0, 3.7, pal.tyre, 5, { round: 1.0 }));
+    for (let k = -2; k <= 2; k++) ops.push(rect(cx - 0.7, k * 1.25 - 0.22, cx + 0.7, k * 1.25 + 0.22, pal.gun, 5.2, { min: 2, flat: true }));
+    ops.push(circ(cx, 0, 1.05, pal.gun, 5.5));
+    ops.push(circ(cx, 0, 0.32, pal.black, 5.6, { min: 2 }));
+  }
+  // the six-tube rack: a low frame ahead of the pivot, tubes laid across its width
+  ops.push(rect(-3.1, -0.6, 3.1, 2.4, pal.gun, 6));       // frame base + pivot plate
+  ops.push(rect(-3.4, -4.4, 3.4, -0.4, mul(pal.steel, 1.1), 6.5)); // the tube cradle
+  for (let i = 0; i < 6; i++) {
+    const x = -2.75 + i * 1.1;
+    ops.push(seg(x, 1.2, x, -6.2, 0.62, mul(pal.gun, 0.95), 7.5));
+    ops.push(circ(x, -6.2, 0.44, pal.black, 7.6, { min: 2 }));
+  }
+  // the firing-crew hand rails behind the tubes
+  ops.push(seg(-3.1, 2.4, 3.1, 2.4, 0.5, pal.black, 7, { min: 2 }));
+  return ops;
+}
+
 function ptrdOps(pal: WeaponPalette): Op[] {
   return [
     seg(0, -2, -2.9, -4.3, 0.6, pal.black, 2, { z1: 0.2 }), seg(0, -2, 2.9, -4.3, 0.6, pal.black, 2, { z1: 0.2 }),
@@ -394,7 +442,7 @@ function ptrdOps(pal: WeaponPalette): Op[] {
 
 interface Geometry { ops: Op[]; extent: number }
 
-const ART_SCALE: Record<ArtKind, number> = { mortar: 1.5, lafette: 1.35, maxim: 1.2, pak38: 1, pak40: 1, at45: 1, zis3: 1, ptrd: 1.1 };
+const ART_SCALE: Record<ArtKind, number> = { mortar: 1.5, lafette: 1.35, maxim: 1.2, pak38: 1, pak40: 1, at45: 1, zis3: 1, ptrd: 1.1, nebel: 1 };
 
 function scaleOp(o: Op, k: number): Op {
   switch (o.k) {
@@ -413,6 +461,7 @@ function geometryFor(weaponId: string, variant: WeaponVariant, pal: WeaponPalett
     case 'maxim': ops = maximOps(legacyVariant(variant), pal); break;
     case 'pak38': case 'pak40': case 'at45': case 'zis3': ops = atGunOps(AT_SPECS[kind], variant, pal); break;
     case 'ptrd': ops = ptrdOps(pal); break;
+    case 'nebel': ops = nebelOps(variant, pal); break;
     default: ops = [];
   }
   // mortars and MGs are read at a glance next to the (deliberately bold) soldiers: draw them a
@@ -436,6 +485,7 @@ export function weaponMuzzleM(weaponId: string): Vec2 {
     case 'lafette': return { x: 0, y: -1.13 * ART_SCALE.lafette };
     case 'maxim': return { x: 0, y: -1.23 * ART_SCALE.maxim };
     case 'ptrd': return { x: 0, y: -1.52 * ART_SCALE.ptrd };
+    case 'nebel': return { x: 0, y: -0.62 };
     case 'pak38': case 'pak40': case 'at45': case 'zis3': {
       const s = AT_SPECS[kind];
       return { x: 0, y: -(s.barrelLen + (s.brake ? s.brake[0] : 0)) / 10 };
@@ -447,6 +497,7 @@ export function weaponMuzzleM(weaponId: string): Vec2 {
 /** AT guns: distance (m) from the axle to the towing eye of the closed trails. 0 for other weapons. */
 export function weaponTowLengthM(weaponId: string): number {
   const kind = artKindOf(weaponId);
+  if (kind === 'nebel') return 2.5;
   if (kind === 'pak38' || kind === 'pak40' || kind === 'at45' || kind === 'zis3') return (AT_SPECS[kind].trailLen + 3) / 10;
   return 0;
 }

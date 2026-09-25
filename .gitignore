@@ -11,3 +11,4 @@ test-results/
 !public/sprites/*.png
 __pycache__/
 tools/blender/.cache/
+cc3-clone-vs-origin-main.zip

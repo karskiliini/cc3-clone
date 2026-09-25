@@ -1,4 +1,5 @@
 import { crewMayReturn, crewOutsideWord } from './vehicleCrew';
+import { inCommand } from './command';
 import { transportWord } from './transport';
 import type {
   Activity, BattleState, Health, Side, Soldier, Team, TeamMoraleWord, TeamStatusWord, Vec2, Vehicle,
@@ -7,6 +8,7 @@ import { SIDES, TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { clamp, dist } from '@/shared/math';
 import { VEHICLE_DEFS } from '@/data/units';
+import { WEAPONS } from '@/data/weapons';
 import { addMessage } from './messages';
 import { crewWeaponStatus } from './crewWeapon';
 import { isDazed } from './daze';
@@ -109,7 +111,7 @@ function stepSoldierMorale(state: BattleState, s: Soldier, dt: number, track: Mo
   // the attacker win rate WORSE (31%->27% combined with the throttle loosening below), presumably by
   // letting defenders (who take far less suppression to begin with) recover just as fast and keep
   // outshooting the attacker regardless. Reverted to the original rates.
-  const decayRate = leaderNearM && leaderNotSuppressed ? 8 : 5;
+  const decayRate = leaderNearM && leaderNotSuppressed && inCommand(state, s) ? 8 : 5;
   s.suppression = clamp(s.suppression - decayRate * dt, 0, 100);
 
   // -------------------------------------------------------------- tank scare
@@ -136,6 +138,9 @@ function stepSoldierMorale(state: BattleState, s: Soldier, dt: number, track: Mo
         s.path = [];
         if (s.side === state.config.playerSide) {
           addMessage(state, `${team?.name ?? 'Report'}\n${s.rank}. ${s.name} surrenders.`, 'bad');
+        } else {
+          // the player just took a prisoner (G17): say so, the score change alone is invisible
+          addMessage(state, `${s.rank}. ${s.name} surrenders to your forces.`, 'good');
         }
       }
     }
@@ -299,9 +304,24 @@ function computeTeamStatus(state: BattleState, team: Team, track: MoraleTrack): 
     if (crew && (!moveWord || crew === 'Packing up')) return { status: crew, outOfAction, morale };
   }
 
-  // A Fire order with nobody actually firing means no one can see the target (round5 critique #9
-  // asked for the manual's "Can't See" word rather than a bare "Idle"/"Waiting").
-  if (word === 'Waiting' && team.order?.type === 'fire') return { status: "Can't See", outOfAction, morale };
+  // vision review round6: the manual's fire-team vocabulary. A team whose fire is in reply to
+  // recent incoming fire reads "Returning Fire". A Fire/Smoke-order team whose men can see
+  // something in weapon range but are not engaging reads "Not Firing" (out of arc, still
+  // aiming, empty weapon); one with nothing visible in range keeps the manual's "Can't See".
+  if (word === 'Firing') {
+    const firing = alive.filter((s) => s.activity === 'firing' || s.activity === 'reloading' || s.activity === 'berserk');
+    const returning = firing.filter((s) => state.time - s.mind.lastIncomingAt < 8);
+    if (firing.length > 0 && returning.length * 2 >= firing.length) word = 'Returning Fire';
+  }
+  if (word === 'Waiting' && (team.order?.type === 'fire' || team.order?.type === 'smoke')) {
+    const engaged = alive.some((s) => {
+      const w = WEAPONS[s.weaponId];
+      if (!w) return false;
+      return s.mind.beliefs.some((b) => (b.kind === 'seen' || b.kind === 'fired')
+        && b.confidence > 0.4 && state.time - b.time < 10 && dist(s.pos, b.pos) * TILE_M <= w.rangeM);
+    });
+    return { status: engaged ? 'Not Firing' : "Can't See", outOfAction, morale };
+  }
 
   return { status: word, outOfAction, morale };
 }

@@ -215,7 +215,7 @@ export function hatchProgress(c: HatchClimb, time: number): number {
   return clamp((time - c.start) / Math.max(1e-6, c.until - c.start), 0, 1);
 }
 
-function stepClimbs(state: BattleState, rng: Rng): void {
+function stepClimbs(state: BattleState, rng: Pick<Rng, 'next'>): void {
   for (const s of state.soldiers.values()) {
     const c = s.hatch;
     if (!c) continue;
@@ -259,6 +259,14 @@ function stepClimbs(state: BattleState, rng: Rng): void {
         }
       } else { s.activity = 'defending'; s.stance = 'crouching'; }
       if (c.passenger && v) onPassengerOut(state, v, s, c.panicked);
+      // item 011: a man climbing out of a burning tank carries the fire with him — most are
+      // burnt (wounded, badly shaken), a few just scorched and terrified, rarely unscathed.
+      if (v && (v.state === 'burning' || v.hatchesBlown)) {
+        const burn = rng.next();
+        if (burn < 0.55) { s.health = 'wounded'; s.morale = clamp(s.morale - 30, 0, 100); s.burned = true; }
+        else if (burn < 0.9) { s.morale = clamp(s.morale - 25, 0, 100); s.burned = true; }
+        else s.morale = clamp(s.morale - 15, 0, 100); // the rare lucky one: scared, not burnt
+      }
     } else if (c.passenger) {
       if (v) onPassengerBoarded(state, v, s); else { s.activity = 'defending'; s.stance = 'crouching'; }
     } else if (v && v.state !== 'burning' && v.state !== 'knockedOut') {

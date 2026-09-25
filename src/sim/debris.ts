@@ -61,14 +61,17 @@ export function blastThrowEnd(state: BattleState, origin: Vec2, ang: number, thr
 
 /** How close (m) a burst of this weapon must land to tear a body apart; 0 = never. A mortar bomb
  * or a light gun's HE within about 1 m, a 75 mm+ shell within about 2 m (heavy 122 mm+ 3 m), a
- * satchel charge 2.5 m; hand grenades and AT rockets never. */
+ * satchel charge 2.5 m. Any weapon that actually kills by fragmentation (lethality > 0) also
+ * shreds within 1.5 m — a near-direct hit blows the man to pieces (user rule): this is what makes
+ * hand grenades lethal up close where their wide-but-weak fragment ring is not. AT rockets are
+ * shaped charges (no fragments) and never shred. */
 export function severeRadiusM(weapon: WeaponDef): number {
   if (weapon.heRadiusM <= 0 || weapon.cls === 'flamethrower' || weapon.cls === 'atrocket') return 0;
-  if (weapon.cls === 'grenade') return weapon.id === 'satchel' ? 2.5 : 0;
-  if (weapon.cls === 'mortar') return 1;
-  if (weapon.heRadiusM >= 8) return 3;
-  if (weapon.heRadiusM >= 4) return 2;
-  return weapon.heRadiusM >= 3 ? 1 : 0;
+  const nearDirect = weapon.lethality > 0 ? 1.5 : 0;
+  if (weapon.cls === 'grenade') return weapon.id === 'satchel' ? 2.5 : nearDirect;
+  if (weapon.cls === 'mortar') return Math.max(1, nearDirect);
+  const byCalibre = weapon.heRadiusM >= 8 ? 3 : weapon.heRadiusM >= 4 ? 2 : weapon.heRadiusM >= 3 ? 1 : 0;
+  return Math.max(byCalibre, nearDirect);
 }
 
 export function isSevereBlast(weapon: WeaponDef, dTiles: number): boolean {

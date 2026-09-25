@@ -58,6 +58,12 @@ export class OptionsScreen implements Screen {
   update(_dt: number, input: InputState): void {
     const m = toMenuInput(input);
     const s = game.settings;
+    // ESC leaves Options without touching the button strip (round7 UI pass).
+    if (input.keysPressed.has('escape')) {
+      game.saveSettings();
+      game.setScreen(this.returnTo ?? new MainMenuScreen());
+      return;
+    }
     for (const c of m.clicks) {
       if (c.button !== 0) continue;
       const p = { x: c.x, y: c.y };
@@ -88,7 +94,11 @@ export class OptionsScreen implements Screen {
     const result = this.strip.update(m);
     if (result.quitOrBack || result.main) {
       game.saveSettings();
-      game.setScreen(new MainMenuScreen());
+      // Back (or explicit Main) leaves Options; Quit-from-battle returns to the battle we
+      // came from — dropping a live deployment/battle session on the main menu mid-game
+      // would lose the player's force selection (round6 review).
+      if (result.main || this.returnTo == null) game.setScreen(new MainMenuScreen());
+      else game.setScreen(this.returnTo);
       return;
     }
   }

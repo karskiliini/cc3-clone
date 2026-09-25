@@ -53,7 +53,10 @@ describe('splitMessage', () => {
 describe('collapseMessages', () => {
   it('leaves distinct messages uncollapsed with count 1', () => {
     const out = collapseMessages([msg('A\nfoo'), msg('A\nbar')], noTeams);
-    expect(out).toEqual([{ who: 'A', body: 'foo', kind: 'info', count: 1 }, { who: 'A', body: 'bar', kind: 'info', count: 1 }]);
+    expect(out).toEqual([
+      { who: 'A', body: 'foo', kind: 'info', count: 1, num: 1 },
+      { who: 'A', body: 'bar', kind: 'info', count: 1, num: 2 },
+    ]);
   });
 
   it('merges consecutive identical messages into one row with a repeat count (round5 critique #6)', () => {
@@ -62,7 +65,7 @@ describe('collapseMessages', () => {
       msg('PzKw IV F1\nKnocked out.', 'bad'),
       msg('PzKw IV F1\nKnocked out.', 'bad'),
     ], noTeams);
-    expect(out).toEqual([{ who: 'PzKw IV F1', body: 'Knocked out.', kind: 'bad', count: 3 }]);
+    expect(out).toEqual([{ who: 'PzKw IV F1', body: 'Knocked out.', kind: 'bad', count: 3, num: 3 }]);
   });
 
   it('does not merge identical text across a different kind, and resumes counting after an interruption', () => {
@@ -73,6 +76,20 @@ describe('collapseMessages', () => {
       msg('A\nfoo', 'bad'),
     ], noTeams);
     expect(out.map((m) => m.count)).toEqual([1, 1, 1, 1]);
+  });
+
+  it('numbers each collapsed row with the running 1-based message number, strictly increasing', () => {
+    // the original shows "(1)", "(2)", ... in each box's top-right (cc3-full-12.jpg);
+    // a merged row carries the number of its last raw member, never a duplicate of a
+    // neighbouring row's number.
+    const out = collapseMessages([
+      msg('A\nfoo', 'warn'),
+      msg('A\nfoo', 'warn'),
+      msg('B\nbar', 'bad'),
+      msg('A\nfoo', 'warn'),
+    ], noTeams);
+    expect(out.map((m) => m.num)).toEqual([2, 3, 4]);
+    for (let i = 1; i < out.length; i++) expect(out[i].num).toBeGreaterThan(out[i - 1].num);
   });
 });
 

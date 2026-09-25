@@ -183,6 +183,41 @@ export function buildMap(def: MapDef): GameMap {
     smoke: new Float32Array(w * h),
     craters: [],
   };
+  // G6: authored minefields become a per-tile array (defender-laid; AP by default, AT if flagged)
+  if (def.minefields) {
+    const mines = new Int8Array(w * h);
+    for (const field of def.minefields) {
+      const kind = field.at ? 2 : 1;
+      for (const t of field.tiles) {
+        if (t.x >= 0 && t.y >= 0 && t.x < w && t.y < h) mines[t.y * w + t.x] = kind;
+      }
+    }
+    map.mines = mines;
+  }
+  // G7: wire entanglements (1 = intact) and bunker interiors (id per tile)
+  if (def.wire) {
+    const wire = new Uint8Array(w * h);
+    for (const run of def.wire) {
+      for (const t of run.tiles) {
+        if (t.x >= 0 && t.y >= 0 && t.x < w && t.y < h) wire[t.y * w + t.x] = 1;
+      }
+    }
+    map.wire = wire;
+  }
+  if (def.bunkers) {
+    const bunkerId = new Int16Array(w * h).fill(-1);
+    def.bunkers.forEach((b, i) => {
+      for (let y = b.y; y < b.y + b.h; y++) {
+        for (let x = b.x; x < b.x + b.w; x++) {
+          if (x >= 0 && y >= 0 && x < w && y < h) bunkerId[y * w + x] = i;
+        }
+      }
+    });
+    map.bunkerId = bunkerId;
+    // one 'bunker' decor per authored bunker so the renderer draws the concrete
+    // embrasure block; variant bit 0 = firing slot facing east/west (hash-chosen)
+    map.decor = [...(def.decor ?? []), ...def.bunkers.map((b, i) => ({ kind: 'bunker' as const, x: b.x + b.w / 2, y: b.y + b.h / 2, variant: i % 2 }))];
+  }
 
   floodFillBuildings(map);
   markWindows(map);

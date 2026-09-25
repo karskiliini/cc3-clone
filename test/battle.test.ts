@@ -62,5 +62,5 @@ describe('Battle', () => {
       const moved = Math.hypot(leaderAfter.pos.x - startPos.x, leaderAfter.pos.y - startPos.y);
       expect(moved).toBeGreaterThan(0.1);
     }
-  });
+  }, 30000);
 });

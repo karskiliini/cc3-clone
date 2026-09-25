@@ -7,9 +7,9 @@
 export const SCREEN_W = 1024;       // CC3 battle screen ran at 1024x768; menus are an 800x600 area centred on black
 export const SCREEN_H = 768;
 export const VIEW_W = 1024;
-export const VIEW_H = 630;          // map viewport height; bottom panel is 138
-export const PANEL_Y = 630;
-export const PANEL_H = 138;
+export const VIEW_H = 670;          // map viewport height; bottom strip is 98 (the original's band)
+export const PANEL_Y = 670;
+export const PANEL_H = 98;
 export const MENU_W = 800;          // menu screens: 800x600 area centred in the 1024x768 canvas
 export const MENU_H = 600;
 export const MENU_X = 112;
@@ -67,7 +67,7 @@ export interface VictoryLocation {
 export type DecorKind =
   | 'haystack' | 'well' | 'cart' | 'bush' | 'stump' | 'pole' | 'rocks' | 'log'
   | 'shellhole' | 'grave' | 'sign' | 'barrel' | 'crate' | 'wreck' | 'woodpile' | 'puddle' | 'flowers' | 'tramwire'
-  | 'foxhole';
+  | 'foxhole' | 'bunker';
 /** Purely visual map dressing (no sim effect — except 'foxhole', whose tile the map DSL also
  * paints as 'trench' so it gives trench cover). Position in tile coords (may be fractional).
  * `angle` (radians, 0 = east, PI/2 = south) is the direction a foxhole faces (toward the enemy). */
@@ -97,8 +97,10 @@ export interface ElevationApi {
   /** A linear ramp across `rect`, going from `fromM` to `toM` along the direction `angleRad`
    * (0 = +x / east, pi/2 = +y / south). */
   slope(rect: Rect, fromM: number, toM: number, angleRad: number): void;
-  /** Lifts/lowers a rect to a flat shelf at `m` metres (feathered over 2 tiles at the edge). */
-  terrace(rect: Rect, m: number): void;
+  /** Lifts/lowers a rect to a flat shelf at `m` metres, feathered into the surrounding ground
+   * over `feather` tiles (default 2 — use 12-20 where a graded road crosses the shelf edge so
+   * the corridor's slope limiter can build a compliant ramp instead of eroding to the wall). */
+  terrace(rect: Rect, m: number, feather?: number): void;
   /** Flattens a corridor along a polyline to a walkable grade (<= `maxGradePct` %), leaving a
    * small embankment/cutting at the corridor edge. */
   gradeRoad(points: Vec2[], widthTiles: number, maxGradePct: number): void;
@@ -121,6 +123,32 @@ export interface ElevationApi {
 
 export type HillFalloff = 'smooth' | 'cone' | 'dome' | 'plateau';
 
+/** Course-of-action overlay kinds for the pre-battle objective map (roadmap G21). Legend
+ * entries mirror the original CC3 COA plan screens: "Defenses, Tanks, Tactical Advancement,
+ * Fire Support, Armor, Air Support, Assault". */
+export type COAKind =
+  | 'advance'      // tactical advancement: thin solid arrow
+  | 'armor'        // armour thrust: heavy arrow
+  | 'assault'      // close assault: thickest arrow
+  | 'firesupport'  // indirect fire support: dashed arrow
+  | 'air'          // air support: dashed arrow with plane glyph
+  | 'defenses';    // defensive line: hatched line with tick marks
+
+export interface COARoute {
+  /** tile-coordinate polyline (2+ points; arrow drawn last→first). */
+  pts: Vec2[];
+  kind: COAKind;
+}
+
+/** Per-map COA overlay data for the COA planning screen's objective map. */
+export interface MapCOA {
+  /** River/urban assault stage labels shown under the objective map, as in the original's
+   * "River Crossing Stages" plan panels (Overwatch, Obstacles, Cut Fence, Reduce, Assault). */
+  stages?: string[];
+  german: COARoute[];
+  soviet: COARoute[];
+}
+
 export interface MapDef {
   id: string;
   name: string;
@@ -141,6 +169,14 @@ export interface MapDef {
   /** Optional ground relief: fills a per-tile elevation field (metres above the map datum).
    * Maps without one are perfectly flat, exactly as before. */
   elevation?(e: ElevationApi): void;
+  /** authored minefields (G6): tiles laid for the defender, hidden until triggered/cleared */
+  minefields?: { side: Side; tiles: { x: number; y: number }[]; at?: boolean }[];
+  /** authored wire entanglements (G7): tile lists, optionally side-tagged */
+  wire?: { side?: Side; tiles: { x: number; y: number }[] }[];
+  /** authored bunkers (G7): multi-tile fortified positions with a garrison side */
+  bunkers?: { x: number; y: number; w: number; h: number; side: Side }[];
+  /** Pre-battle COA overlays for the planning screen's objective map (G21). */
+  coa?: MapCOA;
 }
 
 export interface GameMap {
@@ -157,6 +193,15 @@ export interface GameMap {
   smoke: Float32Array;
   /** crater decals: tile indexes */
   craters: number[];
+  /** per-tile minefield (G6): 0 = none, 1 = AP, 2 = AT. Built at map load from the
+   * authored minefield list; hidden until triggered or cleared. */
+  mines?: Int8Array;
+  /** per-tile wire (G7): 0 = none, 1 = intact wire, 2 = cut. Cut wire is passable at normal speed. */
+  wire?: Uint8Array;
+  /** per-tile bunker interior id (G7): -1 = none. Occupants get heavy omni cover. */
+  bunkerId?: Int16Array;
+  /** decor dressing merged from the authored map def plus sim-generated items (bunkers); render-only. */
+  decor?: DecorItem[];
   /** visual blast marks left by explosions this battle (sub-tile position, size by weapon); the
    * renderer stamps them into its baked terrain. Render-only: never read by the sim. */
   craterMarks?: CraterMark[];
@@ -193,12 +238,12 @@ export interface HeightField {
 }
 
 /** A blast mark from one explosion: centre in tile coords, rim diameter in metres. */
-export interface CraterMark { x: number; y: number; sizeM: number; kind: 'shell' | 'grenade' }
+export interface CraterMark { x: number; y: number; sizeM: number; kind: 'shell' | 'grenade' | 'track' }
 
 // ------------------------------------------------------------------ weapons
 export type WeaponClass =
   | 'rifle' | 'smg' | 'lmg' | 'hmg' | 'pistol' | 'mortar' | 'atgun' | 'tankgun'
-  | 'coaxmg' | 'grenade' | 'atrocket' | 'atrifle' | 'flamethrower';
+  | 'coaxmg' | 'grenade' | 'atrocket' | 'atrifle' | 'flamethrower' | 'rocket';
 
 export interface WeaponDef {
   id: string;
@@ -347,9 +392,15 @@ export interface SoldierMind {
   trait?: 'steady' | 'nervous' | 'brave' | 'reckless' | 'cautious' | 'stoic';
   /** issuedAt of a team order this soldier refused (failed obedience); retried after hesitation. */
   pendingOrderAt?: number;
+  /** burnt climbing out of a burning vehicle (item 011): scarring, panic-prone afterwards */
+  burned?: boolean;
+  /** battle time of the last 'no contact with HQ' shout (G11, throttles the message) */
+  warnedNoCommand?: number;
 }
 
 export interface Soldier {
+  /** campaign identity: stable across battles (G1). Undefined for AI forces. */
+  uid?: string;
   /** gun gunners: rounds left by type (sum = ammo + ammoReserve); sim/aimPoint.ts `soldierRounds` */
   rounds?: RoundCounts;
   id: number;
@@ -407,7 +458,10 @@ export interface Soldier {
    * (0..1.5), and where he stood before the knockback (`origin`) so the renderer can fly a ragdoll
    * from there to his current `pos`. Written by the sim, read only by the renderer. */
   blast?: { from: Vec2; time: number; force: number; origin: Vec2 };
-  /** Knocked down by a blast: cannot move, fire or throw until battle time reaches this. */
+  /** last mine tile index this soldier entered (G6 detonate-once tracking) */
+  mineTileSeen?: number;
+  /** last wire tile index this soldier entered (G7 cut-tracking) */
+  wireSeen?: number;
   stunnedUntil?: number;
   /** Dazed by that blast (sim/daze.ts) until this battle time: cannot fire, throw, reload, work a
    * crew task, spot, loot or obey a movement order — he may only crawl to better cover. */
@@ -446,6 +500,8 @@ export interface Soldier {
   seat?: 'passenger';
   /** Passenger just out of a transport in a panic: he runs to `to` whatever his mind says. */
   bailRun?: { to: Vec2; until: number };
+  /** burnt climbing out of a burning vehicle (item 011): wounded/scorched, panic-prone after */
+  burned?: boolean;
   /** A grenade throw (B1/A1): the throw animation plays until this battle time; the projectile
    * was spawned at release. */
   throwAt?: number;
@@ -543,31 +599,7 @@ export interface StructureFx {
   extentTiles: number[];
 }
 
-export interface BattleEvent {
-  /** A timed individual discharge; the audio layer must not synthesize another whole burst. */
-  singleRound?: boolean;
-  kind: 'shot' | 'hit' | 'kill' | 'explosion' | 'vlCaptured' | 'teamBroken' | 'vehicleKO' | 'message' | 'truce' | 'ended'
-    /** a vehicle blows up (ammunition or fuel): `pos`, `radiusM`, `turretLanding` when the turret was thrown */
-    | 'vehicleExplosion'
-    /** a round cooking off in a burning vehicle: `pos` */
-    | 'cookOffPop'
-    /** a leader shouted an order to his team (B7): `teamId` */
-    | 'orderShout'
-    /** AT rocket launched from a shoulder (B2) */
-    | 'rocketLaunch'
-    /** non-penetrating armour hit (A2) */
-    | 'armorClank'
-    /** penetrating armour hit (A2) */
-    | 'penHit'
-    /** grenade landed and bounced (A1) */
-    | 'grenadeBounce'
-    /** weapon crew began setting up / packing a crew-served weapon (B4) */
-    | 'mgSetup'
-    /** a building lost structure (B3); `weaponId` carries 'breach' | 'caveIn' | 'collapse' */
-    | 'structureFx';
-}
 
-// ----------------------------------------------------------------- vehicles
 export type VehicleState = 'ok' | 'immobilized' | 'knockedOut' | 'burning' | 'abandoned';
 
 
@@ -652,6 +684,8 @@ export interface Vehicle {
   coaxFireTimer: number;
   burnTimer: number;
   hits: number;
+  /** last mine tile index this vehicle entered (G6 detonate-once tracking) */
+  mineTileSeen?: number;
   // ---- ammunition types, aim points, locational damage (all optional, lazy defaults) ----
   /** main-gun rounds left by type (sum = mainAmmo); sim/aimPoint.ts `vehicleRounds` */
   rounds?: RoundCounts;
@@ -686,6 +720,15 @@ export interface Vehicle {
   fireHaltUntil?: number;
   /** C3: a vehicle held for a friendly man under its hull path until this battle time. */
   holdUntil?: number;
+  /** item 038 give-way: the tank has been hull-blocked since this battle time; once it exceeds
+   * GIVEWAY_DELAY_S against a parked own-side hull it backs up briefly instead of standing. */
+  blockedSince?: number;
+  giveWayUntil?: number;
+  /** item 038: hull-down creep — the commander sees a target his gun cannot reach over the crest;
+   * the tank creeps forward until the gun line clears (sim/combat.ts sets it, sim/vehicle.ts drives it). */
+  creepForGun?: boolean;
+  creepAim?: Vec2;
+  creepUntil?: number;
   /** A3: when the vehicle caught fire (visual burn timeline); set at fire start, kept after KO. */
   fire?: { t0: number };
   /** when the current short halt began / battle time before which it will not halt again */
@@ -703,6 +746,21 @@ export interface Vehicle {
    * clockwise); absent = the renderer's default spot beside the hull */
   turretLanding?: Vec2;
   turretLandingDir?: number;
+  /** how this vehicle died (drawn at the KO moment, item 011): 'stopped' — the crew is dead,
+   * the tank just halts; 'fire' — it caught fire (may cook off later); 'explosion' — immediate
+   * ammunition blast; 'hatchBlown' — hatches burst open, fire spews from the fighting
+   * compartment; 'gunSag' — the gun droops on a dead wreck; 'turretBlown' — turret thrown
+   * without a full ammunition blast */
+  deathOutcome?: 'stopped' | 'fire' | 'explosion' | 'hatchBlown' | 'gunSag' | 'turretBlown';
+  /** true when the death outcome opened the hatches (fire spews from the hull) */
+  hatchesBlown?: boolean;
+  /** true when the destroyed gun droops (renderer: barrel pitched down) */
+  gunSag?: boolean;
+  /** engine compartment hit that ignited: the deck burns (flames + dark smoke) but the tank
+   * fights on; a later fire roll can escalate to the full 'burning' state (vehicleDamage.ts) */
+  engineOnFire?: boolean;
+  /** seconds the engine-deck fire has been burning (vehicle.ts step) */
+  engineFireTimer?: number;
   /** cook-off of a burning vehicle (sim/vehicleExplosion.ts): burn seconds already checked, rounds
    * that have popped, and how it ended ('detonated': the ammunition went up; 'fuel': the fuel
    * tank; 'burntOut': the fire died down without either); `rackFire`: the fire started in the
@@ -710,6 +768,8 @@ export interface Vehicle {
   cookOff?: { checkedS: number; pops: number; ended?: 'detonated' | 'fuel' | 'burntOut'; rackFire?: boolean };
   /** battle time the crew must be out by (fire); set when a fire starts */
   bailBy?: number;
+  /** hull-to-hull ram: battle time of the last collision damage roll (sim/vehicle.ts) */
+  lastCollideAt?: number;
   // ---- leaving and re-entering (sim/vehicleCrew.ts, spec 2026-09-17 §10; all optional) ----
   /** the crew is getting out, one man per hatch at a time */
   exiting?: { panicked: boolean; fire: boolean; startedAt: number };
@@ -734,12 +794,24 @@ export interface Vehicle {
   unloading?: { panicked: boolean; startedAt: number; teamId?: number };
   /** battle time it began waiting for men to board (it does not drive off meanwhile) */
   waitingSince?: number;
+  // ---- item 018: main-gun-vs-infantry doctrine ----
+  /** what the vehicle's machine guns are currently working: 't<teamId>', and the battle time the
+   * engagement began (the main-gun escalation clock runs from it) */
+  mgTargetKey?: string;
+  mgSince?: number;
+  // ---- item 020: vehicle-mounted rocket salvos (BM-13, SdKfz 251/1 Wurfrahmen) ----
+  /** rockets left in the current salvo; set when the salvo begins, cleared when the racks empty */
+  rocketSalvoLeft?: number;
+  /** battle seconds until the next rail launches */
+  rocketSalvoTimer?: number;
+  /** battle time the last "rails cannot reach" warning was raised (message pacing) */
+  rocketArcWarnAt?: number;
 }
 
 // -------------------------------------------------------------------- teams
 export type TeamType =
   | 'rifle' | 'smg' | 'mg' | 'mortar' | 'atgun' | 'sniper' | 'atteam'
-  | 'tank' | 'spg' | 'halftrack' | 'command' | 'engineer';
+  | 'tank' | 'spg' | 'halftrack' | 'command' | 'engineer' | 'rocket' | 'transport';
 
 export type OrderType = 'move' | 'moveFast' | 'sneak' | 'fire' | 'smoke' | 'defend' | 'ambush' | 'assault';
 export const ORDER_TYPES: OrderType[] = ['move', 'moveFast', 'sneak', 'fire', 'smoke', 'defend', 'ambush', 'assault'];
@@ -789,6 +861,10 @@ export type TeamStatusWord =
   // most of the team is knocked down or dazed by a blast (sim/daze.ts)
   | 'Stunned'
   | 'Destroyed' | 'Surrendered' | 'Knocked Out' | 'Setting up' | 'Aiming' | 'Loading'
+  // fire-team vocabulary (vision review round6): a team ordered to fire that has not yet started
+  // engaging reads "Not Firing"; a team whose fire is in reply to recent incoming fire reads
+  // "Returning Fire"
+  | 'Not Firing' | 'Returning Fire'
   // crew-served weapons follow their open task (spec 2026-09-17 §6)
   | 'Unlimbering' | 'Spreading trails' | 'Digging in' | 'Packing up'
   // Manual vocabulary this HUD was missing (round5 critique #9): a team with no active order or
@@ -817,6 +893,9 @@ export interface TeamDef {
   quality?: TeamQuality | (Partial<Record<number, TeamQuality>> & { default?: TeamQuality });
   /** overrides the year/quality band outright: [min, max] experience of its men */
   experience?: [number, number];
+  /** successor defId a campaign team may upgrade to when the year advances (G3b).
+   * Target must exist, be same side, and become available strictly later. */
+  upgradesTo?: string;
 }
 
 /** militia: hasty replacements; line; seasoned: picked or long-serving men; elite */
@@ -856,6 +935,9 @@ export interface Team {
   heavy?: boolean;
   /** B7: battle time the leader's shout lands (order ingest); soldiers react after this. */
   shoutAt?: number;
+  /** G31 camouflage net: set when the player issues Ambush with nets (or the AI dig-in does);
+   * while stationary the team is far harder to spot. Cleared when the team moves or fires. */
+  camouflaged?: boolean;
 }
 
 /** packed = carried/limbered (or lying unassembled); settingUp/packing = transition timers running. */
@@ -877,6 +959,8 @@ export interface CrewWeaponState {
   /** crew ran off or the gunner fell: the weapon stays where it is until a crewman re-mans it */
   abandoned: boolean;
   abandonedAt: number;
+  /** run over by a vehicle (item 028): the gun is smashed and can never fire or be re-manned */
+  destroyed?: boolean;
   /** battle seconds the weapon was last set down (a move order issued before this does not pack it) */
   setAt: number;
   /** fire-mission preparation (sim/crewWeapon.ts): laying on a new target, loading the next round,
@@ -976,7 +1060,7 @@ export interface BattleMessage {
 }
 
 export interface Explosion { pos: Vec2; radiusM: number; t: number; kind: 'he' | 'smoke' | 'small' }
-export interface Tracer { from: Vec2; to: Vec2; t: number; hit: boolean; kind: 'bullet' | 'mg' | 'shell' | 'mortar'; deflected?: boolean; fromHeightM?: number }
+export interface Tracer { from: Vec2; to: Vec2; t: number; hit: boolean; kind: 'bullet' | 'mg' | 'shell' | 'mortar' | 'flame' | 'rocket'; deflected?: boolean; fromHeightM?: number }
 /** `kind: 'shell'` marks a vehicle main-gun flash, drawn larger than the default infantry flash. */
 export interface Flash {
   pos: Vec2; facing: number; t: number; kind?: 'shell';
@@ -1000,8 +1084,11 @@ export interface BattleEvent {
   kind: 'shot' | 'hit' | 'kill' | 'explosion' | 'vlCaptured' | 'teamBroken' | 'vehicleKO' | 'message' | 'truce' | 'ended'
     /** a vehicle blows up (ammunition or fuel): `pos`, `radiusM`, `turretLanding` when the turret was thrown */
     | 'vehicleExplosion'
+    /** a player-side team acted on its own initiative (G18): `teamId`, `pos` = objective */
+    | 'subordinateInitiative'
     /** a round cooking off in a burning vehicle: `pos` */
     | 'cookOffPop'
+    /** a leader shouted an order to his team (B7): `teamId` */
     | 'orderShout'
     /** AT rocket launched from a shoulder (B2) */
     | 'rocketLaunch'
@@ -1014,9 +1101,10 @@ export interface BattleEvent {
     /** weapon crew began setting up / packing a crew-served weapon (B4) */
     | 'mgSetup'
     /** a building lost structure (B3); `weaponId` carries 'breach' | 'caveIn' | 'collapse' */
-    | 'structureFx';
+    | 'structureFx'
+    /** small-arms round ricocheted off an AT gun's angled shield plate */
+    | 'shieldRicochet';
   pos?: Vec2;
-  /** vehicleExplosion: blast radius in metres */
   radiusM?: number;
   /** vehicleExplosion: where the blown-off turret lands (tile coords) */
   turretLanding?: Vec2;
@@ -1024,6 +1112,8 @@ export interface BattleEvent {
   weaponId?: string;
   text?: string;
   teamId?: number;
+  /** A timed individual discharge; the audio layer must not synthesize another whole burst. */
+  singleRound?: boolean;
 }
 
 export interface SideState {
@@ -1042,12 +1132,24 @@ export interface BattleConfig {
   year: number;
   seed: number;
   durationS: number;
-  difficulty: 'easy' | 'normal' | 'hard';
   /** team def ids to field per side */
   forces: Record<Side, string[]>;
+  /** Campaign (G1): per-side, per-team-index list of soldier uids, in team soldier order.
+   * Optional — AI/test forces without campaign identity spawn without uids. */
+  rosterUids?: Record<Side, string[][]>;
+  difficulty: 'easy' | 'normal' | 'hard';
   /** Test/harness only: run stepAI for BOTH sides (normally only the non-player side gets AI).
    * Lets a headless harness simulate AI-vs-AI battles. Never set by UI screens. */
   aiBothSides?: boolean;
+  // ---- realism toggles from the Options screen (item 024; copied in when the battle starts)
+  /** Cheat sight: the player sees every enemy soldier and vehicle regardless of spotting. */
+  alwaysSeeEnemy?: boolean;
+  /** Subordinate teams never act on their own initiative. */
+  neverActOnInitiative?: boolean;
+  /** Full enemy info (type, damage, crew) shown for spotted enemies. */
+  alwaysFullEnemyInfo?: boolean;
+  /** Orders are always accepted (no motivation/fear refusal roll). */
+  alwaysObeyOrders?: boolean;
 }
 
 export interface BattleState {
@@ -1121,6 +1223,19 @@ export interface OperationBattleDef {
   title: string;              // "Barbarossa, June 1941"
   requisition: Record<Side, number>;
   aiForces: Record<Side, string[]>;
+  /** briefing expectation: VL points the player should hold at ceasefire (G20);
+   * the debrief's "Land gained" arrow grades against this, not the enemy's haul */
+  expectedVLs?: number;
+}
+
+/** One operation of the 16-operation Grand Campaign (G4): a titled group of battles. */
+export interface GrandOperationDef {
+  id: string;                 // 'barbarossa'
+  title: string;              // 'Operation Barbarossa'
+  year: number;
+  startDate: string;          // 'June 1941'
+  situation: string;          // one-paragraph briefing situation text
+  battles: OperationBattleDef[];
 }
 
 export interface OperationState {
@@ -1130,9 +1245,104 @@ export interface OperationState {
   /** surviving player teams: def id + experience + soldier count */
   forcePool: { defId: string; experience: number; alive: number }[];
   requisition: number;
+  /** which Grand Campaign operation the flat index falls in (G4; derived on load for v1 saves) */
+  opIndex?: number;
 }
 
-// ------------------------------------------------------------- screens
+// ------------------------------------------------------------- campaign (G1)
+export interface SoldierOutcome {
+  uid: string;
+  name: string;
+  rank: string;
+  weaponId: string;
+  /** 'dead' = KIA, 'wounded' = evacuated wounded, 'ok' = fit */
+  health: 'dead' | 'wounded' | 'ok';
+  kills: number;
+  experience: number;
+  isLeader: boolean;
+}
+
+/** Per-team snapshot from one battle. */
+export interface TeamOutcome {
+  defId: string;
+  kills: number;
+  soldiers: SoldierOutcome[];
+}
+
+/** End-of-battle export for the player side: the campaign layer's only input. */
+export interface BattleReport {
+  result: BattleResult;
+  fledSide: Side | null;
+  teams: TeamOutcome[];
+}
+
+/** Campaign-persistent soldier record (roadmap G1). */
+export interface CampaignSoldier {
+  uid: string;
+  name: string;
+  rank: string;
+  weaponId: string;
+  side: Side;
+  health: 'healthy' | 'woundedLight' | 'woundedSerious' | 'kia';
+  kills: number;
+  battles: number;
+  experience: number;
+  /** battle index from which the soldier is available again (wounded only). */
+  availableFrom?: number;
+  teamUid: string;
+  /** awarded medal ids (G2); ladder is implicit in the medal thresholds */
+  medals: string[];
+}
+
+
+/** Per-team snapshot from one battle. */
+export interface TeamOutcome {
+  defId: string;
+  kills: number;
+  soldiers: SoldierOutcome[];
+  /** vehicle state at battle end, for repair carry-over (G3) */
+  vehicleDamage?: 'damaged' | 'immobilised';
+}
+
+/** Campaign-persistent team record (roadmap G1/G3). */
+export interface CampaignTeam {
+  uid: string;
+  defId: string;
+  name: string;
+  soldierUids: string[];
+  vehicleDefId?: string;
+  kills: number;
+  /** carry-over vehicle damage (G3); repaired via refit for points */
+  vehicleDamage?: 'damaged' | 'immobilised';
+  /** vehicle released, crew kept as a foot team (G3) */
+  vehicleRetired?: boolean;
+}
+
+/** Full campaign state persisted between battles. */
+export interface CampaignState {
+  seed: number;
+  playerSide: Side;
+  battleIndex: number;
+  difficulty: 'easy' | 'normal' | 'hard';
+  soldiers: Record<string, CampaignSoldier>;
+  teams: CampaignTeam[];
+  /** team uids fielded in the upcoming battle (G3 selection) */
+  selectedUids: string[];
+  results: BattleResult[];
+  requisition: number;
+  /** awards from the most recent battle (G2), consumed by the debrief screen */
+  lastAwards: SoldierAward[];
+}
+
+/** One man's commendation from a battle (G2). */
+export interface SoldierAward {
+  uid: string;
+  name: string;
+  rank: string;
+  medalIds: string[];
+  promotedTo?: string;
+}
+
 /** A full-screen UI state (main menu, battle, debrief...). Implemented in src/ui/screens/*. */
 export interface Screen {
   onEnter?(): void;
@@ -1151,6 +1361,9 @@ export interface GameSettings {
   speed: 1 | 2 | 4;
   /** Shade the map by what the selected units can see ('L' key / Options). Missing = on. */
   showUnitVision?: boolean;
+  /** Team info-bar display mode, cycled with 'I' (G11): morale sliver, experience
+   * gauge, team name, or cover strength. Missing = 'morale' (the classic default). */
+  infoBarMode?: 'morale' | 'experience' | 'name' | 'cover';
   /** Depth/height map view (Tab key / Options). Missing = off. */
   showDepthMap?: boolean;
   // ---- "realism" toggles from the original's Options screen (cosmetic

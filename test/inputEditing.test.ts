@@ -1,12 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createInput } from '@/engine/input';
 
 let events: EventTarget;
 beforeEach(() => {
   events = new EventTarget();
-  vi.stubGlobal('window', events);
+  (globalThis as { window?: EventTarget }).window = events; // bun:test's vi shim lacks stubGlobal
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { delete (globalThis as { window?: unknown }).window; });
 
 function keyboard(type: 'keydown' | 'keyup', key: string, opts: Record<string, unknown> = {}) {
   const event = new Event(type, { cancelable: true });

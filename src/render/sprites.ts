@@ -97,7 +97,26 @@ export function getSoldierSprite(
 // ============================================================================
 // Dimensions must mirror src/data/units.ts VEHICLE_DEFS exactly (setVehicleDims
 // pushes the real values in at startup; this table is the fallback/default).
-const DIMENSIONS: Record<string, { lengthM: number; widthM: number }> = {
+export const DIMENSIONS: Record<string, { lengthM: number; widthM: number }> = {
+  tiger2: { lengthM: 7.3, widthM: 3.7 },
+  is3: { lengthM: 6.9, widthM: 3.1 },
+  is1: { lengthM: 6.8, widthM: 3.1 },
+  su152: { lengthM: 6.8, widthM: 3.3 },
+  su100: { lengthM: 6.1, widthM: 3.0 },
+  su122: { lengthM: 6.1, widthM: 3.0 },
+  pantherD: { lengthM: 6.9, widthM: 3.3 },
+  pantherA: { lengthM: 6.9, widthM: 3.4 },
+  pz4g: { lengthM: 5.9, widthM: 2.9 },
+  stug4: { lengthM: 5.9, widthM: 2.9 },
+  hetzer: { lengthM: 4.9, widthM: 2.6 },
+  t28: { lengthM: 7.4, widthM: 2.9 },
+  ot34: { lengthM: 6.7, widthM: 3.0 },
+  sherman76: { lengthM: 6.3, widthM: 2.6 },
+  flammpanzer3: { lengthM: 6.3, widthM: 2.9 },
+  kettenkrad: { lengthM: 3.0, widthM: 1.6 },
+  kubelwagen: { lengthM: 3.1, widthM: 1.6 },
+  bm13: { lengthM: 6.5, widthM: 2.3 },
+  sdkfz251_rocket: { lengthM: 5.8, widthM: 2.1 },
   pz3j: { lengthM: 5.6, widthM: 2.9 },
   pz4f1: { lengthM: 5.9, widthM: 2.9 },
   pz4gh: { lengthM: 5.9, widthM: 2.9 },

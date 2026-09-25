@@ -1,11 +1,19 @@
 import type { BattleResult, CursorKind, InputState, Screen, Side, Team } from '@/shared/types';
 import { SIDES } from '@/shared/types';
 import { experienceLevel } from '@/data/experience';
+import { medalById } from '@/data/medals';
 import { game } from '@/game';
 import type { Battle } from '@/sim/battle';
+import { OPERATION } from '@/data/operation';
+import { GRAND_CAMPAIGN, operationForIndex } from '@/data/campaign';
+import { appendHistory } from '@/data/history';
+import { prisonerCount } from '@/sim/victory';
+import { RosterScreen } from './roster';
 import { drawDarkPanel, drawLogo, drawScreenTitle, drawShadowText } from '@/ui/chrome';
 import { beginMenuFrame, toMenuInput, BottomStrip } from './common';
+import { CoaScreen } from './coa';
 import { MainMenuScreen } from './mainMenu';
+import { OptionsScreen } from './options';
 import { OperationScreen, advanceOperation } from './operation';
 
 export const RESULT_WORDS: Record<BattleResult, string> = {
@@ -37,7 +45,7 @@ export function finalStateLabel(team: Team, fled: boolean): string {
 
 export class DebriefScreen implements Screen {
   private battle: Battle;
-  private strip = new BottomStrip({ showBack: true, nextLabel: 'Next →' });
+  private strip = new BottomStrip({ showBack: true, nextLabel: 'Next →', soldiersEnabled: !!game.campaign });
 
   constructor(battle: Battle) {
     this.battle = battle;
@@ -46,11 +54,33 @@ export class DebriefScreen implements Screen {
   update(_dt: number, input: InputState): void {
     const m = toMenuInput(input);
     const result = this.strip.update(m);
-    if (result.quitOrBack || result.main || result.next) {
+    if (result.soldiers) { game.setScreen(new RosterScreen(this)); return; }
+    // ESC advances the debrief like the OK/Continue strip button (round7 UI pass).
+    if (result.quitOrBack || result.main || result.next || input.keysPressed.has('escape')) {
       const battleResult = this.battle.state.result ?? 'draw';
+    // G15: chronicle — one record per fought battle, campaign or free.
+    {
+      const st = this.battle.state;
+      const playerSide = this.battle.playerSide();
+      const enemySide: Side = playerSide === 'german' ? 'soviet' : 'german';
+      const op = game.operation;
+      appendHistory({
+        opIndex: op?.opIndex ?? -1,
+        battleIndex: op ? op.index : -1,
+        mapId: st.config.mapId,
+        year: st.config.year,
+        playerSide,
+        result: this.battle.state.result ?? 'draw',
+        kills: st.sides[playerSide].kills,
+        losses: st.sides[playerSide].losses,
+        enemyLosses: st.sides[enemySide].losses,
+        durationS: Math.round(st.time),
+        foughtAt: Date.now(),
+      });
+    }
       if (game.operation) {
         advanceOperation(battleResult);
-        game.setScreen(new OperationScreen());
+        game.setScreen(new CoaScreen());
       } else {
         game.setScreen(new MainMenuScreen());
       }
@@ -119,6 +149,8 @@ export class DebriefScreen implements Screen {
       ty += 20;
       ctx.fillText(`Losses: ${s.losses}`, x + 12, ty);
       ty += 20;
+      ctx.fillText(`Prisoners taken: ${prisonerCount(state, side)} (worth 3× a kill)`, x + 12, ty);
+      ty += 20;
       ctx.fillText(`Morale: ${Math.round(s.morale)}`, x + 12, ty);
     }
 
@@ -130,7 +162,30 @@ export class DebriefScreen implements Screen {
     const enemyVls = state.map.victoryLocations.filter((vl) => vl.owner === enemySide).reduce((s, vl) => s + vl.value, 0);
     this.drawRatingRow(ctx, 'Force strength', ratingRect.x + 16, ratingRect.y + 26, ratingRect.w - 32, playerStat.morale, enemyStat.morale);
     this.drawRatingRow(ctx, 'Casualties', ratingRect.x + 16, ratingRect.y + 54, ratingRect.w - 32, enemyStat.losses, playerStat.losses);
-    this.drawRatingRow(ctx, 'Land gained', ratingRect.x + 16, ratingRect.y + 82, ratingRect.w - 32, playerVls, enemyVls);
+    // G20: grade the land gained against the briefing's expectation when the battle
+    // is part of the campaign; free battles keep the enemy-comparison arrow.
+    const op = game.operation;
+    const expected = op ? OPERATION[op.index]?.expectedVLs : undefined;
+    this.drawRatingRow(ctx, 'Land gained', ratingRect.x + 16, ratingRect.y + 82, ratingRect.w - 32, playerVls, expected ?? enemyVls);
+    const awards = game.campaign?.lastAwards ?? [];
+    if (awards.length > 0) {
+      const awRect = { x: 40, y: 372, w: 720, h: 44 };
+      drawDarkPanel(ctx, awRect);
+      drawShadowText(ctx, 'COMMENDATIONS', awRect.x + 12, awRect.y + 16, 'bold 13px Arial, Helvetica, sans-serif', '#f0d840');
+      ctx.font = '11px Arial, Helvetica, sans-serif';
+      ctx.textAlign = 'left';
+      const lines = awards.slice(0, 2).map((a) =>
+        `${a.rank} ${a.name} — ${[...a.medalIds.map((id) => medalById(id)?.name ?? id), a.promotedTo ? `promoted to ${a.promotedTo}` : ''].filter(Boolean).join(', ')}`,
+      );
+      lines.forEach((line, i) => {
+        ctx.fillStyle = '#e8e8e0';
+        ctx.fillText(line, awRect.x + 16, awRect.y + 30 + i * 13);
+      });
+      if (awards.length > 2) {
+        ctx.fillStyle = '#c8c8c0';
+        ctx.fillText(`+${awards.length - 2} more`, awRect.x + awRect.w - 70, awRect.y + 16);
+      }
+    }
 
     const teamsRect = { x: 40, y: 384, w: 720, h: 160 };
     drawDarkPanel(ctx, teamsRect);
@@ -163,8 +218,21 @@ export class DebriefScreen implements Screen {
       ctx.fillText(experienceLevel(team.experience), x + 98, y);
       ctx.fillStyle = '#e8e8e0';
       ctx.fillText(`${alive}/${team.soldierIds.length}`, x + 140, y);
-      ctx.fillText(`Kills: ${team.kills}`, x + 190, y);
-      ctx.fillText(finalStateLabel(team, fled), x + 260, y);
+    }
+
+    // G4: what comes next — next battle's title, or the campaign-closing line
+    if (op) {
+      ctx.font = 'bold italic 12px Arial, Helvetica, sans-serif';
+      ctx.fillStyle = '#c8a028';
+      ctx.textAlign = 'right';
+      if (op.index >= OPERATION.length) {
+        ctx.fillText('CAMPAIGN COMPLETE', 760, 372);
+      } else {
+        const nextDef = OPERATION[op.index];
+        const grandOp = GRAND_CAMPAIGN[op.opIndex ?? operationForIndex(GRAND_CAMPAIGN, op.index)];
+        ctx.fillText(`NEXT: ${grandOp.title} — ${nextDef.title}`, 760, 372);
+      }
+      ctx.textAlign = 'left';
     }
 
     this.strip.draw(ctx);

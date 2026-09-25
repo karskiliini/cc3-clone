@@ -94,3 +94,57 @@ describe('immediate facing on order issue', () => {
     expect(gunner.activity).toBe('movingFast');
   });
 });
+
+describe('G23 deploy facing follows the defend arc', () => {
+  const tankConfig: BattleConfig = {
+    mapId: 'border_1941', playerSide: 'german', year: 1941, seed: 3, durationS: 600,
+    difficulty: 'normal', forces: { german: ['ger_pz3j'], soviet: ['sov_rifle_41'] },
+  };
+
+  it('a tank ordered to Defend turns hull and turret to the order bearing immediately (deploy, sim not run)', () => {
+    const battle = new Battle(tankConfig);
+    const team = battle.selectableTeams('german')[0];
+    const veh = battle.state.vehicles.get(team.vehicleId!)!;
+    // point it north first so the change is unambiguous (0 = north, clockwise; east = pi/2)
+    veh.hullFacing = 0; veh.turretFacing = 0;
+    battle.issueOrder(team.id, { type: 'defend', target: { x: veh.pos.x + 6, y: veh.pos.y }, issuedAt: 0 });
+    // deploy phase never steps the sim — the turn happened at issue time
+    expect(battle.state.phase).toBe('deploy');
+    expect(Math.abs(veh.hullFacing - Math.PI / 2)).toBeLessThan(0.05);
+    expect(Math.abs(veh.turretFacing - Math.PI / 2)).toBeLessThan(0.05);
+    battle.start();
+    battle.step(0.5);
+    // survives into the running battle (defend holds the lay)
+    expect(Math.abs(veh.turretFacing - Math.PI / 2)).toBeLessThan(0.2);
+  });
+
+  it('a Defend order at the team own position leaves facing untouched (no garbage snap)', () => {
+    const battle = new Battle(tankConfig);
+    const team = battle.selectableTeams('german')[0];
+    const veh = battle.state.vehicles.get(team.vehicleId!)!;
+    veh.hullFacing = 1.234; veh.turretFacing = 1.234;
+    battle.issueOrder(team.id, { type: 'defend', target: { ...veh.pos }, issuedAt: 0 });
+    expect(veh.hullFacing).toBeCloseTo(1.234);
+    expect(veh.turretFacing).toBeCloseTo(1.234);
+  });
+});
+
+describe('G23 crew-served gun facing', () => {
+  const pakConfig: BattleConfig = {
+    mapId: 'border_1941', playerSide: 'german', year: 1941, seed: 4, durationS: 600,
+    difficulty: 'normal', forces: { german: ['ger_pak38'], soviet: ['sov_rifle_41'] },
+  };
+
+  it('a Defend order pivots the gun immediately to the order bearing (arc pivot = gun.facing)', () => {
+    const battle = new Battle(pakConfig);
+    const team = battle.selectableTeams('german')[0];
+    battle.issueOrder(team.id, { type: 'defend', target: { x: team.pos.x + 5, y: team.pos.y }, issuedAt: 0 });
+    battle.start();
+    battle.step(0.2); // crew sets the gun up; gun exists from issue-time chain onward
+    const f = team.crewWeapon!.facing;
+    // east = pi/2; step 0.2s of lay may slew only partway from spawn heading, so allow slack
+    expect(wrapPi(f)).toBeGreaterThan(0);
+    expect(Math.abs(wrapPi(f) - Math.PI / 2)).toBeLessThan(Math.PI / 2);
+    function wrapPi(a: number): number { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
+  });
+});

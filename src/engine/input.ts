@@ -99,6 +99,7 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
   window.addEventListener('mousedown', (e: MouseEvent) => {
     unlockAudio();
     const p = clientToLogical(e.clientX, e.clientY);
+    state.mouse.x = p.x; state.mouse.y = p.y;
     const button = buttonOf(e.button);
     if (button === 0) state.buttons.left = true;
     else if (button === 1) state.buttons.middle = true;
@@ -157,7 +158,12 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
     if (isEditingText(e.target) || e.isComposing) return;
     unlockAudio();
     const key = e.key.toLowerCase();
-    if (PREVENT_KEYS.has(key) || (/^[0-9]$/.test(key) && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey)) e.preventDefault();
+    if (
+      PREVENT_KEYS.has(key) ||
+      /^f\d+$/.test(key) ||
+      ((e.ctrlKey || e.metaKey) && ['s', 't', 'k', 'm', 'v'].includes(key) && !e.altKey && !e.shiftKey) ||
+      (/^[0-9]$/.test(key) && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey)
+    ) e.preventDefault();
     const isSpace = key === ' ' || key === 'spacebar';
     if (key === 'control') ctrlPhysical = true;
     if (isSpace) {
@@ -177,7 +183,6 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
     }
     state.keysDown.add(key);
   });
-
   window.addEventListener('keyup', (e: KeyboardEvent) => {
     const key = e.key.toLowerCase();
     if (state.keysDown.has(key) && !isEditingText(e.target) && !e.isComposing) state.keysReleased.add(key);

@@ -70,23 +70,23 @@ function drawWeaponGlyph(ctx: CanvasRenderingContext2D, x: number, y: number, cl
 }
 
 const RIGHT_X = 1024;
-const WIDTH = 242;
-const ROW_H = 32;
-const MAX_ROWS = 4;
-const CELL_H = 15;
+const WIDTH = 192;
+const ROW_H = 30;
+const MAX_ROWS = 6;
+const CELL_H = 14;
 const HEADER_H = 14;
-const ARROW_W = 12;
-const NAME_W = 70;
-const ROLE_W = 66;
-const RDS_CELL_W = 28;
+const ARROW_W = 9;
+const NAME_W = 59;
+const ROLE_W = 41;
+const RDS_CELL_W = 24;
 
 /** Inner text widths (cell width minus the 3 px padding each side) of the monitor's columns in
  * the narrowest layout (with the scroll arrow), plus their fonts — used by tests to prove no
  * role/status/activity word overflows. */
 export const MONITOR_TEXT_CELLS = {
-  role: { maxW: ROLE_W - 6, font: 'map' as const },
-  activity: { maxW: NAME_W - 6, font: 'small' as const },
-  status: { maxW: WIDTH - 2 - (ARROW_W + NAME_W + 1 + ROLE_W + 1) - 6, font: 'small' as const },
+  role: { maxW: ROLE_W - 6, font: 'micro' as const },
+  activity: { maxW: NAME_W - 6, font: 'micro' as const },
+  status: { maxW: WIDTH - 2 - (ARROW_W + NAME_W + 1 + ROLE_W + 1) - 6, font: 'micro' as const },
 };
 /** "Loading AP 60%": the round going into the breech and how far the loader has got (steps of 10%). */
 export function loadingWord(round: RoundType, progress: number): string {
@@ -109,7 +109,7 @@ export const MONITOR_STATUS_WORDS = ['Healthy', 'Slightly injured', 'Incap.', 'D
 export const MONITOR_ACTIVITY_WORDS = ['Dead', 'Unconscious', 'Wary', 'Shaken', 'Driving', 'Moving', 'Running', 'Crawling', 'Firing', 'Reloading', 'Loading', 'Assisting', 'Defending', 'Ambushing', 'Hiding', 'Fleeing', 'Charging', 'Surrendered', 'Waiting', 'Changing seat', 'Bailing out', 'Mounting', 'Mounted', 'Dismounting', ...CREW_TASK_WORDS, ...AIM_WORDS, ...MONITOR_GUN_WORDS];
 /** Damaged-system words of the vehicle header (two per line). */
 export const MONITOR_DAMAGE_WORDS = DAMAGE_WORDS;
-export const MONITOR_DAMAGE_CELL = { maxW: Math.floor((WIDTH - 12) / 2) - 4, font: 'small' as const };
+export const MONITOR_DAMAGE_CELL = { maxW: Math.floor((WIDTH - 12) / 2) - 4, font: 'micro' as const };
 
 const GUNNER_WEAPON_CLASSES = new Set<WeaponClass>(['lmg', 'hmg', 'mortar', 'atgun', 'atrocket']);
 
@@ -243,35 +243,77 @@ function statusCell(s: Soldier, time: number): { word: string; color: string } {
   }
 }
 
-/** Original-style abbreviations tried (after shrinking the font) when a word still overflows. */
 export const MONITOR_ABBREV: Record<string, string[]> = {
+  Cowering: ['Cower'],
+  Panicked: ['Panic'],
+  Ambushing: ['Ambush.'],
+  Reloading: ['Reload'],
+  Defending: ['Defend'],
+  Charging: ['Charge'],
+  Crawling: ['Crawl'],
+  Mounting: ['Mount'],
+  Dismounting: ['Dismt.'],
+  'Bailing out': ['Bail'],
+  'Assisting': ['Assist'],
+  'Slightly injured': ['Injured', 'Injur.'],
   Commander: ['Cmdr.'],
   'Assist. Ldr.': ['Asst. Ldr.', 'A. Ldr.'],
   Radioman: ['Radio'],
-  'Slightly injured': ['Injured'],
   Unconscious: ['Uncons.'],
+  Unhooking: ['Unhook'],
+  'Digging in': ['Dig in'],
+  'Closing trail': ['Trail'],
+  'Hooking up': ['Hook up'],
+  'Lifting spade': ['Spade'],
+  Baseplate: ['Base'],
+  'Mounting tube': ['Tube'],
+  'Setting bipod': ['Bipod'],
+  'Packing up': ['Pack'],
+  'Mounting gun': ['Gun'],
+  'Feeding belt': ['Belt'],
+  'Dropping round': ['Drop'],
+  Unloading: ['Unload'],
+  'Aim: turret ring': ['Aim: ring', 'ring'],
+  'Aim: lower hull': ['Aim: hull', 'hull'],
+  'Aim: drv. plate': ['Aim: drv.', 'drv.'],
+  'Aim: mantlet': ['mantlet'],
+  'Aim: tracks': ['tracks'],
+  'Aim: engine': ['engine'],
+  'Aim: centre': ['centre'],
+  'Main gun damaged': ['MGun damaged', 'MGun dmg.'],
+  'Main gun destroyed': ['MGun destroyed', 'MGun gone'],
+  'Coax MG damaged': ['Coax damaged', 'Coax dmg.'],
+  'Coax MG destroyed': ['Coax destroyed', 'Coax gone'],
+  'Bow MG damaged': ['Bow damaged', 'Bow dmg.'],
+  'Bow MG destroyed': ['Bow destroyed', 'Bow gone'],
+  'Sight damaged': ['Sight damaged', 'Sight dmg.'],
+  'Sight destroyed': ['Sight destroyed', 'Sight gone'],
+  'Traverse jammed': ['Trav. jammed'],
+  'Engine damaged': ['Engine damaged', 'Eng. damaged', 'Eng dmgd'],
+  'Engine destroyed': ['Engine destroyed', 'Eng. gone'],
+  'Gearbox damaged': ['Gearbox damaged', 'Gbox dmg.'],
+  'Gearbox destroyed': ['Gearbox destroyed', 'Gbox gone'],
+  'Radio damaged': ['Radio damaged', 'Radio dmg.'],
+  'Radio destroyed': ['Radio destroyed', 'Radio gone'],
+  'Fuel leak': ['Fuel leak', 'Leak'],
   Surrendered: ['Surr.'],
-  'Aiming: turret ring': ['Aim: turret ring', 'Aim: ring'],
-  'Aiming: lower hull': ['Aim: lower hull', 'Aim: hull'],
-  'Aiming: driver plate': ['Aim: drv. plate', 'Aim: driver'],
-  'Aiming: mantlet': ['Aim: mantlet'],
-  'Aiming: tracks': ['Aim: tracks'],
-  'Aiming: engine': ['Aim: engine'],
-  'Aiming: centre': ['Aim: centre'],
+  'Aiming: turret ring': ['Aim: turret ring', 'Aim: ring', 'ring'],
+  'Aiming: lower hull': ['Aim: lower hull', 'Aim: hull', 'hull'],
+  'Aiming: driver plate': ['Aim: drv. plate', 'Aim: driver', 'drv.'],
+  'Aiming: mantlet': ['Aim: mantlet', 'mantlet'],
+  'Aiming: tracks': ['Aim: tracks', 'tracks'],
+  'Aiming: engine': ['Aim: engine', 'engine'],
+  'Aiming: centre': ['Aim: centre', 'centre'],
+  'Aiming: side': ['Aim: side', 'side'],
+  'Aiming: rear': ['Aim: rear', 'rear'],
   'Changing seat': ['Chg. seat'],
   // "Loading APCR 100%" -> "Load APCR 100%" -> "APCR 100%"
   ...Object.fromEntries(MONITOR_GUN_WORDS.filter((w) => w.startsWith('Loading ')).map((w) => [w, [w.replace('Loading ', 'Load '), w.replace('Loading ', '')]])),
   ...Object.fromEntries(MONITOR_GUN_WORDS.filter((w) => w.startsWith('Aiming ')).map((w) => [w, [w.replace('Aiming ', 'Aim ')]])),
   'Right track damaged': ['R. track damaged', 'R. track dmg.'],
   'Left track damaged': ['L. track damaged', 'L. track dmg.'],
-  'Right track broken': ['R. track broken'],
-  'Gearbox destroyed': ['Gearbox destr.'],
-  'Main gun destroyed': ['Main gun destr.', 'Gun destroyed'],
-  'Main gun damaged': ['Gun damaged'],
-  'Coax MG destroyed': ['Coax MG destr.', 'Coax destr.'],
-  'Coax MG damaged': ['Coax damaged'],
-  'Bow MG destroyed': ['Bow MG destr.'],
-  'Engine destroyed': ['Engine destr.'],
+  'Right track broken': ['R. track broken', 'R. track brk.'],
+  'Left track broken': ['L. track broken', 'L. track brk.'],
 };
 
 /** Short weapon names for the line-2 label (the original prints the bare model, no mount/scope). */
@@ -327,7 +369,10 @@ export function weaponReadout(s: Soldier, team: Team | null, vehicle: Vehicle | 
   const w = WEAPONS[s.weaponId];
   // read live every frame, so a weapon taken from the ground (sim/pickup.ts) and its rounds show at
   // once; a man who dropped his weapon (sim/items.ts UNARMED) has nothing to show
-  if (!w) return s.weaponId === 'none' ? { glyph: null, label: 'Unarmed', rounds: null } : { glyph: null, label: '', rounds: s.ammo };
+  // No weapon in hand (dropped, UNARMED): the row shows the bare activity word — the
+  // original's monitor carries no weapon name for a weaponless man, and a fitted
+  // "Unarmed" label could only render at an unreadable 5 px in this narrow slot.
+  if (!w) return { glyph: null, label: '', rounds: null };
   switch (w.cls) {
     case 'mortar':
       return { glyph: w.cls, label: team?.order?.type === 'smoke' && w.smoke ? 'Smk' : 'HE', rounds: s.ammo };
@@ -379,12 +424,20 @@ export class SoldierMonitorPopup {
   private scroll = 0;
   private hoverUp = false;
   private hoverDown = false;
+  private watched: number | null = null;
+  private watchedTeam: number | null = null;
 
   private rect(rows: number, header: boolean | number): Rect {
     const h = rows * ROW_H + (typeof header === 'number' ? header : header ? HEADER_H : 0);
     return { x: RIGHT_X - WIDTH, y: PANEL_Y - h, w: WIDTH, h };
   }
 
+  /** The soldier currently selected inside the monitor (the strip's matrix/cells
+   * highlight); null when nothing is watched or it belongs to another team. */
+  watchedSoldierForTeam(state: BattleState, team: Team | null): number | null {
+    if (this.watched == null || this.watchedTeam == null || !team || team.id !== this.watchedTeam) return null;
+    return state.soldiers.has(this.watched) ? this.watched : null;
+  }
   /** Screen rect the popup occupies for `team` (null when it isn't drawn) — callers use it to keep
    * clicks on the popup from reaching the map underneath. */
   bounds(state: BattleState, team: Team | null): Rect | null {
@@ -397,10 +450,13 @@ export class SoldierMonitorPopup {
   update(input: InputState, state: BattleState, team: Team | null): void {
     this.hoverUp = false;
     this.hoverDown = false;
-    if (!team) return;
+    if (!team) { this.watched = null; this.watchedTeam = null; return; }
     const soldiers = team.soldierIds.map((id) => state.soldiers.get(id)).filter((s): s is Soldier => !!s);
     const rows = Math.min(MAX_ROWS, soldiers.length);
     if (rows === 0) return;
+    // the watched soldier belongs to the shown team; switching teams drops the watch
+    if (this.watchedTeam != null && this.watchedTeam !== team.id) { this.watched = null; }
+    this.watchedTeam = team.id;
     const vehicle = team.vehicleId != null ? state.vehicles.get(team.vehicleId) : undefined;
     const r = this.rect(rows, headerHeight(vehicle));
     const bodyY = r.y + headerHeight(vehicle);
@@ -417,8 +473,21 @@ export class SoldierMonitorPopup {
       const p = { x: c.x, y: c.y };
       if (hitRect(p, upR)) this.scroll = clamp(this.scroll - 1, 0, maxScroll);
       else if (hitRect(p, downR)) this.scroll = clamp(this.scroll + 1, 0, maxScroll);
+      else if (hitRect(p, r)) {
+        // clicking a row watches that soldier: the yellow bracket on the map + the row border
+        for (let i = 0; i < rows; i++) {
+          const rowR: Rect = { x: r.x, y: bodyY + i * ROW_H, w: r.w, h: ROW_H };
+          if (hitRect(p, rowR)) { this.watched = soldiers[this.scroll + i].id; break; }
+        }
+      }
     }
     this.scroll = clamp(this.scroll, 0, maxScroll);
+  }
+
+  /** The soldier whose monitor row was clicked last; the map draws the original's yellow
+   * square bracket around him. Null when nothing is watched. */
+  watchedSoldierId(): number | null {
+    return this.watched;
   }
 
   draw(ctx: CanvasRenderingContext2D, state: BattleState, team: Team | null): void {
@@ -436,7 +505,7 @@ export class SoldierMonitorPopup {
       const hh = headerHeight(vehicle);
       const headerR: Rect = { x: r.x, y: r.y, w: r.w, h: hh };
       drawHudBevel(ctx, headerR, true);
-      setHudFont(ctx, 'small');
+      setHudFont(ctx, 'micro');
       const view = vehicleDamageView(vehicle);
       const gun = vehicle.damage?.mainGun ?? 'ok';
       ctx.fillStyle = gun === 'ok' ? HUD.green : HUD.red;
@@ -447,13 +516,13 @@ export class SoldierMonitorPopup {
       words.forEach((d, i) => {
         const x = r.x + 6 + (i % 2) * Math.floor((r.w - 12) / 2);
         const y = r.y + 2 + HEADER_H * (1 + Math.floor(i / 2));
-        setHudFont(ctx, 'small');
+        setHudFont(ctx, 'micro');
         const fit = fitHudText(ctx, [d.word, ...(MONITOR_ABBREV[d.word] ?? [])], MONITOR_DAMAGE_CELL.maxW);
         ctx.font = fit.font;
         ctx.fillStyle = HUD.red;
         ctx.fillText(fit.text, x, y);
       });
-      setHudFont(ctx, 'small');
+      setHudFont(ctx, 'micro');
       bodyY = r.y + hh;
     }
 
@@ -475,32 +544,42 @@ export class SoldierMonitorPopup {
       drawHudBevel(ctx, nameR, true, HUD.black);
       drawHudBevel(ctx, roleR, false, HUD.face);
       drawHudBevel(ctx, statusR, true, HUD.black);
-      setHudFont(ctx, 'small');
+      setHudFont(ctx, 'micro');
       cellText(ctx, nameR, s.name, HUD.text);
       const st = statusCell(s, state.time);
       cellText(ctx, statusR, st.word, st.color, 'right');
-      setHudFont(ctx, 'map');
+      setHudFont(ctx, 'micro');
       cellText(ctx, roleR, roleName, HUD.text, 'center');
 
       // line 2: [activity]  glyph AP/HE   [N] rds.
       const actR: Rect = { x: contentX, y: y2, w: NAME_W, h: CELL_H };
       drawHudBevel(ctx, actR, true, HUD.black);
-      setHudFont(ctx, 'small');
+      setHudFont(ctx, 'micro');
       cellText(ctx, actR, activityWord(s, team, vehicle, roleName), activityColor(s));
       const ro = weaponReadout(s, team, vehicle, roleName);
       const glyphX = roleR.x + 6;
       if (ro.glyph) drawWeaponGlyph(ctx, glyphX, y2 + 3, ro.glyph);
-      setHudFont(ctx, 'small');
+      setHudFont(ctx, 'micro');
       const rdsLabelW = ctx.measureText(' rds.').width;
       const nR: Rect = { x: Math.round(rightX - 2 - rdsLabelW - RDS_CELL_W), y: y2, w: RDS_CELL_W, h: CELL_H };
       if (ro.label) {
+        // Long labels ("Unarmed" when a live man is between weapons) must shrink to fit
+        // the narrow space between the weapon glyph and the rounds cell — the default
+        // 2 px shrink leaves 7+ letter words overflowing under the rounds box, and the
+        // clipped region guarantees nothing bleeds into it even if a fit still fails.
         setHudFont(ctx, 'label');
         ctx.fillStyle = HUD.text;
-        const labelX = glyphX + GLYPH_SIZE + 5;
-        const fit = fitHudText(ctx, [ro.label], nR.x - 3 - labelX);
+        // no pictogram drawn: the label may start where the glyph would, buying 8 px
+        const labelX = ro.glyph ? glyphX + GLYPH_SIZE + 5 : glyphX + 5;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(labelX - 2, y2 - 1, nR.x - 2 - labelX, CELL_H + 2);
+        ctx.clip();
+        const fit = fitHudText(ctx, [ro.label, ...(MONITOR_ABBREV[ro.label] ?? [])], nR.x - 3 - labelX, 6);
         ctx.font = fit.font;
         ctx.fillText(fit.text, labelX, y2 + 2);
-        setHudFont(ctx, 'small');
+        ctx.restore();
+        setHudFont(ctx, 'micro');
       }
       drawHudBevel(ctx, nR, true, HUD.black);
       if (ro.rounds != null) {
@@ -509,6 +588,11 @@ export class SoldierMonitorPopup {
         ctx.fillText('rds.', rightX - 2, y2 + 2);
         ctx.textAlign = 'left';
         cellText(ctx, nR, String(ro.rounds), HUD.text, 'right');
+      }
+      if (s.id === this.watched) {
+        ctx.strokeStyle = HUD.gold;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(Math.round(r.x) + 1, Math.round(rowY) + 1, Math.round(r.w) - 2, ROW_H - 2);
       }
     }
 

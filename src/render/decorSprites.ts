@@ -234,6 +234,25 @@ function buildFlowers(variant: number): HTMLCanvasElement {
   return c;
 }
 
+/** Concrete pillbox: grey slab, darker embrasure slot, sandbag lip. Variant
+ * 0 = firing slot on the east face, 1 = west face (map.ts picks per bunker). */
+function buildBunker(variant: number): HTMLCanvasElement {
+  const c = createCanvas(14, 10);
+  const ctx = ctx2d(c);
+  px(ctx, 0, 8, 14, 2, 'rgba(20,16,8,0.35)'); // base shadow
+  px(ctx, 1, 1, 12, 7, '#7a7a72'); // concrete body
+  px(ctx, 1, 1, 12, 1, '#8f8f86'); // sunlit top edge
+  px(ctx, 1, 7, 12, 1, '#5c5c55'); // bottom shade
+  px(ctx, 2, 2, 2, 1, '#8a8a80'); px(ctx, 10, 2, 2, 1, '#8a8a80'); // corner chips
+  // firing slot: dark embrasure with a hint of the gun barrel
+  const slotX = variant === 0 ? 9 : 3;
+  px(ctx, slotX, 3, 3, 2, '#1c1a16');
+  px(ctx, slotX + (variant === 0 ? 2 : 0), 4, 1, 1, '#3a3830');
+  // sandbag lip in front of the slot
+  px(ctx, slotX - 1 + (variant === 0 ? 2 : 0), 6, 5, 1, '#8a7a4a');
+  return c;
+}
+
 function build(kind: DecorKind, variant: number, season: Season): HTMLCanvasElement {
   switch (kind) {
     case 'haystack': return buildHaystack(variant);
@@ -255,6 +274,7 @@ function build(kind: DecorKind, variant: number, season: Season): HTMLCanvasElem
     case 'flowers': return buildFlowers(variant);
     case 'tramwire': return buildTramwire();
     case 'foxhole': return buildFoxhole(variant, season);
+    case 'bunker': return buildBunker(variant);
     default: return createCanvas(1, 1);
   }
 }

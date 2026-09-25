@@ -12,7 +12,7 @@ import { DEFAULT_FORCES } from '@/data/operation';
 import { beginMenuFrame, toMenuInput, BottomStrip, ForcePicker, wordWrap } from './common';
 import { MainMenuScreen } from './mainMenu';
 import { DeployScreen } from './deploy';
-
+import { OptionsScreen } from './options';
 const DURATIONS = [10, 15, 20, 30, 999];
 const DIFFICULTIES: ('easy' | 'normal' | 'hard')[] = ['easy', 'normal', 'hard'];
 const DIFFICULTY_LABEL: Record<'easy' | 'normal' | 'hard', string> = {
@@ -50,6 +50,8 @@ class BattleRequisitionScreen implements Screen {
   }
 
   update(_dt: number, input: InputState): void {
+    // ESC = Back in every menu screen, like the original (round7 UI pass).
+    if (input.keysPressed.has('escape')) { game.setScreen(new MainMenuScreen()); return; }
     const m = toMenuInput(input);
     this.picker.update(m);
     const result = this.strip.update(m);
@@ -61,7 +63,7 @@ class BattleRequisitionScreen implements Screen {
       game.setScreen(new MainMenuScreen());
       return;
     }
-    if (result.options) return;
+    if (result.options) { game.setScreen(new OptionsScreen(this)); return; }
     if (result.next && this.picker.rosterIds.length > 0) {
       const cfg: BattleConfig = {
         ...this.cfgBase,
@@ -99,6 +101,8 @@ export class BattleSetupScreen implements Screen {
 
   private sideGerR: Rect = { x: 408, y: 102, w: 176, h: 22 };
   private sideSovR: Rect = { x: 592, y: 102, w: 176, h: 22 };
+  private saveR: Rect = { x: 408, y: 288, w: 172, h: 22 };
+  private loadR: Rect = { x: 592, y: 288, w: 172, h: 22 };
   private yearMinusR: Rect = { x: 408, y: 148, w: 28, h: 22 };
   private yearPlusR: Rect = { x: 740, y: 148, w: 28, h: 22 };
   private diffR: Rect = { x: 408, y: 194, w: 360, h: 22 };
@@ -108,6 +112,57 @@ export class BattleSetupScreen implements Screen {
 
   constructor() {
     this.year = yearForMapId(MAPS[0].id);
+  }
+
+  /** Custom-scenario preset (roadmap G15): map/side/year/difficulty/duration persisted to
+   * localStorage so a favourite setup can be re-fought; forces are drawn fresh from the
+   * year's default OOB at load time. */
+  private hasSaved(): boolean {
+    try {
+      return localStorage.getItem('cc3.custom') !== null;
+    } catch {
+      return false;
+    }
+  }
+
+  private saveSetup(): void {
+    try {
+      localStorage.setItem(
+        'cc3.custom',
+        JSON.stringify({
+          mapId: MAPS[this.mapSelected].id,
+          playerSide: this.playerSide,
+          year: this.year,
+          difficulty: this.difficulty,
+          durationMin: this.durationMin,
+        }),
+      );
+    } catch {
+      // quota/private mode: saving is a nicety
+    }
+  }
+
+  private loadSetup(): boolean {
+    try {
+      const raw = localStorage.getItem('cc3.custom');
+      if (!raw) return false;
+      const p = JSON.parse(raw) as {
+        mapId?: string;
+        playerSide?: Side;
+        year?: number;
+        difficulty?: 'easy' | 'normal' | 'hard';
+        durationMin?: number;
+      };
+      const idx = MAPS.findIndex((m) => m.id === p.mapId);
+      if (idx >= 0) this.mapSelected = idx;
+      if (p.playerSide === 'german' || p.playerSide === 'soviet') this.playerSide = p.playerSide;
+      this.year = clamp(p.year ?? 1941, 1941, 1945);
+      if (p.difficulty && DIFFICULTIES.includes(p.difficulty)) this.difficulty = p.difficulty;
+      if (p.durationMin && DURATIONS.includes(p.durationMin)) this.durationMin = p.durationMin;
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private getThumb(id: string): HTMLCanvasElement | null {
@@ -122,6 +177,8 @@ export class BattleSetupScreen implements Screen {
   }
 
   update(_dt: number, input: InputState): void {
+    // ESC = Back in every menu screen, like the original (round7 UI pass).
+    if (input.keysPressed.has('escape')) { game.setScreen(new MainMenuScreen()); return; }
     const m = toMenuInput(input);
 
     if (m.wheel !== 0 && pointInRect(m.mouse, this.mapListRect)) {
@@ -151,6 +208,10 @@ export class BattleSetupScreen implements Screen {
       } else if (pointInRect(p, this.durR)) {
         const idx = DURATIONS.indexOf(this.durationMin);
         this.durationMin = DURATIONS[(idx + 1) % DURATIONS.length];
+      } else if (pointInRect(p, this.saveR)) {
+        this.saveSetup();
+      } else if (pointInRect(p, this.loadR)) {
+        this.loadSetup();
       }
     }
 
@@ -159,6 +220,7 @@ export class BattleSetupScreen implements Screen {
       game.setScreen(new MainMenuScreen());
       return;
     }
+    if (result.options) { game.setScreen(new OptionsScreen(this)); return; }
     if (result.next) {
       const def = MAPS[this.mapSelected];
       const enemySide: Side = this.playerSide === 'german' ? 'soviet' : 'german';
@@ -170,6 +232,11 @@ export class BattleSetupScreen implements Screen {
         seed: Date.now() & 0xffff,
         durationS: this.durationMin >= 999 ? 999 * 60 : this.durationMin * 60,
         difficulty: this.difficulty,
+        // item 024: realism toggles ride into the battle config
+        alwaysSeeEnemy: game.settings.alwaysSeeEnemy,
+        neverActOnInitiative: game.settings.neverActOnInitiative,
+        alwaysFullEnemyInfo: game.settings.alwaysFullEnemyInfo,
+        alwaysObeyOrders: game.settings.alwaysObeyOrders,
       };
       game.setScreen(
         new BattleRequisitionScreen(
@@ -250,6 +317,11 @@ export class BattleSetupScreen implements Screen {
 
     ctx.fillText('BATTLE LENGTH', 408, 234);
     drawSmallMetalButton(ctx, this.durR, durationLabel(this.durationMin));
+
+    ctx.fillStyle = '#f0d840';
+    ctx.fillText('CUSTOM SCENARIO', 408, 280);
+    drawSmallMetalButton(ctx, this.saveR, 'Save Setup');
+    if (this.hasSaved()) drawSmallMetalButton(ctx, this.loadR, 'Load Setup');
 
     this.strip.draw(ctx);
     ctx.restore();

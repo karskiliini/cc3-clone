@@ -35,7 +35,7 @@ import { TILE_M } from '@/shared/types';
 import { angleTo, clamp, dist, facingAngle, facingFromAngle, turnTowards, wrapAngle } from '@/shared/math';
 import { WEAPONS } from '@/data/weapons';
 import { findPath, isPassable } from './path';
-import { inBounds, tileAt } from './map';
+import { coverAt, inBounds, tileAt } from './map';
 import { TERRAIN_PROPS } from './terrain';
 import { addMessage } from './messages';
 import { VEHICLE_DEFS } from '@/data/units';
@@ -46,8 +46,8 @@ import { formationBaseHeading, rotateOffset } from './spawn';
 import { isDazed, recoveryFactor } from './daze';
 import { INFANTRY_PACE, infantrySpeedMs } from './infantryPace';
 
-export type CrewServedClass = 'mortar' | 'hmg' | 'atgun';
-const CREW_SERVED = new Set<WeaponClass>(['mortar', 'hmg', 'atgun']);
+export type CrewServedClass = 'mortar' | 'hmg' | 'atgun' | 'rocket';
+const CREW_SERVED = new Set<WeaponClass>(['mortar', 'hmg', 'atgun', 'rocket']);
 
 /** A gunner further than this (tiles) from his set-up weapon has left it. */
 export const MANNED_RADIUS_TILES = 6;
@@ -83,6 +83,7 @@ const DEPLOY_STAGES: Record<CrewServedClass, CrewTaskId[][]> = {
   atgun: [['unhook'], ['spreadLeft', 'spreadRight'], ['digLeft', 'digRight']],
   mortar: [['placeBaseplate'], ['mountTube'], ['setBipod']],
   hmg: [['placeTripod'], ['mountGun'], ['feedBelt']],
+  rocket: [['unhook'], ['spreadLeft', 'spreadRight']],
 };
 /** Packing task -> the deploy task it undoes. (A belt is simply lifted out with the gun.) */
 const UNDOES: Partial<Record<CrewTaskId, CrewTaskId>> = {
@@ -134,7 +135,11 @@ export const CREW_LAYOUT: Record<CrewServedClass, CrewLayout> = {
   // atlas has y forward, this frame has the muzzle at -y. The sim never reads the loaded art.)
   mortar: { gunner: { x: -0.6, y: -0.1 }, loader: { x: 0.6, y: -0.55 }, assistant: { x: 1.6, y: 1.5 } },
   hmg: { gunner: { x: 0, y: 1.15 }, loader: { x: -0.95, y: 0.1 }, assistant: { x: -1.6, y: 1.6 } },
-  atgun: { gunner: { x: -0.55, y: 0.6 }, loader: { x: 0.55, y: 0.95 }, assistant: { x: 1.9, y: 1.9 } },
+  // AT gun: the men are BEHIND the gun (weapon frame y > 0), under the shield's shadow, never
+  // beside the plate (user rule). The gunner's seat is the left trail hand-hold, just aft.
+  atgun: { gunner: { x: -0.55, y: 0.85 }, loader: { x: 0.55, y: 1.15 }, assistant: { x: 1.9, y: 2.1 } },
+  // rocket launcher (towed Nebelwerfer): the crew works behind the six-tube rack, like an AT gun
+  rocket: { gunner: { x: -0.55, y: 0.85 }, loader: { x: 0.55, y: 1.15 }, assistant: { x: 1.9, y: 2.1 } },
 };
 /** Weapons whose stations differ from their class (the Maxim is fed from the right). */
 const LAYOUT_OVERRIDE: Record<string, Partial<CrewLayout>> = {
@@ -256,6 +261,37 @@ export function teamCrewWeaponId(state: BattleState, team: Team): string | null 
     if (s && crewServedClass(s.weaponId)) return s.weaponId;
   }
   return null;
+}
+
+// ------------------------------------------------------------------ gun shield (user rule)
+/** Half-angle of the shield's protection: fire arriving within this arc of the muzzle direction
+ * is stopped by the plate (small arms NEVER penetrate). Beyond it the crewman is exposed. */
+export const GUN_SHIELD_ARC_RAD = 1.1; // ~63 deg each side of the muzzle
+/** Half-width of the plate (m): a man further out to the side than this is past the plate's edge. */
+export const GUN_SHIELD_HALF_WIDTH_M = 1.2;
+/** Is `manPos` in the shield's shadow against fire from `shooterPos`? Two conditions: the fire
+ * arrives in the gun's frontal arc, AND the man stands behind the plate line and within its
+ * width. All offsets are converted to METRES before the plate tests (the plate spans |x| <=
+ * half width at y ≈ 0 in the weapon frame; y > 0 is away from the muzzle). */
+export function gunShieldShadow(cw: CrewWeaponState, manPos: Vec2, shooterPos: Vec2): boolean {
+  // shooter must be in the gun's front arc...
+  if (Math.abs(wrapAngle(angleTo(cw.pos, shooterPos) - cw.facing)) > GUN_SHIELD_ARC_RAD) return false;
+  // ...and the man must be BEHIND the plate and INSIDE its width
+  const rel = rotateOffset({ x: (manPos.x - cw.pos.x) * TILE_M, y: (manPos.y - cw.pos.y) * TILE_M }, -cw.facing);
+  return rel.y >= -0.4 && Math.abs(rel.x) <= GUN_SHIELD_HALF_WIDTH_M;
+}
+
+/** True when `victim` is an in-action AT-gun crewman behind his gun's shield and the incoming
+ * small-arms fire from `shooterPos` would strike the plate (user rule: never penetrates). */
+export function behindGunShield(state: BattleState, victim: Soldier, shooterPos: Vec2): boolean {
+  if (victim.health === 'dead' || victim.health === 'incapacitated') return false;
+  const team = state.teams.get(victim.teamId);
+  const cw = team?.crewWeapon;
+  if (!cw || cw.abandoned || cw.phase !== 'ready') return false;
+  const w = WEAPONS[cw.weaponId];
+  if (!w || w.cls !== 'atgun') return false;
+  if (teamCrewWeaponId(state, team) !== cw.weaponId) return false;
+  return gunShieldShadow(cw, victim.pos, shooterPos);
 }
 
 /** Crew-drill speed factor on every task time (spec §6: green x1.25, veteran x0.8). */
@@ -796,12 +832,20 @@ function stepTasks(state: BattleState, team: Team, cw: CrewWeaponState, cls: Cre
       .sort((a, b) => Number(a.isLeader) - Number(b.isLeader) || a.id - b.id);
     if (!busy.has(gunner.id) && able.includes(gunner) && isInActionNow(cw, cls)) {
       const at = walkTo(state, gunner, weaponFramePoint(cw.pos, cw.facing, CREW_LAYOUT[cls].gunner), dt);
-      if (at) { if (gunner.stance === 'standing') gunner.stance = 'crouching'; if (cls === 'hmg') gunner.stance = 'prone'; }
+      if (at) {
+        if (gunner.stance === 'standing') gunner.stance = 'crouching';
+        // AT gun shield (user rule): stay low behind the plate; prone when the ground gives a
+        // ditch (cover at the post), crouching otherwise — NEVER standing
+        if (cls === 'atgun') gunner.stance = coverAt(state.map, gunner.pos) >= 0.5 ? 'prone' : 'crouching';
+        if (cls === 'hmg') gunner.stance = 'prone';
+      }
     }
     idle.forEach((s, i) => {
       if (i >= posts.length) return;
       const at = walkTo(state, s, weaponFramePoint(cw.pos, cw.facing, posts[i]), dt);
       if (at && s.stance === 'standing') s.stance = 'crouching';
+      // AT gun shield (user rule): the same never-stand rule at the standby posts
+      if (at && cls === 'atgun') s.stance = coverAt(state.map, s.pos) >= 0.5 ? 'prone' : 'crouching';
     });
   }
 }
@@ -1027,7 +1071,7 @@ function gateFire(cw: CrewWeaponState, gunner: Soldier, dt: number): void {
 /** Advance every crew-served weapon one sim step. Called at the start of stepMovement. */
 export function stepCrewWeapons(state: BattleState, dt: number): void {
   for (const team of state.teams.values()) {
-    if (team.vehicleId != null) continue;
+    if (team.crewWeapon?.destroyed) continue; // item 028: smashed by an overrun — inert forever
     // riding in a transport with the weapon packed: it goes where its gunner goes
     if (team.transportId != null && team.crewWeapon) {
       const g = state.soldiers.get(team.crewWeapon.gunnerId);
@@ -1050,7 +1094,7 @@ export function isHeldForPacking(state: BattleState, s: Soldier): boolean {
  * current lay so the bring-into-action chain (load -> lay -> fire) starts on the new target. */
 export function onCrewOrder(state: BattleState, team: Team, type: OrderType): void {
   const cw = team.crewWeapon;
-  if (!cw || cw.abandoned) return;
+  if (!cw || cw.abandoned || cw.destroyed) return; // item 028: a smashed gun takes no orders
   const cls = crewServedClass(cw.weaponId);
   if (!cls) return;
   ensureTaskState(cw, cls);
@@ -1119,8 +1163,9 @@ export function gunLoadBaseS(weaponId: string): number {
   return w ? weaponLoadS(w) * LOAD_ATGUN_MUL : TASK_S.load;
 }
 export const HMG_LAY_S = 2;
-/** Load time per round. HMGs are belt fed: no separate load per burst. */
-export const LOAD_S: Record<CrewServedClass, number> = { mortar: TASK_S.dropRound, hmg: 0, atgun: TASK_S.load };
+/** Load time per round. HMGs are belt fed: no separate load per burst. Rocket launchers load their
+ * tubes from the crates at set-up (weapon.reloadS paces the next salvo), nothing per round. */
+export const LOAD_S: Record<CrewServedClass, number> = { mortar: TASK_S.dropRound, hmg: 0, atgun: TASK_S.load, rocket: 0 };
 /** Drill factor of the man doing it: guns use the loading / laying tables of sim/gunTiming.ts. */
 function loadDrill(cls: CrewServedClass, experience: number): number { return cls === 'atgun' ? loadSkillMul(experience) : crewDrillFactor(experience); }
 function layDrill(cls: CrewServedClass, experience: number): number { return cls === 'atgun' ? laySkillMul(experience) : crewDrillFactor(experience); }
@@ -1131,7 +1176,7 @@ export const RELAY_S = 1.5;
 function layBaseS(weaponId: string, distM: number, traverseRad: number, targetMoving = false): number {
   const cls = crewServedClass(weaponId);
   if (!cls) return 0;
-  if (cls === 'mortar') {
+  if (cls === 'mortar' || cls === 'rocket') {
     const range = WEAPONS[weaponId]?.rangeM ?? 1000;
     return MORTAR_LAY_S[0] + (MORTAR_LAY_S[1] - MORTAR_LAY_S[0]) * clamp(distM / range, 0, 1);
   }
@@ -1341,7 +1386,8 @@ export function crewFeedsAmmo(team: Team | undefined, s: Soldier): boolean {
 /** A round sits in the breech of this gunner's gun (it already left his ammunition count). */
 export function hasChamberedRound(team: Team | undefined, s: Soldier): boolean {
   const cw = team?.crewWeapon;
-  return !!cw && cw.gunnerId === s.id && s.weaponId === cw.weaponId && !!cw.chambered && crewServedClass(cw.weaponId) === 'atgun';
+  // item 028: a smashed gun never fires again, whoever stands next to it
+  return !!cw && !cw.destroyed && cw.gunnerId === s.id && s.weaponId === cw.weaponId && !!cw.chambered && crewServedClass(cw.weaponId) === 'atgun';
 }
 
 /** Combat fires the chambered round: hand it back to the count combat is about to take it from. */

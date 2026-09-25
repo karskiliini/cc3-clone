@@ -6,6 +6,7 @@ import { VEHICLE_DEFS } from '@/data/units';
 import { addMessage } from './messages';
 import type { Rng } from '@/shared/rng';
 import { angleTo, clamp, dist, facingFromAngle, facingTo, vadd, vnorm, vscale, vsub } from '@/shared/math';
+import { teamInCommand } from './command';
 import { findPath, isPassable, type TileCostFn } from './path';
 import { fireHazards, nearFireHazard } from './vehicleExplosion';
 import { teamHasSmoke } from './team';
@@ -42,7 +43,24 @@ function canObey(state: BattleState, rng: Rng, s: Soldier, team: Team, target: V
     s.mind.pendingOrderAt = issuedAt;
     return false;
   }
+  // G11: no contact with HQ — orders beyond command radio range are refused. They stay
+  // pending, so the team obeys as soon as it re-enters the radius. Deploy-phase orders
+  // pre-commit paths/facing by design (tests: deployOrders) and bypass the radius.
+  if (state.phase === 'running' && !teamInCommand(state, team)) {
+    s.mind.pendingOrderAt = issuedAt;
+    if (s.mind.warnedNoCommand === undefined || state.time - s.mind.warnedNoCommand > 8) {
+      s.mind.warnedNoCommand = state.time;
+      addMessage(state, `${team.name}: no contact with HQ.`, 'info');
+    }
+    return false;
+  }
 
+  // item 024: the 'Always Obey Orders' realism toggle skips the motivation/fear refusal roll
+  if (state.config.alwaysObeyOrders) {
+    s.mind.pendingOrderAt = undefined;
+    s.mind.anchor = { ...target };
+    return true;
+  }
   let p = 0.5 + s.mind.motivation / 200 + s.experience / 400 - s.mind.fear / 150;
   if (s.mind.trait === 'brave') p += 0.15;
   if (isLeaderless(state, team)) p -= 0.2;
@@ -495,13 +513,23 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
     m.set(team.id, { order, at: same ? prev!.at : state.time + RADIO_OUT_ORDER_DELAY_S });
     return;
   }
+  // infantry without smoke (and not a mortar/vehicle) cannot execute a Smoke order at all:
+  // refuse it at issue time so the old order (and its dot) survives and the player learns why
+  if (order.type === 'smoke' && team.vehicleId == null && team.type !== 'mortar' && !teamHasSmoke(state, team)) {
+    addMessage(state, `${team.name} has no smoke rounds.`, 'warn');
+    return;
+  }
   // never share the waypoint list with the UI or other teams: it is consumed as they are reached
   if (order.waypoints) {
     if (order.type === 'move' || order.type === 'moveFast' || order.type === 'sneak') order.waypoints = order.waypoints.map((w) => ({ x: w.x, y: w.y }));
     else delete order.waypoints;
   }
   team.order = order;
+  // G31 camouflage nets: an ambush order deploys the nets — they take effect immediately while
+  // the team stays still (spotting.ts), and are shed by any later movement order here.
   const type = effectiveType(team, order);
+  if (type === 'ambush') team.camouflaged = true;
+  else if (order.type === 'move' || order.type === 'moveFast' || order.type === 'sneak' || order.type === 'assault') team.camouflaged = false;
 
   // Immediate facing (user micromanagement): every order points the men where it sends them
   // right away — Defend/Ambush/Fire face the target; a move order faces the first leg of the
@@ -540,7 +568,22 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
     // infantry without smoke (and not a mortar) cannot execute the order at all
     if (!isVehicleTeam && team.type !== 'mortar' && !teamHasSmoke(state, team)) return;
   } else if (type === 'defend' || type === 'ambush') {
-    if (vehicle) { vehicle.path = []; vehicle.targetPoint = order.target; }
+    if (vehicle) {
+      vehicle.path = [];
+      vehicle.targetPoint = order.target;
+      // G23: the hull and turret adopt the order bearing right away so the deploy-screen
+      // sprite matches the arc the UI draws (arc pivots on team/gun facing). Without this the
+      // hull keeps its spawn heading until the battle starts and a hull-toward-threat step.
+      if (dist(vehicle.pos, order.target) > 1e-3) {
+        vehicle.hullFacing = angleTo(vehicle.pos, order.target);
+        vehicle.turretFacing = vehicle.hullFacing;
+      }
+    }
+    // crew-served guns pivot to the arc direction immediately too (they otherwise slew only
+    // through the crew's lay tasks once the sim runs).
+    if (!isVehicleTeam && team.crewWeapon && dist(team.crewWeapon.pos, order.target) > 1e-3) {
+      team.crewWeapon.facing = angleTo(team.crewWeapon.pos, order.target);
+    }
   }
 
   for (const sid of team.soldierIds) {

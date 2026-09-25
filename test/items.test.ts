@@ -368,6 +368,6 @@ describe('feedback (§9)', () => {
     expect(weaponReadout(s, team, undefined, 'Soldat')).toMatchObject({ label: 'PPSh', rounds: 35 });
     s.weaponId = UNARMED;
     expect(weaponSuffix(s.weaponId)).toBe('none');
-    expect(weaponReadout(s, team, undefined, 'Soldat')).toMatchObject({ label: 'Unarmed', rounds: null });
+    expect(weaponReadout(s, team, undefined, 'Soldat')).toEqual({ glyph: null, label: '', rounds: null });
   });
 });

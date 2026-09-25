@@ -18,6 +18,7 @@ export function isPassable(map: GameMap, x: number, y: number, mover: Mover): bo
   if (mover === 'vehicle') {
     const steep = map.groundSteep;
     if (steep && steep[i] > VEHICLE_MAX_GRADE) return false;
+    if (map.bunkerId && map.bunkerId[i] >= 0) return false; // a pillbox is a solid obstacle to tracks
   }
   return true;
 }

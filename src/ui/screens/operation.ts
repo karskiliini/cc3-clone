@@ -1,15 +1,21 @@
-import type { BattleConfig, BattleResult, CursorKind, InputState, OperationState, Rect, Screen, Side } from '@/shared/types';
+import type { BattleConfig, BattleResult, CampaignState, CursorKind, InputState, OperationState, Rect, Screen, Side } from '@/shared/types';
 import { otherSide } from '@/shared/types';
 import { pointInRect } from '@/shared/math';
 import { game } from '@/game';
 import { Battle } from '@/sim/battle';
 import { OPERATION, initialForcePool } from '@/data/operation';
 import { TEAM_DEFS } from '@/data/units';
+import { addTeam, applyReport, availableSoldiers, ensureNames, maxSlots, newCampaign, selectForces } from '@/campaign/roster';
+import { Rng } from '@/shared/rng';
+import { GRAND_CAMPAIGN, operationForIndex } from '@/data/campaign';
 import { getMap } from '@/data/maps';
 import { drawDarkPanel, drawLogo, drawScreenTitle, drawShadowText, drawSmallMetalButton } from '@/ui/chrome';
 import { beginMenuFrame, toMenuInput, BottomStrip, ForcePicker, wordWrap } from './common';
+import { CoaScreen } from './coa';
 import { MainMenuScreen } from './mainMenu';
+import { OptionsScreen } from './options';
 import { DeployScreen } from './deploy';
+import { RosterScreen } from './roster';
 
 const OPERATION_KEY = 'cc3.operation';
 
@@ -34,43 +40,69 @@ function saveOperation(op: OperationState): void {
     // ignore storage errors
   }
 }
+const CAMPAIGN_KEY = 'cc3.campaign';
 
-function loadOperation(): OperationState | null {
+function saveCampaign(campaign: CampaignState | null): void {
   try {
-    const raw = localStorage.getItem(OPERATION_KEY);
-    return raw ? (JSON.parse(raw) as OperationState) : null;
+    if (campaign) localStorage.setItem(CAMPAIGN_KEY, JSON.stringify(campaign));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function loadCampaign(): CampaignState | null {
+  try {
+    const raw = localStorage.getItem(CAMPAIGN_KEY);
+    return raw ? (JSON.parse(raw) as CampaignState) : null;
   } catch {
     return null;
   }
 }
 
-/** Advances the campaign after a battle: records the result, rebuilds the surviving
- * force pool from the just-fought Battle, and persists the operation state. */
+function loadOperation(): OperationState | null {
+  try {
+    const raw = localStorage.getItem(OPERATION_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as OperationState;
+    // G4 migration: v1 saves carry no opIndex — derive it from the flat index
+    if (saved.opIndex === undefined) {
+      saved.opIndex = operationForIndex(GRAND_CAMPAIGN, Math.min(saved.index, OPERATION.length - 1));
+    }
+    return saved;
+  } catch {
+    return null;
+  }
+}
+
+/** Advances the campaign after a battle: records the result, folds the battle report
+ * into the persistent roster (G1), and persists the operation state. */
 export function advanceOperation(result: BattleResult): void {
   const op = game.operation;
   if (!op) return;
   op.results.push(result);
 
+  // G3: the campaign roster is the single source of truth — fold the battle report
+  // (kills, wounds, experience, vehicle damage) into it, then persist.
   const battle = game.battle;
-  if (battle) {
-    const side = op.playerSide;
-    const survivors: OperationState['forcePool'] = [];
-    for (const team of battle.state.teams.values()) {
-      if (team.side !== side) continue;
-      const alive = team.soldierIds.filter((id) => {
-        const s = battle.state.soldiers.get(id);
-        return s && s.health !== 'dead';
-      }).length;
-      if (alive > 0) survivors.push({ defId: team.defId, experience: team.experience, alive });
-    }
-    if (survivors.length > 0) op.forcePool = survivors;
+  if (battle && game.campaign) {
+    applyReport(game.campaign, battle.battleReport());
+    game.campaign.selectedUids = [];
   }
 
   op.index += 1;
+  // G4: track which Grand Campaign operation the flat index falls in
+  op.opIndex = operationForIndex(GRAND_CAMPAIGN, Math.min(op.index, OPERATION.length - 1));
   if (op.index < OPERATION.length) {
     op.requisition = OPERATION[op.index].requisition[op.playerSide];
+    if (game.campaign) {
+      // The spend balance refreshes from the NEW operation's allowance (item 041:
+      // reading it here under the old index handed briefing N op N-1's budget).
+      game.campaign.requisition = op.requisition;
+    }
   }
+
   saveOperation(op);
+  saveCampaign(game.campaign);
 }
 
 export class OperationScreen implements Screen {
@@ -97,7 +129,7 @@ export class OperationScreen implements Screen {
       this.strip = new BottomStrip({ showBack: true, nextEnabled: false });
     } else {
       this.mode = 'briefing';
-      this.strip = new BottomStrip({ showBack: true, nextLabel: 'Next →' });
+      this.strip = new BottomStrip({ showBack: true, nextLabel: 'Next →', soldiersEnabled: true });
       this.initPicker();
     }
   }
@@ -107,22 +139,30 @@ export class OperationScreen implements Screen {
     if (!op) return;
     const battleDef = OPERATION[op.index];
     const mapDef = getMap(battleDef.mapId);
-    // Seed the starting roster from surviving teams, but only as many as fit this battle's
-    // requisition budget — carrying the whole (pre-casualty) force pool over unconditionally
-    // could put the roster over budget before the player touches anything, showing negative
-    // requisition points remaining.
-    let spent = 0;
-    const startRosterIds: string[] = [];
-    for (const f of op.forcePool) {
-      const cost = TEAM_DEFS[f.defId]?.cost ?? 0;
-      if (spent + cost > op.requisition) continue;
-      spent += cost;
-      startRosterIds.push(f.defId);
+    // G3: the campaign roster is the single source of truth. Seed it once per operation
+    // from the starting force pool (first battle) — later battles field the survivors.
+    if (!game.campaign) {
+      const campaign = newCampaign((Date.now() & 0xffff) | 1, op.playerSide, op.requisition, 'normal');
+      for (const f of op.forcePool) {
+        const def = TEAM_DEFS[f.defId];
+        if (!def) continue;
+        addTeam(campaign, f.defId, def.name, def.soldiers, def.vehicleDefId,
+          new Rng(campaign.seed + campaign.teams.length * 31));
+      }
+      game.campaign = campaign;
     }
-    this.picker = new ForcePicker(op.playerSide, battleDef.year, op.requisition, startRosterIds, mapDef.season === 'winter');
+    const campaign = game.campaign;
+    // older saves may carry nameless soldiers; repair deterministically
+    ensureNames(campaign);
+    this.picker = new ForcePicker(op.playerSide, battleDef.year, op.requisition, campaign.teams.map((t) => t.uid), mapDef.season === 'winter');
+    this.picker.campaignState = campaign;
+    this.picker.campaignUids = campaign.teams.map((t) => t.uid);
+    this.picker.maxSlotsOverride = maxSlots(campaign.difficulty);
   }
 
   update(_dt: number, input: InputState): void {
+    // ESC = Back in every menu screen, like the original (round7 UI pass).
+    if (input.keysPressed.has('escape')) { game.setScreen(new MainMenuScreen()); return; }
     const m = toMenuInput(input);
 
     if (this.mode === 'new') {
@@ -141,21 +181,24 @@ export class OperationScreen implements Screen {
           };
           game.operation = op;
           saveOperation(op);
-          this.mode = 'briefing';
-          this.strip = new BottomStrip({ showBack: true, nextLabel: 'Next →' });
-          this.initPicker();
+          // G21: the COA planning screen comes first (as in the original), then briefing
+          game.setScreen(new CoaScreen());
         } else if (this.hasSaved && pointInRect(p, this.continueR)) {
           const saved = loadOperation();
           if (saved) {
             game.operation = saved;
+            game.campaign = loadCampaign();
             this.mode = saved.index >= OPERATION.length ? 'complete' : 'briefing';
-            this.strip = new BottomStrip({ showBack: true, nextLabel: this.mode === 'briefing' ? 'Next →' : undefined, nextEnabled: this.mode === 'briefing' });
+            // the strip was built for the 'new' panel: rebuild it with the briefing
+            // mode's config (Next + the Soldiers entry the campaign enables)
+            this.strip = new BottomStrip({ showBack: true, nextLabel: 'Next →', soldiersEnabled: true });
             if (this.mode === 'briefing') this.initPicker();
           }
         }
       }
       const result = this.strip.update(m);
       if (result.quitOrBack || result.main) game.setScreen(new MainMenuScreen());
+      if (result.options) { game.setScreen(new OptionsScreen(this)); return; }
       return;
     }
 
@@ -170,6 +213,7 @@ export class OperationScreen implements Screen {
         }
         game.setScreen(new MainMenuScreen());
       }
+      if (result.options) { game.setScreen(new OptionsScreen(this)); return; }
       return;
     }
 
@@ -179,13 +223,29 @@ export class OperationScreen implements Screen {
     this.picker.update(m);
 
     const result = this.strip.update(m);
+    if (result.soldiers) { game.setScreen(new RosterScreen(this)); return; }
     if (result.quitOrBack || result.main) {
       game.setScreen(new MainMenuScreen());
       return;
     }
-    if (result.next && this.picker.rosterIds.length > 0) {
+    if (result.options) { game.setScreen(new OptionsScreen(this)); return; }
+    if (result.next && game.campaign && this.picker) {
+      const campaign = game.campaign;
+      const battleDef = OPERATION[op.index];
+      if (!selectForces(campaign, this.picker.campaignUids ?? this.picker.rosterIds, battleDef.year, op.requisition)) return;
+    }
+    if (result.next && game.campaign && game.campaign.selectedUids.length > 0) {
       const battleDef = OPERATION[op.index];
       const enemy = otherSide(op.playerSide);
+      const campaign = game.campaign;
+      const selectedTeams = campaign.selectedUids
+        .map((uid) => campaign.teams.find((t) => t.uid === uid))
+        .filter((t) => !!t);
+      const roster = availableSoldiers(campaign);
+      const forces = selectedTeams.map((t) => t.defId);
+      const rosterUids = selectedTeams.map((t) =>
+        t.soldierUids.filter((uid) => roster.some((s) => s.uid === uid)),
+      );
       const cfg: BattleConfig = {
         mapId: battleDef.mapId,
         playerSide: op.playerSide,
@@ -193,7 +253,12 @@ export class OperationScreen implements Screen {
         seed: Date.now() & 0xffff,
         durationS: 20 * 60,
         difficulty: 'normal',
-        forces: { [op.playerSide]: [...this.picker.rosterIds], [enemy]: battleDef.aiForces[enemy] } as Record<Side, string[]>,
+        forces: { [op.playerSide]: forces, [enemy]: battleDef.aiForces[enemy] } as Record<Side, string[]>,
+        rosterUids: { [op.playerSide]: rosterUids } as Record<Side, string[][]>,
+        alwaysSeeEnemy: game.settings.alwaysSeeEnemy,
+        neverActOnInitiative: game.settings.neverActOnInitiative,
+        alwaysFullEnemyInfo: game.settings.alwaysFullEnemyInfo,
+        alwaysObeyOrders: game.settings.alwaysObeyOrders,
       };
       game.battleConfig = cfg;
       game.battle = new Battle(cfg);
@@ -251,7 +316,8 @@ export class OperationScreen implements Screen {
     ctx.fillStyle = '#e8e8e0';
     const desc = wordWrap(`${mapDef.name} — ${mapDef.description}`, 740, 'small').slice(0, 1).join(' ');
     ctx.fillText(desc, 24, 78);
-
+    // G4: the operational situation now lives on its own briefing screen; the
+    // header here keeps only the battle count + map name above the picker tabs.
     this.picker.draw(ctx);
 
     this.strip.draw(ctx);

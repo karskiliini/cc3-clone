@@ -4,7 +4,7 @@
 // smoke-puff sprites. Sized boldly (per direct comparison against
 // ref/ref_cc3_1482..1485.png) so effects read clearly even at 1x zoom.
 // ============================================================================
-import type { Camera, BattleState, Vec2 } from '@/shared/types';
+import type { Camera, BattleState, Vec2, Spark } from '@/shared/types';
 import {
   VIEW_W, VIEW_H, FLASH_LIFE, TRACER_LIFE, EXPLOSION_LIFE_HE, EXPLOSION_LIFE_SMALL, EXPLOSION_LIFE_SMOKE,
 } from '@/shared/types';
@@ -93,6 +93,68 @@ function hotCore(ctx: CanvasRenderingContext2D, x: number, y: number, coreR: num
 }
 
 // ------------------------------------------------------------------- flashes
+
+const SPARK_LIFE_S = 0.8;
+
+/** Item 026: impact sparks/puffs (A2) — the visual signature of a round on armour. 'armor' is a
+ * bright spark fan flying off the plate (the classic ricochet), 'pen' a sharp red-white flash,
+ * 'dust'/'wood'/'stone'/'brick' short-lived puffs, 'body' a dull red fleck, 'backblast' a smoke
+ * ring behind the shooter. */
+function drawSparks(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
+  for (const sp of state.sparks as Spark[]) {
+    const age = state.time - sp.t;
+    if (age < 0 || age > SPARK_LIFE_S) continue;
+    const p = worldToScreen(cam, sp.pos);
+    if (p.x < -20 || p.y < -20 || p.x > VIEW_W + 20 || p.y > VIEW_H + 20) continue;
+    const f = age / SPARK_LIFE_S;
+    const seed = Math.floor(sp.pos.x * 23 + sp.pos.y * 31);
+    ctx.save();
+    if (sp.kind === 'armor') {
+      // 5-8 bright spokes flying off the plate, quickly gone
+      ctx.globalAlpha = clamp(1 - f * 1.6, 0, 1);
+      ctx.strokeStyle = '#ffe9a0';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      const n = 5 + (seed % 4);
+      for (let i = 0; i < n; i++) {
+        const a = hash2(i, seed, 5) * Math.PI * 2;
+        const r = (2 + hash2(i, seed, 6) * 9) * cam.zoom * (0.4 + f * 0.9);
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p.x + Math.cos(a) * r, p.y + Math.sin(a) * r - r * 0.25);
+      }
+      ctx.stroke();
+      // hot core at the impact point
+      ctx.globalAlpha = clamp(1 - f * 3, 0, 1);
+      ctx.fillStyle = '#fff6d8';
+      ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1, 1.6 * cam.zoom), 0, Math.PI * 2); ctx.fill();
+    } else if (sp.kind === 'pen') {
+      ctx.globalAlpha = clamp(1 - f * 2.4, 0, 1);
+      ctx.fillStyle = '#ff5030';
+      ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1.5, 2.6 * cam.zoom * (1 + f)), 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff0c8';
+      ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1, 1.2 * cam.zoom), 0, Math.PI * 2); ctx.fill();
+    } else if (sp.kind === 'body') {
+      ctx.globalAlpha = clamp(1 - f * 1.8, 0, 1);
+      ctx.fillStyle = '#a03020';
+      ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1, 1.4 * cam.zoom), 0, Math.PI * 2); ctx.fill();
+    } else if (sp.kind === 'backblast') {
+      ctx.globalAlpha = clamp(0.7 - f * 1.4, 0, 1);
+      ctx.strokeStyle = 'rgba(200,195,180,0.9)';
+      ctx.lineWidth = 2;
+      const r = 3 * cam.zoom * (0.5 + f * 2.2);
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.stroke();
+    } else {
+      // dust / wood / stone / brick: a small expanding puff in a material tone
+      const tone = sp.kind === 'wood' ? '#b08a52' : sp.kind === 'stone' || sp.kind === 'brick' ? '#b8b0a2' : '#c9c2b0';
+      ctx.globalAlpha = clamp(0.8 - f * 1.6, 0, 1);
+      ctx.fillStyle = tone;
+      const r = Math.max(1, (2 + f * 5) * cam.zoom);
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
 /** Soldier atlases are viewed twelve degrees away from vertical, at ten pixels per metre. */
 const MUZZLE_HEIGHT_PX_PER_M = Math.sin(12 * Math.PI / 180) * 10;
 function drawFlashes(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
@@ -177,6 +239,49 @@ function drawFlashes(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
 }
 
 // ------------------------------------------------------------------- tracers
+/** Rounds in flight (round5 critique #338: mortar shells had no visible flight — the sim
+ * pushes a Projectile per launched round and resolves the impact at launch, so the renderer
+ * owns the whole visual). Lobbed rounds (mortar, grenade, satchel) ride a parabola of
+ * `arcM` metres above the straight line; flat shells/rockets fly at muzzle height. Style
+ * matches the small-arms tracers: a red-orange dotted trail with a bright leading dot. */
+function drawProjectiles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
+  for (const p of state.projectiles) {
+    const progress = clamp((state.time - p.t0) / Math.max(0.05, p.flightS), 0, 1);
+    if (progress <= 0 || progress >= 1) continue;
+    const height = (prog: number) => Math.sin(prog * Math.PI) * p.arcM;
+    const at = (prog: number) => {
+      const s = worldToScreen(cam, { x: p.from.x + (p.to.x - p.from.x) * prog, y: p.from.y + (p.to.y - p.from.y) * prog });
+      s.y -= height(prog) * MUZZLE_HEIGHT_PX_PER_M * cam.zoom;
+      return s;
+    };
+    const head = at(progress);
+    const tail = at(Math.max(0, progress - 0.18));
+    const isLob = p.arcM > 0.5;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.setLineDash([3 * cam.zoom, 5 * cam.zoom]);
+    ctx.strokeStyle = isLob ? 'rgba(70,60,50,0.45)' : 'rgba(40,18,4,0.4)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(head.x, head.y);
+    ctx.lineTo(tail.x, tail.y);
+    ctx.stroke();
+    ctx.setLineDash([2 * cam.zoom, 6 * cam.zoom]);
+    ctx.strokeStyle = isLob ? '#6a5f52' : '#ff7a30';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(head.x, head.y);
+    ctx.lineTo(tail.x, tail.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = isLob ? '#33302b' : '#ffcf9a';
+    ctx.beginPath();
+    ctx.arc(head.x, head.y, 1.7 * cam.zoom, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
 function drawTracers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState): void {
   for (const t of state.tracers) {
     if (t.kind === 'mortar') continue;
@@ -204,9 +309,41 @@ function drawTracers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     let color = '#ffe08a';
     let width = 2;
     let coreColor: string | null = null;
-    if (t.kind === 'mg') { color = '#ffd070'; width = 2.5; }
+    if (t.kind === 'flame') { color = '#ff9030'; width = 5; coreColor = '#ffe8a0'; }
+    else if (t.kind === 'mg') { color = '#ffd070'; width = 2.5; }
     else if (t.kind === 'shell') { color = '#ffb060'; width = 3; coreColor = '#fff6d0'; }
+    else if (t.kind === 'rocket') { color = '#cfc9bb'; width = 5; coreColor = '#ffb060'; }
     if (t.deflected) { color = '#ff9850'; width = 1.5; coreColor = null; }
+    // vision review round6: the original's small-arms tracers are thin RED-ORANGE dotted arcs,
+    // not pale-yellow streaks — only the shells keep the solid streak look.
+    if (t.kind === 'bullet' || t.kind === 'mg') {
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.setLineDash([3 * cam.zoom, 5 * cam.zoom]);
+      ctx.strokeStyle = 'rgba(40,18,4,0.4)';
+      ctx.lineWidth = 3;
+      ctx.globalAlpha = fadeOut;
+      ctx.beginPath();
+      ctx.moveTo(hx, hy);
+      ctx.lineTo(tbx, tby);
+      ctx.stroke();
+      ctx.setLineDash([2 * cam.zoom, 6 * cam.zoom]);
+      ctx.strokeStyle = t.kind === 'mg' ? '#ff5a1e' : '#ff7a30';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(hx, hy);
+      ctx.lineTo(tbx, tby);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // bright leading dot at the round's front
+      ctx.fillStyle = '#ffcf9a';
+      ctx.globalAlpha = fadeOut;
+      ctx.beginPath();
+      ctx.arc(hx, hy, 1.6 * cam.zoom, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      continue;
+    }
     ctx.save();
     ctx.lineCap = 'round';
     // wf19: a thin dark under-stroke so the streak keeps its edge on bright grass and snow
@@ -581,9 +718,11 @@ export function drawEffects(ctx: CanvasRenderingContext2D, cam: Camera, state: B
   drawLandingDust(ctx, cam, state);
   drawBurningVehicles(ctx, cam, state);
   drawExplosions(ctx, cam, state);
+  drawProjectiles(ctx, cam, state);
   drawTracers(ctx, cam, state);
   drawVegetationImpacts(ctx, cam, state);
   drawFlashes(ctx, cam, state);
+  drawSparks(ctx, cam, state);
 
   ctx.restore();
 }

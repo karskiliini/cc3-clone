@@ -83,7 +83,7 @@ function realTankDefId(): string {
 }
 
 describe('soldier monitor text fitting', () => {
-  function fits(words: string[], cell: { maxW: number; font: 'map' | 'small' }) {
+  function fits(words: string[], cell: { maxW: number; font: 'map' | 'small' | 'micro' }) {
     const ctx = fakeCtx();
     for (const word of words) {
       setHudFont(ctx, cell.font);

@@ -42,7 +42,7 @@ const fired = (v: Vehicle): number => BOW_MG_AMMO - (v.bowAmmo ?? BOW_MG_AMMO);
 describe('bow MG', () => {
   it('only the tanks that had one carry it', () => {
     const has = Object.values(VEHICLE_DEFS).filter((d) => d.bowWeaponId).map((d) => d.id).sort();
-    expect(has).toEqual(['is2', 'kv1', 'panther', 'pz3j', 'pz4f1', 'pz4gh', 't34_76', 't34_85', 'tiger']);
+    expect(has).toEqual(['flammpanzer3', 'is2', 'kv1', 'panther', 'pantherA', 'pantherD', 'pz3j', 'pz4f1', 'pz4g', 'pz4gh', 'sherman76', 't34_76', 't34_85', 'tiger', 'tiger2']);
     for (const d of Object.values(VEHICLE_DEFS)) if (d.bowWeaponId) expect(WEAPONS[d.bowWeaponId]).toBeTruthy();
   });
 

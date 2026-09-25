@@ -2,9 +2,11 @@ import type { CursorKind, InputState, Rect, Screen } from '@/shared/types';
 import { game } from '@/game';
 import { drawLogo, drawMetalButton, drawScreenTitle } from '@/ui/chrome';
 import { pointInRect } from '@/shared/math';
-import { beginMenuFrame, toMenuInput, BottomStrip } from './common';
 import { BattleSetupScreen } from './battleSetup';
+import { beginMenuFrame, toMenuInput, BottomStrip } from './common';
+import { BootCampScreen } from './bootCampPicker';
 import { OperationScreen } from './operation';
+import { HistoryScreen } from './history';
 import { OptionsScreen } from './options';
 
 interface MenuButtonSpec {
@@ -20,9 +22,10 @@ const BTN_H = 46;
 export class MainMenuScreen implements Screen {
   private buttons: MenuButtonSpec[] = [
     { label: 'Play A Game', rect: { x: 336, y: 148, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new BattleSetupScreen()) },
-    { label: 'Boot Camp (Training)', rect: { x: 364, y: 236, w: BTN_W, h: BTN_H }, disabled: true },
-    { label: 'Operation', rect: { x: 392, y: 324, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OperationScreen()) },
-    { label: 'Options', rect: { x: 420, y: 412, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OptionsScreen(this)) },
+    { label: 'Boot Camp (Training)', rect: { x: 364, y: 226, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new BootCampScreen()) },
+    { label: 'Operation', rect: { x: 392, y: 304, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OperationScreen()) },
+    { label: 'History', rect: { x: 420, y: 382, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new HistoryScreen()) },
+    { label: 'Options', rect: { x: 448, y: 460, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OptionsScreen(this)) },
   ];
   private hotIndex = -1;
   private strip = new BottomStrip({ showBack: false, nextEnabled: false });

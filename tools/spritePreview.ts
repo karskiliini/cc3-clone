@@ -13,6 +13,7 @@ import {
 } from '@/render/sprites';
 import { getCrewPoseSprite, CREW_POSES, type SoldierPose } from '@/render/soldierArt';
 import { drawSuppressionStipple, poseForSoldier, drawVehicleSprite } from '@/render/unitRender';
+import { VEHICLE_DEFS } from '@/data/units';
 import type { Soldier, MentalState, Activity } from '@/shared/types';
 import { weaponTowLengthM } from '@/render/weaponArt';
 import { CREW_LAYOUT, crewServedClass } from '@/sim/crewWeapon';
@@ -422,10 +423,7 @@ function fakeSoldier(id: number, suppression: number): Soldier {
 }
 
 // --------------------------------------------------------------- vehicles --
-const VEHICLE_IDS = [
-  'pz3j', 'pz4f1', 'pz4gh', 'stug3g', 'panther', 'tiger', 'sdkfz251', 'marder3',
-  't26', 'bt7', 't34_76', 't34_85', 'kv1', 'is2', 't70', 'su76', 'su85',
-];
+const VEHICLE_IDS = Object.keys(VEHICLE_DEFS);
 const vehRow = section('Vehicles — hull + turret (ok)');
 for (const id of VEHICLE_IDS) {
   const hull = getVehicleSprite(id, 'hull', 'ok');

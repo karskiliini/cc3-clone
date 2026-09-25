@@ -13,6 +13,9 @@ const input = createInput(canvas);
 game.input = input;
 game.setScreen(new MainMenuScreen());
 
+// Dev-only hook for UI verification tooling (headless browser drives real screens).
+if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') (window as unknown as Record<string, unknown>).__cc3 = game;
+
 const loggedErrors = new Set<string>();
 function logOnce(err: unknown): void {
   const msg = err instanceof Error ? err.message : String(err);

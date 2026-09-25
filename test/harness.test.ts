@@ -316,6 +316,10 @@ function printReport(reports: RunReport[]): void {
   for (const mapId of new Set(reports.map((r) => r.mapId))) winRate(reports.filter((r) => r.mapId === mapId), `on ${mapId}`);
   // eslint-disable-next-line no-console
   console.log(lines.join('\n'));
+  // Persist the report so a later session can compare balance without re-running (560s+).
+  void import('node:fs').then((fs) => fs.writeFileSync('/tmp/cc3-balance-report.txt', lines.join('\n') + '\n')).catch(() => {
+    /* read-only fs: report stays console-only */
+  });
 }
 
 describe('harness smoke', () => {
@@ -387,5 +391,5 @@ describe('determinism', () => {
     expect(b.german).toEqual(a.german);
     expect(b.soviet).toEqual(a.soviet);
     expect(b.soldierPositions).toEqual(a.soldierPositions);
-  }, 60000);
+  }, 120_000); // bun's runner defaults to 5 s; two 60 s sims need far more
 });

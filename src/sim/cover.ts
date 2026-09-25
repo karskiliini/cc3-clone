@@ -12,7 +12,11 @@ const OMNI_COVER: Partial<Record<Terrain, number>> = {
   trench: 0.8, crater: 0.5, buildingStone: 0.5, buildingWood: 0.5, floor: 0.5, rubble: 0.5, woods: 0.45,
 };
 
-function omniCoverOf(t: Terrain): number {
+/** Occupants of a bunker interior get near-immunity to small arms (G7). */
+export const BUNKER_COVER = 0.85;
+
+function omniCoverOf(map: GameMap, tx: number, ty: number, t: Terrain): number {
+  if (map.bunkerId && map.bunkerId[ty * map.width + tx] >= 0) return BUNKER_COVER;
   return OMNI_COVER[t] ?? TERRAIN_PROPS[t].cover;
 }
 
@@ -20,7 +24,7 @@ function omniCoverOf(t: Terrain): number {
 export function omniCoverAt(map: GameMap, tile: Vec2): number {
   const tx = Math.floor(tile.x), ty = Math.floor(tile.y);
   if (!inBounds(map, tx, ty)) return 0;
-  return omniCoverOf(tileAt(map, tx, ty));
+  return omniCoverOf(map, tx, ty, tileAt(map, tx, ty));
 }
 
 const LINEAR_COVER: Partial<Record<Terrain, number>> = {
@@ -69,11 +73,10 @@ function crestProtection(map: GameMap, tx: number, ty: number, stepX: number, st
 export function coverFrom(map: GameMap, tile: Vec2, dirRad: number, ctx?: CoverContext): number {
   const tx = Math.floor(tile.x), ty = Math.floor(tile.y);
   if (!inBounds(map, tx, ty)) return 0;
-  const omni = omniCoverOf(tileAt(map, tx, ty));
+  const omni = omniCoverOf(map, tx, ty, tileAt(map, tx, ty));
 
   const stepX = Math.round(Math.sin(dirRad));
   const stepY = Math.round(-Math.cos(dirRad));
-
   let diag1 = { dx: 0, dy: 0 };
   let diag2 = { dx: 0, dy: 0 };
   if (stepX !== 0 && stepY !== 0) {

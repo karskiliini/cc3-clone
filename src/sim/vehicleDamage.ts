@@ -557,6 +557,29 @@ export function hurtPassenger(state: BattleState, v: Vehicle, s: Soldier, to: 'd
  * left in `to` at once, the men get out one per hatch at a time (sim/vehicleCrew.ts, spec
  * 2026-09-17 §10) and end up as infantry beside it. A hull left `abandoned` keeps its damage and
  * ammunition; the crew remembers what drove it out. */
+/** Item 011: how a hull that has just become a final wreck died. Drawn once, consumed by the
+ * renderer and the aftermath (fire may cook off, hatches stay open). Weights favour visible
+ * catastrophe: most kills show fire or an explosion, a minority just stop. */
+export function rollDeathOutcome(rng: { next(): number }, v: Vehicle, def: VehicleDef, crewAboard: boolean): void {
+  const r = rng.next();
+  if (crewAboard) {
+    // the crew is still climbing out: the kill shows through the hatches
+    if (r < 0.2) { v.deathOutcome = 'explosion'; }
+    else if (r < 0.5) { v.deathOutcome = 'fire'; v.engineOnFire = true; }
+    else if (r < 0.62) { v.deathOutcome = 'hatchBlown'; v.hatchesBlown = true; v.engineOnFire = true; }
+    else if (r < 0.75 && def.hasTurret) { v.deathOutcome = 'turretBlown'; v.turretBlown = true; }
+    else if (r < 0.88) { v.deathOutcome = 'stopped'; }
+    else { v.deathOutcome = 'gunSag'; v.gunSag = true; }
+  } else {
+    // an empty hull is murdered where it stands: usually it just stops, sometimes the ammo or
+    // the fuel still goes up
+    if (r < 0.55) { v.deathOutcome = 'stopped'; }
+    else if (r < 0.7 && def.hasTurret) { v.deathOutcome = 'turretBlown'; v.turretBlown = true; }
+    else if (r < 0.85) { v.deathOutcome = 'hatchBlown'; v.hatchesBlown = true; }
+    else { v.deathOutcome = 'fire'; v.engineOnFire = true; }
+  }
+}
+
 export function bailOut(state: BattleState, v: Vehicle, team: Team, to: 'abandoned' | 'knockedOut' | 'burning', message: string | null = 'Crew bails out!', opts: BailOpts = {}): void {
   if (to === 'abandoned' && (v.state === 'immobilized' || isImmobile(v))) v.wasImmobile = true;
   v.state = to;
@@ -599,7 +622,7 @@ export const FIRE_BAIL_S = 3;
 
 /** A vehicle on fire: the crew goes for the hatches at once, as fast as the hatches allow, and the
  * fire gets some of the men before they reach one. */
-function startFireBail(state: BattleState, v: Vehicle, team: Team | undefined): void {
+export function startFireBail(state: BattleState, v: Vehicle, team: Team | undefined): void {
   v.bailBy = state.time + FIRE_BAIL_S;
   v.seatSwap = undefined;
   if (!team) return;
@@ -669,7 +692,31 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
   const armorMm = def ? locationArmorMm(def, location) : 9999;
   const res: VehicleHitResult = { location, armorMm, penetrated: false, ko: false, outcome: 'bounced' };
   const team = state.teams.get(v.teamId);
-  if (!def || v.state === 'knockedOut' || v.state === 'burning') { res.outcome = 'none'; return res; }
+  // item 013: a KNOCKED-OUT wreck can still be hit, and if the shot finds the ammunition (the
+  // more rounds aboard, the more likely) the rack may ignite — burning, then the cook-off path.
+  if (v.state === 'knockedOut') {
+    res.outcome = 'none';
+    const mainLeft = v.mainAmmo ?? 0;
+    const pen = roundPenetrationMm(weapon, input.distM, round);
+    // only a round that actually GETS THROUGH the armour can reach the rack; a bounce sparks
+    // off the dead hull. HE does not penetrate — excluded.
+    if (mainLeft > 0 && pen > 0 && penetrates(weapon, input.distM, armorMm, rng, round)) {
+      res.penetrated = true;
+      // rack hit probability scales with the fraction of the ready rack still loaded
+      const rackP = Math.min(0.5, 0.08 + 0.34 * (mainLeft / Math.max(1, def.readyRack ?? 10)));
+      const loc = location.zone;
+      const rackExposure = loc.startsWith('turret') ? 1 : loc === 'hullSide' ? 0.7 : 0.4;
+      if (rng.next() < rackP * rackExposure) {
+        v.state = 'burning';
+        v.fire = { t0: state.time };
+        v.cookOff = { checkedS: 0, pops: 0, rackFire: true };
+        state.events.push({ kind: 'explosion', pos: { ...v.pos }, side: input.shooterSide, weaponId: weapon.id });
+        res.outcome = 'fire';
+      }
+    }
+    return res;
+  }
+  if (v.state === 'burning') { res.outcome = 'none'; return res; }
 
   const lay = vehicleLayout(def);
   const openHit = lay.openTop && location.face === 'top';
@@ -686,6 +733,8 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
   if (!res.penetrated) {
     nonPenetrating(state, rng, v, def, team, input, location, armorMm, pen);
     if (!wasImmobile && isImmobile(v)) { res.outcome = 'immobilised'; shooterMsg(state, input, `${name} immobilised.`); }
+    // item 026: a bounced shot is announced — the shooter sees his round strike armour and fly off
+    else if (res.outcome === 'bounced') shooterMsg(state, input, `Ricochet! The round bounces off the ${name}'s armour.`);
     return res;
   }
 
@@ -765,15 +814,26 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
   if (!wasImmobile && isImmobile(v)) shooterMsg(state, input, `${name} immobilised.`);
 
   if (rng.next() < fireP) {
-    v.fire = { t0: state.time };
-    v.state = 'burning';
-    v.path = []; v.speed = 0;
-    startFireBail(state, v, team);
-    state.events.push({ kind: 'vehicleKO', pos: { ...v.pos }, side: input.shooterSide });
-    if (team && team.side === state.config.playerSide) addMessage(state, `${team.name}\n${location.zone === 'hullRear' || location.zone === 'engineDeck' ? 'Engine on fire' : 'Vehicle on fire'} — bail out!`, 'bad');
-    shooterMsg(state, input, `${name} is burning.`);
-    res.ko = true; res.outcome = 'fire';
-    return res;
+    if (location.zone === 'hullRear' || location.zone === 'engineDeck') {
+      // engine compartment hit that ignites: the deck burns, the tank is NOT yet a total loss —
+      // flames + dense smoke at the deck (renderer: dmg.engineFire), crew still fights/bails by
+      // the normal morale rules. The next fire roll escalates to the full 'burning' state.
+      v.engineOnFire = true;
+      if (team && team.side === state.config.playerSide) addMessage(state, `${team.name}\nEngine on fire!`, 'bad');
+      shooterMsg(state, input, `${name}: engine deck on fire.`);
+      res.outcome = 'fire';
+      return res;
+    } else {
+      v.fire = { t0: state.time };
+      v.state = 'burning';
+      v.path = []; v.speed = 0;
+      startFireBail(state, v, team);
+      state.events.push({ kind: 'vehicleKO', pos: { ...v.pos }, side: input.shooterSide });
+      if (team && team.side === state.config.playerSide) addMessage(state, `${team.name}\nVehicle on fire — bail out!`, 'bad');
+      shooterMsg(state, input, `${name} is burning.`);
+      res.ko = true; res.outcome = 'fire';
+      return res;
+    }
   }
 
   // ---- the tank fights on with what is left, unless the crew has had enough
@@ -791,16 +851,56 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
       const stays = left.length > 0 && isServiceable(v);
       if (stays && casualties > 0 && exp < 40 && rng.next() < 0.6) v.noReturn = true;
       bailOut(state, v, team, stays ? 'abandoned' : 'knockedOut', left.length > 0 ? 'Crew bails out!' : null, { cause: casualties > 0 ? 'heavy' : 'penetration', panicked: exp < 60 || casualties > 0 });
+      if (!stays) {
+        // item 011: the kill shows its face — most deaths burn or blow, a few just stop
+        rollDeathOutcome(rng, v, def, true);
+        // item 015: the blast strikes the men still aboard before they can climb out — an
+        // ammunition explosion kills or knocks out nearly everyone; a turret burst hits the
+        // turret crew hardest; hatch/hatch-fire crews are wounded by the flash
+        blastCrew(state, rng, v, team, input.shooterSide);
+        if (v.deathOutcome === 'explosion') detonateVehicle(state, rng, v, input.shooterSide);
+        else if (v.deathOutcome === 'fire') startFireBail(state, v, team);
+      }
       state.events.push({ kind: 'vehicleKO', pos: { ...v.pos }, side: input.shooterSide });
       shooterMsg(state, input, `${name} knocked out.`);
       res.ko = true; res.outcome = 'knockedOut';
     }
   } else if (v.state === 'abandoned') {
     v.state = 'knockedOut';
+    // the crew already left (or is dead): the wreck's end is drawn from the outcome set
+    rollDeathOutcome(rng, v, def, false);
+    if (v.deathOutcome === 'fire') startFireBail(state, v, undefined);
     state.events.push({ kind: 'vehicleKO', pos: { ...v.pos }, side: input.shooterSide });
     res.ko = true; res.outcome = 'knockedOut';
   }
   return res;
+}
+
+
+/** Item 015: the blast of a killing blow hurts the men still aboard. 'explosion' (rack going up)
+ * kills or knocks out almost everyone; 'turretBlown' maims the turret crew; 'fire'/'hatchBlown'
+ * wound about half. Survivors bail out panicked (the existing climb-out continues for them). */
+export function blastCrew(state: BattleState, rng: Rng, v: Vehicle, team: Team | undefined, side: Side): void {
+  if (!team) return;
+  const crew = crewOf(state, v, team);
+  const hitRole = (s: Soldier): 'dead' | 'incapacitated' | 'wounded' | null => {
+    switch (v.deathOutcome) {
+      case 'explosion': return rng.next() < 0.7 ? 'dead' : 'incapacitated';
+      case 'turretBlown': {
+        const role = crewRoleOf(state, v, s.id);
+        const inTurret = role === 'commander' || role === 'gunner' || role === 'loader';
+        const p = rng.next();
+        if (inTurret) return p < 0.6 ? 'dead' : p < 0.9 ? 'incapacitated' : 'wounded';
+        return p < 0.2 ? 'wounded' : null;
+      }
+      case 'fire': case 'hatchBlown': return rng.next() < 0.5 ? 'wounded' : null;
+      default: return null; // a quiet stop hurts nobody
+    }
+  };
+  for (const s of crew) {
+    const to = hitRole(s);
+    if (to) hurtCrewman(state, v, s, to, side, team);
+  }
 }
 
 function crewStress(state: BattleState, v: Vehicle, team: Team | undefined, amount: number): void {
@@ -860,12 +960,19 @@ function nonPenetrating(
     const men = c.crew.map((r) => seatOccupant(state, v, r)).filter((s): s is Soldier => !!s);
     if (men.length > 0) hurtCrewman(state, v, men[rng.int(0, men.length - 1)], rng.next() < 0.3 ? 'incapacitated' : 'wounded', input.shooterSide, team);
   }
-  // green crews may bail out of a still-working tank (the shared mind is the commander's)
-  if (team && v.state !== 'abandoned') {
+  // item 011: panic bail-out of a still-working tank. Inexperienced crews go readily when the
+  // shared mind breaks; veterans only under EXTREME panic (leader broken, whole crew terrified).
+  if (team && v.state !== 'abandoned' && v.state !== 'knockedOut' && v.state !== 'burning') {
     const crew = crewOf(state, v, team);
     const lead = crew[0];
-    if (lead && lead.experience < 35 && (lead.mind.state === 'cowering' || lead.mind.state === 'panicked') && rng.next() < 0.2) {
-      bailOut(state, v, team, 'abandoned', 'Crew bails out!', { cause: 'panic' });
+    if (lead && (lead.mind.state === 'cowering' || lead.mind.state === 'panicked')) {
+      const terrified = crew.filter((c) => c.mind.state === 'panicked' || c.mind.state === 'cowering').length;
+      const exp = crew.reduce((a, c) => a + c.experience, 0) / Math.max(1, crew.length);
+      const gate = exp < 35 ? 0.2 : exp < 60 ? 0.06 : 0.02;
+      const extreme = terrified >= crew.length && lead.mind.state === 'panicked';
+      if (rng.next() < (extreme ? gate * 3 : gate)) {
+        bailOut(state, v, team, 'abandoned', 'Crew bails out!', { cause: 'panic' });
+      }
     }
   }
 }
@@ -923,6 +1030,8 @@ export const DAMAGE_WORDS: string[] = Array.from(new Set(Object.values(SYSTEM_WO
 export interface VehicleDamageView {
   /** thin smoke trail from the engine deck (engine damaged/destroyed, not yet burning) */
   engineSmoke: boolean;
+  /** the engine compartment itself is on fire — flames + dense dark smoke at the deck */
+  engineFire: boolean;
   burning: boolean;
   /** a broken track lies slewed beside the hull */
   brokenTrack: 'L' | 'R' | 'both' | null;
@@ -931,6 +1040,10 @@ export interface VehicleDamageView {
   turretLanding?: { pos: Vec2; dir: number };
   /** atlas state key for the turret sprite, or null for the normal one */
   turretKey: 'turret.blown' | null;
+  /** item 011: the death outcome visuals — hatches blown open with fire spewing from the hull */
+  hatchesBlown: boolean;
+  /** item 011: the destroyed gun droops (barrel pitched down, too tired to keep it up) */
+  gunSag: boolean;
   /** damaged systems for the HUD, worst first */
   systems: { system: VehicleSystem; state: EquipState; word: string }[];
 }
@@ -943,11 +1056,16 @@ export function vehicleDamageView(v: Vehicle): VehicleDamageView {
   const l = d?.trackL === 'destroyed', r = d?.trackR === 'destroyed';
   return {
     engineSmoke: !!d && d.engine !== 'ok' && v.state !== 'burning' && v.state !== 'knockedOut',
+    // the engine deck itself alight: recorded by the hit code when a fuel/engine hit ignites
+    // hatchesBlown wrecks burn through the open hatches even after the KO state lands
+    engineFire: !!v.engineOnFire || !!v.hatchesBlown,
     burning: v.state === 'burning',
     brokenTrack: l && r ? 'both' : l ? 'L' : r ? 'R' : null,
     turretBlown: !!v.turretBlown,
     turretLanding: v.turretBlown && v.turretLanding ? { pos: v.turretLanding, dir: v.turretLandingDir ?? 0 } : undefined,
     turretKey: v.turretBlown ? 'turret.blown' : null,
+    hatchesBlown: !!v.hatchesBlown,
+    gunSag: !!v.gunSag,
     systems,
   };
 }

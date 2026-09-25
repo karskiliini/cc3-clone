@@ -282,7 +282,7 @@ function blit(ctx: CanvasRenderingContext2D, f: EarthField, season: Season, o: S
 }
 
 // =================================================================== craters
-export type CraterKind = 'shell' | 'grenade';
+export type CraterKind = 'shell' | 'grenade' | 'track';
 export interface CraterDraw {
   /** centre, zoom-1 world px */
   x: number; y: number;
@@ -297,6 +297,7 @@ export interface CraterDraw {
 /** Outer radius in zoom-1 world px that the crater (ejecta, scorch, shadow) can touch. */
 export function craterExtentPx(c: CraterDraw): number {
   const R = c.diameterM / 2;
+  if (c.kind === 'track') return R * 1.3;
   const m = c.kind === 'grenade' ? R * 2.9 + 0.2 : R * (c.old ? 2.1 : 3.3) + 0.4;
   return m * PX_PER_M;
 }
@@ -325,6 +326,45 @@ export function fillCrater(f: EarthField, c: CraterDraw, season: Season): ShadeO
   const decay = old ? 4.2 : 3.0;
   const H = f.H, soil = f.soil, scorch = f.scorch, snow = f.snow, mat = f.mat;
 
+  return fillShellCrater(f, c, season, w, h, zoom, seed, winter, R, K, amps, phs, n1, n2, p1, p2);
+}
+
+/** A vehicle track press on snow/mud: a shallow dark rut, no bowl or ejecta. Painted as
+ * scorch-only so the existing shade pass darkens the surface without digging. */
+function paintTrackMark(f: EarthField, c: CraterDraw, winter: boolean): void {
+  const { w, h, zoom } = f;
+  const R = c.diameterM / 2;
+  for (let y = 0; y < h; y++) {
+    const Y = f.oy + (y + 0.5) / zoom;
+    const dym = (Y - c.y) / PX_PER_M;
+    for (let x = 0; x < w; x++) {
+      const X = f.ox + (x + 0.5) / zoom;
+      const dxm = (X - c.x) / PX_PER_M;
+      const d2 = dxm * dxm + dym * dym;
+      if (d2 > R * R) continue;
+      // feather the edge so a run of ruts reads as a continuous track
+      const t = 1 - Math.sqrt(d2) / R;
+      const i = y * w + x;
+      f.scorch[i] = Math.max(f.scorch[i], t * 0.55);
+      if (winter) f.snow[i] = Math.min(f.snow[i], 1 - t * 0.8);
+    }
+  }
+}
+
+/** The shell/grenade crater fill proper (the bulk of fillCrater). */
+function fillShellCrater(
+  f: EarthField, c: CraterDraw, _season: Season,
+  w: number, h: number, zoom: number, seed: number, winter: boolean, R: number,
+  K: number, amps: Float32Array, phs: Float32Array,
+  n1: number, n2: number, p1: number, p2: number,
+): ShadeOpts {
+  const grenade = c.kind === 'grenade';
+  const old = c.old;
+  const Hr = grenade ? 0.015 : R * (old ? 0.09 : 0.19);
+  const ejR = grenade ? 1.9 : old ? 2.05 : winter ? 2.7 : 2.3;
+  const D = grenade ? R * 0.55 : R * (old ? 0.32 : 0.5);
+  const decay = old ? 4.2 : 3.0;
+  const H = f.H, soil = f.soil, scorch = f.scorch, snow = f.snow, mat = f.mat;
   for (let y = 0; y < h; y++) {
     const Y = f.oy + (y + 0.5) / zoom;
     const dym = (Y - c.y) / PX_PER_M;

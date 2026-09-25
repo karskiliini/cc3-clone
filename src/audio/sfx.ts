@@ -20,6 +20,7 @@ export type SfxKind =
   | 'rifle' | 'smg' | 'lmg' | 'hmg' | 'pistol'
   | 'mortarFire' | 'mortarHit' | 'tankGun' | 'atGun' | 'explosion' | 'grenade'
   | 'ricochet' | 'smokePop' | 'click' | 'message' | 'flagCapture' | 'scream'
+  | 'moan'
   | 'teamBroken';
 
 /** Kinds that get priority when the polyphony cap is exceeded. */
@@ -36,6 +37,7 @@ export class Sfx {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private masterVolume = 0.7;
+  private muted = false;
   private paused = false;
 
   private recentPlays: number[] = []; // performance.now() timestamps of one-shots in the current window
@@ -74,10 +76,23 @@ export class Sfx {
       this.ctx.resume().catch(() => {});
     }
   }
-
   setVolume(v: number): void {
     this.masterVolume = clamp(v, 0, 1);
-    if (this.master && !this.paused) this.master.gain.value = this.masterVolume;
+    if (this.master && !this.paused) this.master.gain.value = this.muted ? 0 : this.masterVolume;
+  }
+
+  /** CTRL+S (manual input card): hard mute of every output while keeping the
+   * volume setting. Survives pause/unpause cycles — setPaused re-applies it. */
+  setMuted(v: boolean): void {
+    if (this.muted === v) return;
+    this.muted = v;
+    if (this.master && this.ctx) {
+      this.master.gain.setTargetAtTime(v || this.paused ? 0 : this.masterVolume, this.ctx.currentTime, 0.01);
+    }
+  }
+
+  isMuted(): boolean {
+    return this.muted;
   }
 
   /** Battle pause (F3/space) or the game losing focus: hard-mutes the master
@@ -87,9 +102,10 @@ export class Sfx {
     if (this.paused === v) return;
     this.paused = v;
     if (this.master && this.ctx) {
-      this.master.gain.setTargetAtTime(v ? 0 : this.masterVolume, this.ctx.currentTime, 0.01);
+      this.master.gain.setTargetAtTime(v || this.muted ? 0 : this.masterVolume, this.ctx.currentTime, 0.01);
     }
   }
+
 
   private ready(): boolean {
     return this.ctx !== null && this.master !== null && this.ctx.state !== 'closed' && !this.paused;
@@ -142,6 +158,7 @@ export class Sfx {
       case 'message': message(ctx, dest, when, g); break;
       case 'flagCapture': flagCapture(ctx, dest, when, g); break;
       case 'scream': scream(ctx, dest, when, g, pan); break;
+      case 'moan': moan(ctx, dest, when, g, pan); break;
       case 'teamBroken': teamBrokenAlarm(ctx, dest, when, g); break;
     }
   }
@@ -285,6 +302,15 @@ export class Sfx {
         }
         case 'vehicleKO': {
           this.emitAt('explosion', ev.pos, centre);
+          break;
+        }
+        case 'armorClank': {
+          // non-penetrating hit: the classic ricochet ping off the armour
+          this.emitAt('ricochet', ev.pos, centre);
+          break;
+        }
+        case 'penHit': {
+          this.emitAt('ricochet', ev.pos, centre, 0.7);
           break;
         }
         case 'message': {
@@ -559,4 +585,39 @@ function scream(ctx: AudioContext, dest: AudioNode, when: number, gain: number, 
   lfo.start(when);
   osc.stop(when + 0.35);
   lfo.stop(when + 0.35);
+}
+
+/** A wounded man's moan: a low, falling hum — darker and slower than the kill scream, closer to
+ * a groan than a shout. User rule: men in pain near the camera are audible, and audible men are
+ * findable. */
+function moan(ctx: AudioContext, dest: AudioNode, when: number, gain: number, pan: number | undefined): void {
+  const osc = ctx.createOscillator();
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(180, when);
+  osc.frequency.exponentialRampToValueAtTime(95, when + 0.8);
+  const lfo = ctx.createOscillator();
+  lfo.type = 'sine';
+  lfo.frequency.value = 7;
+  const lfoGain = ctx.createGain();
+  lfoGain.gain.value = 9;
+  lfo.connect(lfoGain);
+  lfoGain.connect(osc.frequency);
+  const env = ctx.createGain();
+  env.gain.setValueAtTime(0, when);
+  env.gain.linearRampToValueAtTime(gain * 0.12, when + 0.08);
+  env.gain.setValueAtTime(gain * 0.12, when + 0.45);
+  env.gain.exponentialRampToValueAtTime(0.0001, when + 0.85);
+  osc.connect(env);
+  let out: AudioNode = env;
+  if (pan !== undefined && ctx.createStereoPanner) {
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = pan;
+    out.connect(panner);
+    out = panner;
+  }
+  out.connect(dest);
+  osc.start(when);
+  lfo.start(when);
+  osc.stop(when + 0.9);
+  lfo.stop(when + 0.9);
 }

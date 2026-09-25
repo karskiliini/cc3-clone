@@ -3,7 +3,7 @@
 // a small ListBox widget, word-wrap, camera-control helpers and a BACK button
 // factory. Nothing here owns simulation state.
 // ============================================================================
-import type { BattleState, Camera, InputState, Rect, Side, Team, TeamDef, TeamType, Vec2 } from '@/shared/types';
+import type { BattleState, Camera, CampaignState, InputState, Rect, Side, Team, TeamDef, TeamType, Vec2 } from '@/shared/types';
 import { SCREEN_W, SCREEN_H, VIEW_W, VIEW_H, MENU_X, MENU_Y, MENU_W, MENU_H, TILE_M, TILE_PX } from '@/shared/types';
 import { pointInRect } from '@/shared/math';
 import { panCamera, clampCamera, worldToScreen } from '@/engine/camera';
@@ -11,8 +11,10 @@ import { Button, drawDarkPanel, drawBottomStrip, drawSmallMetalButton, drawVerti
 import { PALETTE } from '@/render/palette';
 import { drawText, textWidth } from '@/render/pixelfont';
 import { getTeamIcon } from '@/render/sprites';
-import { TEAM_DEFS, VEHICLE_DEFS, teamsForYear } from '@/data/units';
+import { addTeam, refitTeam, retireVehicle, upgradeTeam } from '@/campaign/roster';
+import { Rng } from '@/shared/rng';
 import { WEAPONS } from '@/data/weapons';
+import { TEAM_DEFS, VEHICLE_DEFS, teamsForYear } from '@/data/units';
 import { experienceLevel, typicalExperience } from '@/data/experience';
 
 // ------------------------------------------------------------------- noise --
@@ -338,6 +340,20 @@ function pickFriendlySoldierScreen(state: BattleState, cam: Camera, screenPt: Ve
   return bestTeam;
 }
 
+/** Centroid of one side's alive teams (vehicle anchor for vehicle teams), for
+ * opening the deploy/battle camera on where the units actually are instead of
+ * the geometric centre of a deploy zone that may be far taller than the view. */
+export function friendlyCentroid(state: BattleState, side: Side): Vec2 {
+  let cx = 0, cy = 0, n = 0;
+  for (const t of state.teams.values()) {
+    if (t.side !== side || t.outOfAction) continue;
+    const p = t.vehicleId != null ? state.vehicles.get(t.vehicleId)?.pos : t.pos;
+    if (!p) continue;
+    cx += p.x; cy += p.y; n++;
+  }
+  return n > 0 ? { x: cx / n, y: cy / n } : { x: state.map.width / 2, y: state.map.height / 2 };
+}
+
 /** Screen-space team bounding circle: centre = centroid of the team's alive
  * soldiers (or vehicle position), radius = the furthest member from that
  * centre plus a fixed px margin, so a click anywhere near a spread-out
@@ -380,15 +396,34 @@ function pointInRotatedRectScreen(p: Vec2, centre: Vec2, halfLenPx: number, half
  * radius (independent of zoom), then any friendly team's screen-space
  * bounding circle, then any friendly vehicle's rotated hull rectangle
  * (+ slop). Returns the hit team, or null.
+ *
+ * `opts.circleFallback: false` skips the bounding-circle stage — used where a
+ * press on "empty ground" must stay empty (deploy marquee); file formations
+ * make column teams' circles swallow big empty areas between soldiers.
  */
-export function pickFriendlyTeamScreen(state: BattleState, cam: Camera, screenPt: Vec2, side: Side): Team | null {
+export function pickFriendlyTeamScreen(state: BattleState, cam: Camera, screenPt: Vec2, side: Side, opts?: { circleFallback?: boolean }): Team | null {
   const soldierHit = pickFriendlySoldierScreen(state, cam, screenPt, side);
   if (soldierHit) return soldierHit;
 
-  for (const team of state.teams.values()) {
-    if (team.side !== side || team.outOfAction) continue;
-    const circle = teamBoundingCircleScreen(state, cam, team);
-    if (circle && Math.hypot(screenPt.x - circle.c.x, screenPt.y - circle.c.y) <= circle.r) return team;
+  if (opts?.circleFallback !== false) {
+    // Tightest fit wins, not first-match nor deepest: adjacent file-formations
+    // overlap heavily, and both first-match (lower team id) and deepest (big
+    // columns swallow small clusters under them) mis-resolve ambiguous clicks.
+    // Smallest containing circle = the cluster the cursor is actually inside.
+    let bestTeam: Team | null = null;
+    let bestR = Infinity;
+    let bestDepth = -Infinity;
+    for (const team of state.teams.values()) {
+      if (team.side !== side || team.outOfAction) continue;
+      const circle = teamBoundingCircleScreen(state, cam, team);
+      if (!circle) continue;
+      const depth = circle.r - Math.hypot(screenPt.x - circle.c.x, screenPt.y - circle.c.y);
+      if (depth < 0) continue;
+      if (circle.r < bestR || (circle.r === bestR && depth > bestDepth)) {
+        bestR = circle.r; bestDepth = depth; bestTeam = team;
+      }
+    }
+    if (bestTeam) return bestTeam;
   }
 
   const pxPerTile = TILE_PX * cam.zoom;
@@ -460,6 +495,10 @@ export interface BottomStripConfig {
   nextLabel?: string;
   nextEnabled?: boolean;
   helpText?: string;
+  /** G1/G22: the campaign roster is one click away wherever a campaign context
+   * exists (operation force-selection, debrief). Defaults to off — screens
+   * without campaign state keep the placeholder greyed out. */
+  soldiersEnabled?: boolean;
 }
 
 export interface BottomStripResult {
@@ -467,7 +506,9 @@ export interface BottomStripResult {
   main: boolean;
   options: boolean;
   next: boolean;
+  soldiers: boolean;
 }
+
 
 /** The control strip present at the bottom of every menu screen: Quit/Back,
  * Main, a row of disabled placeholder buttons (Revert/Briefing/History/Map/
@@ -487,6 +528,7 @@ export class BottomStrip {
   showBack: boolean;
   nextLabel: string;
   nextEnabled: boolean;
+  soldiersEnabled: boolean;
   helpText: string;
 
   private hotQuit = false;
@@ -498,6 +540,7 @@ export class BottomStrip {
     this.showBack = cfg.showBack;
     this.nextLabel = cfg.nextLabel ?? 'Next →';
     this.nextEnabled = cfg.nextEnabled ?? true;
+    this.soldiersEnabled = cfg.soldiersEnabled ?? false;
     this.helpText = cfg.helpText ?? 'Right-click on screen elements to display more detailed help.';
   }
 
@@ -511,15 +554,17 @@ export class BottomStrip {
     let main = false;
     let options = false;
     let next = false;
+    let soldiers = false;
     for (const c of input.clicks) {
       if (c.button !== 0) continue;
       const p = { x: c.x, y: c.y };
       if (pointInRect(p, this.quitBtn)) quitOrBack = true;
       else if (pointInRect(p, this.mainBtn)) main = true;
       else if (pointInRect(p, this.optionsBtn)) options = true;
+      else if (this.soldiersEnabled && pointInRect(p, this.soldiersBtn)) soldiers = true;
       else if (this.nextEnabled && pointInRect(p, this.nextBtn)) next = true;
     }
-    return { quitOrBack, main, options, next };
+    return { quitOrBack, main, options, next, soldiers };
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
@@ -530,7 +575,7 @@ export class BottomStrip {
       { label: 'Briefing', rect: this.briefingBtn, disabled: true },
       { label: 'History', rect: this.historyBtn, disabled: true },
       { label: 'Map', rect: this.mapBtn, disabled: true },
-      { label: 'Soldiers', rect: this.soldiersBtn, disabled: true },
+      { label: 'Soldiers', rect: this.soldiersBtn, disabled: !this.soldiersEnabled },
       { label: 'Options', rect: this.optionsBtn, hot: this.hotOptions },
       { label: this.nextLabel, rect: this.nextBtn, disabled: !this.nextEnabled, hot: this.hotNext },
     ]);
@@ -560,6 +605,8 @@ export const TEAM_FLAVOR: Record<TeamType, string> = {
   halftrack: 'A lightly armored transport that moves infantry quickly and mounts a machine gun. Not built to trade fire with real armor.',
   command: 'Commanders provide leadership; command staffs add firepower and make nearby teams more effective. Anchor assaults and defenses.',
   engineer: 'Combat engineers carry satchel charges for clearing bunkers and fortified buildings, alongside their personal weapons.',
+  rocket: 'Rocket artillery: salvo indirect fire with devastating first impact, then a long reload and a vulnerable gun line. Shoot and scoot.',
+  transport: 'An unarmed utility vehicle: ferries ammunition and supplies to guns and tanks. Not a fighting unit.',
 };
 
 const SLOT_RANKS = ['1st Sergeant', '2nd Lieutenant', '1st Lieutenant', 'Captain', 'Major'];
@@ -606,6 +653,8 @@ const CATEGORY_LABEL: Record<TeamType, string> = {
   halftrack: 'Halftrack',
   command: 'Command Team',
   engineer: 'Engineers',
+  rocket: 'Rocket Artillery',
+  transport: 'Utility Vehicle',
 };
 
 /** Category label for a team row, e.g. 'Rifle Infantry', 'Heavy Tank'. Tanks
@@ -649,6 +698,12 @@ export class ForcePicker {
   year: number;
   points: number;
   rosterIds: string[];
+  /** campaign team uids parallel to rosterIds when in campaign mode (G3) */
+  campaignUids: string[] | null = null;
+  /** campaign state for refit/retire mutations (G3) */
+  campaignState: CampaignState | null = null;
+  /** slot count by difficulty (G3); falls back to the battle-mode default */
+  maxSlotsOverride: number | null = null;
   category: 'regular' | 'armor' = 'regular';
   /** When true, shows the "* unit is equipped for winter combat" note (the
    * original marked individual winter-pattern teams with an asterisk; our
@@ -677,9 +732,11 @@ export class ForcePicker {
   private rosterListRect: Rect = { x: 440, y: 128, w: 330, h: 220 };
   private pointsRect: Rect = { x: 440, y: 368, w: 330, h: 34 };
 
-  private readonly poolRowH = 27;
-  private readonly rosterRowH = 27;
-  private readonly maxRosterSlots = 15;
+  private poolRowH = 27;
+  private rosterRowH = 27;
+  private get maxRosterSlots(): number {
+    return this.maxSlotsOverride ?? 15;
+  }
 
   constructor(side: Side, year: number, points: number, initialRosterIds: string[], winterMap = false) {
     this.side = side;
@@ -704,7 +761,31 @@ export class ForcePicker {
   }
 
   remaining(): number {
+    // Campaign mode: the display shows the campaign's live requisition balance —
+    // acquisitions and refits deduct it, seeded/owned roster rows are pre-paid and cost
+    // nothing here (G3 force pool, item 041). Battle mode keeps points minus spent.
+    if (this.campaignState && this.campaignUids) return this.campaignState.requisition;
     return this.points - this.spent();
+  }
+
+  /** Whether the selected roster row's team has an upgrade path available this year (G3b). */
+  private selectedCanUpgrade(): boolean {
+    if (!this.campaignState || !this.campaignUids || this.rosterSelected < 0) return false;
+    const team = this.campaignState.teams.find((t) => t.uid === this.campaignUids![this.rosterSelected]);
+    const def = team ? TEAM_DEFS[team.defId] : null;
+    const next = def?.upgradesTo ? TEAM_DEFS[def.upgradesTo] : null;
+    return !!next && next.years.includes(this.year);
+  }
+
+  /** Resolves a roster row's team def. Battle-mode rows carry raw defIds; campaign-mode
+   * rows carry campaign team uids (G3), which resolve through the campaign roster so
+   * purchased teams (item 041) render with their own identity. */
+  private rosterDefAt(idx: number): TeamDef | null {
+    const direct = TEAM_DEFS[this.rosterIds[idx]];
+    if (direct) return direct;
+    if (!this.campaignState) return null;
+    const team = this.campaignState.teams.find((t) => t.uid === this.rosterIds[idx]);
+    return team ? TEAM_DEFS[team.defId] ?? null : null;
   }
 
   update(input: InputState): void {
@@ -718,7 +799,25 @@ export class ForcePicker {
         this.category = 'armor';
         this.refreshPool();
       } else if (pointInRect(p, this.retireBtn) && this.rosterSelected >= 0) {
-        this.rosterIds.splice(this.rosterSelected, 1);
+        if (this.campaignState && this.campaignUids) {
+          retireVehicle(this.campaignState, this.campaignUids[this.rosterSelected]);
+        } else {
+          this.rosterIds.splice(this.rosterSelected, 1);
+        }
+        this.rosterSelected = -1;
+      } else if (pointInRect(p, this.restBtn) && this.rosterSelected >= 0 && this.campaignState && this.campaignUids) {
+        upgradeTeam(this.campaignState, this.campaignUids[this.rosterSelected], this.year);
+        this.rosterSelected = -1;
+      } else if (pointInRect(p, this.refitBtn) && this.rosterSelected >= 0 && this.campaignState && this.campaignUids) {
+        const cs = this.campaignState;
+        const team = cs.teams.find((t) => t.uid === this.campaignUids![this.rosterSelected]);
+        if (team) {
+          refitTeam(cs, team.uid, {
+            repair: !!team.vehicleDamage,
+            replace: true,
+            required: TEAM_DEFS[team.defId]?.soldiers.length ?? 0,
+          });
+        }
         this.rosterSelected = -1;
       } else if (pointInRect(p, this.poolListRect)) {
         const row = this.poolScroll + Math.floor((p.y - this.poolListRect.y) / this.poolRowH);
@@ -726,13 +825,31 @@ export class ForcePicker {
           this.poolSelected = row;
           const def = TEAM_DEFS[this.poolIds[row]];
           if (def && this.rosterIds.length < this.maxRosterSlots && this.remaining() >= def.cost) {
-            this.rosterIds.push(def.id);
+            if (this.campaignState && this.campaignUids) {
+              // G3 force pool (item 041): a purchase mints a persistent campaign team,
+              // pays its acquisition from the live requisition balance, and fields it
+              // immediately — both parallel lists carry the new uid so the operation's
+              // Next selects it into the battle.
+              const campaign = this.campaignState;
+              const team = addTeam(campaign, def.id, def.name, def.soldiers, def.vehicleDefId,
+                new Rng(campaign.seed + campaign.teams.length * 31));
+              campaign.requisition -= def.cost;
+              this.campaignUids.push(team.uid);
+              this.rosterIds.push(team.uid);
+            } else {
+              this.rosterIds.push(def.id);
+            }
           }
         }
       } else if (pointInRect(p, this.rosterListRect)) {
         const row = this.rosterScroll + Math.floor((p.y - this.rosterListRect.y) / this.rosterRowH);
         if (row >= 0 && row < this.rosterIds.length) {
           if (row === this.rosterSelected) {
+            if (this.campaignState && this.campaignUids) {
+              // Campaign mode: the two lists are parallel — removing a roster row un-fields
+              // the team for this battle but it stays in the kampfgruppe for later ops.
+              this.campaignUids.splice(row, 1);
+            }
             this.rosterIds.splice(row, 1);
             this.rosterSelected = -1;
           } else {
@@ -893,8 +1010,8 @@ export class ForcePicker {
     }
 
     drawVerticalStencil(ctx, 'ACTIVE ROSTER', 434, 492, '#ff7a1a', 44, ['#ff6a00', '#ffc030'], 364);
-    drawSmallMetalButton(ctx, this.refitBtn, 'Refit', { disabled: true });
-    drawSmallMetalButton(ctx, this.restBtn, 'Rest', { disabled: true });
+    drawSmallMetalButton(ctx, this.refitBtn, 'Refit', { disabled: this.rosterSelected < 0 || !this.campaignState });
+    drawSmallMetalButton(ctx, this.restBtn, 'Upgrade', { disabled: this.rosterSelected < 0 || !this.campaignState || !this.selectedCanUpgrade() });
     drawSmallMetalButton(ctx, this.detailsBtn, 'Details', { disabled: true });
     drawSmallMetalButton(ctx, this.retireBtn, 'Retire', { disabled: this.rosterSelected < 0 });
     drawSmallMetalButton(ctx, this.revertBtn, 'Revert', { disabled: true });
@@ -931,7 +1048,7 @@ export class ForcePicker {
         ctx.textAlign = 'left';
         continue;
       }
-      const def = TEAM_DEFS[this.rosterIds[idx]];
+      const def = this.rosterDefAt(idx);
       if (!def) continue;
       if (idx === this.rosterSelected) {
         ctx.fillStyle = 'rgba(200,50,30,0.35)';
@@ -985,7 +1102,7 @@ export class ForcePicker {
   }
 }
 
-function wordWrapCtx(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, font: string): string[] {
+export function wordWrapCtx(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, font: string): string[] {
   ctx.save();
   ctx.font = font;
   const words = text.split(/\s+/).filter((w) => w.length > 0);
