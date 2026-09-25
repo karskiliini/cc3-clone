@@ -34,7 +34,9 @@ function shooterFactor(shooter: Soldier): number {
   const stateTerm = mindState === 'shaken' ? 0.7 : mindState === 'berserk' || shooter.activity === 'berserk' ? 1.2 : 1;
   // first-fire shock (spec §11): a green soldier fires wildly once shaken by it.
   const wildFireTerm = mindState === 'shaken' && shooter.experience < 30 ? 0.5 : 1;
-  return suppressionTerm * expTerm * fatigueTerm * stateTerm * wildFireTerm;
+  // stress (mind spec §2) unsettles his hands before it tips him into 'shaken': up to -20% at 100
+  const stressTerm = 1 - clamp(shooter.mind?.stress ?? 0, 0, 100) * 0.002;
+  return suppressionTerm * expTerm * fatigueTerm * stateTerm * wildFireTerm * stressTerm;
 }
 
 /** Penetration (mm) of `round` from this weapon at `distM`. AP: penetrationMm * max(0.4, 1 - dist/1000).

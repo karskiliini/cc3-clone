@@ -264,6 +264,10 @@ function decayThreatAndBeliefs(state: BattleState, dt: number, soldier: Soldier,
 }
 
 // ------------------------------------------------------------------- events
+/** Fire on a teammate this close (m) stresses him too, by this much per round (before cover). */
+export const TEAMMATE_FIRE_M = 10;
+export const TEAMMATE_FIRE_STRESS = 0.5;
+
 /** Fire that lands near (or on) a soldier: near-miss/hit stress + belief/threatDir update (spec §5),
  * plus first-fire shock for green troops (spec §11). */
 export function onIncomingFire(
@@ -287,6 +291,18 @@ export function onIncomingFire(
       addStress(mind, base * coverFactor);
     } else if (distM <= 100) {
       addStress(mind, 0.5 * coverFactor);
+    }
+    // rounds cracking into the man beside him (hitTheDirt.ts drops him too): a little of the fear
+    // reaches every teammate within TEAMMATE_FIRE_M who was not close enough to get his own share
+    const team = state.teams.get(soldier.teamId);
+    if (team) {
+      for (const id of team.soldierIds) {
+        if (id === soldier.id) continue;
+        const o = state.soldiers.get(id);
+        if (!o || !o.mind || o.health === 'dead' || o.health === 'incapacitated' || o.vehicleId != null) continue;
+        if (dist(o.pos, soldier.pos) * TILE_M > TEAMMATE_FIRE_M || dist(o.pos, impactPos) <= 1.5) continue;
+        addStress(o.mind, TEAMMATE_FIRE_STRESS * (1 - (o.cover ?? 0) * 0.5));
+      }
     }
   }
   mind.lastIncomingAt = state.time;
@@ -556,8 +572,8 @@ function resumeFromOrder(state: BattleState, s: Soldier, team: Team | undefined)
   if (order && (order.type === 'move' || order.type === 'moveFast' || order.type === 'sneak')) {
     s.path = routeVia(state, s.pos, orderRoutePoints(order), 'infantry');
     s.activity = order.type === 'moveFast' ? 'movingFast' : order.type === 'sneak' ? 'sneaking' : 'moving';
-    // down under Move Fast fire (hitTheDirt.ts): he crawls on until he judges it quiet
-    if (order.type === 'moveFast' && s.mind.downAt != null) s.stance = 'prone';
+    // down under fire on the move (hitTheDirt.ts): he crawls on until he judges it quiet
+    if ((order.type === 'moveFast' || order.type === 'move') && s.mind.downAt != null) s.stance = 'prone';
   } else if (order && order.type === 'ambush') {
     s.activity = 'ambushing';
     s.stance = 'prone';

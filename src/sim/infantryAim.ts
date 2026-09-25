@@ -55,7 +55,7 @@ function aimSeconds(s: Soldier, weapon: WeaponDef, at: Vec2, now: number, follow
     : (light ? 0.8 : mg ? 2.1 : heavy ? 3 : 1.8) + turn + (weapon.id.includes('scoped') ? 1.2 : 0);
   const settle = !followUp && now - memory(s).movedAt < 1 ? 0.8 : 0;
   const skill = 1.3 - clamp(s.experience, 0, 100) * 0.006;
-  const condition = 1 + s.fatigue * 0.008 + s.suppression * 0.008 + (s.health === 'wounded' ? 0.35 : 0);
+  const condition = 1 + s.fatigue * 0.008 + s.suppression * 0.008 + (s.mind?.stress ?? 0) * 0.004 + (s.health === 'wounded' ? 0.35 : 0);
   return Math.max(0.5, (base + range * (followUp ? 0.3 : 1) + settle) * skill * condition * (hip ? 0.6 : 1));
 }
 
@@ -86,10 +86,19 @@ export function infantryAimReady(s: Soldier, weapon: WeaponDef, target: Target, 
   return now >= aim.readyAt;
 }
 
+/** A man crawling on under fire (sim/hitTheDirt.ts) crawls this long between shots: the move is
+ * his mission. A shaken man twice as long. */
+export const CRAWL_SHOT_GAP_S = 6;
+/** Seconds of movement between aimed shots on a movement order. */
+function boundS(s: Soldier): number {
+  if (s.mind?.downAt == null || s.stance !== 'prone') return 3;
+  return CRAWL_SHOT_GAP_S * (s.mind.state === 'shaken' ? 2 : 1);
+}
+
 export function infantryDidFire(s: Soldier, now: number): void {
   const m = memory(s);
   if (s.aiming) m.shot = s.aiming;
   m.shotAt = now;
-  m.walkUntil = advancing(s) ? now + 3 : now;
+  m.walkUntil = advancing(s) ? now + boundS(s) : now;
   s.aiming = undefined;
 }
