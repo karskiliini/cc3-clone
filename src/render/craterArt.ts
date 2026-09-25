@@ -297,7 +297,7 @@ export interface CraterDraw {
 /** Outer radius in zoom-1 world px that the crater (ejecta, scorch, shadow) can touch. */
 export function craterExtentPx(c: CraterDraw): number {
   const R = c.diameterM / 2;
-  if (c.kind === 'track') return R * 1.3;
+  if (c.kind === 'track') return R * 1.3 * PX_PER_M;
   const m = c.kind === 'grenade' ? R * 2.9 + 0.2 : R * (c.old ? 2.1 : 3.3) + 0.4;
   return m * PX_PER_M;
 }
@@ -329,27 +329,6 @@ export function fillCrater(f: EarthField, c: CraterDraw, season: Season): ShadeO
   return fillShellCrater(f, c, season, w, h, zoom, seed, winter, R, K, amps, phs, n1, n2, p1, p2);
 }
 
-/** A vehicle track press on snow/mud: a shallow dark rut, no bowl or ejecta. Painted as
- * scorch-only so the existing shade pass darkens the surface without digging. */
-function paintTrackMark(f: EarthField, c: CraterDraw, winter: boolean): void {
-  const { w, h, zoom } = f;
-  const R = c.diameterM / 2;
-  for (let y = 0; y < h; y++) {
-    const Y = f.oy + (y + 0.5) / zoom;
-    const dym = (Y - c.y) / PX_PER_M;
-    for (let x = 0; x < w; x++) {
-      const X = f.ox + (x + 0.5) / zoom;
-      const dxm = (X - c.x) / PX_PER_M;
-      const d2 = dxm * dxm + dym * dym;
-      if (d2 > R * R) continue;
-      // feather the edge so a run of ruts reads as a continuous track
-      const t = 1 - Math.sqrt(d2) / R;
-      const i = y * w + x;
-      f.scorch[i] = Math.max(f.scorch[i], t * 0.55);
-      if (winter) f.snow[i] = Math.min(f.snow[i], 1 - t * 0.8);
-    }
-  }
-}
 
 /** The shell/grenade crater fill proper (the bulk of fillCrater). */
 function fillShellCrater(
@@ -430,6 +409,7 @@ function fillShellCrater(
 /** Draws a crater onto `ctx` (whose pixels map to world px via originX/originY and `zoom`,
  * i.e. canvas px = (world - origin) * zoom; any current transform is ignored). */
 export function paintCrater(ctx: CanvasRenderingContext2D, c: CraterDraw, season: Season, originX: number, originY: number, zoom: number): void {
+  if (c.kind === 'track') { paintTrackRut(ctx, c, season, originX, originY, zoom); return; }
   const ext = craterExtentPx(c);
   const px0 = Math.floor((c.x - ext - originX) * zoom), py0 = Math.floor((c.y - ext - originY) * zoom);
   const px1 = Math.ceil((c.x + ext - originX) * zoom), py1 = Math.ceil((c.y + ext - originY) * zoom);
@@ -438,6 +418,22 @@ export function paintCrater(ctx: CanvasRenderingContext2D, c: CraterDraw, season
   FIELD.reset(px1 - px0, py1 - py0, zoom, originX + px0 / zoom, originY + py0 / zoom);
   const o = fillCrater(FIELD, c, season);
   blit(ctx, FIELD, season, o, px0, py0);
+}
+
+/** A vehicle's track press on snow or mud: nothing is dug, the surface is only trodden. A soft
+ * round shade, faint enough that the stamps laid every ~1.5 m of travel blend into one band. */
+export const TRACK_RUT_ALPHA = 0.16;
+function paintTrackRut(ctx: CanvasRenderingContext2D, c: CraterDraw, season: Season, originX: number, originY: number, zoom: number): void {
+  const x = (c.x - originX) * zoom, y = (c.y - originY) * zoom, r = craterExtentPx(c) * zoom;
+  const rgb = season === 'winter' ? '96,108,122' : '58,44,28'; // packed snow shades blue-grey, mud brown
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, `rgba(${rgb},${TRACK_RUT_ALPHA})`);
+  g.addColorStop(0.6, `rgba(${rgb},${TRACK_RUT_ALPHA * 0.7})`);
+  g.addColorStop(1, `rgba(${rgb},0)`);
+  ctx.save();
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
 }
 
 // ================================================================== foxholes

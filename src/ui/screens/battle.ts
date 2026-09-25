@@ -48,6 +48,9 @@ import { DebriefScreen } from './debrief';
 import { OverviewScreen } from './overview';
 import { OptionsScreen } from './options';
 
+/** Real seconds the battle screen stays up, with the result shown, after the battle ends. */
+export const BATTLE_END_HOLD_S = 5;
+
 const MOVE_TYPES: OrderType[] = ['move', 'moveFast', 'sneak'];
 const DRAG_THRESHOLD_PX = 5;
 const RIGHT_GESTURE_PX = 5;
@@ -290,7 +293,7 @@ export class BattleScreen implements Screen {
 
     if (state.phase === 'ended') {
       this.endedElapsed += dt;
-      if (this.endedElapsed > 2) {
+      if (this.endedElapsed > BATTLE_END_HOLD_S) {
         game.setScreen(new DebriefScreen(battle));
         return;
       }

@@ -7,7 +7,7 @@ import { WEAPONS } from '@/data/weapons';
 import { MAPS } from '@/data/maps';
 import { buildMap } from '@/sim/map';
 import { TERRAIN_PROPS } from '@/sim/terrain';
-import { EarthField, fillCrater, fillFoxhole, shadeField, buildTrenchDraw, fillTrenches } from '@/render/craterArt';
+import { EarthField, fillCrater, fillFoxhole, shadeField, buildTrenchDraw, fillTrenches, craterExtentPx, paintCrater, TRACK_RUT_ALPHA } from '@/render/craterArt';
 
 function makeState(fill: Terrain = 'grass'): BattleState {
   const W = 20, H = 20;
@@ -159,6 +159,24 @@ describe('earthwork art (height fields)', () => {
     // inner walls, half the rim radius out along the NW/SE diagonal
     const nw = (60 - 9) * W + (60 - 9), se = (60 + 9) * W + (60 + 9);
     expect(lum(out, nw)).toBeLessThan(lum(out, se));
+  });
+
+  it('a vehicle track rut in snow is a faint shade over its full width, never a dark pit', () => {
+    // it used to go through the shell-crater painter clipped to a 5 px box (extent in metres, not
+    // px): tanks left a trail of small black squares in the snow
+    const c = { x: 100, y: 100, diameterM: 3.7, kind: 'track' as const, old: false, seed: 5 };
+    expect(craterExtentPx(c)).toBeGreaterThan(20); // zoom-1 px: 1.85 m x 1.3 at 10 px/m
+    const stops: string[] = [];
+    let filled = 0, imagePuts = 0;
+    const ctx = {
+      save() {}, restore() {}, beginPath() {}, arc() {}, fill() { filled++; }, drawImage() { imagePuts++; }, putImageData() { imagePuts++; },
+      createRadialGradient: () => ({ addColorStop: (_o: number, col: string) => stops.push(col) }),
+      canvas: { width: 512, height: 512 }, fillStyle: '',
+    } as unknown as CanvasRenderingContext2D;
+    paintCrater(ctx, c, 'winter', 0, 0, 1);
+    expect(filled).toBe(1);
+    expect(imagePuts).toBe(0); // no earth/bowl patch
+    for (const col of stops) expect(Number(col.match(/,([\d.]+)\)$/)![1])).toBeLessThanOrEqual(TRACK_RUT_ALPHA);
   });
 
   it('a foxhole has its spoil piled on the enemy-facing side', () => {
