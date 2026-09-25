@@ -46,6 +46,7 @@ import {
   missionBracketMul, onMissionShotAtVehicle,
 } from './crewWeapon';
 import { observerVisibility } from './spotting';
+import { isCrawlingUnderFire } from './hitTheDirt';
 import { treesInBlast } from './trees';
 import { blastThrowEnd, dismember, isSevereBlast, throwDebris } from './debris';
 import { applyBlastDamage } from './structures';
@@ -258,8 +259,40 @@ export function pickSoldierTargetForTest(state: BattleState, soldier: Soldier): 
   return weapon ? pickTarget(state, soldier, state.teams.get(soldier.teamId), weapon) : null;
 }
 
+/** A man crawling on under fire (hitTheDirt.ts) keeps his mind on the move: he takes only a shot
+ * that is there — a spotted enemy within CRAWL_FIRE_RANGE_M, with a line of sight from the ground,
+ * inside his field of fire (CRAWL_FIELD_RAD of where the fire came from, else of his way ahead).
+ * No area fire at beliefs, no hunting. */
+export const CRAWL_FIRE_RANGE_M = 150;
+export const CRAWL_FIELD_RAD = Math.PI / 3;
+function crawlerTarget(state: BattleState, s: Soldier, weapon: WeaponDef): Target | null {
+  const rangeM = Math.min(weapon.rangeM, CRAWL_FIRE_RANGE_M);
+  const eyeM = eyeHeightM(s.stance);
+  const facing = s.mind.threatDir ?? (s.path.length > 0 ? angleTo(s.pos, s.path[s.path.length - 1]) : facingAngle(s.facing));
+  const inField = (p: Vec2) => Math.abs(wrapAngle(angleTo(s.pos, p) - facing)) <= CRAWL_FIELD_RAD;
+  const ok = (p: Vec2) => dist(s.pos, p) * TILE_M <= rangeM && inField(p) && hasLOS(state.map, s.pos, p, { eyeM });
+  const { soldiers, vehicles } = gatherCandidates(state, s.side);
+  let best: Target | null = null;
+  let bestD = Infinity;
+  if (AT_WEAPON_CLASSES.has(weapon.cls)) {
+    for (const v of vehicles) {
+      const d = dist(s.pos, v.pos);
+      if (d < bestD && ok(v.pos) && !isHopelessTarget(state, s, weapon, v)) { bestD = d; best = { kind: 'vehicle', vehicle: v }; }
+    }
+    if (best) return best;
+  }
+  for (const e of soldiers) {
+    if (e.vehicleId != null) continue;
+    const d = dist(s.pos, e.pos);
+    if (d < bestD && ok(e.pos)) { bestD = d; best = { kind: 'soldier', soldier: e }; }
+  }
+  return best;
+}
+
 function pickTarget(state: BattleState, soldier: Soldier, team: Team | undefined, weapon: WeaponDef): Target | null {
   const map = state.map;
+  if (isCrawlingUnderFire(soldier)) return crawlerTarget(state, soldier, weapon);
+  // running upright: his mind is on getting there, no snap shots (he drops and crawls under fire)
   if (soldier.activity === 'movingFast') return null;
 
   let maxRangeM = weapon.rangeM;
@@ -1119,6 +1152,9 @@ function stepSoldierCombat(state: BattleState, rng: Rng, dt: number, soldier: So
     // harness showed the combination made attacker win rate worse, not better. Reverted to the
     // original spec §6.7 thresholds — the shot-volume gap turned out to be dominated by the AI's
     // move/fire-eligibility split (see ai.ts bounding overwatch), not this throttle.
+    // a man who went down on the move (hitTheDirt.ts) and is pinned keeps his head down: the move
+    // is his mission, not a firefight from where he lies
+    if (soldier.mind.state === 'pinned' && soldier.mind.downAt != null) { clearInfantryAim(soldier); return; }
     if (soldier.mind.state === 'pinned' && !rng.chance(0.3)) return;
     if (soldier.suppression > 85) { clearInfantryAim(soldier); return; }
     if (soldier.suppression > 60 && !rng.chance(0.3)) return;

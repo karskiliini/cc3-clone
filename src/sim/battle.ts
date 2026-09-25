@@ -168,6 +168,8 @@ export class Battle {
     stepCombat(state, this.rng, dt);
     stepMorale(state, this.rng, dt);
     // kit as objects (spec 2026-09-17 §9): casualties leave theirs, able men pick things up
+    // (the stepItemDrops call was lost in the f01a0b3 patch merge; restored)
+    stepItemDrops(state, this.rng);
     stepPendingBursts(state, this.rng);
     stepTreeFires(state, this.rng, dt);
     stepPickups(state, this.rng, dt);

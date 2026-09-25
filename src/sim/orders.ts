@@ -384,9 +384,9 @@ export function applyOrderToSoldier(state: BattleState, team: Team, s: Soldier, 
     s.mind.anchor = { x: hop.end.x, y: hop.end.y };
     s.path = path;
     s.activity = activity as Soldier['activity'];
-    // a man who went to ground under Move Fast fire (hitTheDirt.ts) stays down on a re-issued
-    // Move Fast: he gets up when HE judges the fire has stopped, not because the order came again
-    const staysDown = type === 'moveFast' && s.mind.downAt != null;
+    // a man who went to ground under fire on the move (hitTheDirt.ts) stays down on a re-issued
+    // Move / Move Fast: he gets up when HE judges the fire has stopped, not because the order came again
+    const staysDown = (type === 'moveFast' || type === 'move') && s.mind.downAt != null;
     if (!staysDown) { s.mind.downAt = undefined; s.mind.downHoldUntil = undefined; }
     s.stance = type === 'sneak' || staysDown ? 'prone' : 'standing';
     // face the first leg immediately so a deploy-phase order reads its direction at once

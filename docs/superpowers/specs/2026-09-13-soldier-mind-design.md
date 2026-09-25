@@ -83,27 +83,41 @@ Each soldier evaluates his team order independently every step:
   (every 3rd opportunity, to conserve ammo); ambushers hold fire until an enemy is *seen* within 30 m.
 - A panicked or cowering soldier does nothing; a pinned one holds.
 
-### 4.1 Move Fast under fire: hit the dirt, crawl on, run again (user request 2026-09-25)
+### 4.1 Under fire on the move: hit the dirt, crawl on, go on again (user request 2026-09-25)
 
 > When I order men to move fast they start running, but when they take incoming fire they should
 > automatically move to prone and start crawling. Only when they're convinced they're not going to
 > receive more fire shall they start advancing fast again.
 
-`src/sim/hitTheDirt.ts`, per soldier, per movement step. The order, destination and path are never
-touched; only HOW he moves changes (activity stays `movingFast`, stance `prone` caps him at crawl pace).
+`src/sim/hitTheDirt.ts`, per soldier, per movement step, for **Move and Move Fast**. The order,
+destination and path are never touched; only HOW he moves changes (activity stays
+`moving`/`movingFast`, stance `prone` caps him at crawl pace 0.3 m/s).
 - **Drop**: fire on him (`mind.lastIncomingAt`: near misses, hits, blasts) or on a teammate within
   10 m, in the last 0.6 s. He holds still 0.5 s (the get-down), then crawls on along his route.
 - **Get up**: no such fire for `quietNeeded` s AND suppression ≤ 10 + experience/4. `quietNeeded` =
   (1.5 + (100 − experience)·0.06 + stress·0.04) × trait (reckless 0.6, brave 0.8, steady/stoic 0.9,
-  cautious/nervous 1.3) × state (shaken 1.4, wary 1.1) × 0.7 if his leader is up and running within
+  cautious/nervous 1.3) × state (shaken 1.4, wary 1.1) × 0.7 if his leader is up and moving within
   15 m × a stable personal 0.85–1.15. A veteran is up after ~2.5 s of quiet, a regular ~4.5 s, a
-  green man ~6.5 s+. Rising holds him still 0.45–0.75 s, then he runs. Fire again drops him again.
-- A re-issued Move Fast does not stand him up; any other order does. Arriving while down, he stays
-  down. Pinned/cowering is the state machine's; on recovery he is still down until he judges it quiet.
+  green man ~6.5 s+. Rising holds him still 0.45–0.75 s, then he walks / runs. Fire drops him again.
+- A re-issued Move / Move Fast does not stand him up; any other order does. Arriving while down, he
+  stays down. Pinned/cowering is the state machine's; on recovery he is still down until he judges it quiet.
 - Crawling tires like walking (0.5/s), not like running. HUD line 2 reads "Crawling".
+- **Crawler fire** (`combat.ts crawlerTarget`): the move stays the mission. He takes only a shot that
+  is there: a spotted enemy within 150 m (weapon range permitting), line of sight from the ground,
+  within ±60° of where the fire came from (`threatDir`), else of his way ahead. No area fire at
+  beliefs, no turning to hunt. Each shot is the normal aimed shot (he pauses for the aim time, which
+  already grows with suppression, fatigue, stress, and shrinks with experience), then he crawls
+  6 s before the next (shaken: 12 s). Accuracy: the existing moving-shooter ×0.6, shaken ×0.7,
+  suppression and stress terms. A pinned man who went down on the move does not fire (he keeps
+  his head down; a pinned man in position keeps the §3 30% rate); cowering/panicked never fire.
+- **Running upright** (Move Fast, not down) still never fires: his mind is on getting there, and
+  fire drops him into the crawl, where he can shoot.
+- **Stress**: a near miss stresses him whether he is up or down (§2 table, scaled by cover only);
+  each round on a teammate within 10 m adds 0.5 (× cover) to him. Stress costs performance directly:
+  small-arms accuracy × (1 − stress·0.002) and aim time × (1 + stress·0.004), besides driving fear
+  and the shaken state (§3).
 - **Sneak** is already prone. **Assault** is a walking charge that fires as it goes; going to ground
-  mid-charge kills it, so a charging man stays on his feet until suppression pins him. **Move** walks
-  and already bounds from cover (§9).
+  mid-charge kills it, so a charging man stays on his feet until suppression pins him.
 - Teams: crawlers simply fall behind; nothing pulls them upright to keep formation.
 
 ## 5. Beliefs (memory of the enemy)

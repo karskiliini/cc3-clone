@@ -44,6 +44,10 @@ function nearMiss(state: BattleState, rng: Rng, s: Soldier, suppression = 12): v
   s.suppression = Math.min(100, s.suppression + suppression);
 }
 
+function obeying(rng: Rng): Rng {
+  return new Proxy(rng, { get(o, p) { if (p === 'chance') return () => true; const v = Reflect.get(o, p); return typeof v === 'function' ? v.bind(o) : v; } }) as Rng;
+}
+
 function speedOver(step: (s: number) => void, s: Soldier, seconds: number): number {
   const from = { ...s.pos };
   step(seconds);
@@ -160,7 +164,7 @@ describe('Move Fast under fire: hit the dirt, crawl on, get up and run when it i
     for (const m of men) { expect(m.stance).toBe('prone'); expect(m.activity).toBe('movingFast'); }
   });
 
-  it('a crawler falling behind is not dragged upright by his team; another order does stand him up', () => {
+  it('a crawler falling behind is not dragged upright by his team; a new Move keeps him down, an Assault stands him up', () => {
     // a loose file, men 12 m apart: fire on the flank man is not fire on the others
     const { state, team, men, rng, step } = runningSquad(50, 6);
     step(1);
@@ -171,8 +175,10 @@ describe('Move Fast under fire: hit the dirt, crawl on, get up and run when it i
     expect(rear.stance).toBe('prone');
     expect(men[0].stance).toBe('standing');
     expect(men[0].pos.x - rear.pos.x).toBeGreaterThan(3); // the others ran on; nobody waited
-    const obey = new Proxy(rng, { get(o, p) { if (p === 'chance') return () => true; const v = Reflect.get(o, p); return typeof v === 'function' ? v.bind(o) : v; } }) as Rng;
-    applyOrder(state, team, { type: 'move', target: { x: 110.5, y: 101.5 }, issuedAt: state.time }, obey);
+    applyOrder(state, team, { type: 'move', target: { x: 110.5, y: 101.5 }, issuedAt: state.time }, obeying(rng));
+    expect(rear.mind.downAt).toBeDefined();
+    expect(rear.stance).toBe('prone');
+    applyOrder(state, team, { type: 'assault' as never, target: { x: 110.5, y: 101.5 }, issuedAt: state.time }, obeying(rng));
     expect(rear.mind.downAt).toBeUndefined();
     expect(rear.stance).toBe('standing');
   });

@@ -1,22 +1,23 @@
 // ============================================================================
-// hitTheDirt.ts — a man running under a Move Fast order throws himself down when fire comes
-// in, crawls on along his own route, and gets up to run again only once HE is convinced the
-// fire has stopped (user request 2026-09-25; mind spec §4 "Move Fast under fire").
+// hitTheDirt.ts — a man running (Move Fast) or walking (Move) throws himself down when fire
+// comes in, crawls on along his own route, and gets up to go on only once HE is convinced the
+// fire has stopped (user request 2026-09-25; mind spec §4.1).
 //
 // Rules (each soldier decides for himself; nothing here touches his order, destination or path):
 //  * Trigger: rounds / near misses / blasts landing on him (mind.lastIncomingAt, set by
 //    combat.ts onIncomingFire and mind.ts onExplosionNear) or on a teammate within
 //    TEAM_FIRE_NEAR_M of him, within the last FRESH_FIRE_S. He drops (DROP_HOLD_S still, the
-//    get-down), then crawls at crawl pace along the same path (activity stays movingFast; the
+//    get-down), then crawls at crawl pace along the same path (activity stays movingFast/moving; the
 //    prone stance caps his speed in infantryPace.ts, and the renderer picks prone.crawl).
 //  * Resume: no fire on him or his neighbours for `quietNeededS` seconds AND his suppression
 //    has fallen to `suppressionOkFor`. Veterans judge quickly, green / stressed / shaken men
 //    stay down longer; see quietNeededS for the numbers. He then gets up (a short still rise,
 //    RISE_HOLD_S) and runs on. Fire during the rise or later drops him again.
-//  * Only Move Fast. A Sneak is already prone. An Assault is a walking charge that fires as it
+//  * Move and Move Fast. A Sneak is already prone. An Assault is a walking charge that fires as it
 //    goes (hastyFire.ts 'assault'): going to ground in the open in the middle of a charge is what
 //    kills it, so the assault keeps going on its feet and only suppression (the mind's pinned
-//    state) stops a man. A plain Move walks and already bounds from cover (coverSeek.ts).
+//    state) stops a man.
+//  * While crawling he takes a shot that is there (combat.ts crawlerTarget), never hunts for one.
 //  * Pinned / cowering / panicked men belong to the mind state machine; while they are in it
 //    this module only keeps its memory, so on recovery (resumeFromOrder) he is still down.
 // ============================================================================
@@ -30,7 +31,7 @@ export const FRESH_FIRE_S = 0.6;
 export const TEAM_FIRE_NEAR_M = 10;
 /** Throwing himself down: he holds still this long (s) — the renderer's drop is 0.45 s. */
 export const DROP_HOLD_S = 0.5;
-/** A leader already up and running within this distance (m) pulls his men up sooner. */
+/** A leader already up and moving on within this distance (m) pulls his men up sooner. */
 const LEADER_PULL_M = 15;
 
 /** Latest incoming fire on him or a living teammate close by (battle seconds). */
@@ -88,18 +89,29 @@ function leaderUpAndRunning(state: BattleState, s: Soldier): boolean {
   if (!team || team.leaderId === s.id) return false;
   const l = state.soldiers.get(team.leaderId);
   if (!l || l.health === 'dead' || l.health === 'incapacitated') return false;
-  return l.activity === 'movingFast' && l.mind.downAt == null && l.stance === 'standing'
+  return isMoverActivity(l) && l.path.length > 0 && l.mind.downAt == null && l.stance === 'standing'
     && dist(l.pos, s.pos) * TILE_M <= LEADER_PULL_M;
 }
 
-/** Is this man's movement under a Move Fast order this module governs? */
-function underMoveFast(state: BattleState, s: Soldier): boolean {
+/** Is this man's movement under a Move / Move Fast order this module governs? */
+function underMoveOrder(state: BattleState, s: Soldier): boolean {
   const team = state.teams.get(s.teamId);
   const order = team?.order;
-  return !!team && team.vehicleId == null && !team.outOfAction && !!order && order.type === 'moveFast' && order.mountVehicleId == null;
+  return !!team && team.vehicleId == null && !team.outOfAction && !!order
+    && (order.type === 'moveFast' || order.type === 'move') && order.mountVehicleId == null;
 }
 
-/** True while he is down (crawling) under Move Fast. */
+/** The activity a man on this module's orders walks or runs in. */
+function isMoverActivity(s: Soldier): boolean {
+  return s.activity === 'movingFast' || s.activity === 'moving';
+}
+
+/** Down under fire and still on his way: crawling on (combat.ts lets him take a shot that is there). */
+export function isCrawlingUnderFire(s: Soldier): boolean {
+  return s.mind?.downAt != null && s.path.length > 0 && isMoverActivity(s) && s.stance === 'prone';
+}
+
+/** True while he is down (crawling) under a Move / Move Fast order. */
 export function isDownUnderFire(s: Soldier): boolean {
   return s.mind.downAt != null;
 }
@@ -115,9 +127,9 @@ function clear(s: Soldier): void {
 export function stepHitTheDirt(state: BattleState, s: Soldier): boolean {
   const mind = s.mind;
   if (!mind) return false;
-  if (!underMoveFast(state, s)) { clear(s); return false; }
+  if (!underMoveOrder(state, s)) { clear(s); return false; }
   // pinned / firing / reloading...: the mind or combat has him for now; keep the memory
-  if (s.activity !== 'movingFast') return false;
+  if (!isMoverActivity(s)) return false;
   const t = state.time;
   if (s.path.length === 0) {
     // arrived while down (movement.onArrive normally handles this and clears the memory):
