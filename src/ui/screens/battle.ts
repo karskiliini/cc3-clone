@@ -1,5 +1,5 @@
 import type { CursorKind, InputState, OrderType, Screen, Side, Team, Vec2 } from '@/shared/types';
-import { ORDER_DOT_COLOR, ORDER_HOTKEYS, ORDER_TYPES, VIEW_H, VIEW_W, otherSide } from '@/shared/types';
+import { ORDER_DOT_COLOR, ORDER_HOTKEYS, ORDER_TYPES, TILE_PX, VIEW_H, VIEW_W, otherSide } from '@/shared/types';
 import { game } from '@/game';
 import type { Battle } from '@/sim/battle';
 import { teamCanFire, teamHasSmoke } from '@/sim/team';
@@ -17,13 +17,14 @@ import { pickOrderMarker } from '@/render/orderMarkers';
 import { GAME_SPEEDS, cycleTeamKey, handleDepthMapKey, handleSpeedKey, offsetOrderPoints } from './viewKeys';
 import { hitRect } from '@/ui/hud/hudChrome';
 import { drawLOSLine } from '@/ui/losTool';
-import { drawElevationReadout } from '@/ui/elevationReadout';
+import { elevationTextAt } from '@/ui/elevationReadout';
+import { HOVER_TONE_COLOR, drawPointerReadout, hoverInfoAt, type HoverInfo, type ReadoutLine } from '@/ui/hoverInfo';
 import { GrassFx } from '@/render/grassFx';
 import { BlastFx } from '@/render/blastFx';
 import { transportAt } from '@/sim/transport';
 import { isRemountTarget } from '@/sim/vehicleCrew';
 import { drawText, textWidth } from '@/render/pixelfont';
-import { drawTargetHighlight, targetableEnemyAt, teamObserver, type TargetHover } from '@/ui/targetHover';
+import { drawTargetHighlight, targetCursorKind, targetStatusText, targetableEnemyAt, teamObserver, type TargetHover } from '@/ui/targetHover';
 import { TeamGrid } from '@/ui/hud/teamGrid';
 import { CombatMessages } from '@/ui/hud/combatMessages';
 import { BottomStrip } from '@/ui/hud/bottomStrip';
@@ -110,6 +111,8 @@ export class BattleScreen implements Screen {
   private pendingOrder: OrderType | null = null;
   /** Fire order pending and the pointer is over an enemy team that can be targeted right now. */
   private targetHover: TargetHover | null = null;
+  /** what the pointer is over on the map, named in the pointer readout */
+  private hoverInfo: HoverInfo | null = null;
   /** Move-type order pending over a vehicle a selected team can board: a transport with room, or
    * the crew's own abandoned vehicle. */
   private mountHover: { pos: Vec2; halfM: number; label: string } | null = null;
@@ -513,6 +516,11 @@ export class BattleScreen implements Screen {
       if (sel.length > 0) this.targetHover = targetableEnemyAt(state, battle.playerSide(), sel, screenToWorld(cam, input.mouse));
     }
 
+    // The word or two by the pointer: what the player's side knows is under it.
+    this.hoverInfo = (!this.overHud(input.mouse) && !this.commandMenu.isOpen && input.pointerInside)
+      ? hoverInfoAt(state, battle.playerSide(), screenToWorld(cam, input.mouse), TILE_PX * cam.zoom, this.showDead)
+      : null;
+
     this.mountHover = null;
     if (this.pendingOrder && MOVE_TYPES.includes(this.pendingOrder) && !this.overHud(input.mouse) && !this.commandMenu.isOpen) {
       const world = screenToWorld(cam, input.mouse);
@@ -699,7 +707,7 @@ export class BattleScreen implements Screen {
         if (!obs) continue;
         const { from, eyeM } = obs;
         drawLOSLine(ctx, cam, state.map, from, to, { state, team: t }, { eyeM },
-          { label: primary, alpha: primary ? 1 : 0.6, fireOrder: this.pendingOrder === 'fire' });
+          { label: primary, alpha: primary ? 1 : 0.6, fireOrder: this.pendingOrder === 'fire', bigCursor: !!this.targetHover });
       }
     }
 
@@ -753,8 +761,18 @@ export class BattleScreen implements Screen {
 
     if (game.settings.showDepthMap) this.depthOverlay.drawLegend(ctx);
 
-    // Elevation under the pointer is always shown while it is over the map.
-    if (!this.overHud(game.input.state.mouse) && !this.commandMenu.isOpen) drawElevationReadout(ctx, cam, state.map, game.input.state.mouse);
+    // Pointer readout while it is over the map: what is under it (unit, building, ground), the
+    // Fire target's status (no line of fire / KO / burning) and the elevation, in one small box.
+    const mouse = game.input.state.mouse;
+    if (!this.overHud(mouse) && !this.commandMenu.isOpen) {
+      const lines: ReadoutLine[] = [];
+      if (this.hoverInfo) lines.push({ text: this.hoverInfo.text, color: HOVER_TONE_COLOR[this.hoverInfo.tone] });
+      const status = this.targetHover ? targetStatusText(this.targetHover) : null;
+      if (status && !this.hoverInfo?.text.includes(`(${status})`)) lines.push({ text: status, color: this.targetHover?.dead ? '#b8b8b0' : '#ff9070' });
+      const elev = elevationTextAt(state.map, screenToWorld(cam, mouse));
+      if (elev) lines.push({ text: elev, color: '#aaa48c' });
+      drawPointerReadout(ctx, cam, mouse, lines, { bigCursor: !!this.targetHover, hover: this.hoverInfo });
+    }
 
     ctx.restore();
 
@@ -781,10 +799,7 @@ export class BattleScreen implements Screen {
   }
 
   cursor(): CursorKind {
-    if (this.targetHover) {
-      const pen = this.targetHover.pen;
-      return pen === 'likely' ? 'targetLikely' : pen === 'maybe' ? 'targetMaybe' : pen === 'none' ? 'targetNone' : 'target';
-    }
+    if (this.targetHover) return targetCursorKind(this.targetHover);
     if (this.pendingOrder) return 'crosshair';
     if (this.modernPanDrag.active) return 'hand';
     if (this.rightDrag.active && !this.rightDrag.menuOpenedOnPress && this.rightDrag.moved >= RIGHT_GESTURE_PX) return 'hand';

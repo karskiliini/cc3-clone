@@ -17,6 +17,8 @@ const DEFAULT_SETTINGS: GameSettings = {
   showUnitVision: true,
   // Tab: depth/height map view over the battlefield.
   showDepthMap: false,
+  // Spotted enemy vehicles carry their name on the map; off makes you learn them by outline.
+  enemyVehicleNames: true,
 };
 
 function loadSettings(): GameSettings {

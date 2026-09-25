@@ -98,7 +98,7 @@ export function drawLOSLine(
   to: Vec2,
   context?: { state: BattleState; team: Team },
   heights?: LosHeights,
-  opts?: { label?: boolean; alpha?: number; fireOrder?: boolean },
+  opts?: { label?: boolean; alpha?: number; fireOrder?: boolean; bigCursor?: boolean },
 ): void {
   let segs = aimLineProfile(map, from, to, heights);
   const estimated = !!opts?.fireOrder && !!context && aimPointClass(segs) === 'blocked'
@@ -155,7 +155,9 @@ export function drawLOSLine(
     const color = context ? rangeColor(distM, teamMaxRangeM(context.state, context.team)) : CLASS_COLOR[endCls];
     ctx.font = 'bold 11px Arial, Helvetica, sans-serif';
     ctx.textBaseline = 'top';
-    const tx = Math.round(toPx.x) + 8, ty = Math.round(toPx.y) - 14;
+    // clear of the big aiming cross (64 px) when it is up, else just by the pointer
+    const off = opts?.bigCursor ? 30 : 8;
+    const tx = Math.round(toPx.x) + off, ty = Math.round(toPx.y) - 6 - off;
     ctx.fillStyle = 'rgba(0,0,0,0.75)';
     ctx.fillText(distLabel, tx + 1, ty + 1);
     ctx.fillStyle = estimated ? DARK_GREEN : endCls === 'blocked' ? RED : color;

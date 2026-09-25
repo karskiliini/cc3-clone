@@ -48,6 +48,7 @@ export class OptionsScreen implements Screen {
         { label: 'Never Act On Initiative', value: () => onOff(s.neverActOnInitiative), click: () => (s.neverActOnInitiative = !s.neverActOnInitiative) },
         { label: 'Always Have Full Enemy Info', value: () => onOff(s.alwaysFullEnemyInfo), click: () => (s.alwaysFullEnemyInfo = !s.alwaysFullEnemyInfo) },
         { label: 'Always Obey Orders', value: () => onOff(s.alwaysObeyOrders), click: () => (s.alwaysObeyOrders = !s.alwaysObeyOrders) },
+        { label: 'Enemy Vehicle Names', value: () => onOff(s.enemyVehicleNames ?? true), click: () => (s.enemyVehicleNames = !(s.enemyVehicleNames ?? true)) },
       ],
     ];
   }

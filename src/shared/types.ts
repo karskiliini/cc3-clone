@@ -1110,7 +1110,8 @@ export interface BattleState {
 }
 
 // --------------------------------------------------------------- UI shared
-export type CursorKind = 'arrow' | 'crosshair' | 'hand' | 'no' | 'move' | 'wait' | 'target' | 'targetNone' | 'targetMaybe' | 'targetLikely';
+export type CursorKind = 'arrow' | 'crosshair' | 'hand' | 'no' | 'move' | 'wait' | 'target' | 'targetNone' | 'targetMaybe' | 'targetLikely'
+  | 'targetNoneBlocked' | 'targetMaybeBlocked' | 'targetLikelyBlocked' | 'targetDead';
 
 export interface InputState {
   mouse: Vec2;                // logical 800x600 coords
@@ -1174,6 +1175,9 @@ export interface GameSettings {
   showUnitVision?: boolean;
   /** Depth/height map view (Tab key / Options). Missing = off. */
   showDepthMap?: boolean;
+  /** Name spotted enemy vehicles on the map ("T-34/76") so they need not be told by their
+   * outlines (Options). Missing = on. */
+  enemyVehicleNames?: boolean;
   // ---- "realism" toggles from the original's Options screen (cosmetic
   // no-ops for now; stored so the UI has somewhere to persist them) ----
   alwaysSeeEnemy?: boolean;

@@ -22,6 +22,10 @@ const HOTSPOT: Record<CursorKind, [number, number]> = {
   targetNone: [0, 0],
   targetMaybe: [0, 0],
   targetLikely: [0, 0],
+  targetNoneBlocked: [0, 0],
+  targetMaybeBlocked: [0, 0],
+  targetLikelyBlocked: [0, 0],
+  targetDead: [0, 0],
 };
 
 const cssCache = new Map<CursorKind, string>();
@@ -38,7 +42,13 @@ const TARGET_COLORS: Partial<Record<CursorKind, [string, string]>> = {
   targetNone: ['#101010', 'rgba(235,235,225,0.9)'],
   targetMaybe: ['#ffd21e', 'rgba(0,0,0,0.85)'],
   targetLikely: ['#35e04a', 'rgba(0,0,0,0.85)'],
+  targetNoneBlocked: ['#101010', 'rgba(235,235,225,0.9)'],
+  targetMaybeBlocked: ['#ffd21e', 'rgba(0,0,0,0.85)'],
+  targetLikelyBlocked: ['#35e04a', 'rgba(0,0,0,0.85)'],
+  targetDead: ['#9a9a94', 'rgba(0,0,0,0.85)'],
 };
+/** No line of fire from here: the same colour, but the ring and arms are broken into dashes. */
+const BLOCKED_KINDS = new Set<CursorKind>(['targetNoneBlocked', 'targetMaybeBlocked', 'targetLikelyBlocked']);
 
 function buildTargetCursor(kind: CursorKind): string {
   const [ink, outline] = TARGET_COLORS[kind] ?? TARGET_COLORS.target!;
@@ -47,29 +57,50 @@ function buildTargetCursor(kind: CursorKind): string {
   c.height = TARGET_SIZE;
   const ctx = c.getContext('2d')!;
   const m = TARGET_SIZE / 2;
+  const blocked = BLOCKED_KINDS.has(kind);
+  const deadTarget = kind === 'targetDead';
   const shape = (): void => {
+    ctx.setLineDash(blocked ? [5, 4] : []);
     ctx.beginPath();
     ctx.arc(m, m, 17, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath();
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      ctx.moveTo(m + dx * 7, m + dy * 7);
-      ctx.lineTo(m + dx * 29, m + dy * 29);
+      if (blocked) {
+        // arms broken in two: a gap where the ring crosses them
+        ctx.moveTo(m + dx * 7, m + dy * 7); ctx.lineTo(m + dx * 13, m + dy * 13);
+        ctx.moveTo(m + dx * 21, m + dy * 21); ctx.lineTo(m + dx * 29, m + dy * 29);
+      } else {
+        ctx.moveTo(m + dx * 7, m + dy * 7);
+        ctx.lineTo(m + dx * 29, m + dy * 29);
+      }
+    }
+    if (deadTarget) {
+      // a wreck: the centre struck through with an X
+      for (const [dx, dy] of [[1, 1], [1, -1]]) {
+        ctx.moveTo(m - dx * 8, m - dy * 8);
+        ctx.lineTo(m + dx * 8, m + dy * 8);
+      }
     }
     ctx.stroke();
   };
   ctx.lineCap = 'butt';
   // The black reticle is mostly ink with a thin pale halo; the coloured ones are a thin bright
   // line inside a heavier dark outline.
-  const dark = kind === 'targetNone';
+  const dark = kind === 'targetNone' || kind === 'targetNoneBlocked';
   ctx.strokeStyle = outline;
   ctx.lineWidth = 5;
   shape();
   ctx.strokeStyle = ink;
   ctx.lineWidth = dark ? 3.2 : 2;
   shape();
-  ctx.fillStyle = outline;
-  ctx.fillRect(m - 2.5, m - 2.5, 5, 5);
-  ctx.fillStyle = ink;
-  ctx.fillRect(m - 1.5, m - 1.5, 3, 3);
+  if (!deadTarget) {
+    ctx.fillStyle = outline;
+    ctx.fillRect(m - 2.5, m - 2.5, 5, 5);
+    ctx.fillStyle = ink;
+    ctx.fillRect(m - 1.5, m - 1.5, 3, 3);
+  }
   return `url(${c.toDataURL('image/png')}) ${m} ${m}, crosshair`;
 }
 

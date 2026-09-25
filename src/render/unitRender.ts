@@ -15,7 +15,7 @@ import { VEHICLE_DEFS } from '@/data/units';
 import { teamBarColor } from '@/ui/hud/hudChrome';
 import { drawOrderMarkers } from '@/render/orderMarkers';
 import { CREW_LAYOUT, gunHaulers, crewServedClass, crewWeaponView, crewWeaponVisual, separateMgMount, weaponFramePoint } from '@/sim/crewWeapon';
-import { FLASH_LIFE, TILE_M } from '@/shared/types';
+import { FLASH_LIFE, TILE_M, TILE_PX } from '@/shared/types';
 import type { Vec2, Vehicle } from '@/shared/types';
 import { vehicleDamageView, vehicleLayout } from '@/sim/vehicleDamage';
 import { hatchWorld, isServiceable } from '@/sim/vehicleCrew';
@@ -905,13 +905,20 @@ function drawFlags(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleStat
   }
 }
 
-function drawTeamLabels(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, settings: GameSettings): void {
+function drawTeamLabels(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side, settings: GameSettings): void {
   // Manual: "Team information bars appear... hidden when zoomed in/out" —
   // and even at normal zoom the original shows none by default (this is an
   // opt-in debug overlay here, off by default per game.ts).
   if (!settings.unitLabels) return;
   if (cam.zoom !== 1) return;
+  const vehicleNames = settings.enemyVehicleNames ?? true;
   for (const team of state.teams.values()) {
+    // an enemy team is labelled only while some of it is spotted (never leak a hidden one); its
+    // vehicles already carry their name tag when that option is on
+    if (team.side !== playerSide) {
+      if (team.vehicleId != null ? (vehicleNames || !state.spottedVehicles[playerSide].has(team.vehicleId))
+        : !team.soldierIds.some((id) => state.spotted[playerSide].has(id))) continue;
+    }
     const leader = state.soldiers.get(team.leaderId);
     const pos = leader && leader.health !== 'dead' ? leader.pos : team.pos;
     if (!visible(pos, cam)) continue;
@@ -921,6 +928,36 @@ function drawTeamLabels(ctx: CanvasRenderingContext2D, cam: Camera, state: Battl
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
     ctx.fillRect(Math.round(p.x - w / 2 - 1), y, w + 2, 8);
     drawText(ctx, team.name, Math.round(p.x - w / 2), y + 1, PALETTE.white, 'small');
+  }
+}
+
+/** Spotted enemy vehicles still in the fight, with the name their tag shows ("T-34/76"). Wrecks
+ * and hidden vehicles get none. */
+export function enemyVehicleNameTags(state: BattleState, playerSide: Side): { v: Vehicle; text: string }[] {
+  const out: { v: Vehicle; text: string }[] = [];
+  for (const vid of state.spottedVehicles[playerSide]) {
+    const v = state.vehicles.get(vid);
+    if (!v || v.side === playerSide || (v.state !== 'ok' && v.state !== 'immobilized')) continue;
+    const def = VEHICLE_DEFS[v.defId];
+    if (def) out.push({ v, text: def.name });
+  }
+  return out;
+}
+
+/** Enemy vehicle name tags (Options: Enemy Vehicle Names), a small pale-red word just above the
+ * hull, so the pointer readout below it and the hull itself stay clear. */
+function drawEnemyVehicleNames(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side): void {
+  const pxPerM = (TILE_PX * cam.zoom) / TILE_M;
+  for (const { v, text } of enemyVehicleNameTags(state, playerSide)) {
+    if (!visible(v.pos, cam)) continue;
+    const def = VEHICLE_DEFS[v.defId];
+    const p = worldToScreen(cam, v.pos);
+    const half = (def ? Math.max(def.lengthM, def.widthM) / 2 : 3) * pxPerM;
+    const w = textWidth(text, 'small');
+    const x = Math.round(p.x - w / 2), y = Math.round(p.y - half - 18);
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(x - 2, y - 1, w + 4, 9);
+    drawText(ctx, text, x, y, '#f4b49c', 'small');
   }
 }
 
@@ -947,7 +984,8 @@ export function drawUnits(
   drawLooseObjects(ctx, cam, state, true, showDead);
   drawTeamBars(ctx, cam, state, playerSide, selectedTeamIds, hoverTeamId);
   drawFlags(ctx, cam, state);
-  drawTeamLabels(ctx, cam, state, settings);
+  drawTeamLabels(ctx, cam, state, playerSide, settings);
+  if (settings.enemyVehicleNames ?? true) drawEnemyVehicleNames(ctx, cam, state, playerSide);
 
   // order endpoints for every friendly team; lines for the selected / hovered ones (orderMarkers.ts)
   drawOrderMarkers(ctx, cam, state, playerSide, selectedTeamIds, orderHover);
