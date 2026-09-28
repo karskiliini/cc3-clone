@@ -685,9 +685,9 @@ function straightDrivable(state: BattleState, v: Vehicle, b: Vec2, maxCost: numb
  * of turned back for, he steers for the farthest point ahead he can reach in a straight line, and
  * the last couple of metres to a point off his bow count as arrived. A shortcut never cuts past a
  * waypoint the player set (the route goes where it was told to). */
-function pursuePath(state: BattleState, v: Vehicle, def: VehicleDef): void {
+function pursuePath(state: BattleState, v: Vehicle, def: VehicleDef, travelFacing = v.hullFacing): void {
   const path = v.path;
-  const offBow = (p: Vec2): number => Math.abs(wrapAngle(angleTo(v.pos, p) - v.hullFacing));
+  const offBow = (p: Vec2): number => Math.abs(wrapAngle(angleTo(v.pos, p) - travelFacing));
   const pinned = state.teams.get(v.teamId)?.order?.waypoints ?? [];
   const isPinned = (p: Vec2): boolean => pinned.some((w) => dist(w, p) <= 1);
   // a waypoint under the hull is reached (its bearing is meaningless that close: chasing it only
@@ -702,6 +702,35 @@ function pursuePath(state: BattleState, v: Vehicle, def: VehicleDef): void {
   }
   if (skip > 0) path.splice(0, skip);
   if (def.turnRadiusM == null && path.length === 1 && dist(v.pos, path[0]) < ARRIVED_TILES && offBow(path[0]) > ARRIVED_OFF_BOW) path.length = 0;
+}
+
+// ------------------------------------------------------------------ backing on a plain Move
+/** Reverse speed as a share of the forward speed. */
+export const REVERSE_SPEED_MUL = 0.5;
+/** A plain Move whose way lies more than this far off the bow is driven in reverse... */
+const BACK_START_RAD = (110 * Math.PI) / 180;
+/** ...until the way comes back within this of the bow (the gap keeps it from flip-flopping). */
+const BACK_STOP_RAD = (70 * Math.PI) / 180;
+/** Routes longer than this (tiles, ~100 m) are driven forward: nobody reverses that far. */
+const BACK_MAX_TILES = 50;
+const backingOnMove = new WeakSet<Vehicle>();
+
+/** On a plain Move (not Move Fast / Sneak / Assault) a crew with its way behind it backs up,
+ * keeping the front and the thicker armour toward where it was facing, instead of turning round.
+ * The way is judged a few tiles down the route (not the waypoint under the hull). */
+function backsOnMove(state: BattleState, v: Vehicle): boolean {
+  const order = state.teams.get(v.teamId)?.order;
+  if (order?.type !== 'move' || v.path.length === 0) { backingOnMove.delete(v); return false; }
+  let len = 0, prev = v.pos, probe = v.path[v.path.length - 1];
+  for (const p of v.path) {
+    len += dist(prev, p); prev = p;
+    if (len >= 3 && probe === v.path[v.path.length - 1]) probe = p;
+  }
+  const off = Math.abs(wrapAngle(angleTo(v.pos, probe) - v.hullFacing));
+  const was = backingOnMove.has(v);
+  const back = was ? off > BACK_STOP_RAD : off > BACK_START_RAD && len <= BACK_MAX_TILES;
+  if (back) backingOnMove.add(v); else backingOnMove.delete(v);
+  return back;
 }
 
 /** Moves `v` to `next` unless another hull is in the way (then see onHullBlocked). */
@@ -933,7 +962,9 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     // early dodge: a man in the path AHEAD of the hull steps aside before the hull-local test
     stepOverrunLookahead(state, rng, v, def);
 
-    pursuePath(state, v, def);
+    const backing = def.turnRadiusM == null && backsOnMove(state, v);
+    const travel = backing ? wrapAngle(v.hullFacing + Math.PI) : v.hullFacing;
+    pursuePath(state, v, def, travel);
     if (v.path.length === 0) { v.speed = 0; continue; }
     const wp = v.path[0];
     // G7: intact wire blocks the tracks; tracks can force through (consuming it)
@@ -981,16 +1012,19 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
       continue;
     }
 
-    turnHull(state, v, def, desired, dt);
+    // reversing (a plain Move to a point behind): the tail is steered at the waypoint
+    const aim = backing ? wrapAngle(desired + Math.PI) : desired;
+    turnHull(state, v, def, aim, dt);
     if (frozen) v.turretFacing = wrapAngle(v.hullFacing + frozenRel.get(v)!);
-    const headingErr = Math.abs(wrapAngle(desired - v.hullFacing));
+    const headingErr = Math.abs(wrapAngle(aim - v.hullFacing));
     // tracked: a big heading error is turned out on the spot; a sharp turn under way costs speed
     // (<= 40% of the current maximum beyond 30 deg)
     if (headingErr > PIVOT_RAD) {
       v.speed = 0;
       continue;
     }
-    let speedMs = fullSpeedMs * (headingErr > SHARP_TURN_RAD ? SHARP_TURN_SPEED_MUL : headingErr > HEADING_ALIGN_RAD ? 0.7 : 1);
+    let speedMs = fullSpeedMs * (backing ? REVERSE_SPEED_MUL : 1)
+      * (headingErr > SHARP_TURN_RAD ? SHARP_TURN_SPEED_MUL : headingErr > HEADING_ALIGN_RAD ? 0.7 : 1);
     // A tracked vehicle only ever travels along its own hull heading: it drives forward while it
     // keeps turning, and never slips sideways toward the waypoint. So that the arc closes on the
     // waypoint instead of orbiting it, the speed is held to what the hull can turn inside the
@@ -1000,9 +1034,10 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
       const rate = hullTurnNow(state, v, def).rate;
       speedMs = Math.min(speedMs, Math.max(0.3, rate * d * TILE_M * 0.6));
     }
-    v.speed = speedMs;
+    v.speed = backing ? -speedMs : speedMs;
     // one damaged track drags the hull to that side; the driver keeps correcting
     v.hullFacing = wrapAngle(v.hullFacing + trackPullRad(v) * dt);
+    const travelNow = backing ? wrapAngle(v.hullFacing + Math.PI) : v.hullFacing;
 
     const distTiles = (speedMs * dt) / TILE_M;
     // an arc never lands exactly on a waypoint: an intermediate one counts as passed from close by
@@ -1013,10 +1048,10 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     } else if (headingErr <= TRACK_STRAIGHT_RAD) {
       // item 022: lined up — drive along the hull axis (the residual error is turned out as it
       // goes); never a straight line to the waypoint, tracks only go where the hull points
-      const fwd = { x: Math.sin(v.hullFacing), y: -Math.cos(v.hullFacing) };
+      const fwd = { x: Math.sin(travelNow), y: -Math.cos(travelNow) };
       if (!driveTo(state, v, vadd(v.pos, vscale(fwd, distTiles)))) continue;
     } else {
-      const fwd = { x: Math.sin(v.hullFacing), y: -Math.cos(v.hullFacing) };
+      const fwd = { x: Math.sin(travelNow), y: -Math.cos(travelNow) };
       const next = vadd(v.pos, vscale(fwd, distTiles));
       const nt = tileAt(map, Math.floor(next.x), Math.floor(next.y));
       // never cut a corner into something a vehicle cannot enter: turn on the spot instead

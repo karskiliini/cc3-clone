@@ -92,3 +92,40 @@ describe('hulls keep apart', () => {
     expect(dist(b.pos, gb)).toBeLessThan(2);
   });
 });
+
+describe('backing on a plain Move', () => {
+  function drive(type: 'move' | 'moveFast', goal: Vec2, seconds: number) {
+    const state = makeState();
+    const { v, team } = addTank(state, 'pz4gh', { x: 200.5, y: 200.5 }, 0, 60, 'german'); // facing north
+    team.order = { type, target: goal, issuedAt: state.time };
+    v.path = findPath(state.map, v.pos, goal, 'vehicle');
+    let minSpeed = 0, maxOff = 0;
+    run(state, seconds, () => {
+      minSpeed = Math.min(minSpeed, v.speed);
+      maxOff = Math.max(maxOff, Math.abs(wrapAngle(v.hullFacing - 0)));
+    });
+    return { v, minSpeed, maxOff };
+  }
+
+  it('a tank told to Move to a point behind it backs there, front still toward where it faced', () => {
+    const goal = { x: 202.5, y: 220.5 }; // 40 m behind, a little to the side
+    const { v, minSpeed, maxOff } = drive('move', goal, 40);
+    expect(dist(v.pos, goal)).toBeLessThan(2);
+    expect(minSpeed).toBeLessThan(0);            // it reversed
+    expect(maxOff).toBeLessThan(Math.PI / 4);     // and never turned round
+  });
+
+  it('Move Fast to the same point turns round and drives there forward', () => {
+    const goal = { x: 202.5, y: 220.5 };
+    const { v, minSpeed, maxOff } = drive('moveFast', goal, 40);
+    expect(dist(v.pos, goal)).toBeLessThan(2);
+    expect(minSpeed).toBeGreaterThanOrEqual(0);
+    expect(maxOff).toBeGreaterThan(Math.PI * 0.75);
+  });
+
+  it('a long way back (over ~100 m) is driven forward even on a plain Move', () => {
+    const { minSpeed, maxOff } = drive('move', { x: 200.5, y: 270.5 }, 20); // 140 m behind
+    expect(minSpeed).toBeGreaterThanOrEqual(0);
+    expect(maxOff).toBeGreaterThan(Math.PI * 0.75);
+  });
+});
