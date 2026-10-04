@@ -65,13 +65,13 @@ const outOfMsg = new WeakMap<BattleState, Set<string>>();
 /** "<team>\nOut of APCR." once per team and type (own side only). */
 export function noteOutOf(state: BattleState, teamId: number, round: RoundType): void {
   const team = state.teams.get(teamId);
-  if (!team || team.side !== state.config.playerSide) return;
+  if (!team) return;
   let set = outOfMsg.get(state);
   if (!set) { set = new Set(); outOfMsg.set(state, set); }
   const key = `${teamId}:${round}`;
   if (set.has(key)) return;
   set.add(key);
-  addMessage(state, `${team.name}\nOut of ${ROUND_LABEL[round]}.`, 'warn');
+  addMessage(state, `${team.name}\nOut of ${ROUND_LABEL[round]}.`, 'warn', team.side);
 }
 
 // ------------------------------------------------------------------ round choice

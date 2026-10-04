@@ -6,8 +6,7 @@ import type { Battle } from '@/sim/battle';
 import { teamCanFire, teamHasSmoke } from '@/sim/team';
 import { VEHICLE_DEFS } from '@/data/units';
 import { clamp } from '@/shared/math';
-import { addMessage } from '@/sim/messages';
-import { flee } from '@/sim/victory';
+import type { CommandBody } from '@/sim/commands';
 import { centerCamera, clampCamera, panCamera, screenToWorld, worldToScreen, zoomIn, zoomOut } from '@/engine/camera';
 import { TerrainRenderer } from '@/render/terrainRender';
 import { drawUnits } from '@/render/unitRender';
@@ -139,7 +138,8 @@ export class BattleScreen implements Screen {
   private mountHover: { pos: Vec2; halfM: number; label: string } | null = null;
   private markerDrag: MarkerDrag | null = null;
   private pendingWaypoints: Vec2[] = [];
-  private paused = false;
+  /** The speed this screen last asked the sim for (game.settings.speed is the player's choice). */
+  private requestedSpeed = 1;
   /** countdown to the next camera-proximity wounded moan (battle.ts audio sweep) */
   private moanTimer = 2;
   /** Real seconds elapsed since the battle ended, driving the debrief transition below — must be
@@ -174,6 +174,24 @@ export class BattleScreen implements Screen {
   constructor(battle: Battle, terrain?: TerrainRenderer) {
     this.battle = battle;
     this.terrain = terrain ?? new TerrainRenderer(battle.state.map);
+    this.combatMessages.setViewer(battle.playerSide());
+    this.requestedSpeed = battle.state.speed ?? 1;
+  }
+
+  /** Paused by the shared pause command (F3/PAUSE), not a screen-local flag. */
+  private get paused(): boolean {
+    return this.battle.state.phase === 'paused';
+  }
+
+  /** Everything the player does to the battle goes through the command queue (item 042). */
+  private command(body: CommandBody): void {
+    this.battle.submit(this.battle.playerSide(), body);
+  }
+
+  /** A UI notice in the message column (never part of the sim state). */
+  private notice(text: string, kind: 'info' | 'warn' = 'info'): void {
+    this.combatMessages.notice(this.battle.state, text, kind);
+    game.audio?.play('message', 0.5);
   }
 
   /** onEnter runs again when Options / the overview map hand control back: only the
@@ -253,13 +271,13 @@ export class BattleScreen implements Screen {
         ? { x: team.pos.x - primary.pos.x, y: team.pos.y - primary.pos.y }
         : { x: 0, y: 0 };
       const pts = offsetOrderPoints(world, chain, offset);
-      battle.issueOrder(id, {
+      this.command({ type: 'order', teamId: id, order: {
         type: this.pendingOrder,
         target: pts.target,
         targetTeamId: enemy ? enemy.id : undefined,
         issuedAt: state.time,
         waypoints: pts.waypoints.length > 0 ? pts.waypoints : undefined,
-      });
+      } });
     }
     game.audio?.play('click');
     this.pendingOrder = null;
@@ -276,9 +294,12 @@ export class BattleScreen implements Screen {
       return;
     }
 
-    if (!this.paused && state.phase === 'running') {
-      battle.step(dt * game.settings.speed);
+    if (game.settings.speed !== this.requestedSpeed) {
+      this.requestedSpeed = game.settings.speed;
+      this.command({ type: 'setSpeed', speed: game.settings.speed });
     }
+    // always step: while paused no tick runs, but due commands (resume, orders) still apply
+    battle.step(dt * (state.speed ?? 1));
 
     const selectableIds = new Set(battle.selectableTeams(battle.playerSide()).map((team) => team.id));
     this.controlGroups.prune(selectableIds);
@@ -443,7 +464,7 @@ export class BattleScreen implements Screen {
           // waypoints survive. Dragging a WAYPOINT dot rewrites that point in place.
           const reissue = team ? reissueOrderOnMarkerDrag(team.order, drag, world) : null;
           if (reissue) {
-            battle.issueOrder(drag.teamId, { ...reissue, issuedAt: state.time });
+            this.command({ type: 'order', teamId: drag.teamId, order: { ...reissue, issuedAt: state.time } });
             game.audio?.play('click');
           }
         }
@@ -509,9 +530,9 @@ export class BattleScreen implements Screen {
     }
 
     // Tab: game speed; '§': depth map view. '.' / ',' cycle teams.
-    if (handleSpeedKey(input.keysPressed, game.settings)) addMessage(state, `Speed ${game.settings.speed}x`, 'info');
+    if (handleSpeedKey(input.keysPressed, game.settings)) this.notice(`Speed ${game.settings.speed}x`);
     if (handleDepthMapKey(input.keysPressed, game.settings)) {
-      addMessage(state, `Depth map ${game.settings.showDepthMap ? 'on' : 'off'}`, 'info');
+      this.notice(`Depth map ${game.settings.showDepthMap ? 'on' : 'off'}`);
     }
     const cycled = cycleTeamKey(input.keysPressed, battle.selectableTeams(battle.playerSide()).map((t) => t.id), this.selectedTeamId);
     if (cycled != null) this.setSelection([cycled]);
@@ -525,7 +546,7 @@ export class BattleScreen implements Screen {
       if (groupAction.assign) {
         this.controlGroups.assign(groupAction.key, this.selectedTeamIds);
         const count = this.selectedTeamIds.length;
-        addMessage(state, `Control group ${groupAction.key}\n${count ? `${count} ${count === 1 ? 'team' : 'teams'} assigned` : 'Cleared'}`, 'info');
+        this.notice(`Control group ${groupAction.key}\n${count ? `${count} ${count === 1 ? 'team' : 'teams'} assigned` : 'Cleared'}`);
         game.audio?.play('click');
       } else {
         const ids = this.controlGroups.recall(groupAction.key);
@@ -626,17 +647,17 @@ export class BattleScreen implements Screen {
       || (this.showMinimap && m.x >= r.x && m.x < r.x + r.w && m.y >= r.y && m.y < r.y + r.h));
     if (action === 'truce') {
       // Truce button: accept a standing enemy offer, otherwise offer/withdraw our own
-      battle.pressTruce(battle.playerSide());
+      this.command({ type: 'truce' });
     } else if (action === 'flee') {
       // Per the manual, Flee ends the battle immediately with the enemy taking the map — it is
       // not a per-team retreat order. Two-step: the first click arms it for 2 s so an overshoot
       // from the adjacent order bar can't forfeit the battle.
       if (now < this.fleeArmedUntil) {
         this.fleeArmedUntil = 0;
-        flee(state, battle.playerSide());
+        this.command({ type: 'flee' });
       } else {
         this.fleeArmedUntil = now + FLEE_CONFIRM_MS;
-        addMessage(state, 'Flee?\nClick again to confirm', 'warn');
+        this.notice('Flee?\nClick again to confirm', 'warn');
       }
     } else if (action === 'map') {
       this.showMinimap = !this.showMinimap;
@@ -653,7 +674,9 @@ export class BattleScreen implements Screen {
       game.setScreen(new OverviewScreen(battle, this));
       return;
     }
-    if (input.keysPressed.has('f3') || input.keysPressed.has('pause')) this.paused = !this.paused;
+    if (input.keysPressed.has('f3') || input.keysPressed.has('pause')) {
+      if (state.phase === 'running' || state.phase === 'paused') this.command({ type: this.paused ? 'resume' : 'pause' });
+    }
     if (input.keysPressed.has('f5')) this.showTeamGrid = !this.showTeamGrid;
     if (input.keysPressed.has('f6')) this.showMinimap = !this.showMinimap;
     if (input.keysPressed.has('f7')) this.showSoldierMonitor = !this.showSoldierMonitor;
@@ -661,11 +684,11 @@ export class BattleScreen implements Screen {
     if (input.keysDown.has('control') && input.keysPressed.has('k')) this.showDead = !this.showDead;
     if (input.keysDown.has('control') && input.keysPressed.has('t')) {
       this.terrain.showTrees = !this.terrain.showTrees;
-      addMessage(state, `Trees ${this.terrain.showTrees ? 'shown' : 'hidden'}`, 'info');
+      this.notice(`Trees ${this.terrain.showTrees ? 'shown' : 'hidden'}`);
     }
     if (input.keysDown.has('control') && input.keysPressed.has('s') && game.audio) {
       game.audio.setMuted(!game.audio.isMuted());
-      addMessage(state, `Sound ${game.audio.isMuted() ? 'off' : 'on'}`, 'info');
+      this.notice(`Sound ${game.audio.isMuted() ? 'off' : 'on'}`);
     }
 
     // SPACEBAR (manual input card): show each command radius. Pause stays on
@@ -683,7 +706,7 @@ export class BattleScreen implements Screen {
       const modes: NonNullable<GameSettings['infoBarMode']>[] = ['morale', 'experience', 'name', 'cover'];
       const cur = game.settings.infoBarMode ?? 'morale';
       game.settings.infoBarMode = modes[(modes.indexOf(cur) + 1) % modes.length];
-      addMessage(state, `Info bar: ${game.settings.infoBarMode}`, 'info');
+      this.notice(`Info bar: ${game.settings.infoBarMode}`);
       game.saveSettings();
     }
 
@@ -692,7 +715,7 @@ export class BattleScreen implements Screen {
         game.settings.unitLabels = !game.settings.unitLabels;
       } else {
         game.settings.showUnitVision = !(game.settings.showUnitVision ?? true);
-        addMessage(state, `View overlay ${game.settings.showUnitVision ? 'on' : 'off'}`, 'info');
+        this.notice(`View overlay ${game.settings.showUnitVision ? 'on' : 'off'}`);
       }
       game.saveSettings();
     }
@@ -711,7 +734,11 @@ export class BattleScreen implements Screen {
     }
 
     game.audio?.setPaused(this.paused || state.phase !== 'running');
-    const events = battle.drainEvents();
+    // while no tick runs (paused), this frame's commands apply now rather than next frame
+    battle.step(0);
+    const viewer = battle.playerSide();
+    // the other side's message chimes are not ours to hear
+    const events = battle.drainEvents().filter((e) => e.kind !== 'message' || !e.side || e.side === viewer);
     this.blastFx.onEvents(events, state.time);
     game.audio?.handleEvents(events, cam);
     game.audio?.ambient(state.phase === 'running' && !this.paused);

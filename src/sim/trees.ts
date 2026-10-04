@@ -220,7 +220,7 @@ function dodgeFire(state: BattleState, s: Soldier): void {
   s.path = [best];
   s.dodgeUntil = state.time + 2;
   const team = state.teams.get(s.teamId);
-  if (team && !team.outOfAction) addMessage(state, `${team.name}\nMen are getting clear of the fire!`, 'warn');
+  if (team && !team.outOfAction) addMessage(state, `${team.name}\nMen are getting clear of the fire!`, 'warn', team.side);
 }
 
 let fireWeapon: WeaponDef | null = null;

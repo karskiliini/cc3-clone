@@ -50,7 +50,7 @@ function canObey(state: BattleState, rng: Rng, s: Soldier, team: Team, target: V
     s.mind.pendingOrderAt = issuedAt;
     if (s.mind.warnedNoCommand === undefined || state.time - s.mind.warnedNoCommand > 8) {
       s.mind.warnedNoCommand = state.time;
-      addMessage(state, `${team.name}: no contact with HQ.`, 'info');
+      addMessage(state, `${team.name}: no contact with HQ.`, 'info', team.side);
     }
     return false;
   }
@@ -520,7 +520,7 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
   // infantry without smoke (and not a mortar/vehicle) cannot execute a Smoke order at all:
   // refuse it at issue time so the old order (and its dot) survives and the player learns why
   if (order.type === 'smoke' && team.vehicleId == null && team.type !== 'mortar' && !teamHasSmoke(state, team)) {
-    addMessage(state, `${team.name} has no smoke rounds.`, 'warn');
+    addMessage(state, `${team.name} has no smoke rounds.`, 'warn', team.side);
     return;
   }
   // never share the waypoint list with the UI or other teams: it is consumed as they are reached
@@ -720,7 +720,7 @@ export function stepAttackOrders(state: BattleState, rng: Rng): void {
     const target = state.teams.get(order.targetTeamId);
     const last = order.lastKnownPos ?? order.target;
     if (attackTargetDestroyed(state, target)) {
-      if (team.side === state.config.playerSide) addMessage(state, `${team.name}\nTarget destroyed.`, 'good');
+      addMessage(state, `${team.name}\nTarget destroyed.`, 'good', team.side);
       applyOrder(state, team, { type: 'defend', target: { x: last.x, y: last.y }, issuedAt: state.time }, rng, true);
       continue;
     }

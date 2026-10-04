@@ -234,7 +234,7 @@ export function detonateVehicle(state: BattleState, rng: Rng, v: Vehicle, killer
   throwFragments(state, rng, v, rng.int(3, 6), 5, 10 + 15 * load);
   shockWitnesses(state, v.pos, 0.7 + 0.3 * load);
   state.events.push({ kind: 'vehicleExplosion', pos: { ...v.pos }, side: killerSide, radiusM: Math.round(radiusM * 10) / 10, turretLanding: v.turretLanding ? { ...v.turretLanding } : undefined });
-  if (team && team.side === state.config.playerSide) addMessage(state, `${team.name}\nAmmunition explodes!`, 'bad');
+  if (team) addMessage(state, `${team.name}\nAmmunition explodes!`, 'bad', team.side);
   return true;
 }
 
@@ -249,7 +249,7 @@ function fuelExplosion(state: BattleState, rng: Rng, v: Vehicle, killerSide: Sid
   shockWitnesses(state, v.pos, 0.35);
   state.events.push({ kind: 'vehicleExplosion', pos: { ...v.pos }, side: killerSide, radiusM: FUEL_BLAST_RADIUS_M });
   const team = state.teams.get(v.teamId);
-  if (team && team.side === state.config.playerSide) addMessage(state, `${team.name}\nFuel tank explodes!`, 'bad');
+  if (team) addMessage(state, `${team.name}\nFuel tank explodes!`, 'bad', team.side);
 }
 
 // ------------------------------------------------------------------ cook-off

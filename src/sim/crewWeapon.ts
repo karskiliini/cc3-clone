@@ -599,7 +599,7 @@ function useLightMg(state: BattleState, team: Team, cw: CrewWeaponState, gunner:
     gunner.aiming = undefined; clearMission(cw);
     cw.lightMode = true; cw.done = []; cw.workers = {}; cw.progress = {}; cw.open = [];
     cw.goal = 'pack'; cw.phase = 'packed'; cw.timer = 0;
-    if (team.side === state.config.playerSide) addMessage(state, `${team.name}\nMount left behind; using the light MG.`, 'warn');
+    addMessage(state, `${team.name}\nMount left behind; using the light MG.`, 'warn', team.side);
   }
   cw.pos = { ...gunner.pos }; cw.facing = facingAngle(gunner.facing);
   return true;
@@ -616,8 +616,8 @@ function abandon(state: BattleState, team: Team, cw: CrewWeaponState, why: 'fled
   cw.abandonedAt = state.time;
   cw.workers = {};
   // (half-assembled: it lies as it is, with the work already done; a returning crew carries on)
-  if (why === 'fled' && team.side === state.config.playerSide && (cw.done?.length ?? 0) > 0) {
-    addMessage(state, `${team.name}\nThe crew abandons the gun!`, 'warn');
+  if (why === 'fled' && (cw.done?.length ?? 0) > 0) {
+    addMessage(state, `${team.name}\nThe crew abandons the gun!`, 'warn', team.side);
   }
 }
 
@@ -708,9 +708,7 @@ function stepAbandoned(state: BattleState, team: Team, cw: CrewWeaponState, cls:
     cw.gunnerId = s.id;
     cw.abandoned = false;
     cw.setAt = state.time;
-    if (team.side === state.config.playerSide) {
-      addMessage(state, `${team.name}\n${s.rank}. ${s.name} mans the gun.`, 'info');
-    }
+    addMessage(state, `${team.name}\n${s.rank}. ${s.name} mans the gun.`, 'info', team.side);
     // the work already done on the weapon stands; he only has to lay it again
     clearMission(cw);
     if (cw.done!.length === 0 && cw.goal === 'pack') setGoal(cw, 'deploy');
@@ -845,8 +843,8 @@ function completeTask(state: BattleState, team: Team, cw: CrewWeaponState, cls: 
   cw.done!.push(task);
   // into action (not after every new belt during a fight)
   const ready = allDeployTasks(cls).every((k) => cw.done!.includes(k));
-  if (ready && !(task === 'feedBelt' && cw.mission) && team.side === state.config.playerSide) {
-    addMessage(state, `${team.name}\n${cls === 'atgun' ? 'Gun' : cls === 'mortar' ? 'Mortar' : 'MG'} ready.`, 'info');
+  if (ready && !(task === 'feedBelt' && cw.mission)) {
+    addMessage(state, `${team.name}\n${cls === 'atgun' ? 'Gun' : cls === 'mortar' ? 'Mortar' : 'MG'} ready.`, 'info', team.side);
   }
 }
 
@@ -933,11 +931,11 @@ function stepTasks(state: BattleState, team: Team, cw: CrewWeaponState, cls: Cre
   // no one able to take an open task: tell the player (rate-limited)
   const unmanned = open.find((k) => workers[k] == null);
   if (worked || !unmanned || cw.lastWorkedAt == null) cw.lastWorkedAt = state.time;
-  if (unmanned && team.side === state.config.playerSide
+  if (unmanned
     && state.time - (cw.lastWorkedAt ?? state.time) >= HELP_AFTER_S
     && state.time - (cw.lastHelpMsgAt ?? -1e9) >= HELP_MSG_EVERY_S) {
     cw.lastHelpMsgAt = state.time;
-    addMessage(state, `${team.name}\n${helpMessage(unmanned)}`, 'warn');
+    addMessage(state, `${team.name}\n${helpMessage(unmanned)}`, 'warn', team.side);
   }
 
   // men without a task stand by at their posts (not while packing: they wait to move off)

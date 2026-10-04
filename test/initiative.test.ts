@@ -59,7 +59,7 @@ describe('subordinate initiative (G18)', () => {
     const issued: number[] = [];
     // run enough ticks for the 0.002/tick roll to fire
     for (let i = 0; i < 3000; i++) {
-      const r = stepSubordinateInitiative(s, new Rng(i), (teamId, target) => {
+      const r = stepSubordinateInitiative(s, new Rng(i), s.config.playerSide, (teamId, target) => {
         issued.push(teamId);
         s.teams.get(teamId)!.order = { type: 'moveFast', target, issuedAt: s.time };
       });
@@ -77,7 +77,7 @@ describe('subordinate initiative (G18)', () => {
     for (const id of [1, 2, 3]) s.soldiers.get(id)!.mind.state = 'broken';
     let fired = false;
     for (let i = 0; i < 3000; i++) {
-      const r = stepSubordinateInitiative(s, new Rng(i), () => { fired = true; });
+      const r = stepSubordinateInitiative(s, new Rng(i), s.config.playerSide, () => { fired = true; });
       if (r) break;
     }
     expect(fired).toBe(false);
@@ -88,7 +88,7 @@ describe('subordinate initiative (G18)', () => {
     s.teams.get(1)!.order = { type: 'move', target: { x: 20, y: 20 }, issuedAt: 0 };
     let fired = false;
     for (let i = 0; i < 3000; i++) {
-      const r = stepSubordinateInitiative(s, new Rng(i), () => { fired = true; });
+      const r = stepSubordinateInitiative(s, new Rng(i), s.config.playerSide, () => { fired = true; });
       if (r) break;
     }
     expect(fired).toBe(false);

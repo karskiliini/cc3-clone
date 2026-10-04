@@ -33,12 +33,12 @@ function enemyVLs(state: BattleState, side: Side, from: { x: number; y: number }
 }
 
 
-/** Rolls each player-side team for subordinate initiative. Returns the acting
- * team (with its order issued) or null. Called from the AI tick only for the
- * human side. */
-export function stepSubordinateInitiative(state: BattleState, rng: Rng, issue: (teamId: number, target: Vec2) => void): InitiativeResult | null {
+/** Rolls each team of `side` for subordinate initiative. Returns the acting
+ * team (with its order issued) or null. Called from the AI tick only for
+ * human-controlled sides. */
+export function stepSubordinateInitiative(state: BattleState, rng: Rng, side: Side, issue: (teamId: number, target: Vec2) => void): InitiativeResult | null {
   if (state.phase !== 'running') return null;
-  const playerSide: Side = state.config.playerSide;
+  const playerSide: Side = side;
 
   for (const team of state.teams.values()) {
     if (team.side !== playerSide || team.outOfAction) continue;

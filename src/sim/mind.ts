@@ -132,11 +132,10 @@ function getSoldierTrack(track: MindTrack, id: number): SoldierTrack {
 
 /** Rate-limited (1 per 5 s per team) personality message, player-side flavour per spec §11. */
 function personalityMessage(state: BattleState, track: MindTrack, team: Team, text: string, kind: 'info' | 'bad' | 'good' = 'info'): void {
-  if (team.side !== state.config.playerSide) return; // personality messages are player-side only (spec §11)
   const last = track.lastMsgAt.get(team.id) ?? -Infinity;
   if (state.time - last < 5) return;
   track.lastMsgAt.set(team.id, state.time);
-  addMessage(state, `${team.name}\n${text}`, kind);
+  addMessage(state, `${team.name}\n${text}`, kind, team.side); // own side's log only (spec §11)
 }
 
 /** True while a soldier is frozen by first-fire shock (spec §11): no movement, no fire. */

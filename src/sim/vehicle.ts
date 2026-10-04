@@ -827,7 +827,7 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
         v.engineOnFire = false;
         v.engineFireTimer = 0;
         const team = state.teams.get(v.teamId);
-        if (team && team.side === state.config.playerSide) addMessage(state, `${team.name}\nEngine fire out.`, 'good');
+        if (team) addMessage(state, `${team.name}\nEngine fire out.`, 'good', team.side);
       }
     }
     // A burning, knocked-out or abandoned vehicle is dead weight: it never drives, and any path
@@ -971,7 +971,7 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     if (wireAt(map, wp.x, wp.y) === WIRE_INTACT) {
       if (rng.chance(VEHICLE_BREAK_CHANCE * dt / 0.1)) {
         consumeWire(map, Math.floor(wp.y) * map.width + Math.floor(wp.x));
-        addMessage(state, 'Wire crushed under the tracks.');
+        addMessage(state, 'Wire crushed under the tracks.', 'info', v.side);
       } else continue; // held up this step
     }
     // item 038 give-way: a hull blocked for too long by a parked own-side vehicle backs up
@@ -1293,7 +1293,7 @@ function collideDamage(state: BattleState, rng: Rng, a: Vehicle, b: Vehicle, clo
     if (done > 0) {
       v.speed = 0;
       const team = state.teams.get(v.teamId);
-      if (team && team.side === state.config.playerSide) addMessage(state, `${team.name}\nCollision! Running gear damaged.`, 'bad');
+      if (team) addMessage(state, `${team.name}\nCollision! Running gear damaged.`, 'bad', team.side);
       state.events.push({ kind: 'armorClank', pos: { ...v.pos }, side: otherSide(v.side) });
     }
   }
@@ -1387,8 +1387,8 @@ function runDown(state: BattleState, v: Vehicle, dirRad: number, s: Soldier): vo
   if (state.time - last >= OVERRUN_MSG_EVERY_S) {
     overrunMsgAt.set(state, state.time);
     const team = state.teams.get(s.teamId);
-    if (s.side === state.config.playerSide) addMessage(state, `${team?.name ?? 'Report'}\n${s.rank}. ${s.name} was run down.`, 'bad');
-    else addMessage(state, `${state.teams.get(v.teamId)?.name ?? 'Report'}\nEnemy soldier run down.`, 'good');
+    addMessage(state, `${team?.name ?? 'Report'}\n${s.rank}. ${s.name} was run down.`, 'bad', s.side);
+    addMessage(state, `${state.teams.get(v.teamId)?.name ?? 'Report'}\nEnemy soldier run down.`, 'good', v.side);
   }
 }
 
@@ -1443,8 +1443,8 @@ export function stepOverrun(state: BattleState, rng: Rng, v: Vehicle, dirRad: nu
     cw.open = [];
     const t = state.teams.get(v.teamId);
     const gun = state.teams.get(team.id);
-    if (team.side === state.config.playerSide) addMessage(state, `${gun?.name ?? 'Report'}\nOur gun was run over and smashed!`, 'bad');
-    else addMessage(state, `${t?.name ?? 'Report'}\nEnemy gun run over and smashed.`, 'good');
+    addMessage(state, `${gun?.name ?? 'Report'}\nOur gun was run over and smashed!`, 'bad', team.side);
+    addMessage(state, `${t?.name ?? 'Report'}\nEnemy gun run over and smashed.`, 'good', v.side);
   }
 }
 
@@ -1462,7 +1462,7 @@ function holdForFriendly(state: BattleState, v: Vehicle, s: Soldier): void {
   if (state.time - (haltMsgAt.get(v) ?? -1e9) >= HALT_MSG_EVERY_S) {
     haltMsgAt.set(v, state.time);
     const team = state.teams.get(v.teamId);
-    addMessage(state, `${team?.name ?? 'Report'}\nWe can't advance — our men in the way.`, 'info');
+    addMessage(state, `${team?.name ?? 'Report'}\nWe can't advance — our men in the way.`, 'info', v.side);
   }
   const first = stuckSince.get(s);
   if (first != null && state.time - first >= STUCK_S) {

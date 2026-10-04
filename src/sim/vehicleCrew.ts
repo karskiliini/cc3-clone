@@ -460,7 +460,7 @@ function goLive(state: BattleState, v: Vehicle, team: Team): void {
     if (!old || old.health === 'dead' || old.health === 'incapacitated') { if (old) old.isLeader = false; team.leaderId = inside[0].id; inside[0].isLeader = true; }
   }
   team.order = null;
-  if (team.side === state.config.playerSide) addMessage(state, `${team.name}\nCrew returns to the ${def?.name ?? 'vehicle'}.`, 'good');
+  addMessage(state, `${team.name}\nCrew returns to the ${def?.name ?? 'vehicle'}.`, 'good', team.side);
 }
 
 function sendToHatch(state: BattleState, v: Vehicle, def: VehicleDef, s: Soldier, fast: boolean): void {
@@ -518,7 +518,7 @@ export function tryRemountOrder(state: BattleState, team: Team, order: Order): b
   const why = crewReturnRefusal(state, v, true);
   if (why === 'useless' || why === 'noCrew') return true;
   if (why) {
-    if (team.side === state.config.playerSide) addMessage(state, `${team.name}\n${WILL_NOT_GO_BACK}`, 'warn');
+    addMessage(state, `${team.name}\n${WILL_NOT_GO_BACK}`, 'warn', team.side);
     return true;
   }
   v.remount = { since: state.time, ordered: true };

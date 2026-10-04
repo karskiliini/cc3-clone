@@ -274,11 +274,10 @@ function endPickup(state: BattleState, s: Soldier, track: PickupTrack, item: Gro
 
 // ------------------------------------------------------------------ taking it
 function say(state: BattleState, track: PickupTrack, team: Team, s: Soldier, text: string): void {
-  if (team.side !== state.config.playerSide) return;
   const last = track.lastMsgAt.get(team.id) ?? -Infinity;
   if (state.time - last < MSG_GAP_S) return;
   track.lastMsgAt.set(team.id, state.time);
-  addMessage(state, `${team.name}\n${s.rank}. ${s.name} ${text}`, 'info');
+  addMessage(state, `${team.name}\n${s.rank}. ${s.name} ${text}`, 'info', team.side);
 }
 
 function takeRounds(s: Soldier, item: GroundItem, want: number): number {

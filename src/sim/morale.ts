@@ -4,7 +4,7 @@ import { transportWord } from './transport';
 import type {
   Activity, BattleState, Health, Side, Soldier, Team, TeamMoraleWord, TeamStatusWord, Vec2, Vehicle,
 } from '@/shared/types';
-import { SIDES, TILE_M } from '@/shared/types';
+import { SIDES, TILE_M, otherSide } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { clamp, dist } from '@/shared/math';
 import { VEHICLE_DEFS } from '@/data/units';
@@ -136,12 +136,9 @@ function stepSoldierMorale(state: BattleState, s: Soldier, dt: number, track: Mo
         s.activity = 'surrendered';
         s.stance = 'standing';
         s.path = [];
-        if (s.side === state.config.playerSide) {
-          addMessage(state, `${team?.name ?? 'Report'}\n${s.rank}. ${s.name} surrenders.`, 'bad');
-        } else {
-          // the player just took a prisoner (G17): say so, the score change alone is invisible
-          addMessage(state, `${s.rank}. ${s.name} surrenders to your forces.`, 'good');
-        }
+        addMessage(state, `${team?.name ?? 'Report'}\n${s.rank}. ${s.name} surrenders.`, 'bad', s.side);
+        // the other side just took a prisoner (G17): say so, the score change alone is invisible
+        addMessage(state, `${s.rank}. ${s.name} surrenders to your forces.`, 'good', otherSide(s.side));
       }
     }
   }
@@ -203,11 +200,10 @@ function majorityHesitating(alive: Soldier[], team: Team): boolean {
 }
 
 function maybeAnnounceHesitating(state: BattleState, team: Team, track: MoraleTrack): void {
-  if (team.side !== state.config.playerSide) return;
   const last = track.hesitationMsgAt.get(team.id) ?? -Infinity;
   if (state.time - last < 60) return;
   track.hesitationMsgAt.set(team.id, state.time);
-  addMessage(state, `${team.name}\nis hesitating.`, 'warn');
+  addMessage(state, `${team.name}\nis hesitating.`, 'warn', team.side);
 }
 
 /** 'Loading' / 'Aiming' for a vehicle whose main gun is being loaded or laid, else null. */
@@ -339,8 +335,9 @@ function teamCenterPos(state: BattleState, team: Team): Vec2 {
   return team.pos;
 }
 
-function messageForTransition(side: Side, playerSide: Side, teamName: string, status: TeamStatusWord): string | null {
-  if (side === playerSide) {
+/** How `viewer` hears of a team of `side` changing status (its own team, or an enemy one). */
+function messageForTransition(side: Side, viewer: Side, teamName: string, status: TeamStatusWord): string | null {
+  if (side === viewer) {
     if (status === 'Pinned') return `${teamName}\nWe're pinned down.`;
     if (status === 'Broken') return `${teamName}\nWe're breaking!`;
     if (status === 'Routed') return `${teamName}\nWe're running!`;
@@ -368,8 +365,10 @@ function updateTeamCaches(state: BattleState, track: MoraleTrack): void {
     if (last !== status) {
       track.teamLastStatus.set(team.id, status);
       if (status === 'Pinned' || status === 'Broken' || status === 'Routed' || status === 'Destroyed' || status === 'Knocked Out') {
-        const msg = messageForTransition(team.side, state.config.playerSide, team.name, status);
-        if (msg) addMessage(state, msg, team.side === state.config.playerSide ? 'bad' : 'good');
+        for (const viewer of SIDES) {
+          const msg = messageForTransition(team.side, viewer, team.name, status);
+          if (msg) addMessage(state, msg, team.side === viewer ? 'bad' : 'good', viewer);
+        }
         if (status === 'Broken' || status === 'Routed') {
           state.events.push({ kind: 'teamBroken', teamId: team.id, side: team.side });
         }

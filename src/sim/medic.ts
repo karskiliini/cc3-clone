@@ -137,14 +137,14 @@ export function stepMedic(state: BattleState, rng: Rng, dt: number): void {
         if (state.time >= task.since + MEDIC_TREAT_S) {
           if (patient.health === 'wounded') {
             patient.health = 'healthy';
-            if (patient.side === state.config.playerSide) addMessage(state, `${team.name}\n${patient.name} bandaged.`, 'good');
+            addMessage(state, `${team.name}\n${patient.name} bandaged.`, 'good', patient.side);
             m.delete(team.id);
           } else {
             // incapacitated: stabilized, then carried to the rear
             task.phase = 'carry';
             task.since = state.time;
             medic.carrying = { patientId: patient.id, since: state.time };
-            if (patient.side === state.config.playerSide) addMessage(state, `${team.name}\nCarrying ${patient.name} to cover.`, 'good');
+            addMessage(state, `${team.name}\nCarrying ${patient.name} to cover.`, 'good', patient.side);
           }
         }
       } else {
@@ -164,7 +164,7 @@ export function stepMedic(state: BattleState, rng: Rng, dt: number): void {
         dragBehind(state, medic, patient);
         if (medic.path.length === 0) {
           medic.carrying = undefined;
-          if (patient.side === state.config.playerSide) addMessage(state, `${team.name}\n${patient.name} is in cover.`, 'good');
+          addMessage(state, `${team.name}\n${patient.name} is in cover.`, 'good', patient.side);
           m.delete(team.id);
         }
       }

@@ -30,7 +30,7 @@
 // field and the terrain renderer (map.dirtyTiles) are updated alongside.
 // ============================================================================
 import type { BattleState, GameMap, Side, Soldier, Terrain, Vec2, WeaponDef } from '@/shared/types';
-import { TILE_M } from '@/shared/types';
+import { SIDES, TILE_M } from '@/shared/types';
 import { Rng, hash2 } from '@/shared/rng';
 import { getHeightField, refreshTiles, setTileOverride, syncCraterMarks, buildingIsBig, H_BREACH_LIP } from './heightField';
 import { addMessage } from './messages';
@@ -387,7 +387,7 @@ function soldiersOnTiles(state: BattleState, tiles: Set<number>): Soldier[] {
 function debrisHit(state: BattleState, st: StructState, s: Soldier, lethality: number, rng: Rng): void {
   const lastBefore = state.messages[state.messages.length - 1];
   applyHit(state, s, debrisWeapon(lethality), rng);
-  if (s.health !== 'dead' || s.side !== state.config.playerSide) return;
+  if (s.health !== 'dead') return;
   const msg = state.messages[state.messages.length - 1];
   if (!msg || msg === lastBefore || !/has been killed\.$/.test(msg.text)) return;
   if (state.time - st.lastCrushedMsgAt < 3) return;
@@ -428,7 +428,7 @@ function resolveCasualties(state: BattleState, st: StructState, ev: BlastEvent, 
     const victims = soldiersOnTiles(state, new Set(caved));
     const teams = new Set<number>();
     for (const s of victims) {
-      if (s.side === state.config.playerSide) teams.add(s.teamId);
+      teams.add(s.teamId);
       addStress(s.mind, 25);
       if (rng.chance(tune.chance)) debrisHit(state, st, s, tune.lethality, rng);
     }
@@ -494,8 +494,7 @@ function stressOccupants(state: BattleState, pos: Vec2, power: number): void {
 }
 
 // ------------------------------------------------------------------ messages
-function nearPlayerUnits(state: BattleState, p: Vec2, rTiles: number): boolean {
-  const side = state.config.playerSide;
+function nearSideUnits(state: BattleState, side: Side, p: Vec2, rTiles: number): boolean {
   for (const s of state.soldiers.values()) {
     if (s.side !== side || s.health === 'dead') continue;
     if (Math.abs(s.pos.x - p.x) <= rTiles && Math.abs(s.pos.y - p.y) <= rTiles) return true;
@@ -503,14 +502,15 @@ function nearPlayerUnits(state: BattleState, p: Vec2, rTiles: number): boolean {
   return false;
 }
 
-/** "Wall breached." — reported when the player can know about it: his own round did it (a fire
- * mission is his order, however far away it lands) or one of his men is close enough to see. */
+/** "Wall breached." — reported to each side that can know about it: its own round did it (a fire
+ * mission is its order, however far away it lands) or one of its men is close enough to see. */
 function notifyBreach(state: BattleState, st: StructState, p: Vec2, side: Side | null): void {
   pushStructureFx(state, 'breach', p, state.map.tiles[Math.floor(p.y) * state.map.width + Math.floor(p.x)] === 'buildingStone');
   if (state.time - st.lastBreachMsgAt < 8) return;
-  if (side !== state.config.playerSide && !nearPlayerUnits(state, p, 25)) return;
+  const told = SIDES.filter((v) => v === side || nearSideUnits(state, v, p, 25));
+  if (told.length === 0) return;
   st.lastBreachMsgAt = state.time;
-  addMessage(state, 'Wall breached.', 'warn');
+  for (const v of told) addMessage(state, 'Wall breached.', 'warn', v);
 }
 
 function notifyCollapse(state: BattleState, st: StructState, b: BuildingRec): void {
@@ -536,7 +536,7 @@ function notifyBuried(state: BattleState, st: StructState, teamId: number): void
   if (state.time - last < 6) return;
   st.lastBuriedMsgAt.set(teamId, state.time);
   const team = state.teams.get(teamId);
-  addMessage(state, `${team?.name ?? 'Report'}\nWe're being buried in here!`, 'bad');
+  if (team) addMessage(state, `${team.name}\nWe're being buried in here!`, 'bad', team.side);
 }
 
 function finishChanges(state: BattleState, changed: number[]): void {

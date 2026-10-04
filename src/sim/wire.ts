@@ -33,7 +33,7 @@ export function vehicleWireBlock(state: BattleState, v: Vehicle, rng: import('@/
   if (wireAt(state.map, v.pos.x, v.pos.y) !== WIRE_INTACT) return false;
   if (!rng.chance(VEHICLE_BREAK_CHANCE)) return true; // held up this step
   consumeWire(state.map, Math.floor(v.pos.y) * state.map.width + Math.floor(v.pos.x));
-  addMessage(state, 'Wire crushed under the tracks.');
+  addMessage(state, 'Wire crushed under the tracks.', 'info', v.side);
   return false;
 }
 
@@ -53,7 +53,7 @@ export function cutWireNear(state: BattleState, s: Soldier): boolean {
       if (wireAt(map, tx + dx, ty + dy) === WIRE_INTACT) {
         const idx = (ty + dy) * map.width + (tx + dx);
         consumeWire(map, idx);
-        addMessage(state, 'Wire cut.');
+        addMessage(state, 'Wire cut.', 'info', s.side);
         return true;
       }
     }

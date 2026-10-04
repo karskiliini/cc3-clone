@@ -59,8 +59,8 @@ export function sideScore(state: BattleState, side: Side): number {
  * needs its own bottom rung, not the same "defeat" bucket as a narrow loss). Thresholds are
  * reciprocal around 1 (a totalVictory ratio is the exact inverse of a totalDefeat ratio) so the
  * scale reads the same from either side. */
-export function computeResult(state: BattleState): BattleResult {
-  const player = state.config.playerSide;
+export function computeResult(state: BattleState, side: Side = state.config.playerSide): BattleResult {
+  const player = side;
   const enemy = otherSide(player);
   // A side's score goes negative when it loses more men than it has points (score = ... - losses).
   // Below -20 that flipped the sign of the ratio, so a side that had been wiped out without taking
@@ -93,9 +93,15 @@ function resultMessage(result: BattleResult): string {
   }
 }
 
+/** Each side's result graded from its own perspective; `state.result` is the viewer's. */
+function setResults(state: BattleState, results: Record<Side, BattleResult>): void {
+  state.results = results;
+  state.result = results[state.config.playerSide];
+}
+
 /** Immediately ends the battle: `side` flees the field, ceding every victory location to the
- * enemy and forcing a result from the player's perspective — per the manual, "Flee ends the
- * battle immediately with the enemy taking the map." No-op once the battle has already ended. */
+ * enemy and forcing a total defeat for it (total victory for the other) — per the manual, "Flee
+ * ends the battle immediately with the enemy taking the map." No-op once the battle has ended. */
 export function flee(state: BattleState, side: Side): void {
   if (state.phase !== 'running') return;
   const enemy = otherSide(side);
@@ -109,7 +115,9 @@ export function flee(state: BattleState, side: Side): void {
   state.fledSide = side;
   // A flee cedes every VL outright, so grade it at the top of the scale regardless of the score
   // ratio at the moment of fleeing — fleeing the field is itself the most one-sided outcome.
-  state.result = side === state.config.playerSide ? 'totalDefeat' : 'totalVictory';
+  setResults(state, side === 'german'
+    ? { german: 'totalDefeat', soviet: 'totalVictory' }
+    : { german: 'totalVictory', soviet: 'totalDefeat' });
   state.events.push({ kind: 'ended' });
   addMessage(state, `${sideName(side)} forces have fled the field — the enemy takes the ground.`, 'warn');
 }
@@ -145,10 +153,8 @@ export function stepVictory(state: BattleState, dt: number): void {
       vl.capturingSide = null;
       vl.captureTimer = 0;
       state.events.push({ kind: 'vlCaptured', side, pos: { x: vl.x, y: vl.y } });
-      const isPlayer = side === state.config.playerSide;
-      const header = isPlayer ? sideName(side) : 'Enemy';
-      const body = isPlayer ? `We have taken ${vl.name}.` : `Enemy has taken ${vl.name}.`;
-      addMessage(state, `${header}\n${body}`, 'good');
+      addMessage(state, `${sideName(side)}\nWe have taken ${vl.name}.`, 'good', side);
+      addMessage(state, `Enemy\nEnemy has taken ${vl.name}.`, 'bad', otherSide(side));
     }
   }
 
@@ -198,8 +204,8 @@ export function stepVictory(state: BattleState, dt: number): void {
 
   if (ended) {
     state.phase = 'ended';
-    state.result = computeResult(state);
+    setResults(state, { german: computeResult(state, 'german'), soviet: computeResult(state, 'soviet') });
     state.events.push({ kind: 'ended' });
-    addMessage(state, resultMessage(state.result), 'info');
+    for (const side of SIDES) addMessage(state, resultMessage(state.results![side]), 'info', side);
   }
 }

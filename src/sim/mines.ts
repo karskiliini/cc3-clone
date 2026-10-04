@@ -58,7 +58,7 @@ export function clearMineNear(state: BattleState, s: Soldier): boolean {
       if (mineAt(map, tx + dx, ty + dy) !== MINE_NONE) {
         const idx = tileIdx(map, tx + dx, ty + dy);
         consumeMine(map, idx);
-        addMessage(state, 'Engineers cleared the mines.');
+        addMessage(state, 'Engineers cleared the mines.', 'info', s.side);
         return true;
       }
     }
@@ -79,7 +79,7 @@ export function soldierMineCheck(state: BattleState, s: Soldier, rng: Rng): void
   if (!rng.chance(0.7)) return;
   consumeMine(state.map, idx);
   state.explosions.push({ pos: { x: s.pos.x, y: s.pos.y }, radiusM: 3, t: 0, kind: 'small' });
-  addMessage(state, 'A mine explodes.', 'bad');
+  addMessage(state, 'A mine explodes.', 'bad', s.side);
   if (kind === MINE_AP) {
     const weapon = WEAPONS[AP_MINE_WEAPON_ID];
     if (weapon) applyHit(state, s, weapon, rng, s.side === 'german' ? 'soviet' : 'german');
@@ -96,7 +96,7 @@ export function vehicleMineCheck(state: BattleState, v: Vehicle, rng: Rng): void
   v.mineTileSeen = idx;
   if (!rng.chance(0.8)) return;
   consumeMine(state.map, idx);
-  addMessage(state, `${v.defId}: hit a mine!`, 'bad');
+  addMessage(state, `${v.defId}: hit a mine!`, 'bad', v.side);
   // immobilise the hull outright (track damage), crew shaken
   v.state = 'immobilized';
   v.hits += AT_MINE_DAMAGE;

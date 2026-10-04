@@ -13,7 +13,8 @@
 // Consecutive identical lines collapse into one row; the number shown is the
 // collapsed row's last raw message's running number.
 // ============================================================================
-import type { Rect, InputState, BattleState, BattleMessage, Team } from '@/shared/types';
+import type { Rect, InputState, BattleState, BattleMessage, Side, Team } from '@/shared/types';
+import { messageVisibleTo } from '@/sim/messages';
 import { HUD } from '@/render/palette';
 import { clamp } from '@/shared/math';
 import { hitRect, setHudFont, clipTextToWidth, teamDisplayName } from './hudChrome';
@@ -168,9 +169,42 @@ function drawMessage(ctx: CanvasRenderingContext2D, box: Rect, m: CollapsedMessa
   ctx.restore();
 }
 
+/** UI notices kept per screen (speed, overlays, control groups): never part of the sim state. */
+const NOTICE_CAP = 50;
+
 export class CombatMessages {
   /** Rows scrolled back from the newest message (0 = pinned to newest). */
   private scroll = 0;
+  /** HUD-local notices, merged into the log by time. */
+  private notices: BattleMessage[] = [];
+
+  /** @param viewer the side whose message log this column shows */
+  constructor(private viewer: Side = 'german') {}
+
+  setViewer(viewer: Side): void {
+    this.viewer = viewer;
+  }
+
+  /** A UI notice ("Speed 2x", "Depth map on") shown in the log, outside the sim state. */
+  notice(state: BattleState, text: string, kind: BattleMessage['kind'] = 'info'): void {
+    this.notices.push({ time: state.time, text, kind });
+    if (this.notices.length > NOTICE_CAP) this.notices.splice(0, this.notices.length - NOTICE_CAP);
+  }
+
+  /** The viewer's log: its own side's and public messages, with the UI notices, oldest first. */
+  log(state: BattleState): BattleMessage[] {
+    const own = state.messages.filter((m) => messageVisibleTo(m, this.viewer));
+    if (this.notices.length === 0) return own;
+    // merge by time; a notice goes after sim messages of the same time (it was made after them)
+    const out: BattleMessage[] = [];
+    let j = 0;
+    for (const m of own) {
+      while (j < this.notices.length && this.notices[j].time < m.time) out.push(this.notices[j++]);
+      out.push(m);
+    }
+    while (j < this.notices.length) out.push(this.notices[j++]);
+    return out;
+  }
   private hoverUp = false;
   private hoverDown = false;
   private hoverStrip = false;
@@ -181,7 +215,7 @@ export class CombatMessages {
 
   update(input: InputState, state: BattleState): void {
     const teams = Array.from(state.teams.values());
-    const total = collapseMessages(state.messages, teams).length;
+    const total = collapseMessages(this.log(state), teams).length;
     const maxScroll = this.maxScroll(total);
     this.hoverUp = hitRect(input.mouse, PANEL_UP);
     this.hoverDown = hitRect(input.mouse, PANEL_DOWN);
@@ -202,7 +236,7 @@ export class CombatMessages {
 
   draw(ctx: CanvasRenderingContext2D, state: BattleState): void {
     const teams = Array.from(state.teams.values());
-    const collapsed = collapseMessages(state.messages, teams);
+    const collapsed = collapseMessages(this.log(state), teams);
     const total = collapsed.length;
     const maxScroll = this.maxScroll(total);
     const endIdx = total - this.scroll; // exclusive

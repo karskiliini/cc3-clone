@@ -165,7 +165,7 @@ export function stepCrewSeats(state: BattleState, v: Vehicle): void {
       seats[sw.role] = man.id;
       if (dual && sw.role === 'gunner') seats.commander = man.id;
       v.seatSwap = undefined;
-      if (team.side === state.config.playerSide) addMessage(state, `${team.name}\n${man.rank}. ${man.name} takes over as ${ROLE_WORD[sw.role].toLowerCase()}.`, 'info');
+      addMessage(state, `${team.name}\n${man.rank}. ${man.name} takes over as ${ROLE_WORD[sw.role].toLowerCase()}.`, 'info', team.side);
     } else return;
   }
   for (let pi = 0; pi < SEAT_PRIORITY.length; pi++) {
@@ -522,7 +522,7 @@ export function hurtCrewman(state: BattleState, v: Vehicle, s: Soldier, to: 'dea
     if (s.health === 'wounded') return;
     s.health = 'wounded';
     s.morale = clamp(s.morale - 20, 0, 100);
-    if (!quiet && team.side === state.config.playerSide) addMessage(state, `${team.name}\n${role ? ROLE_WORD[role] : 'Crewman'} wounded.`, 'bad');
+    if (!quiet) addMessage(state, `${team.name}\n${role ? ROLE_WORD[role] : 'Crewman'} wounded.`, 'bad', team.side);
     return;
   }
   s.health = to;
@@ -530,7 +530,7 @@ export function hurtCrewman(state: BattleState, v: Vehicle, s: Soldier, to: 'dea
   state.events.push({ kind: 'kill', pos: { ...v.pos }, side });
   state.sides[side].kills++;
   state.sides[s.side].losses++;
-  if (!quiet && team.side === state.config.playerSide) addMessage(state, `${team.name}\n${role ? ROLE_WORD[role] : 'Crewman'} ${to === 'dead' ? 'killed' : 'badly wounded'}.`, 'bad');
+  if (!quiet) addMessage(state, `${team.name}\n${role ? ROLE_WORD[role] : 'Crewman'} ${to === 'dead' ? 'killed' : 'badly wounded'}.`, 'bad', team.side);
 }
 
 export interface BailOpts {
@@ -550,7 +550,7 @@ export function hurtPassenger(state: BattleState, v: Vehicle, s: Soldier, to: 'd
   state.sides[side].kills++;
   state.sides[s.side].losses++;
   const t = state.teams.get(s.teamId);
-  if (t && t.side === state.config.playerSide) addMessage(state, `${t.name}\n${s.rank}. ${s.name} ${to === 'dead' ? 'killed' : 'badly wounded'} in the ${VEHICLE_DEFS[v.defId]?.name ?? 'vehicle'}.`, 'bad');
+  if (t) addMessage(state, `${t.name}\n${s.rank}. ${s.name} ${to === 'dead' ? 'killed' : 'badly wounded'} in the ${VEHICLE_DEFS[v.defId]?.name ?? 'vehicle'}.`, 'bad', t.side);
 }
 
 /** The crew leaves the vehicle (reused by the mind model's panic bail-out, spec §10.2): the hull is
@@ -588,7 +588,7 @@ export function bailOut(state: BattleState, v: Vehicle, team: Team, to: 'abandon
   v.bailBy = undefined;
   v.seatSwap = undefined;
   v.remount = undefined;
-  if (message && team.side === state.config.playerSide) addMessage(state, `${team.name}\n${message}`, 'bad');
+  if (message) addMessage(state, `${team.name}\n${message}`, 'bad', team.side);
   const crew = crewOf(state, v, team);
   // the crew shared one mind (the commander's): every man takes what it knew and felt with him
   const lead = crew.find((c) => c.id === team.leaderId) ?? crew[0];
@@ -665,9 +665,9 @@ const BIG_CLASSES = new Set(['tankgun', 'atgun', 'atrocket']);
 function isBigRound(w: WeaponDef): boolean { return BIG_CLASSES.has(w.cls) || (w.cls === 'grenade' && w.penetrationMm > 0) || (w.cls === 'mortar'); }
 
 function shooterMsg(state: BattleState, input: VehicleHitInput, text: string): void {
-  if (input.shooterSide !== state.config.playerSide) return;
+  if (!input.shooterSide) return;
   const t = input.shooterTeamId != null ? state.teams.get(input.shooterTeamId) : undefined;
-  addMessage(state, `${t?.name ?? 'Report'}\n${text}`, 'good');
+  addMessage(state, `${t?.name ?? 'Report'}\n${text}`, 'good', input.shooterSide);
 }
 
 /** Minimum able crew to keep fighting the vehicle. */
@@ -744,7 +744,7 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
     res.outcome = isImmobile(v) ? 'immobilised' : 'damaged';
     if (!wasImmobile && isImmobile(v)) {
       shooterMsg(state, input, `Hit the tracks — ${name} immobilised.`);
-      if (team && team.side === state.config.playerSide) addMessage(state, `${team.name}\n${location.zone === 'runningGearL' ? 'Left' : 'Right'} track broken.`, 'bad');
+      if (team) addMessage(state, `${team.name}\n${location.zone === 'runningGearL' ? 'Left' : 'Right'} track broken.`, 'bad', team.side);
     }
     crewStress(state, v, team, 10);
     return res;
@@ -773,7 +773,7 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
     v.path = []; v.speed = 0;
     v.cookOff = { checkedS: 0, pops: 0, rackFire: true };
     startFireBail(state, v, team);
-    if (team && team.side === state.config.playerSide) addMessage(state, `${team.name}\nAmmunition on fire — bail out!`, 'bad');
+    if (team) addMessage(state, `${team.name}\nAmmunition on fire — bail out!`, 'bad', team.side);
     shooterMsg(state, input, `${name} is burning.`);
     res.outcome = 'fire';
     return res;
@@ -807,7 +807,7 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
     if (!hasSystem(def, sys)) continue;
     if (rng.next() >= p * clamp(k, 0.6, 1.1)) continue;
     const to: EquipState = sys === 'fuelLeak' ? 'damaged' : rng.next() < 0.55 ? 'destroyed' : 'damaged';
-    if (worsen(v, sys, to) && team && team.side === state.config.playerSide) addMessage(state, `${team.name}\n${systemWord(sys, to)}.`, 'bad');
+    if (worsen(v, sys, to) && team) addMessage(state, `${team.name}\n${systemWord(sys, to)}.`, 'bad', team.side);
   }
   if (location.spot === 'turretRing' && systemState(v, 'traverse') !== 'ok') shooterMsg(state, input, 'Turret ring hit — turret jammed.');
   if (location.spot === 'gunMantlet' && systemState(v, 'mainGun') === 'destroyed') shooterMsg(state, input, `${name}: main gun knocked out.`);
@@ -819,7 +819,7 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
       // flames + dense smoke at the deck (renderer: dmg.engineFire), crew still fights/bails by
       // the normal morale rules. The next fire roll escalates to the full 'burning' state.
       v.engineOnFire = true;
-      if (team && team.side === state.config.playerSide) addMessage(state, `${team.name}\nEngine on fire!`, 'bad');
+      if (team) addMessage(state, `${team.name}\nEngine on fire!`, 'bad', team.side);
       shooterMsg(state, input, `${name}: engine deck on fire.`);
       res.outcome = 'fire';
       return res;
@@ -829,7 +829,7 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
       v.path = []; v.speed = 0;
       startFireBail(state, v, team);
       state.events.push({ kind: 'vehicleKO', pos: { ...v.pos }, side: input.shooterSide });
-      if (team && team.side === state.config.playerSide) addMessage(state, `${team.name}\nVehicle on fire — bail out!`, 'bad');
+      if (team) addMessage(state, `${team.name}\nVehicle on fire — bail out!`, 'bad', team.side);
       shooterMsg(state, input, `${name} is burning.`);
       res.ko = true; res.outcome = 'fire';
       return res;
@@ -919,7 +919,7 @@ function nonPenetrating(
   const big = isBigRound(weapon);
   const say = (sys: VehicleSystem, to: EquipState): void => {
     if (!hasSystem(def, sys)) return;
-    if (worsen(v, sys, to) && team && team.side === state.config.playerSide) addMessage(state, `${team.name}\n${systemWord(sys, to)}.`, 'bad');
+    if (worsen(v, sys, to) && team) addMessage(state, `${team.name}\n${systemWord(sys, to)}.`, 'bad', team.side);
   };
   if (!big) {
     // small arms and AT rifles: only men in an open compartment, from the side, rear or above

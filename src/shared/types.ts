@@ -1082,6 +1082,9 @@ export interface BattleMessage {
   time: number;               // battle seconds elapsed
   text: string;
   kind: 'info' | 'warn' | 'bad' | 'good';
+  /** The side whose log this belongs to (its own reports, worded from its perspective);
+   * undefined = a public message both sides read (battle end, flight, truce agreed). */
+  side?: Side;
 }
 
 /** `weaponId` (optional, render only) picks the burst art: grenade, shell, ammunition blast. */
@@ -1152,9 +1155,16 @@ export interface SideState {
   score: number;
 }
 
+/** Who gives a side its orders: a person through `Battle.submit`, or the sim's own AI. */
+export type Controller = 'human' | 'ai';
+
 export interface BattleConfig {
   mapId: string;
+  /** The local viewer's side: the UI's perspective (selection, fog, own message log, debrief).
+   * The sim never reads it; when `controllers` is absent this side is human and the other AI. */
   playerSide: Side;
+  /** Who controls each side. Defaults from `playerSide` / `aiBothSides` (see resolveControllers). */
+  controllers?: Record<Side, Controller>;
   year: number;
   seed: number;
   durationS: number;
@@ -1164,8 +1174,8 @@ export interface BattleConfig {
    * Optional — AI/test forces without campaign identity spawn without uids. */
   rosterUids?: Record<Side, string[][]>;
   difficulty: 'easy' | 'normal' | 'hard';
-  /** Test/harness only: run stepAI for BOTH sides (normally only the non-player side gets AI).
-   * Lets a headless harness simulate AI-vs-AI battles. Never set by UI screens. */
+  /** Test/harness shorthand for `controllers: { german: 'ai', soviet: 'ai' }` (AI vs AI).
+   * Never set by UI screens; read only by resolveControllers. */
   aiBothSides?: boolean;
   // ---- realism toggles from the Options screen (item 024; copied in when the battle starts)
   /** Cheat sight: the player sees every enemy soldier and vehicle regardless of spotting. */
@@ -1196,7 +1206,14 @@ export interface BattleState {
   flashes: Flash[];
   /** dark red pixel decals (tile coordinates) */
   bloodDecals: Vec2[];
+  /** The result from the viewer's (config.playerSide) perspective; see `results` for both. */
   result: BattleResult | null;
+  /** Each side's result graded from its own perspective, set when the battle ends. */
+  results?: Record<Side, BattleResult> | null;
+  /** Sim ticks run so far (each SIM_DT); commands are stamped and applied by tick. */
+  tick?: number;
+  /** Game speed multiplier (1, 2, 4 ...), set by the setSpeed command; shared in multiplayer. */
+  speed?: number;
   events: BattleEvent[];      // drained by renderer/audio each frame
   nextId: number;
   /** Side that ended the battle by fleeing (sim/victory.ts flee()), if any — lets the debrief show

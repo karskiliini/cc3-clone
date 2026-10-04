@@ -541,22 +541,19 @@ export function applyHit(
   state.sides[resolvedKillerSide].kills++;
   state.sides[victim.side].losses++;
 
-  if (victim.side === state.config.playerSide) {
-    const victimTeam = state.teams.get(victim.teamId);
-    const verb = result === 'dead' ? 'killed' : 'wounded';
-    addMessage(state, `${victimTeam?.name ?? 'Report'}\n${victim.rank}. ${victim.name} has been ${verb}.`, 'bad');
-  } else {
-    reportEnemyKill(state, killerTeam);
-  }
+  const victimTeam = state.teams.get(victim.teamId);
+  const verb = result === 'dead' ? 'killed' : 'wounded';
+  addMessage(state, `${victimTeam?.name ?? 'Report'}\n${victim.rank}. ${victim.name} has been ${verb}.`, 'bad', victim.side);
+  reportEnemyKill(state, killerTeam, otherSide(victim.side));
 }
 
 /** Coalesced "Enemy soldier killed." report: one line per killer team within 5 s; further kills in
  * that window update the same line to "N enemy soldiers killed." instead of spamming the log. */
 const killReportAt = new WeakMap<BattleState, Map<number, { at: number; count: number; msg: BattleMessage }>>();
-function reportEnemyKill(state: BattleState, killerTeam: Team | undefined): void {
+function reportEnemyKill(state: BattleState, killerTeam: Team | undefined, side: Side): void {
   let m = killReportAt.get(state);
   if (!m) { m = new Map(); killReportAt.set(state, m); }
-  const key = killerTeam?.id ?? -1;
+  const key = killerTeam?.id ?? (side === 'german' ? -1 : -2);
   const prev = m.get(key);
   const name = killerTeam?.name ?? 'Report';
   if (prev && state.time - prev.at < 5 && state.messages.includes(prev.msg)) {
@@ -564,7 +561,7 @@ function reportEnemyKill(state: BattleState, killerTeam: Team | undefined): void
     prev.msg.text = `${name}\n${prev.count} enemy soldiers killed.`;
     return;
   }
-  addMessage(state, `${name}\nEnemy soldier killed.`, 'good');
+  addMessage(state, `${name}\nEnemy soldier killed.`, 'good', side);
   m.set(key, { at: state.time, count: 1, msg: state.messages[state.messages.length - 1] });
 }
 
@@ -1298,7 +1295,7 @@ function stepSoldierCombat(state: BattleState, rng: Rng, dt: number, soldier: So
       soldier.reloadTimer = weapon.reloadS;
     } else if (!track.outOfAmmoMessaged.has(soldier.id)) {
       track.outOfAmmoMessaged.add(soldier.id);
-      addMessage(state, `${team?.name ?? 'A team'} is out of ammo`, 'warn');
+      addMessage(state, `${team?.name ?? 'A team'} is out of ammo`, 'warn', soldier.side);
       soldier.activity = 'idle';
     }
     return;
@@ -2119,9 +2116,7 @@ function stepVehicleRockets(state: BattleState, rng: Rng, dt: number, vehicle: V
     if (state.time - (vehicle.rocketArcWarnAt ?? -Infinity) > ROCKET_ARC_WARN_S) {
       vehicle.rocketArcWarnAt = state.time;
       const team = state.teams.get(vehicle.teamId);
-      if (team?.side === state.config.playerSide) {
-        addMessage(state, `${def.name}\nLaunch rails cannot reach that bearing.`, 'warn');
-      }
+      if (team) addMessage(state, `${def.name}\nLaunch rails cannot reach that bearing.`, 'warn', team.side);
     }
     vehicle.gunState = 'laying';
     return;

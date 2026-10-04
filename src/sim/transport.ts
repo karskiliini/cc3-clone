@@ -147,7 +147,7 @@ export function startUnload(state: BattleState, v: Vehicle, panicked: boolean, t
   }
   v.unloading = { panicked, startedAt: state.time, teamId };
   const name = VEHICLE_DEFS[v.defId]?.name ?? 'Vehicle';
-  if (v.side === state.config.playerSide && !panicked) addMessage(state, `${name}\nPassengers dismounting.`, 'info');
+  if (!panicked) addMessage(state, `${name}\nPassengers dismounting.`, 'info', v.side);
 }
 
 function threatDirFor(state: BattleState, v: Vehicle, s: Soldier): number | null {
@@ -353,7 +353,7 @@ export function transportHolds(state: BattleState, v: Vehicle): boolean {
   else if (state.time - prog.at >= BOARD_STALL_S && nearest > BOARD_NEAR_TILES) return false; // nobody is coming
   if (v.waitingSince == null) {
     v.waitingSince = state.time;
-    if (v.path.length > 0 && v.side === state.config.playerSide) addMessage(state, `${VEHICLE_DEFS[v.defId]?.name ?? 'Vehicle'}\nWaiting for passengers.`, 'info');
+    if (v.path.length > 0) addMessage(state, `${VEHICLE_DEFS[v.defId]?.name ?? 'Vehicle'}\nWaiting for passengers.`, 'info', v.side);
   }
   return state.time - v.waitingSince < WAIT_MAX_S;
 }

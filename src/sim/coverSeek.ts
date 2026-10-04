@@ -90,13 +90,12 @@ function moveTo(state: BattleState, s: Soldier, tile: Vec2): void {
 
 const lookCoverMsgAt = new WeakMap<BattleState, Map<number, number>>();
 function maybeAnnounceLookingForCover(state: BattleState, team: Team): void {
-  if (team.side !== state.config.playerSide) return; // flavour text is player-side only (spec §11)
   let m = lookCoverMsgAt.get(state);
   if (!m) { m = new Map(); lookCoverMsgAt.set(state, m); }
   const last = m.get(team.id) ?? -Infinity;
   if (state.time - last < 180) return;
   m.set(team.id, state.time);
-  addMessage(state, `${team.name}\nis looking for cover.`, 'info');
+  addMessage(state, `${team.name}\nis looking for cover.`, 'info', team.side); // own side's log only (spec §11)
 }
 
 function seekForSoldier(state: BattleState, rng: Rng, s: Soldier): void {

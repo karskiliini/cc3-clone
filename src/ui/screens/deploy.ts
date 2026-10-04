@@ -2,7 +2,6 @@ import type { BattleState, Camera, CursorKind, InputState, Rect, Screen, Team, V
 import { VIEW_H, VIEW_W, ORDER_HOTKEYS, ORDER_DOT_COLOR, otherSide, type OrderType } from '@/shared/types';
 import { game } from '@/game';
 import type { Battle } from '@/sim/battle';
-import { aiDeploy } from '@/sim/ai';
 import { centerCamera, clampCamera, panCamera, screenToWorld, worldToScreen, zoomIn, zoomOut } from '@/engine/camera';
 import { TerrainRenderer } from '@/render/terrainRender';
 import { drawUnits } from '@/render/unitRender';
@@ -14,7 +13,7 @@ import { teamObserver } from '@/ui/targetHover';
 import { cycleTeamKey, handleDepthMapKey } from './viewKeys';
 import { OptionsScreen } from './options';
 import { hitRect } from '@/ui/hud/hudChrome';
-import { addMessage } from '@/sim/messages';
+import type { CommandBody } from '@/sim/commands';
 import { MainMenuScreen } from '@/ui/screens/mainMenu';
 import { TeamGrid } from '@/ui/hud/teamGrid';
 import { CombatMessages } from '@/ui/hud/combatMessages';
@@ -92,6 +91,12 @@ export class DeployScreen implements Screen {
   constructor(battle: Battle) {
     this.battle = battle;
     this.terrain = new TerrainRenderer(battle.state.map);
+    this.combatMessages.setViewer(battle.playerSide());
+  }
+
+  /** Deployment moves, orders and Begin go through the command queue (item 042). */
+  private command(body: CommandBody): void {
+    this.battle.submit(this.battle.playerSide(), body);
   }
 
   /** onEnter runs again when Options / the overview map hand control back: only the
@@ -120,11 +125,11 @@ export class DeployScreen implements Screen {
    * Armour Defends facing the enemy zone, infantry Ambushes (G23: the arc/hull
    * faces the enemy, not the team's own feet). */
   private issueDefaultOrder(team: Team): void {
-    this.battle.issueOrder(team.id, {
+    this.command({ type: 'order', teamId: team.id, order: {
       type: team.vehicleId != null ? 'defend' : 'ambush',
       target: this.enemyCentre,
       issuedAt: 0,
-    });
+    } });
   }
 
   private setSelection(ids: number[]): void {
@@ -159,6 +164,8 @@ export class DeployScreen implements Screen {
     const cam = game.cam;
     const map = this.battle.state.map;
     const state = this.battle.state;
+    // no ticks run while deploying: this applies the deploy moves and orders queued so far
+    this.battle.step(0);
 
     if (this.quitConfirm) {
       this.updateQuitConfirm(input);
@@ -186,7 +193,7 @@ export class DeployScreen implements Screen {
       if (input.keysPressed.has(ORDER_HOTKEYS[ot])) {
         this.pendingOrder = this.pendingOrder === ot ? null : ot;
         if (this.pendingOrder && this.selectedTeamId == null) {
-          addMessage(state, 'Select a team first, then the order target.', 'info');
+          this.combatMessages.notice(state, 'Select a team first, then the order target.');
         }
         break;
       }
@@ -351,8 +358,9 @@ export class DeployScreen implements Screen {
           const team = state.teams.get(id);
           if (!team) continue;
           const target = delta ? { x: Math.floor(team.pos.x) + delta.x + 0.5, y: Math.floor(team.pos.y) + delta.y + 0.5 } : dropWorld;
-          const ok = this.battle.deployTeam(id, target);
+          const ok = this.battle.canDeployTeam(id, target);
           if (ok) {
+            this.command({ type: 'deployTeam', teamId: id, pos: target });
             movedAny = true;
             // Manual: "Issuing a second order or redeploying the unit cancels the first
             // order" — the redeployed team falls back to its default Defend/Ambush.
@@ -414,10 +422,10 @@ export class DeployScreen implements Screen {
 
     const action = this.bottomStrip.update(input);
     if (action === 'auto') {
-      aiDeploy(this.battle.state, this.battle.playerSide(), this.battle.rng, this.battle);
+      this.command({ type: 'autoDeploy' });
       game.audio?.play('click');
     } else if (action === 'begin') {
-      this.battle.start();
+      this.command({ type: 'ready' });
       game.audio?.play('click');
       game.setScreen(new BattleScreen(this.battle, this.terrain));
     } else if (action === 'map') {
@@ -436,13 +444,13 @@ export class DeployScreen implements Screen {
         game.settings.unitLabels = !game.settings.unitLabels;
       } else {
         game.settings.showUnitVision = !(game.settings.showUnitVision ?? true);
-        addMessage(state, `View overlay ${game.settings.showUnitVision ? 'on' : 'off'}`, 'info');
+        this.combatMessages.notice(state, `View overlay ${game.settings.showUnitVision ? 'on' : 'off'}`);
       }
       game.saveSettings();
     }
     // '§': depth map view (hides the vision overlay while on). '.' / ',' cycle teams.
     if (handleDepthMapKey(input.keysPressed, game.settings)) {
-      addMessage(state, `Depth map ${game.settings.showDepthMap ? 'on' : 'off'}`, 'info');
+      this.combatMessages.notice(state, `Depth map ${game.settings.showDepthMap ? 'on' : 'off'}`);
     }
   }
 
@@ -463,12 +471,12 @@ export class DeployScreen implements Screen {
       const offset = isMoveType && ids.length > 1
         ? { x: team.pos.x - primary.pos.x, y: team.pos.y - primary.pos.y }
         : { x: 0, y: 0 };
-      this.battle.issueOrder(id, {
+      this.command({ type: 'order', teamId: id, order: {
         type,
         target: { x: world.x + offset.x, y: world.y + offset.y },
         issuedAt: this.battle.state.time,
         waypoints: chaining ? undefined : (this.pendingWaypoints.length > 0 ? this.pendingWaypoints.map((p) => ({ x: p.x + offset.x, y: p.y + offset.y })) : undefined),
-      });
+      } });
     }
     game.audio?.play('click');
     if (chaining) return;
