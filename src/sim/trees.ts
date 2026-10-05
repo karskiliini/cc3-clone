@@ -29,6 +29,7 @@ import { crushTile } from './structures';
 import { addMessage } from './messages';
 import { addStress } from './mind';
 import { applyHit } from './combat';
+import * as dm from '@/shared/dmath';
 
 /** Dense woods core (the AI's concealment heart) resists crushing; the fringe
  * and scattered trees go down. `woods` needs a vehicle of this length (m) or
@@ -113,7 +114,7 @@ export function treesInBlast(state: BattleState, rng: Rng, pos: Vec2, weapon: We
       if (!inBounds(map, tx, ty)) continue;
       const t = tileAt(map, tx, ty);
       if (!TREE_TILES.has(t)) continue;
-      const d = Math.hypot(tx + 0.5 - pos.x, ty + 0.5 - pos.y);
+      const d = dm.hypot(tx + 0.5 - pos.x, ty + 0.5 - pos.y);
       if (d > rTiles) continue;
       const crushed = crushTile(map, tx, ty);
       if (crushed && weapon.heRadiusM >= TREE_IGNITE_RADIUS_M && rng.chance(TREE_IGNITE_CHANCE)) {

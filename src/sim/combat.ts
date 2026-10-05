@@ -53,6 +53,7 @@ import { applyBlastDamage } from './structures';
 import { getHeightField, syncCraterMarks } from './heightField';
 import { dropKit, shedGearInBlast, throwItems } from './items';
 import type { Order } from '@/shared/types';
+import * as dm from '@/shared/dmath';
 
 export { hitChance, penetrates };
 
@@ -83,7 +84,7 @@ function stepMelee(state: BattleState, rng: Rng, dt: number, track: CombatTrack)
     let bestD = Infinity;
     for (const b of infantry) {
       if (b.side === a.side) continue;
-      const d = Math.hypot(a.pos.x - b.pos.x, a.pos.y - b.pos.y);
+      const d = dm.hypot(a.pos.x - b.pos.x, a.pos.y - b.pos.y);
       if (d <= MELEE_RANGE_TILES && d < bestD) { victim = b; bestD = d; }
     }
     if (!victim) continue;
@@ -592,7 +593,7 @@ export function applyBlastKnockback(state: BattleState, rng: Rng, s: Soldier, bu
   const d = dist(s.pos, burst);
   const force = blastForce(weapon, d) * exposure.force;
   if (force < 0.22) return;
-  const ang = d > 1e-3 ? Math.atan2(s.pos.y - burst.y, s.pos.x - burst.x) : rng.range(0, Math.PI * 2);
+  const ang = d > 1e-3 ? dm.atan2(s.pos.y - burst.y, s.pos.x - burst.x) : rng.range(0, Math.PI * 2);
   // Quadratic impulse keeps exposed standing men vulnerable without giving every sheltered man
   // the old minimum one-metre throw. The renderer uses this same attenuated force for its arc.
   const throwM = clamp(force * force * 9.5, 0, 15);
@@ -735,7 +736,7 @@ export function leaveCrater(state: BattleState, pos: Vec2, weapon: WeaponDef, un
       // distance (m) from the blast to the nearest edge of that tile, and the rim that fits
       const ex = Math.max(tx + dx - pos.x, 0, pos.x - (tx + dx + 1));
       const ey = Math.max(ty + dy - pos.y, 0, pos.y - (ty + dy + 1));
-      sizeM = Math.min(sizeM, Math.hypot(ex, ey) * TILE_M * 0.9);
+      sizeM = Math.min(sizeM, dm.hypot(ex, ey) * TILE_M * 0.9);
     }
   }
   sizeM = Math.max(0.8, sizeM);
@@ -971,7 +972,7 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
     const aim = targetPosOf(target), range = dist(shooter.pos, aim);
     const heading = angleTo(shooter.pos, aim) + rng.gauss() * (shooter.aiming.hasty === 'panic' ? 0.12 : 0.045);
     resolveSmallArmsRay(state, rng, shooter, weapon,
-      { x: shooter.pos.x + Math.sin(heading) * range, y: shooter.pos.y - Math.cos(heading) * range }, heading);
+      { x: shooter.pos.x + dm.sin(heading) * range, y: shooter.pos.y - dm.cos(heading) * range }, heading);
     return;
   }
   if (target.kind === 'point') {
@@ -1101,7 +1102,7 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
 function resolveSmallArmsRay(state: BattleState, rng: Rng, s: Soldier, weapon: WeaponDef, aim: Vec2, heading: number): void {
   const b = s.smgBurst;
   const from = smgMuzzle(s, heading), range = dist(s.pos, aim);
-  const to = { x: from.x + Math.sin(heading) * range, y: from.y - Math.cos(heading) * range };
+  const to = { x: from.x + dm.sin(heading) * range, y: from.y - dm.cos(heading) * range };
   const initialHull = smgHullIntercept(state, from, to, s.vehicleId);
   const shot = traceRound(state, rng, from, initialHull?.pos ?? to, weapon, { eyeM: smgMuzzleHeight(s, b?.mode ?? 'aimed'), targetM: 0.8 });
   let hull: ReturnType<typeof smgHullIntercept> = null;
@@ -1117,7 +1118,7 @@ function resolveSmallArmsRay(state: BattleState, rng: Rng, s: Soldier, weapon: W
     let closest = Infinity, travelled = 0, nearest = { pos: shot.impact, along: Infinity, leg: 1 };
     for (let leg = 1; leg < shot.points.length; leg++) {
       const a = shot.points[leg - 1], end = shot.points[leg], dx = end.x - a.x, dy = end.y - a.y;
-      const length = Math.hypot(dx, dy);
+      const length = dm.hypot(dx, dy);
       const alongRay = length > 0 ? ((victim.pos.x - a.x) * dx + (victim.pos.y - a.y) * dy) / (length * length) : 0;
       // A man just behind the intercept is not in the ray, even if he is within the hit radius.
       if (shot.blocked && leg === shot.points.length - 1 && alongRay >= 1) continue;
@@ -1223,8 +1224,8 @@ function fireBurst(state: BattleState, rng: Rng, soldier: Soldier, weapon: Weapo
     weapon.cls === 'atgun' ? 1.0 :
     weapon.cls === 'atrocket' ? 0.9 :
     0.55;
-  const mx = soldier.pos.x + Math.sin(soldier.facing) * muzzleOffM;
-  const my = soldier.pos.y - Math.cos(soldier.facing) * muzzleOffM;
+  const mx = soldier.pos.x + dm.sin(soldier.facing) * muzzleOffM;
+  const my = soldier.pos.y - dm.cos(soldier.facing) * muzzleOffM;
   state.flashes.push({ pos: { x: mx, y: my }, facing: facingAngle(soldier.facing), t: 0, kind: flashKind });
   state.events.push({ kind: 'shot', pos: { ...soldier.pos }, weaponId: weapon.id, side: soldier.side });
   // B2: a rocket launcher vents its backblast — a dust puff behind the firer (opposite his
@@ -1234,7 +1235,7 @@ function fireBurst(state: BattleState, rng: Rng, soldier: Soldier, weapon: Weapo
     // facing), and the launch whomp for audio.
     const back = facingTo(soldier.pos, tPos) + Math.PI;
     state.sparks.push({
-      pos: { x: soldier.pos.x + Math.sin(back) * 1.2, y: soldier.pos.y - Math.cos(back) * 1.2 },
+      pos: { x: soldier.pos.x + dm.sin(back) * 1.2, y: soldier.pos.y - dm.cos(back) * 1.2 },
       t: state.time, kind: 'backblast',
     });
     state.events.push({ kind: 'rocketLaunch', pos: { ...soldier.pos }, side: soldier.side, weaponId: weapon.id });
@@ -1764,7 +1765,7 @@ export const VEHICLE_UNLOAD_S = 2;
 
 function vehicleHitChance(weapon: WeaponDef, distM: number, cover: number, stance: Soldier['stance'], moving: boolean, speedMs = 0): number {
   if (distM > weapon.rangeM) return 0;
-  const rf = distM <= 100 ? 1 : Math.pow(100 / distM, 0.8);
+  const rf = distM <= 100 ? 1 : dm.pow(100 / distM, 0.8);
   const st = stance === 'standing' ? 1 : stance === 'crouching' ? 0.7 : 0.45;
   // Lead: penalty scales with the target's actual speed (1/(1+v/14)): ~0.56 at an 11 m/s
   // road march, ~0.86 at a slow 2 m/s crawl. The legacy boolean path keeps 0.6 for foot targets.
@@ -2415,7 +2416,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
       } else {
         // a round fired on the move lands wide of a point target
         const at = estimated ? estimateAim(state, rng, vehicle.pos, tPos) : { ...tPos };
-        if (ownMoving) { const r = (4 + rng.next() * 10) / TILE_M, a = rng.next() * Math.PI * 2; at.x += Math.sin(a) * r; at.y -= Math.cos(a) * r; }
+        if (ownMoving) { const r = (4 + rng.next() * 10) / TILE_M, a = rng.next() * Math.PI * 2; at.x += dm.sin(a) * r; at.y -= dm.cos(a) * r; }
         const shot = traceRound(state, rng, vehicle.pos, at, fired, { eyeM: VEHICLE_GUN_M, targetM: estimated ? 0.5 : 1.7 });
         traceTracers(state, shot, tracerKindFor(fired), !shot.blocked && !shot.deflected);
         areaImpact(state, rng, vehicle.pos, vehicle.side, fired, shot.impact, gunner);
@@ -2589,7 +2590,7 @@ function stepBowMg(state: BattleState, rng: Rng, vehicle: Vehicle, def: VehicleD
   const shieldVictim = target.kind === 'soldier' ? target.soldier : null;
   vehicle.bowFireTimer = 1 / mg.rate;
   // the muzzle is in the bow plate
-  const fx = Math.sin(vehicle.hullFacing), fy = -Math.cos(vehicle.hullFacing);
+  const fx = dm.sin(vehicle.hullFacing), fy = -dm.cos(vehicle.hullFacing);
   const muzzle = { x: vehicle.pos.x + (fx * def.lengthM * 0.4) / TILE_M, y: vehicle.pos.y + (fy * def.lengthM * 0.4) / TILE_M };
   state.events.push({ kind: 'shot', pos: { ...muzzle }, weaponId: mg.id, side: vehicle.side });
   const skillMul = clamp(0.7 + gunner.experience / 200, 0.7, 1.2) * (systemState(vehicle, 'bowMg') === 'damaged' ? BOW_MG_DAMAGED_MUL : 1);

@@ -6,12 +6,13 @@ import { dist } from '@/shared/math';
 import { roundPenetrationMm } from '@/sim/ballistics';
 import { SKILL_ACE, chooseAimPoint, gunnerSkill, soldierRounds, vehicleRounds } from '@/sim/aimPoint';
 import { crewEffects, expectedArmorMm, mainGunUsable } from '@/sim/vehicleDamage';
+import * as dm from '@/shared/dmath';
 
 /** Standard normal CDF (Abramowitz-Stegun 7.1.26 via erf), accurate to ~1e-7. */
 function phi(z: number): number {
   const x = Math.abs(z) / Math.SQRT2;
   const t = 1 / (1 + 0.3275911 * x);
-  const erf = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+  const erf = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * dm.exp(-x * x);
   return z >= 0 ? 0.5 * (1 + erf) : 0.5 * (1 - erf);
 }
 

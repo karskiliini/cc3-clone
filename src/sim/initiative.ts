@@ -1,6 +1,7 @@
 import type { BattleState, Side, Team, Vec2 } from '@/shared/types';
 import { otherSide, TILE_M } from '@/shared/types';
 import { Rng } from '@/shared/rng';
+import * as dm from '@/shared/dmath';
 
 // ============================================================================
 // initiative.ts — subordinate initiative (roadmap G18).
@@ -28,7 +29,7 @@ export interface InitiativeResult {
 function enemyVLs(state: BattleState, side: Side, from: { x: number; y: number }): { vl: BattleState['map']['victoryLocations'][number]; distM: number }[] {
   return state.map.victoryLocations
     .filter((vl) => vl.owner === otherSide(side))
-    .map((vl) => ({ vl, distM: Math.hypot(vl.x - from.x, vl.y - from.y) * TILE_M }))
+    .map((vl) => ({ vl, distM: dm.hypot(vl.x - from.x, vl.y - from.y) * TILE_M }))
     .sort((a, b) => a.distM - b.distM);
 }
 
@@ -58,7 +59,7 @@ export function stepSubordinateInitiative(state: BattleState, rng: Rng, side: Si
     if (options.length === 0) continue;
     const pick = options[rng.int(0, Math.min(2, options.length) - 1)];
     const target = { x: pick.vl.x, y: pick.vl.y };
-    if (team.aiObjective && Math.hypot(team.aiObjective.x - target.x, team.aiObjective.y - target.y) * TILE_M < OBJECTIVE_EPSILON_M) continue;
+    if (team.aiObjective && dm.hypot(team.aiObjective.x - target.x, team.aiObjective.y - target.y) * TILE_M < OBJECTIVE_EPSILON_M) continue;
 
     team.aiObjective = target;
     issue(team.id, target);

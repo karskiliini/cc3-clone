@@ -35,6 +35,7 @@ import { addStress } from './mind';
 import { isPassable } from './path';
 import { vehicleRounds } from './aimPoint';
 import { hurtCrewman, hurtPassenger } from './vehicleDamage';
+import * as dm from '@/shared/dmath';
 
 // ------------------------------------------------------------------ the charge
 /** Explosive weight of one round relative to an HE round of the same gun (AP and APCR: the
@@ -99,7 +100,7 @@ function blastWeapon(id: string, name: string, radiusM: number, lethality: numbe
 /** Where something heavy thrown `m` metres along `ang` (atan2 radians) comes down: it flies over
  * walls and hedges, so only the landing spot matters — pulled in until a man could stand there. */
 function flyEnd(state: BattleState, origin: Vec2, ang: number, m: number): Vec2 {
-  const ux = Math.cos(ang), uy = Math.sin(ang);
+  const ux = dm.cos(ang), uy = dm.sin(ang);
   for (let d = m; d > 0.5; d -= 1) {
     const q = { x: origin.x + (ux * d) / TILE_M, y: origin.y + (uy * d) / TILE_M };
     const tx = Math.floor(q.x), ty = Math.floor(q.y);
@@ -303,7 +304,7 @@ export function stepCookOff(state: BattleState, rng: Rng, v: Vehicle): void {
     if (load <= 0) {
       // fuel only: the same rising shape, scaled to FUEL_BLAST_CHANCE over the window
       const area = (COOKOFF_UNTIL_S - COOKOFF_FROM_S) * 0.625;
-      if (ramp > 0 && rng.chance((-Math.log(1 - FUEL_BLAST_CHANCE) / area) * ramp)) { co.ended = 'fuel'; fuelExplosion(state, rng, v, otherSide(v.side)); }
+      if (ramp > 0 && rng.chance((-dm.log(1 - FUEL_BLAST_CHANCE) / area) * ramp)) { co.ended = 'fuel'; fuelExplosion(state, rng, v, otherSide(v.side)); }
       continue;
     }
     if (t >= POPS_FROM_S && rng.chance(0.1 * (0.4 + 0.6 * load))) cookOffPop(state, rng, v);

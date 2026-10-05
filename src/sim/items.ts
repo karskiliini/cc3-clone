@@ -16,6 +16,7 @@ import { WEAPONS } from '@/data/weapons';
 import { inBounds } from './map';
 import { isPassable } from './path';
 import { blastThrowEnd, blastThrowM } from './debris';
+import * as dm from '@/shared/dmath';
 
 export const ITEM_CAP = 600;
 /** weaponId of a man with empty hands (no WEAPONS entry, so he cannot fire). */
@@ -183,7 +184,7 @@ export function throwItems(state: BattleState, rng: Rng, burst: Vec2, radiusTile
     if (d > radiusTiles) continue;
     const force = forceAt(d);
     if (force <= 0.05) continue;
-    const ang = d > 1e-3 ? Math.atan2(it.pos.y - burst.y, it.pos.x - burst.x) : rng.range(0, Math.PI * 2);
+    const ang = d > 1e-3 ? dm.atan2(it.pos.y - burst.y, it.pos.x - burst.x) : rng.range(0, Math.PI * 2);
     const from = { x: it.pos.x, y: it.pos.y };
     it.pos = blastThrowEnd(state, from, ang + rng.range(-0.25, 0.25), blastThrowM(force) * rng.range(0.6, 1.15));
     it.dir = rng.range(0, Math.PI * 2);
@@ -199,7 +200,7 @@ export function shedGearInBlast(state: BattleState, rng: Rng, s: Soldier, burst:
   if (!rng.chance(0.4)) return;
   track.bareHeaded.add(s.id);
   const origin = s.blast?.origin ?? s.pos;
-  const ang = Math.atan2(s.pos.y - burst.y, s.pos.x - burst.x) + rng.range(-0.6, 0.6);
+  const ang = dm.atan2(s.pos.y - burst.y, s.pos.x - burst.x) + rng.range(-0.6, 0.6);
   const helmet = rng.chance(0.7);
   addItem(state, {
     kind: helmet ? 'helmet' : 'pack', side: s.side,

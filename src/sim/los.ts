@@ -3,6 +3,7 @@ import { TILE_M } from '@/shared/types';
 import { TERRAIN_PROPS } from './terrain';
 import { idx, inBounds } from './map';
 import { GROWTH_HEIGHT_M, tileStanding } from './growth';
+import * as dm from '@/shared/dmath';
 
 export interface LosResult {
   clear: boolean;
@@ -85,7 +86,7 @@ export function losTrace(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeight
   const tx = Math.floor(to.x), ty = Math.floor(to.y);
   const startTile: Vec2 = { x: fx, y: fy };
   const endTile: Vec2 = { x: tx, y: ty };
-  const distM = Math.hypot(to.x - from.x, to.y - from.y) * TILE_M;
+  const distM = dm.hypot(to.x - from.x, to.y - from.y) * TILE_M;
 
   const startTerrain = inBounds(map, fx, fy) ? map.tiles[idx(map, fx, fy)] : 'open';
   const startIsWoods = startTerrain === 'woods';

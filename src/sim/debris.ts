@@ -19,6 +19,7 @@ import { inBounds, tileAt } from './map';
 import { isPassable } from './path';
 import { hasLOS } from './los';
 import { addStress } from './mind';
+import * as dm from '@/shared/dmath';
 
 export const DEBRIS_CAP = 300;
 export const DEBRIS_VARIANTS = 3;
@@ -39,7 +40,7 @@ export function blastThrowM(force: number): number {
 /** End point of a throw of `throwM` metres from `origin` along `ang` (atan2 radians): stops at the
  * last passable point before a wall, a vehicle, water or the map edge. */
 export function blastThrowEnd(state: BattleState, origin: Vec2, ang: number, throwM: number): Vec2 {
-  const ux = Math.cos(ang), uy = Math.sin(ang);
+  const ux = dm.cos(ang), uy = dm.sin(ang);
   const lenTiles = throwM / TILE_M;
   const steps = Math.ceil(lenTiles / 0.2);
   const otx = Math.floor(origin.x), oty = Math.floor(origin.y);
@@ -91,7 +92,7 @@ export function dismember(state: BattleState, rng: Rng, s: Soldier, burst: Vec2,
   const debris = debrisOf(state);
   const origin = s.blast?.origin ?? s.pos;
   const d = dist(origin, burst);
-  const base = d > 1e-3 ? Math.atan2(origin.y - burst.y, origin.x - burst.x) : rng.range(0, Math.PI * 2);
+  const base = d > 1e-3 ? dm.atan2(origin.y - burst.y, origin.x - burst.x) : rng.range(0, Math.PI * 2);
   const season = state.map.def.season;
   const kinds = rng.chance(0.5) ? [...PARTS, 'boot' as DebrisKind] : PARTS;
   for (const kind of kinds) {
@@ -126,7 +127,7 @@ export function throwDebris(state: BattleState, rng: Rng, burst: Vec2, radiusTil
     if (d > radiusTiles) continue;
     const force = forceAt(d);
     if (force <= 0.05) continue;
-    const ang = d > 1e-3 ? Math.atan2(part.pos.y - burst.y, part.pos.x - burst.x) : rng.range(0, Math.PI * 2);
+    const ang = d > 1e-3 ? dm.atan2(part.pos.y - burst.y, part.pos.x - burst.x) : rng.range(0, Math.PI * 2);
     const from = { x: part.pos.x, y: part.pos.y };
     part.pos = blastThrowEnd(state, from, ang + rng.range(-0.3, 0.3), blastThrowM(force) * rng.range(0.6, 1.1));
     part.dir = rng.range(0, Math.PI * 2);

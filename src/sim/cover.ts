@@ -7,6 +7,7 @@
 import type { GameMap, Terrain, Vec2 } from '@/shared/types';
 import { inBounds, tileAt } from './map';
 import { TERRAIN_PROPS } from './terrain';
+import * as dm from '@/shared/dmath';
 
 const OMNI_COVER: Partial<Record<Terrain, number>> = {
   trench: 0.8, crater: 0.5, buildingStone: 0.5, buildingWood: 0.5, floor: 0.5, rubble: 0.5, woods: 0.45,
@@ -75,8 +76,8 @@ export function coverFrom(map: GameMap, tile: Vec2, dirRad: number, ctx?: CoverC
   if (!inBounds(map, tx, ty)) return 0;
   const omni = omniCoverOf(map, tx, ty, tileAt(map, tx, ty));
 
-  const stepX = Math.round(Math.sin(dirRad));
-  const stepY = Math.round(-Math.cos(dirRad));
+  const stepX = Math.round(dm.sin(dirRad));
+  const stepY = Math.round(-dm.cos(dirRad));
   let diag1 = { dx: 0, dy: 0 };
   let diag2 = { dx: 0, dy: 0 };
   if (stepX !== 0 && stepY !== 0) {

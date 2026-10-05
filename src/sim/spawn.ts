@@ -8,6 +8,7 @@ import { randomName } from '@/data/names';
 import { rollExperience } from '@/data/experience';
 import { baseMotivation, createMind, rollTrait } from './mind';
 import { isPassable } from './path';
+import * as dm from '@/shared/dmath';
 
 const RELOAD_HEAVY = new Set(['mortar', 'atgun', 'atrocket']);
 
@@ -20,7 +21,7 @@ const MIN_SLOT_SPACING = 1.5;
  * (`angleTo`): 0 = north (-y), PI/2 = east. A canonical offset whose front is -y rotated by a
  * heading therefore has its front facing that heading. */
 export function rotateOffset(v: Vec2, rad: number): Vec2 {
-  const c = Math.cos(rad), s = Math.sin(rad);
+  const c = dm.cos(rad), s = dm.sin(rad);
   return { x: v.x * c - v.y * s, y: v.x * s + v.y * c };
 }
 
@@ -46,19 +47,19 @@ const j = (rng: Rng, amp: number) => rng.range(-amp, amp);
 function spaced(rng: Rng, placed: Vec2[], want: () => Vec2): Vec2 {
   let p = want();
   for (let tries = 0; tries < 12; tries++) {
-    if (placed.every((q) => Math.hypot(p.x - q.x, p.y - q.y) >= MIN_SLOT_SPACING)) return p;
+    if (placed.every((q) => dm.hypot(p.x - q.x, p.y - q.y) >= MIN_SLOT_SPACING)) return p;
     p = want();
   }
   for (let guard = 0; guard < 20; guard++) {
     let nearest: Vec2 | null = null;
     let nd = Infinity;
     for (const q of placed) {
-      const d = Math.hypot(p.x - q.x, p.y - q.y);
+      const d = dm.hypot(p.x - q.x, p.y - q.y);
       if (d < nd) { nd = d; nearest = q; }
     }
     if (!nearest || nd >= MIN_SLOT_SPACING) break;
-    const ang = nd > 1e-3 ? Math.atan2(p.y - nearest.y, p.x - nearest.x) : rng.range(0, Math.PI * 2);
-    p = { x: nearest.x + Math.cos(ang) * (MIN_SLOT_SPACING + 0.05), y: nearest.y + Math.sin(ang) * (MIN_SLOT_SPACING + 0.05) };
+    const ang = nd > 1e-3 ? dm.atan2(p.y - nearest.y, p.x - nearest.x) : rng.range(0, Math.PI * 2);
+    p = { x: nearest.x + dm.cos(ang) * (MIN_SLOT_SPACING + 0.05), y: nearest.y + dm.sin(ang) * (MIN_SLOT_SPACING + 0.05) };
   }
   return p;
 }
@@ -95,7 +96,7 @@ export function naturalFormation(def: TeamDef, rng: Rng): Vec2[] {
       const c = slots[w];
       slots[i] = spaced(rng, placed, () => {
         const t = Math.min(1.45, 0.3 + 0.45 * Math.floor(k / 2) + j(rng, 0.3));
-        return { x: c.x + side * r * Math.cos(t), y: c.y + r * Math.sin(t) };
+        return { x: c.x + side * r * dm.cos(t), y: c.y + r * dm.sin(t) };
       });
       placed.push(slots[i]);
       k++;
@@ -121,7 +122,7 @@ export function naturalFormation(def: TeamDef, rng: Rng): Vec2[] {
       const p = spaced(rng, placed, () => {
         const a = rng.range(0, Math.PI * 2);
         const r = rng.range(1.6, 3.0);
-        return { x: Math.cos(a) * r, y: Math.abs(Math.sin(a)) * r * 0.8 + j(rng, 0.8) };
+        return { x: dm.cos(a) * r, y: Math.abs(dm.sin(a)) * r * 0.8 + j(rng, 0.8) };
       });
       slots.push(p); placed.push(p);
     }
@@ -240,14 +241,14 @@ export function findVehicleDeploySpot(state: BattleState, side: Side, defId: str
   const zone = map.def.deployZones[side];
   // only hold the search to the deploy zone when the wanted spot is itself inside it
   const zoned = want.x >= zone.x && want.x < zone.x + zone.w && want.y >= zone.y && want.y < zone.y + zone.h;
-  const clear = (p: Vec2): boolean => others.every((o) => Math.hypot(o.pos.x - p.x, o.pos.y - p.y) >= vehicleDeploySpacing(defId, o.defId));
+  const clear = (p: Vec2): boolean => others.every((o) => dm.hypot(o.pos.x - p.x, o.pos.y - p.y) >= vehicleDeploySpacing(defId, o.defId));
   const okTile = (x: number, y: number): boolean =>
     x >= 0 && y >= 0 && x < map.width && y < map.height
     && (!zoned || (x + 0.5 >= zone.x && x + 0.5 < zone.x + zone.w && y + 0.5 >= zone.y && y + 0.5 < zone.y + zone.h))
     && isPassable(map, x, y, 'vehicle');
   if (clear(want)) return want;
   const heading = formationBaseHeading(map, side);
-  const fx = Math.sin(heading), fy = -Math.cos(heading);
+  const fx = dm.sin(heading), fy = -dm.cos(heading);
   const tx = Math.floor(want.x), ty = Math.floor(want.y);
   let best: Vec2 | null = null;
   let bestScore = Infinity;
@@ -260,11 +261,11 @@ export function findVehicleDeploySpot(state: BattleState, side: Side, defId: str
         if (!okTile(x, y)) continue;
         const p = { x: x + 0.5, y: y + 0.5 };
         if (!clear(p)) continue;
-        let score = Math.hypot(p.x - want.x, p.y - want.y);
+        let score = dm.hypot(p.x - want.x, p.y - want.y);
         // staggered beats abreast / nose-to-tail: penalise lining up with a near neighbour
         for (const o of others) {
           const ox = p.x - o.pos.x, oy = p.y - o.pos.y;
-          if (Math.hypot(ox, oy) > vehicleDeploySpacing(defId, o.defId) * 1.8) continue;
+          if (dm.hypot(ox, oy) > vehicleDeploySpacing(defId, o.defId) * 1.8) continue;
           const along = Math.abs(ox * fx + oy * fy), across = Math.abs(-ox * fy + oy * fx);
           if (along < 1.5 || across < 1.5) score += 2;
         }
@@ -368,7 +369,7 @@ export function spawnTeam(state: BattleState, def: TeamDef, side: Side, pos: Vec
   // replace it in the deploy screen with any order (move/hide/ambush/attack) aimed with the mouse.
   const baseHeading = formationBaseHeading(state.map, side);
   const facing = facingFromAngle(baseHeading);
-  const ahead = { x: pos.x + Math.cos(baseHeading) * 4, y: pos.y + Math.sin(baseHeading) * 4 };
+  const ahead = { x: pos.x + dm.cos(baseHeading) * 4, y: pos.y + dm.sin(baseHeading) * 4 };
   team.facing = facing;
   team.order = { type: 'defend', target: ahead, issuedAt: state.time };
   const offsets = naturalFormation(def, rng).map((o) => rotateOffset(o, baseHeading));

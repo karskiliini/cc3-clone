@@ -13,6 +13,7 @@ import { stepOrderWaypoints } from './orders';
 import { isDazed, stepDazed } from './daze';
 import { INFANTRY_PACE, infantrySpeedMs } from './infantryPace';
 import { stepHitTheDirt } from './hitTheDirt';
+import * as dm from '@/shared/dmath';
 
 const SPEEDS: Record<string, number> = {
   moving: INFANTRY_PACE.walk,
@@ -34,7 +35,7 @@ export const GRADE_UPHILL_VEHICLE = 1.9;
  * on a flat map (no `map.ground`), so nothing changes there. */
 export function gradeSpeedMul(map: GameMap, a: Vec2, b: Vec2, coeff = GRADE_UPHILL_INFANTRY): number {
   if (!map.ground) return 1;
-  const runM = Math.hypot(b.x - a.x, b.y - a.y) * TILE_M;
+  const runM = dm.hypot(b.x - a.x, b.y - a.y) * TILE_M;
   if (runM < 1e-3) return 1;
   const grade = (groundHeightAt(map, b) - groundHeightAt(map, a)) / runM;
   const m = 1 - grade * coeff;
@@ -160,7 +161,7 @@ function resolveSoldierOverlap(state: BattleState, s: Soldier, rng: Rng): void {
     // he was travelling (his facing), so he steps ASIDE rather than back the way he came
     const side = rng.chance(0.5) ? 1 : -1;
     const travelRad = facingAngle(s.facing);
-    const perp = { x: -Math.cos(travelRad) * side, y: -Math.sin(travelRad) * side };
+    const perp = { x: -dm.cos(travelRad) * side, y: -dm.sin(travelRad) * side };
     let spot = vadd(s.pos, vscale(perp, SOLDIER_BODY_RADIUS_TILES * 2));
     const tx = Math.floor(spot.x), ty = Math.floor(spot.y);
     if (!inBounds(state.map, tx, ty) || !isPassable(state.map, tx, ty, 'infantry')) {

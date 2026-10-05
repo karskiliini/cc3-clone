@@ -9,6 +9,7 @@ import { onSpotted } from './mind';
 import { dazeVisionFactor } from './daze';
 import { VEHICLE_DEFS } from '@/data/units';
 import { vehicleEyes, type VehicleEye } from './vehicleVision';
+import * as dm from '@/shared/dmath';
 
 export const SOLDIER_SPOT_RANGE_M = 300;
 /** Item 014: radius (m) of the glow cast by a burning vehicle — anyone inside it and in LOS of
@@ -253,7 +254,7 @@ export function observerStandingSpotScore(
 function nearestFirePos(state: BattleState, ev: Vehicle): Vec2 | null {
   for (const v of state.vehicles.values()) {
     if (v === ev || v.state !== 'burning') continue;
-    if (distSqTiles(v.pos, ev.pos) <= (FIRELIGHT_RANGE_M / TILE_M) ** 2) return v.pos;
+    if (distSqTiles(v.pos, ev.pos) <= dm.pow(FIRELIGHT_RANGE_M / TILE_M, 2)) return v.pos;
   }
   return null;
 }
@@ -262,7 +263,7 @@ export function item14FloorM(state: BattleState, ev: Vehicle): number {
   if (ev.state === 'burning') return ALWAYS_SPOT_RANGE_M * 3; // his own fire gives him away
   for (const v of state.vehicles.values()) {
     if (v === ev || v.state !== 'burning') continue;
-    if (distSqTiles(v.pos, ev.pos) <= (FIRELIGHT_RANGE_M / TILE_M) ** 2) return ALWAYS_SPOT_RANGE_M;
+    if (distSqTiles(v.pos, ev.pos) <= dm.pow(FIRELIGHT_RANGE_M / TILE_M, 2)) return ALWAYS_SPOT_RANGE_M;
   }
   return 0;
 }
@@ -280,7 +281,7 @@ export function updateSpotting(state: BattleState, rng: Rng): void {
     // ---- soldier targets ----
     const prevSpotted = state.spotted[side];
     const newSpotted = new Set<number>();
-    const alwaysSq = (ALWAYS_SPOT_RANGE_M / TILE_M) ** 2;
+    const alwaysSq = dm.pow(ALWAYS_SPOT_RANGE_M / TILE_M, 2);
 
     // For belief clustering (spec §5): count how many currently-visible enemies of this side sit
     // within 4 tiles of each other, computed once per enemy-of-this-side (not per spotter).
@@ -324,7 +325,7 @@ export function updateSpotting(state: BattleState, rng: Rng): void {
         // the target is lit up regardless of his stance or movement
         if (!alwaysSpotted && visibility > 0) {
           for (const f of fires) {
-            if (distSqTiles(f, e.pos) <= (FIRELIGHT_RANGE_M / TILE_M) ** 2) { alwaysSpotted = true; break; }
+            if (distSqTiles(f, e.pos) <= dm.pow(FIRELIGHT_RANGE_M / TILE_M, 2)) { alwaysSpotted = true; break; }
           }
         }
 

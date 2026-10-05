@@ -1,0 +1,13 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`dmath > reproduces fixed reference bits (the same on every engine) 1`] = `
+[
+  "0.8414709848078965",
+  "-0.4161468365471424",
+  "2.498091544796509",
+  "2.0137527074704766",
+  "2.302585092994046",
+  "-0.8039373685728239",
+  "3.9528470752104745",
+]
+`;

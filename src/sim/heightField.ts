@@ -19,6 +19,7 @@
 import type { GameMap, HeightField, MapVectorFeature, Terrain, Vec2 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import { hash2 } from '@/shared/rng';
+import * as dm from '@/shared/dmath';
 
 export const HF_RES = 4;
 /** metres per sample */
@@ -77,7 +78,7 @@ function distSeg(px: number, py: number, s: Seg): number {
   const abx = s.bx - s.ax, aby = s.by - s.ay;
   const len2 = abx * abx + aby * aby;
   const t = len2 > 0 ? clamp01(((px - s.ax) * abx + (py - s.ay) * aby) / len2) : 0;
-  return Math.hypot(px - (s.ax + abx * t), py - (s.ay + aby * t));
+  return dm.hypot(px - (s.ax + abx * t), py - (s.ay + aby * t));
 }
 
 // ------------------------------------------------------------------ building/context setup
@@ -292,7 +293,7 @@ function addLineFeatures(ctx: FieldCtx, tx: number, ty: number, out: Float32Arra
             const u = len2 > 0 ? clamp01(((px - sg.ax) * abx + (py - sg.ay) * aby) / len2) : 0;
             const qx = sg.ax + abx * u, qy = sg.ay + aby * u;
             if (qx < nx - 0.02 || qx > nx + 1.02 || qy < ny - 0.02 || qy > ny + 1.02) continue;
-            const dd = Math.hypot(px - qx, py - qy);
+            const dd = dm.hypot(px - qx, py - qy);
             if (dd < d) d = dd;
           }
           if (d === Infinity) continue;
@@ -315,7 +316,7 @@ function tileCanopy(map: GameMap, tx: number, ty: number, out: Float32Array): vo
       const sx = tx * R + (k % R), sy = ty * R + ((k / R) | 0);
       // lone crowns: a sample cluster around a hashed trunk position in the tile
       const trunkX = Math.floor(hash2(tx, ty, 5103) * R), trunkY = Math.floor(hash2(tx, ty, 5104) * R);
-      const d = Math.hypot((k % R) - trunkX, ((k / R) | 0) - trunkY);
+      const d = dm.hypot((k % R) - trunkX, ((k / R) | 0) - trunkY);
       out[k] = hash2(tx, ty, 5105) < 0.6 && d <= 1.2 ? 7 + hash2(sx, sy, 5106) * 2 : 0;
     }
   } else {
@@ -382,14 +383,14 @@ function stampBowl(field: HeightField, cx: number, cy: number, radiusM: number, 
   for (let sy = Math.max(0, sy0); sy <= Math.min(field.h - 1, sy1); sy++) {
     for (let sx = Math.max(0, sx0); sx <= Math.min(field.w - 1, sx1); sx++) {
       const px = (sx + 0.5) / R, py = (sy + 0.5) / R;
-      const d = Math.hypot(px - cx, py - cy) / rT; // 1 at the rim
+      const d = dm.hypot(px - cx, py - cy) / rT; // 1 at the rim
       const i = sy * field.w + sx;
       if (d < 1) {
         const v = depth * (1 - d * d);
         // overlapping holes deepen a little rather than simply taking the deeper one
         field.dig[i] = Math.min(field.dig[i], v) + (field.dig[i] < 0 && v < 0 ? Math.max(v, field.dig[i]) * 0.15 : 0);
       } else if (d < 1.6 && field.dig[i] >= -0.05) {
-        const r = rim * Math.sin(((d - 1) / 0.6) * Math.PI) * (d < 1.3 ? 1 : 1 - (d - 1.3) / 0.3 * 0.5);
+        const r = rim * dm.sin(((d - 1) / 0.6) * Math.PI) * (d < 1.3 ? 1 : 1 - (d - 1.3) / 0.3 * 0.5);
         field.dig[i] = Math.max(field.dig[i], r);
       }
     }
@@ -406,7 +407,7 @@ export function applyCrater(field: HeightField, pos: Vec2, sizeM: number): void 
 /** Foxhole pit (-1.2 m) with a spoil mound on the side facing `angle` (radians, 0 = east). */
 function stampFoxhole(field: HeightField, cx: number, cy: number, angle: number, twoMan: boolean): void {
   const R = field.res;
-  const ux = Math.cos(angle), uy = Math.sin(angle);
+  const ux = dm.cos(angle), uy = dm.sin(angle);
   const halfLenM = twoMan ? 1.0 : 0.55, halfWidM = 0.55;
   const reach = 1.4; // tiles
   const sx0 = Math.floor((cx - reach) * R), sx1 = Math.ceil((cx + reach) * R);
@@ -417,14 +418,14 @@ function stampFoxhole(field: HeightField, cx: number, cy: number, angle: number,
       const along = dx * ux + dy * uy;       // toward the enemy
       const across = -dx * uy + dy * ux;     // along the pit's long axis
       const i = sy * field.w + sx;
-      const e = Math.hypot(Math.max(0, Math.abs(across) - (halfLenM - halfWidM)) / halfWidM, along / halfWidM);
+      const e = dm.hypot(Math.max(0, Math.abs(across) - (halfLenM - halfWidM)) / halfWidM, along / halfWidM);
       if (e < 1) {
         field.dig[i] = Math.min(field.dig[i], H_FOXHOLE * (e < 0.6 ? 1 : 1 - smooth((e - 0.6) / 0.4) * 0.7));
       } else {
         // crescent of spoil 0.6-1.4 m in front of the pit
         const f = along - halfWidM;
         if (f > 0 && f < 1.1 && Math.abs(across) < halfLenM + 0.6) {
-          const m = H_FOXHOLE_SPOIL * Math.sin((f / 1.1) * Math.PI) * (1 - smooth((Math.abs(across) - halfLenM) / 0.6));
+          const m = H_FOXHOLE_SPOIL * dm.sin((f / 1.1) * Math.PI) * (1 - smooth((Math.abs(across) - halfLenM) / 0.6));
           field.dig[i] = Math.max(field.dig[i], m);
         }
       }
@@ -445,7 +446,7 @@ function stampTrenchSegs(field: HeightField, segs: Seg[]): void {
         const i = sy * field.w + sx;
         if (dM <= 0.55) field.dig[i] = Math.min(field.dig[i], H_TRENCH);
         else if (dM <= 0.85) field.dig[i] = Math.min(field.dig[i], H_TRENCH * (1 - smooth((dM - 0.55) / 0.3)));
-        else if (dM <= 1.6 && field.dig[i] >= 0) field.dig[i] = Math.max(field.dig[i], 0.3 * Math.sin(((dM - 0.85) / 0.75) * Math.PI));
+        else if (dM <= 1.6 && field.dig[i] >= 0) field.dig[i] = Math.max(field.dig[i], 0.3 * dm.sin(((dM - 0.85) / 0.75) * Math.PI));
       }
     }
     recomposeRect(field, sx0, sy0, sx1, sy1);

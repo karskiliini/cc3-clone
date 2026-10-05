@@ -17,6 +17,7 @@ import { applyOrderToSoldier, orderRoutePoints, routeVia } from './orders';
 import { DAZE_VETERAN_EXP, isDazed } from './daze';
 import { blastExposure } from './blastExposure';
 import { inCommand } from './command';
+import * as dm from '@/shared/dmath';
 
 // ---------------------------------------------------------------- motivation
 /** Motivation seed from experience (proxy for conscript/regular/elite quality bands) + leadership. */
@@ -211,7 +212,7 @@ function maintainBeliefs(state: BattleState, soldier: Soldier, dtSinceLast: numb
     const b = mind.beliefs[i];
     b.confidence -= (1 / 120) * dtSinceLast;
     if (hasLOS(state.map, soldier.pos, b.pos) && !enemyVisibleNear(state, soldier, b.pos)) {
-      b.confidence *= Math.pow(0.5, dtSinceLast / 10);
+      b.confidence *= dm.pow(0.5, dtSinceLast / 10);
     }
     b.deadSeen = countDeadNear(state, soldier, b.pos);
     if (b.deadSeen >= b.count) {
@@ -335,7 +336,7 @@ export function onIncomingFire(
       mind.threatDir = angleTo(soldier.pos, shooter.pos);
       mind.threatLevel = 1;
       const dir = mind.threatDir;
-      const farPos = { x: soldier.pos.x + Math.sin(dir) * (60 / TILE_M), y: soldier.pos.y - Math.cos(dir) * (60 / TILE_M) };
+      const farPos = { x: soldier.pos.x + dm.sin(dir) * (60 / TILE_M), y: soldier.pos.y - dm.cos(dir) * (60 / TILE_M) };
       addOrMergeBelief(mind, farPos, 'fired', 0.5, 1, state.time);
     } else {
       mind.threatLevel = Math.max(mind.threatLevel, 0.6);
@@ -500,7 +501,7 @@ export function onFired(state: BattleState, rng: Rng, soldier: Soldier): void {
     t.spotAnchor = null;
     const angle = rng.range(0, Math.PI * 2);
     const distTiles = rng.range(10, 20) / TILE_M;
-    const dest = { x: soldier.pos.x + Math.cos(angle) * distTiles, y: soldier.pos.y + Math.sin(angle) * distTiles };
+    const dest = { x: soldier.pos.x + dm.cos(angle) * distTiles, y: soldier.pos.y + dm.sin(angle) * distTiles };
     soldier.path = findPath(state.map, soldier.pos, dest, 'infantry');
     if (soldier.activity !== 'firing') soldier.activity = 'moving';
   }

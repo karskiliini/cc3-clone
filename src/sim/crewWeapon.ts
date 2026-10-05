@@ -45,6 +45,7 @@ import { expectedArmorMm } from './vehicleDamage';
 import { formationBaseHeading, rotateOffset } from './spawn';
 import { isDazed, recoveryFactor } from './daze';
 import { INFANTRY_PACE, infantrySpeedMs } from './infantryPace';
+import * as dm from '@/shared/dmath';
 
 export type CrewServedClass = 'mortar' | 'hmg' | 'atgun' | 'rocket';
 const CREW_SERVED = new Set<WeaponClass>(['mortar', 'hmg', 'atgun', 'rocket']);
@@ -169,10 +170,10 @@ export function trailEndM(weaponId: string, side: -1 | 1, open: number): Vec2 {
   const g = trailGeom(weaponId);
   const t = clamp(open, 0, 1);
   // along an arc about the trail hinge near the axle, not a straight chord
-  const a0 = Math.atan2(g.closed.x, g.closed.y), a1 = Math.atan2(g.open.x, g.open.y);
-  const r0 = Math.hypot(g.closed.x, g.closed.y), r1 = Math.hypot(g.open.x, g.open.y);
+  const a0 = dm.atan2(g.closed.x, g.closed.y), a1 = dm.atan2(g.open.x, g.open.y);
+  const r0 = dm.hypot(g.closed.x, g.closed.y), r1 = dm.hypot(g.open.x, g.open.y);
   const a = a0 + (a1 - a0) * t, r = r0 + (r1 - r0) * t;
-  return { x: side * Math.sin(a) * r, y: Math.cos(a) * r };
+  return { x: side * dm.sin(a) * r, y: dm.cos(a) * r };
 }
 
 /** Distance (m) from the axle to where the haulers hold the closed trails. */

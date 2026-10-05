@@ -29,6 +29,7 @@ import { treeCrushByVehicle } from './trees';
 import { stepVehicleCrews } from './vehicleCrew';
 import { stepTransport, transportHolds } from './transport';
 import { isDazed } from './daze';
+import * as dm from '@/shared/dmath';
 
 const HEADING_ALIGN_RAD = 0.35;
 /** Tracked vehicles: beyond this heading error they stop and pivot; beyond SHARP_TURN_RAD they
@@ -131,7 +132,7 @@ function distToSegment(p: Vec2, a: Vec2, b: Vec2): number {
   const abx = b.x - a.x, aby = b.y - a.y;
   const len2 = abx * abx + aby * aby;
   const t = len2 > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2)) : 0;
-  return Math.hypot(p.x - (a.x + abx * t), p.y - (a.y + aby * t));
+  return dm.hypot(p.x - (a.x + abx * t), p.y - (a.y + aby * t));
 }
 
 
@@ -300,7 +301,7 @@ function stepOneVehicleMind(state: BattleState, rng: Rng, dt: number, v: Vehicle
   let topUrgency = -1;
   for (const th of threats) {
     const d = bestRoundAgainst(th.weapon, th.distM, def.armor.front, year).chance;
-    const urgency = d * (1 - (1 - d) ** shotsWithin(th.firstShotS, th.cycleS)) + d * 1e-3;
+    const urgency = d * (1 - dm.pow(1 - d, shotsWithin(th.firstShotS, th.cycleS))) + d * 1e-3;
     if (urgency > topUrgency || !top) { topUrgency = urgency; topDanger = d; top = th; }
   }
   // Belief-only threat (spec §10c): an unseen AT shooter that just sent a round past us. Danger is
@@ -359,7 +360,7 @@ function stepOneVehicleMind(state: BattleState, rng: Rng, dt: number, v: Vehicle
       const ourP = mainGunUsable(v) ? bestRoundAgainst(ourWeapon, top.distM, top.theirArmor, year, ours).chance : 0;
       const ourShots = Math.min(2, shotsWithin(timeToFirstShotS(state, v, top.pos, !!top.vehicle && Math.abs(top.vehicle.speed) > 0.1), cycleTimeS(state, v)));
       const theirShots = Math.max(1, Math.min(2, shotsWithin(top.firstShotS, top.cycleS)));
-      shouldFlee = 1 - (1 - ourP) ** ourShots < 1 - (1 - topDanger) ** theirShots;
+      shouldFlee = 1 - dm.pow(1 - ourP, ourShots) < 1 - dm.pow(1 - topDanger, theirShots);
     }
   }
   // a tank whose main gun is gone has no business in front of anything that can hurt it
@@ -476,7 +477,7 @@ function driveReversing(state: BattleState, rng: Rng, dt: number, v: Vehicle, sp
   // item 022: a tank moves only along its tracks — reversing drives BACKWARD along the hull's
   // rear axis, never a straight line to the destination. The driver shapes the course by
   // steering the hull (turnHull above); the tracks follow where the hull points.
-  const rear = { x: -Math.sin(v.hullFacing), y: Math.cos(v.hullFacing) };
+  const rear = { x: -dm.sin(v.hullFacing), y: dm.cos(v.hullFacing) };
   const next = vadd(v.pos, vscale(rear, distTiles));
   // A fleeing vehicle never leaves the battlefield: backing past the map edge stops the hull at
   // the border (it stands there, still facing the threat, until the 10 s cooldown cycle forces a
@@ -540,7 +541,7 @@ function driveToCover(state: BattleState, rng: Rng, dt: number, v: Vehicle, def:
   v.hullFacing = wrapAngle(v.hullFacing + trackPullRad(v) * dt);
   const direction = track.backing ? wrapAngle(v.hullFacing + Math.PI) : v.hullFacing;
   const advance = Math.min(dist(v.pos, wp), speed * dt / TILE_M);
-  const next = { x: v.pos.x + Math.sin(direction) * advance, y: v.pos.y - Math.cos(direction) * advance };
+  const next = { x: v.pos.x + dm.sin(direction) * advance, y: v.pos.y - dm.cos(direction) * advance };
   if (!isPassable(state.map, Math.floor(next.x), Math.floor(next.y), 'vehicle')) { v.speed = 0; return; }
   // item 038: the cover drive's old terrain-only check let two hulls drive into overlap — block
   // against live hulls too (wrecks are solid but the collision step's separation handles them).
@@ -638,7 +639,7 @@ function seekFiringSpot(state: BattleState, v: Vehicle, def: VehicleDef): void {
     const n = Math.max(8, Math.round(Math.PI * r));
     for (let k = 0; k < n; k++) {
       const a = (k / n) * Math.PI * 2;
-      const c = { x: Math.floor(v.pos.x + Math.sin(a) * r) + 0.5, y: Math.floor(v.pos.y - Math.cos(a) * r) + 0.5 };
+      const c = { x: Math.floor(v.pos.x + dm.sin(a) * r) + 0.5, y: Math.floor(v.pos.y - dm.cos(a) * r) + 0.5 };
       if (!isPassable(state.map, Math.floor(c.x), Math.floor(c.y), 'vehicle')) continue;
       const toTarget = dist(c, target);
       if (toTarget > rangeTiles || vehicleBlockingAt(state, v, c)) continue;
@@ -899,7 +900,7 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
       const headingErr = Math.abs(wrapAngle(angleTo(v.pos, aim) - v.hullFacing));
       const crawlMs = headingErr <= TRACK_STRAIGHT_RAD ? Math.min(0.8, def.speedOffroadMs) : 0;
       const stepTiles = (crawlMs * dt) / TILE_M;
-      const fwd = { x: Math.sin(v.hullFacing), y: -Math.cos(v.hullFacing) };
+      const fwd = { x: dm.sin(v.hullFacing), y: -dm.cos(v.hullFacing) };
       const next = vadd(v.pos, vscale(fwd, stepTiles));
       const nx = Math.floor(next.x), ny = Math.floor(next.y);
       if (stepTiles > 0 && inBounds(map, nx, ny) && isPassable(map, nx, ny, 'vehicle') && !hullBlocked(state, v, next)) {
@@ -980,7 +981,7 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
       if (state.time < v.giveWayUntil) {
         const spd = def.speedOffroadMs * 0.5;
         const stepTiles = (spd * dt) / TILE_M;
-        const back = { x: -Math.sin(v.hullFacing), y: Math.cos(v.hullFacing) };
+        const back = { x: -dm.sin(v.hullFacing), y: dm.cos(v.hullFacing) };
         const next = vadd(v.pos, vscale(back, stepTiles));
         const nx = Math.floor(next.x), ny = Math.floor(next.y);
         if (inBounds(map, nx, ny) && isPassable(map, nx, ny, 'vehicle') && !hullBlocked(state, v, next)) {
@@ -1048,10 +1049,10 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     } else if (headingErr <= TRACK_STRAIGHT_RAD) {
       // item 022: lined up — drive along the hull axis (the residual error is turned out as it
       // goes); never a straight line to the waypoint, tracks only go where the hull points
-      const fwd = { x: Math.sin(travelNow), y: -Math.cos(travelNow) };
+      const fwd = { x: dm.sin(travelNow), y: -dm.cos(travelNow) };
       if (!driveTo(state, v, vadd(v.pos, vscale(fwd, distTiles)))) continue;
     } else {
-      const fwd = { x: Math.sin(travelNow), y: -Math.cos(travelNow) };
+      const fwd = { x: dm.sin(travelNow), y: -dm.cos(travelNow) };
       const next = vadd(v.pos, vscale(fwd, distTiles));
       const nt = tileAt(map, Math.floor(next.x), Math.floor(next.y));
       // never cut a corner into something a vehicle cannot enter: turn on the spot instead
@@ -1095,7 +1096,7 @@ function stepWheeledDrive(state: BattleState, rng: Rng, dt: number, v: Vehicle, 
   let next: Vec2;
   if (backing || absErr > HEADING_ALIGN_RAD) {
     const sign = backing ? -1 : 1;
-    next = { x: v.pos.x + Math.sin(v.hullFacing) * stepTiles * sign, y: v.pos.y - Math.cos(v.hullFacing) * stepTiles * sign };
+    next = { x: v.pos.x + dm.sin(v.hullFacing) * stepTiles * sign, y: v.pos.y - dm.cos(v.hullFacing) * stepTiles * sign };
     const ntx = Math.floor(next.x), nty = Math.floor(next.y);
     if (!inBounds(map, ntx, nty) || !isPassable(map, ntx, nty, 'vehicle')) {
       // no room for the manoeuvre: shuffle toward the waypoint at a crawl instead
@@ -1137,8 +1138,8 @@ export function stepVehicleCollisions(state: BattleState, rng: Rng, dt: number):
       // speed: reversing counts), projected on the line between the centres. Two tanks driving
       // side by side, or one pulling away from the other, are not closing at all.
       const ux = (b.pos.x - a.pos.x) / (dM / TILE_M || 1), uy = (b.pos.y - a.pos.y) / (dM / TILE_M || 1);
-      const va = { x: Math.sin(a.hullFacing) * a.speed, y: -Math.cos(a.hullFacing) * a.speed };
-      const vb = { x: Math.sin(b.hullFacing) * b.speed, y: -Math.cos(b.hullFacing) * b.speed };
+      const va = { x: dm.sin(a.hullFacing) * a.speed, y: -dm.cos(a.hullFacing) * a.speed };
+      const vb = { x: dm.sin(b.hullFacing) * b.speed, y: -dm.cos(b.hullFacing) * b.speed };
       const closing = Math.max(0, (va.x - vb.x) * ux + (va.y - vb.y) * uy);
       // hard block: the faster hull is stopped — never ride over another. Item 038: its route is
       // kept (a hull-blocked tank waits in its lane; two tanks parked close used to cancel each
@@ -1167,14 +1168,14 @@ export function stepVehicleCollisions(state: BattleState, rng: Rng, dt: number):
 const SEPARATE_MAX_STEP_M = 0.05;
 function separateHulls(state: BattleState, a: Vehicle, b: Vehicle): void {
   const dx = b.pos.x - a.pos.x, dy = b.pos.y - a.pos.y;
-  const dT = Math.hypot(dx, dy) || 1e-6; // tiles
+  const dT = dm.hypot(dx, dy) || 1e-6; // tiles
   const ux = dx / dT, uy = dy / dT; // direction a -> b
   const aDef = VEHICLE_DEFS[a.defId], bDef = VEHICLE_DEFS[b.defId];
   if (!aDef || !bDef) return;
-  const relA = Math.abs(wrapAngle(Math.atan2(dx, -dy) - a.hullFacing));
-  const relB = Math.abs(wrapAngle(Math.atan2(-dx, dy) - b.hullFacing));
-  const rA = aDef.widthM / 2 + (aDef.lengthM / 2 - aDef.widthM / 2) * Math.abs(Math.cos(relA));
-  const rB = bDef.widthM / 2 + (bDef.lengthM / 2 - bDef.widthM / 2) * Math.abs(Math.cos(relB));
+  const relA = Math.abs(wrapAngle(dm.atan2(dx, -dy) - a.hullFacing));
+  const relB = Math.abs(wrapAngle(dm.atan2(-dx, dy) - b.hullFacing));
+  const rA = aDef.widthM / 2 + (aDef.lengthM / 2 - aDef.widthM / 2) * Math.abs(dm.cos(relA));
+  const rB = bDef.widthM / 2 + (bDef.lengthM / 2 - bDef.widthM / 2) * Math.abs(dm.cos(relB));
   const needM = rA + rB; // required centre separation in metres
   if (dT * TILE_M >= needM) return;
   const aMovable = a.state === 'ok' && crewEffects(state, a).canDrive;
@@ -1189,7 +1190,7 @@ function separateHulls(state: BattleState, a: Vehicle, b: Vehicle): void {
   const tryMove = (v: Vehicle, partner: Vehicle, baseUx: number, baseUy: number, step: number) => {
     const d0 = dist(v.pos, partner.pos);
     for (const ang of angles) {
-      const c = Math.cos(ang), s = Math.sin(ang);
+      const c = dm.cos(ang), s = dm.sin(ang);
       const mx = baseUx * c - baseUy * s, my = baseUx * s + baseUy * c;
       const nx = v.pos.x + mx * step, ny = v.pos.y + my * step;
       // the pair: only strict separation progress counts — inside the footprint the landing may
@@ -1255,12 +1256,12 @@ function hullGapM(v: Vehicle, at: Vec2, o: Vehicle): number {
   const def = VEHICLE_DEFS[v.defId], od = VEHICLE_DEFS[o.defId];
   if (!def || !od) return Infinity;
   const dx = (at.x - o.pos.x) * TILE_M, dy = (at.y - o.pos.y) * TILE_M;
-  const d = Math.hypot(dx, dy);
+  const d = dm.hypot(dx, dy);
   if (d < 1e-3) return -1;
-  const relV = Math.abs(wrapAngle(Math.atan2(dx, -dy) - v.hullFacing));
-  const relO = Math.abs(wrapAngle(Math.atan2(-dx, dy) - o.hullFacing));
-  const rV = def.widthM / 2 + (def.lengthM / 2 - def.widthM / 2) * Math.abs(Math.cos(relV));
-  const rO = od.widthM / 2 + (od.lengthM / 2 - od.widthM / 2) * Math.abs(Math.cos(relO));
+  const relV = Math.abs(wrapAngle(dm.atan2(dx, -dy) - v.hullFacing));
+  const relO = Math.abs(wrapAngle(dm.atan2(-dx, dy) - o.hullFacing));
+  const rV = def.widthM / 2 + (def.lengthM / 2 - def.widthM / 2) * Math.abs(dm.cos(relV));
+  const rO = od.widthM / 2 + (od.lengthM / 2 - od.widthM / 2) * Math.abs(dm.cos(relO));
   return d - (rV + rO);
 }
 
@@ -1322,7 +1323,7 @@ const STUCK_S = 5;
 /** Position of `p` in the hull frame of `v`, metres: x to the right, y ahead along `dirRad`. */
 function hullLocalM(v: Vehicle, dirRad: number, p: Vec2): { x: number; y: number } {
   const dx = (p.x - v.pos.x) * TILE_M, dy = (p.y - v.pos.y) * TILE_M;
-  const fx = Math.sin(dirRad), fy = -Math.cos(dirRad);
+  const fx = dm.sin(dirRad), fy = -dm.cos(dirRad);
   return { x: dx * -fy + dy * fx, y: dx * fx + dy * fy };
 }
 
@@ -1345,7 +1346,7 @@ export function canReactToOverrun(state: BattleState, s: Soldier): boolean {
 /** Nearest free spot beside the hull (the side he is already on first), tile coords, or null. */
 function dodgeSpot(state: BattleState, v: Vehicle, dirRad: number, s: Soldier, halfWidthM: number): Vec2 | null {
   const local = hullLocalM(v, dirRad, s.pos);
-  const fx = Math.sin(dirRad), fy = -Math.cos(dirRad);
+  const fx = dm.sin(dirRad), fy = -dm.cos(dirRad);
   const rx = -fy, ry = fx; // hull right
   const first = local.x >= 0 ? 1 : -1;
   for (const side of [first, -first]) {
@@ -1403,7 +1404,7 @@ export function stepOverrun(state: BattleState, rng: Rng, v: Vehicle, dirRad: nu
   const def = VEHICLE_DEFS[v.defId];
   if (!def) return;
   const halfW = def.widthM / 2, halfL = def.lengthM / 2;
-  const reach = (Math.hypot(halfW, halfL) + 0.5) / TILE_M;
+  const reach = (dm.hypot(halfW, halfL) + 0.5) / TILE_M;
   for (const s of state.soldiers.values()) {
     if (s.vehicleId != null) continue;
     if (Math.abs(s.pos.x - v.pos.x) > reach || Math.abs(s.pos.y - v.pos.y) > reach) continue;
@@ -1492,8 +1493,8 @@ function stepOverrunLookahead(state: BattleState, rng: Rng, v: Vehicle, def: Veh
   const dirRad = angleTo(v.pos, v.path[0]);
   const halfW = def.widthM / 2;
   const aheadTiles = (def.lengthM * 1.5 + 2) / TILE_M;
-  const fx = Math.sin(dirRad), fy = -Math.cos(dirRad);
-  const reach = (Math.hypot(halfW, def.lengthM / 2) + aheadTiles) * 1.5;
+  const fx = dm.sin(dirRad), fy = -dm.cos(dirRad);
+  const reach = (dm.hypot(halfW, def.lengthM / 2) + aheadTiles) * 1.5;
   for (const s of state.soldiers.values()) {
     if (s.vehicleId != null || s.health !== 'healthy') continue;
     if (s.side === v.side) continue; // friends are handled by the hull-local hold rule

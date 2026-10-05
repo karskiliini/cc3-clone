@@ -118,7 +118,9 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
   const field = state.map.heightField;
   h.int(field ? field.marksApplied : state.map.craterMarks?.length ?? 0);
   h.int(state.map.craters.length);
-  h.str(state.result);
+  // both sides' results, not state.result (that one is the viewer's and differs per client)
+  h.str(state.results?.german);
+  h.str(state.results?.soviet);
   return h.h >>> 0;
 }
 

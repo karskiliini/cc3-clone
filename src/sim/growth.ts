@@ -12,6 +12,7 @@ import type { BattleState, GameMap, Terrain, Vec2 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import { VEHICLE_DEFS } from '@/data/units';
 import { dist } from '@/shared/math';
+import * as dm from '@/shared/dmath';
 
 export const GROWTH_RES = 4; // samples per tile edge (0.5 m), same grid as the height field
 export const GROWTH_HEIGHT_M: Partial<Record<Terrain, number>> = { tallgrass: 1.0, crops: 1.2 };
@@ -101,8 +102,8 @@ export function flattenUnderVehicle(map: GameMap, pos: Vec2, facing: number, len
   const f = getGrowth(map);
   const R = f.res, stepM = TILE_M / R;
   const hl = lengthM / 2, hw = widthM / 2;
-  const fx = Math.sin(facing), fy = -Math.cos(facing), rx = Math.cos(facing), ry = Math.sin(facing);
-  const reachT = (Math.hypot(hl, hw) + stepM) / TILE_M;
+  const fx = dm.sin(facing), fy = -dm.cos(facing), rx = dm.cos(facing), ry = dm.sin(facing);
+  const reachT = (dm.hypot(hl, hw) + stepM) / TILE_M;
   const x0 = Math.floor((pos.x - reachT) * R), x1 = Math.ceil((pos.x + reachT) * R);
   const y0 = Math.floor((pos.y - reachT) * R), y1 = Math.ceil((pos.y + reachT) * R);
   const dirty = new Set<number>();
@@ -125,7 +126,7 @@ export function flattenByBlast(map: GameMap, pos: Vec2, sizeM: number): void {
   const dirty = new Set<number>();
   for (let sy = Math.floor((pos.y - reachT) * R); sy <= Math.ceil((pos.y + reachT) * R); sy++) {
     for (let sx = Math.floor((pos.x - reachT) * R); sx <= Math.ceil((pos.x + reachT) * R); sx++) {
-      const d = Math.hypot(((sx + 0.5) / R - pos.x) * TILE_M, ((sy + 0.5) / R - pos.y) * TILE_M);
+      const d = dm.hypot(((sx + 0.5) / R - pos.x) * TILE_M, ((sy + 0.5) / R - pos.y) * TILE_M);
       if (d <= inner) setCut(map, f, sx, sy, 2, dirty); else if (d <= outer) setCut(map, f, sx, sy, 1, dirty);
     }
   }
@@ -143,7 +144,7 @@ export function stepGrowth(state: BattleState): void {
     // skip the work when the map has no tall growth near at all: cheap test on the centre and ends
     const def = VEHICLE_DEFS[v.defId];
     const len = def?.lengthM ?? 6, wid = def?.widthM ?? 3;
-    const hx = Math.sin(v.hullFacing) * (len / 2 / TILE_M), hy = -Math.cos(v.hullFacing) * (len / 2 / TILE_M);
+    const hx = dm.sin(v.hullFacing) * (len / 2 / TILE_M), hy = -dm.cos(v.hullFacing) * (len / 2 / TILE_M);
     const tA = map.tiles[Math.floor(v.pos.y + hy) * map.width + Math.floor(v.pos.x + hx)];
     const tB = map.tiles[Math.floor(v.pos.y - hy) * map.width + Math.floor(v.pos.x - hx)];
     // G8: vehicles on snow or mud leave persistent track ruts (render-only marks)

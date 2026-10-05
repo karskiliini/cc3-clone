@@ -3,6 +3,7 @@ import { TILE_M } from '@/shared/types';
 import { angleTo, clamp, dist, facingAngle, wrapAngle } from '@/shared/math';
 import type { Rng } from '@/shared/rng';
 import { VEHICLE_DEFS } from '@/data/units';
+import * as dm from '@/shared/dmath';
 
 export type SmgBurst = NonNullable<Soldier['smgBurst']>;
 export interface SmgHandling { mode: 'aimed' | 'hip'; uncontrolled: boolean }
@@ -58,21 +59,21 @@ export function smgRoundAim(s: Soldier, b: SmgBurst, index: number, rng: Rng): {
   const recoil = clamp((0.25 + Math.min(index, 12) * 0.045) * control * (b.mode === 'hip' ? 1.45 : 1), 0.08, 1);
   // Start on the aim point, sweep across it, then settle on the opposite edge. A short aimed
   // burst at one man has no intentional traverse, only the small recoil/handling component.
-  const traverse = b.sweepSign * b.sweep * 0.5 * Math.sin(progress * Math.PI * 1.5);
+  const traverse = b.sweepSign * b.sweep * 0.5 * dm.sin(progress * Math.PI * 1.5);
   const dispersion = (b.mode === 'hip' ? 0.023 : 0.0035) * control * (b.uncontrolled ? 1.7 : 1)
     + (b.hasty === 'panic' ? 0.08 : b.hasty ? 0.025 : 0) * brace;
-  const climb = b.sweepSign * recoil * 0.008 * Math.sin(index * 1.3);
+  const climb = b.sweepSign * recoil * 0.008 * dm.sin(index * 1.3);
   const heading = angleTo(s.pos, b.aim) + traverse + rng.gauss() * dispersion + climb;
   const range = dist(s.pos, b.aim) * (1 + Math.max(0, index - 2) * recoil * 0.003);
-  return { heading, recoil, pos: { x: s.pos.x + Math.sin(heading) * range, y: s.pos.y - Math.cos(heading) * range } };
+  return { heading, recoil, pos: { x: s.pos.x + dm.sin(heading) * range, y: s.pos.y - dm.cos(heading) * range } };
 }
 
 export function smgMuzzle(s: Soldier, heading: number): Vec2 {
   // Match the enlarged sprite's barrel reach; hip fire keeps it closer to the body.
   const hip = s.smgBurst?.mode === 'hip';
   const forward = (s.stance === 'prone' ? 1.17 : hip ? 0.74 : 0.88) / TILE_M, right = (hip ? 0.18 : 0.24) / TILE_M;
-  return { x: s.pos.x + Math.sin(heading) * forward + Math.cos(heading) * right,
-    y: s.pos.y - Math.cos(heading) * forward + Math.sin(heading) * right };
+  return { x: s.pos.x + dm.sin(heading) * forward + dm.cos(heading) * right,
+    y: s.pos.y - dm.cos(heading) * forward + dm.sin(heading) * right };
 }
 
 export function smgMuzzleHeight(s: Soldier, mode: SmgHandling['mode']): number {
@@ -88,7 +89,7 @@ export function smgHullIntercept(state: BattleState, from: Vec2, to: Vec2, ride:
   for (const v of state.vehicles.values()) {
     if (v.id === ride) continue;
     const def = VEHICLE_DEFS[v.defId]; if (!def) continue;
-    const c = Math.cos(v.hullFacing), sin = Math.sin(v.hullFacing);
+    const c = dm.cos(v.hullFacing), sin = dm.sin(v.hullFacing);
     const local = (p: Vec2) => ({ x: (p.x - v.pos.x) * c + (p.y - v.pos.y) * sin,
       y: (p.x - v.pos.x) * sin - (p.y - v.pos.y) * c });
     const a = local(from), b = local(to), half = { x: def.widthM / TILE_M / 2, y: def.lengthM / TILE_M / 2 };

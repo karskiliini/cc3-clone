@@ -1,5 +1,6 @@
 import type { BattleState, Soldier, Team } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
+import * as dm from '@/shared/dmath';
 
 // ============================================================================
 // command.ts — command radius (roadmap Shell G11-G16).
@@ -36,5 +37,5 @@ export function teamInCommand(state: BattleState, team: Team): boolean {
 }
 
 function distTiles(a: { x: number; y: number }, b: { x: number; y: number }): number {
-  return Math.hypot(a.x - b.x, a.y - b.y);
+  return dm.hypot(a.x - b.x, a.y - b.y);
 }

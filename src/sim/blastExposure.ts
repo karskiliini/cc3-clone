@@ -1,6 +1,7 @@
 import type { BattleState, Soldier, Terrain, Vec2 } from '@/shared/types';
 import { inBounds, tileAt } from './map';
 import { clamp } from '@/shared/math';
+import * as dm from '@/shared/dmath';
 
 // Blast protection is physical shelter, not visibility: grass and smoke cannot stop it.
 const SHELTER: Partial<Record<Terrain, number>> = {
@@ -50,7 +51,7 @@ export function blastExposure(state: BattleState, s: Soldier, burst: Vec2): Blas
   return {
     cover,
     injury: (standing ? 1.25 : low ? 0.3 : 0.7) * transmission,
-    force: (standing ? 1.2 : low ? 0.3 : 0.6) * transmission ** 1.5,
+    force: (standing ? 1.2 : low ? 0.3 : 0.6) * dm.pow(transmission, 1.5),
     // Shelter reduces the physical shock, but a nearby explosion remains audible and frightening.
     shock: (standing ? 1 : low ? 0.65 : 0.8) * (0.2 + 0.8 * transmission),
   };

@@ -111,9 +111,9 @@ export class Battle {
       this.autoDeployForce(side, zone, defIds);
     }
 
-    // AI-controlled sides deploy themselves. Historically only the non-viewer side did, even in
-    // AI-vs-AI harness runs; keep that order of RNG use so seeded battles replay unchanged.
-    for (const side of this.aiDeployOrder()) aiDeploy(this.state, side, this.rng, this);
+    // AI-controlled sides deploy themselves. The sim visits sides in the fixed SIDES order, never
+    // by the viewer: two clients watching different sides must consume the RNG identically.
+    for (const side of SIDES) if (this.sideIsAI(side)) aiDeploy(this.state, side, this.rng, this);
 
     this.state.phase = 'deploy';
   }
@@ -149,14 +149,6 @@ export class Battle {
       }
     }
     return p;
-  }
-
-  /** AI sides that deploy themselves, in the historical order (the non-viewer side only when
-   * both are AI, since the harness always let the viewer side keep its auto-deployment). */
-  private aiDeployOrder(): Side[] {
-    const viewer = this.state.config.playerSide;
-    const enemy = otherSide(viewer);
-    return this.controllers[enemy] === 'ai' ? [enemy] : [];
   }
 
   sideIsAI(side: Side): boolean {
@@ -326,14 +318,11 @@ export class Battle {
     this.aiAccum += dt;
     if (this.aiAccum >= AI_INTERVAL) {
       this.aiAccum -= AI_INTERVAL;
-      // the historical per-tick order: the viewer's enemy, truce and initiative, then the viewer
-      const viewer = state.config.playerSide;
-      const enemy = otherSide(viewer);
-      if (this.controllers[enemy] === 'ai') stepAI(state, this.rng, this, enemy);
+      // fixed side order (SIDES), independent of who is watching
+      for (const side of SIDES) if (this.sideIsAI(side)) stepAI(state, this.rng, this, side);
       this.evaluateTruce();
       this.maybeAiTruceOffer();
       this.subordinateInitiative();
-      if (this.controllers[viewer] === 'ai') stepAI(state, this.rng, this, viewer);
     }
 
     this.ageEffects(dt);
@@ -463,7 +452,7 @@ export class Battle {
   private evaluateTruce(): void {
     const state = this.state;
     const s = state.sides;
-    for (const ai of this.truceOrder()) {
+    for (const ai of SIDES) {
       if (!this.sideIsAI(ai)) continue;
       const other = otherSide(ai);
       // the other side's standing offer, evaluated against the AI's situation
@@ -484,20 +473,13 @@ export class Battle {
     }
   }
 
-  /** Sides in the order the truce rules visit them: the viewer's enemy first (the only AI
-   * side in single player), so a seeded single-player battle uses the RNG as it always did. */
-  private truceOrder(): Side[] {
-    const viewer = this.state.config.playerSide;
-    return [otherSide(viewer), viewer];
-  }
-
   /** G18 subordinate initiative: once per AI tick, an idle confident team of a human side
    * may act on its own and take the nearest enemy-held VL (E13 flavour). The commander
    * is told in the message log; he overrules by simply issuing a new order. */
   private subordinateInitiative(): void {
     // item 024: the 'Never Act On Initiative' realism toggle silences team initiative
     if (this.state.config.neverActOnInitiative) return;
-    for (const side of this.truceOrder().reverse()) {
+    for (const side of SIDES) {
       if (this.sideIsAI(side)) continue;
       const res = stepSubordinateInitiative(this.state, this.rng, side, (teamId, target) => {
         this.issueOrder(teamId, { type: 'moveFast', target: { ...target }, issuedAt: this.state.time });
@@ -515,7 +497,7 @@ export class Battle {
     const state = this.state;
     if (state.phase !== 'running' || state.time < TRUCE_OFFER_MIN_TIME_S) return;
     const s = state.sides;
-    for (const ai of this.truceOrder()) {
+    for (const ai of SIDES) {
       if (!this.sideIsAI(ai)) continue;
       const other = otherSide(ai);
       if (s[ai].truceOffered || s[ai].truceAccepted) continue;

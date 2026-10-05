@@ -7,6 +7,7 @@ import type { LosHeights } from './los';
 import { groundAtTile, inBounds } from './map';
 import { GROWTH_HEIGHT_M, cutGrowthAt } from './growth';
 import { damageVegetation } from './trees';
+import * as dm from '@/shared/dmath';
 
 export interface RoundTrace {
   impact: Vec2;
@@ -20,8 +21,8 @@ export function estimateAim(state: BattleState, rng: Rng, from: Vec2, aim: Vec2)
   const radius = (2.5 + dist(from, aim) * TILE_M * 0.025) / TILE_M;
   const angle = rng.range(0, Math.PI * 2), r = radius * Math.sqrt(rng.next());
   return {
-    x: clamp(aim.x + Math.cos(angle) * r, 0.01, state.map.width - 0.01),
-    y: clamp(aim.y + Math.sin(angle) * r, 0.01, state.map.height - 0.01),
+    x: clamp(aim.x + dm.cos(angle) * r, 0.01, state.map.width - 0.01),
+    y: clamp(aim.y + dm.sin(angle) * r, 0.01, state.map.height - 0.01),
   };
 }
 
@@ -85,10 +86,10 @@ export function traceRound(
       deflected = true;
       spark(p, 'ricochet');
       points.push({ ...p });
-      const angle = Math.atan2(end.y - start.y, end.x - start.x) + (rng.chance(0.5) ? 1 : -1) * rng.range(0.08, 0.35);
+      const angle = dm.atan2(end.y - start.y, end.x - start.x) + (rng.chance(0.5) ? 1 : -1) * rng.range(0.08, 0.35);
       const remaining = length * (1 - f) * 0.75;
       start = p; startZ = z;
-      end = { x: p.x + Math.cos(angle) * remaining, y: p.y + Math.sin(angle) * remaining };
+      end = { x: p.x + dm.cos(angle) * remaining, y: p.y + dm.sin(angle) * remaining };
       endZ = groundAtTile(map, Math.floor(end.x), Math.floor(end.y)) + (heights.targetM ?? 1.7);
       turned = true;
       break;

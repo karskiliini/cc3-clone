@@ -22,6 +22,7 @@ import type { BattleState, CrewRole, Soldier, Vec2, Vehicle } from '@/shared/typ
 import { TILE_M } from '@/shared/types';
 import { VEHICLE_DEFS } from '@/data/units';
 import { ensureSeats, seatOccupant, vehicleLayout } from './vehicleDamage';
+import * as dm from '@/shared/dmath';
 
 const DEG = Math.PI / 180;
 const FULL = Math.PI * 2;
@@ -98,8 +99,8 @@ export function isButtonedUp(state: BattleState, commander: Soldier): boolean {
   return state.time - commander.mind.lastIncomingAt < BUTTON_UP_RECENT_FIRE_S;
 }
 
-function forwardVec(facing: number): Vec2 { return { x: Math.sin(facing), y: -Math.cos(facing) }; }
-function rightVec(facing: number): Vec2 { return { x: Math.cos(facing), y: Math.sin(facing) }; }
+function forwardVec(facing: number): Vec2 { return { x: dm.sin(facing), y: -dm.cos(facing) }; }
+function rightVec(facing: number): Vec2 { return { x: dm.cos(facing), y: dm.sin(facing) }; }
 
 /** `base` offset by `fwdM` metres along `facing` (and optionally `rightM` metres to its right),
  * converted to tile coordinates. */

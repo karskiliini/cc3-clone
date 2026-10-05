@@ -20,6 +20,7 @@ import { applyDaze, isDazed } from './daze';
 import {
   coaxUsable, crewRoleOf, ensureSeats, expectedArmorMm, hasSystem, hurtCrewman, isImmobile, mainGunUsable, seatRoles, systemState, vehicleLayout,
 } from './vehicleDamage';
+import * as dm from '@/shared/dmath';
 
 /** Seconds a calm, unhurt man of average experience needs through a hatch (spec: 1.5 to 2.5 s). */
 export const CLIMB_MIN_S = 1.5;
@@ -54,7 +55,7 @@ export function climbSeconds(s: Soldier, panicked: boolean): number {
 
 /** Hull-local metres (x right, y ahead) to tile coordinates. */
 export function hullToWorld(v: Vehicle, x: number, y: number): Vec2 {
-  const fx = Math.sin(v.hullFacing), fy = -Math.cos(v.hullFacing);
+  const fx = dm.sin(v.hullFacing), fy = -dm.cos(v.hullFacing);
   const rx = -fy, ry = fx;
   return { x: v.pos.x + (rx * x + fx * y) / TILE_M, y: v.pos.y + (ry * x + fy * y) / TILE_M };
 }
@@ -63,7 +64,7 @@ export function hullToWorld(v: Vehicle, x: number, y: number): Vec2 {
 export function hatchLocal(v: Vehicle, def: VehicleDef, h: VehicleHatchDef): { x: number; y: number } {
   if (h.group !== 'turret' || !def.hasTurret) return { x: h.x, y: h.y };
   const a = v.turretFacing - v.hullFacing;
-  const c = Math.cos(a), sn = Math.sin(a);
+  const c = dm.cos(a), sn = dm.sin(a);
   // x right, y ahead, clockwise-positive heading
   return { x: h.x * c + h.y * sn, y: -h.x * sn + h.y * c };
 }
@@ -91,7 +92,7 @@ export function besideHatch(state: BattleState, v: Vehicle, def: VehicleDef, hi:
   let preferRight = true;
   if (threatDir != null) {
     const right = hullToWorld(v, 1, 0);
-    const toThreat = { x: Math.sin(threatDir), y: -Math.cos(threatDir) };
+    const toThreat = { x: dm.sin(threatDir), y: -dm.cos(threatDir) };
     preferRight = (right.x - v.pos.x) * toThreat.x + (right.y - v.pos.y) * toThreat.y <= 0;
   }
   for (const flip of [false, true]) {
@@ -135,7 +136,7 @@ function pickHatch(state: BattleState, v: Vehicle, def: VehicleDef, s: Soldier, 
     let away = 0;
     if (threatDir != null) {
       const p = hatchWorld(v, def, hatches[i]);
-      away = -((p.x - v.pos.x) * Math.sin(threatDir) + (p.y - v.pos.y) * -Math.cos(threatDir));
+      away = -((p.x - v.pos.x) * dm.sin(threatDir) + (p.y - v.pos.y) * -dm.cos(threatDir));
     }
     const tt = Math.max(t, 0);
     if (tt < bestT - 1e-9 || (Math.abs(tt - bestT) <= 1e-9 && away > bestAway + 1e-9)) { best = i; bestT = tt; bestAway = away; }
@@ -232,7 +233,7 @@ function stepClimbs(state: BattleState, rng: Pick<Rng, 'next'>): void {
       // Most of the time is spent hauling himself out. Only then does he drop off the hull,
       // accelerating toward the ground instead of sliding evenly across it throughout the climb.
       if (state.time < c.dropAt) p = 0.12 * clamp((state.time - c.start) / Math.max(1e-6, c.dropAt - c.start), 0, 1);
-      else p = 0.12 + 0.88 * clamp((state.time - c.dropAt) / Math.max(1e-6, c.until - c.dropAt), 0, 1) ** 2;
+      else p = 0.12 + 0.88 * dm.pow(clamp((state.time - c.dropAt) / Math.max(1e-6, c.until - c.dropAt), 0, 1), 2);
     }
     s.pos = { x: c.from.x + (c.to.x - c.from.x) * p, y: c.from.y + (c.to.y - c.from.y) * p };
     s.stance = 'standing';
@@ -289,12 +290,12 @@ function runSpot(state: BattleState, v: Vehicle, s: Soldier): Vec2 {
   const away = angleTo(v.pos, s.pos);
   const base = s.mind.threatDir != null ? s.mind.threatDir + Math.PI : away;
   // men from the two sides fan out instead of running in file
-  const lean = Math.sin(away - base) >= 0 ? 0.5 : -0.5;
+  const lean = dm.sin(away - base) >= 0 ? 0.5 : -0.5;
   // out of a burning vehicle: clear of the 15 m its ammunition can reach before going to ground
   for (const m of v.state === 'burning' ? [22, 18, 14, 10, 6] : [14, 10, 6]) {
     for (const off of [lean, 0, -lean, lean * 2.4]) {
       const a = base + off;
-      const to = { x: s.pos.x + (Math.sin(a) * m) / TILE_M, y: s.pos.y + (-Math.cos(a) * m) / TILE_M };
+      const to = { x: s.pos.x + (dm.sin(a) * m) / TILE_M, y: s.pos.y + (-dm.cos(a) * m) / TILE_M };
       let ok = true;
       for (let k = 1; k <= 7 && ok; k++) {
         const x = Math.floor(s.pos.x + ((to.x - s.pos.x) * k) / 7), y = Math.floor(s.pos.y + ((to.y - s.pos.y) * k) / 7);

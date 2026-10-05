@@ -16,6 +16,7 @@ import { settleTile } from './coverSeek';
 import { vehicleLayout } from './vehicleDamage';
 import { BESIDE_HULL_M, besideHatch, hullToWorld } from './vehicleCrew';
 import { isDazed } from './daze';
+import * as dm from '@/shared/dmath';
 
 /** Seconds one man needs through the door (a squad of ten: about 15 s). */
 export const BOARD_S = 1.5;
@@ -224,7 +225,7 @@ export function onPassengerOut(state: BattleState, v: Vehicle, s: Soldier, panic
   const idx = team ? Math.max(0, team.soldierIds.indexOf(s.id)) : 0;
   const lateral = ((idx % 5) - 2) * 1.6;
   const back = (def?.lengthM ?? 6) / 2 + 2 + Math.floor(idx / 5) * 1.8;
-  const ax = Math.sin(away), ay = -Math.cos(away);
+  const ax = dm.sin(away), ay = -dm.cos(away);
   const slot = { x: v.pos.x + (ax * back + -ay * lateral) / TILE_M, y: v.pos.y + (ay * back + ax * lateral) / TILE_M };
   const taken = (tx: number, ty: number): boolean => {
     if (!team) return false;
@@ -284,7 +285,7 @@ function stepBoarding(state: BattleState, team: Team, v: Vehicle, def: VehicleDe
   const still = Math.abs(v.speed) <= 0.05;
   let outside = 0;
   let place = 0; // his place in the queue behind the door
-  const fx = Math.sin(v.hullFacing), fy = -Math.cos(v.hullFacing);
+  const fx = dm.sin(v.hullFacing), fy = -dm.cos(v.hullFacing);
   for (const id of team.soldierIds) {
     const s = state.soldiers.get(id);
     if (!s || !isAble(s) || s.vehicleId != null) continue;

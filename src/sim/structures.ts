@@ -36,6 +36,7 @@ import { getHeightField, refreshTiles, setTileOverride, syncCraterMarks, buildin
 import { addMessage } from './messages';
 import { applyHit } from './combat';
 import { addStress } from './mind';
+import * as dm from '@/shared/dmath';
 
 export const STRUCTURE_HP: Partial<Record<Terrain, number>> = {
   buildingWood: 50,
@@ -163,7 +164,7 @@ function shooterFor(state: BattleState, pos: Vec2, weapon: WeaponDef, from?: Vec
   if (from) return from;
   for (let k = state.tracers.length - 1; k >= 0 && k >= state.tracers.length - 12; k--) {
     const tr = state.tracers[k];
-    if (tr.t === 0 && Math.hypot(tr.to.x - pos.x, tr.to.y - pos.y) < 1.5) return tr.from;
+    if (tr.t === 0 && dm.hypot(tr.to.x - pos.x, tr.to.y - pos.y) < 1.5) return tr.from;
   }
   return null;
 }
@@ -219,13 +220,13 @@ export function applyBlastDamage(state: BattleState, pos: Vec2, weapon: WeaponDe
         // distance (m) from the burst to the nearest point of the tile
         const ex = Math.max(x - pos.x, 0, pos.x - (x + 1));
         const ey = Math.max(y - pos.y, 0, pos.y - (y + 1));
-        const dM = Math.hypot(ex, ey) * TILE_M;
+        const dM = dm.hypot(ex, ey) * TILE_M;
         if (dM > blast.radiusM) continue;
         let dmg = blast.power * (1 - 0.75 * (dM / Math.max(0.01, blast.radiusM)));
         if (shooter && dM > 0) {
           // direct fire: the face toward the gun takes the blast, walls behind the burst much less
           const vx = x + 0.5 - pos.x, vy = y + 0.5 - pos.y, sx = shooter.x - pos.x, sy = shooter.y - pos.y;
-          const dot = (vx * sx + vy * sy) / Math.max(1e-6, Math.hypot(vx, vy) * Math.hypot(sx, sy));
+          const dot = (vx * sx + vy * sy) / Math.max(1e-6, dm.hypot(vx, vy) * dm.hypot(sx, sy));
           if (dot < -0.2) dmg *= 0.35;
         }
         hits.push({ i, dmg });
@@ -250,7 +251,7 @@ function singleTileHit(map: GameMap, st: StructState, pos: Vec2, power: number):
       if (x < 0 || y < 0 || x >= map.width || y >= map.height) continue;
       const i = y * map.width + x;
       if (Number.isNaN(st.hp[i])) continue;
-      const d = Math.hypot(x + 0.5 - pos.x, y + 0.5 - pos.y);
+      const d = dm.hypot(x + 0.5 - pos.x, y + 0.5 - pos.y);
       if (d < bestD && d <= 1.2) { bestD = d; best = i; }
     }
   }
@@ -487,7 +488,7 @@ function stressOccupants(state: BattleState, pos: Vec2, power: number): void {
     const x = Math.floor(s.pos.x), y = Math.floor(s.pos.y);
     if (x < 0 || y < 0 || x >= map.width || y >= map.height) continue;
     if (!hit.has(map.buildingId[y * map.width + x])) continue;
-    const d = Math.hypot(s.pos.x - pos.x, s.pos.y - pos.y);
+    const d = dm.hypot(s.pos.x - pos.x, s.pos.y - pos.y);
     if (d > 4) continue;
     addStress(s.mind, base * (1 - d / 5) * (1.3 - s.experience / 100));
   }

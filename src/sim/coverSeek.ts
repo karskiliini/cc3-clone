@@ -14,6 +14,7 @@ import { inBounds } from './map';
 import { addMessage } from './messages';
 import { isDazed } from './daze';
 import { fireHazards, nearFireHazard } from './vehicleExplosion';
+import * as dm from '@/shared/dmath';
 
 const SEEK_INTERVAL_S = 2;
 /** Search radius (tiles) for a spot clear of a burning vehicle: 15 m plus room to choose. */
@@ -23,7 +24,7 @@ function buildThreatSet(state: BattleState, s: Soldier, team: Team | undefined):
   const threats: ThreatWeighted[] = [];
   for (const b of s.mind.beliefs) {
     if (b.confidence <= 0.3) continue;
-    threats.push({ dirRad: Math.atan2(b.pos.x - s.pos.x, -(b.pos.y - s.pos.y)), weight: b.confidence });
+    threats.push({ dirRad: dm.atan2(b.pos.x - s.pos.x, -(b.pos.y - s.pos.y)), weight: b.confidence });
   }
   if (s.mind.threatDir != null && s.mind.threatLevel > 0) {
     threats.push({ dirRad: s.mind.threatDir, weight: s.mind.threatLevel });

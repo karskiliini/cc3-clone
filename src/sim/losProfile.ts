@@ -6,6 +6,7 @@
 import type { GameMap, Vec2 } from '@/shared/types';
 import { losTrace, losDistanceFactor, type LosHeights } from './los';
 import { TILE_M } from '@/shared/types';
+import * as dm from '@/shared/dmath';
 
 export type AimClass = 'clear' | 'obscured' | 'blocked';
 
@@ -22,7 +23,7 @@ const MAX_SAMPLES = 160;
 export function classifyPoint(map: GameMap, from: Vec2, p: Vec2, heights?: LosHeights): AimClass {
   const r = losTrace(map, from, p, heights);
   if (!r.clear) return 'blocked';
-  const distM = Math.hypot(p.x - from.x, p.y - from.y) * TILE_M;
+  const distM = dm.hypot(p.x - from.x, p.y - from.y) * TILE_M;
   const df = losDistanceFactor(distM);
   const concealShare = df > 0 ? r.visibility / df : 0;
   return concealShare < OBSCURED_BELOW ? 'obscured' : 'clear';
@@ -32,7 +33,7 @@ export function classifyPoint(map: GameMap, from: Vec2, p: Vec2, heights?: LosHe
  * Ground beyond an obstacle is blocked, but the line can turn visible again further on (for
  * example rising ground beyond a dip), exactly as the sight line behaves in the sim. */
 export function aimLineProfile(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeights): AimSegment[] {
-  const len = Math.hypot(to.x - from.x, to.y - from.y);
+  const len = dm.hypot(to.x - from.x, to.y - from.y);
   if (len < 1e-6) return [{ t0: 0, t1: 1, cls: 'clear' }];
   const n = Math.max(2, Math.min(MAX_SAMPLES, Math.ceil(len / STEP_TILES)));
   const segs: AimSegment[] = [];

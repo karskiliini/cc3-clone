@@ -16,6 +16,7 @@ import { canTeamMount, passengerCapacity, passengersAboard, roomLeft } from './t
 import { growthHeightAt } from './growth';
 import { armorFacingFor, bestRoundAgainst } from './ballistics';
 import { timeToFirstShotS } from './gunTiming';
+import * as dm from '@/shared/dmath';
 
 export interface AIBattle {
   issueOrder(teamId: number, order: Order): void;
@@ -167,8 +168,8 @@ function bestCoverWithin(state: BattleState, centre: Vec2, radiusTiles: number, 
   for (let i = 0; i < 30; i++) {
     const ang = rng.range(0, Math.PI * 2);
     const r = rng.range(0, radiusTiles);
-    const x = Math.floor(centre.x + Math.cos(ang) * r);
-    const y = Math.floor(centre.y + Math.sin(ang) * r);
+    const x = Math.floor(centre.x + dm.cos(ang) * r);
+    const y = Math.floor(centre.y + dm.sin(ang) * r);
     if (!inBounds(state.map, x, y)) continue;
     if (!isPassable(state.map, x, y, 'infantry')) continue;
     const pos = { x: x + 0.5, y: y + 0.5 };
@@ -197,8 +198,8 @@ function goodCoverNearRoad(state: BattleState, centre: Vec2, rng: Rng): Vec2 {
   for (let i = 0; i < 30; i++) {
     const ang = rng.range(0, Math.PI * 2);
     const r = rng.range(0, 15);
-    const x = Math.floor(centre.x + Math.cos(ang) * r);
-    const y = Math.floor(centre.y + Math.sin(ang) * r);
+    const x = Math.floor(centre.x + dm.cos(ang) * r);
+    const y = Math.floor(centre.y + dm.sin(ang) * r);
     if (!inBounds(state.map, x, y)) continue;
     if (!isPassable(state.map, x, y, 'infantry')) continue;
     const pos = { x: x + 0.5, y: y + 0.5 };
@@ -245,8 +246,8 @@ function chooseWaypoint(
     const r = rng.range(3, maxR);
     // angleTo is 0 = north, clockwise: the unit vector of a bearing is (sin, -cos). (This used to
     // be (cos, sin), which pointed the "forward cone" 90 degrees off the objective.)
-    const x = Math.floor(from.x + Math.sin(ang) * r);
-    const y = Math.floor(from.y - Math.cos(ang) * r);
+    const x = Math.floor(from.x + dm.sin(ang) * r);
+    const y = Math.floor(from.y - dm.cos(ang) * r);
     if (!inBounds(state.map, x, y)) continue;
     if (!isPassable(state.map, x, y, 'infantry')) continue;
     const pos = { x: x + 0.5, y: y + 0.5 };
@@ -363,7 +364,7 @@ function stepTransportAI(
     const ang = angleTo(objective, vehicle.pos);
     let point: Vec2 = objective;
     for (let back = DISMOUNT_SHORT_M; back <= DISMOUNT_SHORT_M + 120; back += 40) {
-      const c = { x: objective.x + (Math.sin(ang) * back) / TILE_M, y: objective.y + (-Math.cos(ang) * back) / TILE_M };
+      const c = { x: objective.x + (dm.sin(ang) * back) / TILE_M, y: objective.y + (-dm.cos(ang) * back) / TILE_M };
       point = c;
       if (!knownAtGunSees(state, side, c)) break;
     }
@@ -952,7 +953,7 @@ function suspectedPositions(state: BattleState, vl: Vec2, r = 6, max = 3): Vec2[
       if (!isPassable(state.map, x, y, 'infantry')) continue;
       const p = { x: x + 0.5, y: y + 0.5 };
       const s = coverAt(state.map, p);
-      if (s >= 0.3) cand.push({ p, s: s - Math.hypot(dx, dy) * 0.02 });
+      if (s >= 0.3) cand.push({ p, s: s - dm.hypot(dx, dy) * 0.02 });
     }
   }
   cand.sort((a, b) => b.s - a.s || a.p.y - b.p.y || a.p.x - b.p.x);
@@ -999,7 +1000,7 @@ function chooseFup(state: BattleState, rng: Rng, from: Vec2, objective: Vec2, th
   for (let i = 0; i < 36; i++) {
     const ang = back + (rng.next() - 0.5) * (Math.PI * 0.7);
     const r = rng.range(45, 60);
-    const x = Math.floor(objective.x + Math.sin(ang) * r), y = Math.floor(objective.y - Math.cos(ang) * r);
+    const x = Math.floor(objective.x + dm.sin(ang) * r), y = Math.floor(objective.y - dm.cos(ang) * r);
     if (!inBounds(state.map, x, y) || !isPassable(state.map, x, y, 'infantry')) continue;
     const p = { x: x + 0.5, y: y + 0.5 };
     let cover = 0;
@@ -1036,7 +1037,7 @@ function chooseBoundPoint(
   for (let i = 0; i < 28; i++) {
     const ang = bearing + (rng.next() - 0.5) * (Math.PI * 0.55);
     const r = rng.range(Math.min(6, maxR), maxR);
-    const x = Math.floor(from.x + Math.sin(ang) * r), y = Math.floor(from.y - Math.cos(ang) * r);
+    const x = Math.floor(from.x + dm.sin(ang) * r), y = Math.floor(from.y - dm.cos(ang) * r);
     if (!inBounds(state.map, x, y) || !isPassable(state.map, x, y, 'infantry')) continue;
     const p = { x: x + 0.5, y: y + 0.5 };
     const progress = toGoal - dist(p, goal);
@@ -1066,7 +1067,7 @@ function chooseHide(state: BattleState, rng: Rng, from: Vec2, threats: Vec2[]): 
   let bestScore = coverAt(state.map, from) * 7 + concealmentAt(state.map, from) * 3 - Math.min(3, seenBy(state, threats, from)) * 3 + 1;
   for (let i = 0; i < 20; i++) {
     const ang = rng.range(0, Math.PI * 2), r = rng.range(1, 9);
-    const x = Math.floor(from.x + Math.sin(ang) * r), y = Math.floor(from.y - Math.cos(ang) * r);
+    const x = Math.floor(from.x + dm.sin(ang) * r), y = Math.floor(from.y - dm.cos(ang) * r);
     if (!inBounds(state.map, x, y) || !isPassable(state.map, x, y, 'infantry')) continue;
     const p = { x: x + 0.5, y: y + 0.5 };
     let score = coverAt(state.map, p) * 7 + concealmentAt(state.map, p) * 3 - r * 0.2;
@@ -1158,7 +1159,7 @@ function chooseStation(state: BattleState, rng: Rng, anchor: Vec2, watch: Vec2[]
   for (let i = 0; i < 20; i++) {
     const ang = rng.range(0, Math.PI * 2);
     const r = i === 0 ? 0 : rng.range(0, maxR);
-    const x = Math.floor(anchor.x + Math.sin(ang) * r), y = Math.floor(anchor.y - Math.cos(ang) * r);
+    const x = Math.floor(anchor.x + dm.sin(ang) * r), y = Math.floor(anchor.y - dm.cos(ang) * r);
     if (!inBounds(state.map, x, y) || !isPassable(state.map, x, y, 'vehicle')) continue;
     const p = { x: x + 0.5, y: y + 0.5 };
     let score = -r * 0.4;
@@ -1184,7 +1185,7 @@ function chooseRefuge(state: BattleState, rng: Rng, from: Vec2, home: Vec2, avoi
   for (let i = 0; i < 30; i++) {
     const ang = i < 15 ? homeward + (rng.next() - 0.5) * Math.PI : rng.range(0, Math.PI * 2);
     const r = rng.range(3, 25);
-    const x = Math.floor(from.x + Math.sin(ang) * r), y = Math.floor(from.y - Math.cos(ang) * r);
+    const x = Math.floor(from.x + dm.sin(ang) * r), y = Math.floor(from.y - dm.cos(ang) * r);
     if (!inBounds(state.map, x, y) || !isPassable(state.map, x, y, 'vehicle')) continue;
     const p = { x: x + 0.5, y: y + 0.5 };
     const score = -r;
@@ -1216,7 +1217,7 @@ function chooseFirePosition(state: BattleState, rng: Rng, v: Vehicle, ev: Vehicl
     const near = i % 2 === 0;
     const c = near ? v.pos : ev.pos;
     const ang = rng.range(0, Math.PI * 2), r = near ? rng.range(2, 20) : rng.range(30, 90);
-    const x = Math.floor(c.x + Math.sin(ang) * r), y = Math.floor(c.y - Math.cos(ang) * r);
+    const x = Math.floor(c.x + dm.sin(ang) * r), y = Math.floor(c.y - dm.cos(ang) * r);
     if (!inBounds(state.map, x, y) || !isPassable(state.map, x, y, 'vehicle')) continue;
     const p = { x: x + 0.5, y: y + 0.5 };
     if (dist(p, v.pos) > maxTravelTiles) continue;
@@ -1252,7 +1253,7 @@ function chooseOverwatch(state: BattleState, rng: Rng, from: Vec2, objective: Ve
   for (let i = 0; i < 32; i++) {
     const ang = back + (rng.next() - 0.5) * (Math.PI * 0.8);
     const r = rng.range(minTiles, Math.max(minTiles + 10, Math.min(130, dNow)));
-    const x = Math.floor(objective.x + Math.sin(ang) * r), y = Math.floor(objective.y - Math.cos(ang) * r);
+    const x = Math.floor(objective.x + dm.sin(ang) * r), y = Math.floor(objective.y - dm.cos(ang) * r);
     if (!inBounds(state.map, x, y) || !isPassable(state.map, x, y, 'infantry')) continue;
     const p = { x: x + 0.5, y: y + 0.5 };
     let score = coverAt(state.map, p) * 5 - dist(from, p) * 0.15;
@@ -1445,7 +1446,7 @@ function stepAttackAI(state: BattleState, rng: Rng, battle: AIBattle, side: Side
     else if (plan.phase === 'prep') dest = t.pos;
     else {
       const ang = angleTo(objective, groupAt);
-      const behind = { x: groupAt.x + Math.sin(ang) * 15, y: groupAt.y - Math.cos(ang) * 15 };
+      const behind = { x: groupAt.x + dm.sin(ang) * 15, y: groupAt.y - dm.cos(ang) * 15 };
       const prev = plan.posts.get(FOLLOW_KEY + t.id);
       if (prev && prev.objectiveId === plan.objectiveId && dist(prev.pos, behind) <= 12) dest = prev.pos;
       else { dest = bestCoverWithin(state, behind, 5, rng, objective); plan.posts.set(FOLLOW_KEY + t.id, { objectiveId: plan.objectiveId ?? -1, pos: dest, at: state.time }); }
@@ -1663,7 +1664,7 @@ function stepAttackMortar(
     if ((plan.phase === 'assault' || plan.phase === 'allIn') && lead && leadDistM <= 130 && leadDistM >= 25 && defenders.length && !plan.smoked.has(smokeKey)) {
       const c = defenders.sort((a, b) => dist(a.pos, lead.pos) - dist(b.pos, lead.pos) || a.teamId - b.teamId)[0];
       const ang = angleTo(c.pos, lead.pos);
-      const p = { x: c.pos.x + Math.sin(ang) * 8, y: c.pos.y - Math.cos(ang) * 8 }; // 16 m in front of them
+      const p = { x: c.pos.x + dm.sin(ang) * 8, y: c.pos.y - dm.cos(ang) * 8 }; // 16 m in front of them
       if (!friendlyWithin(myTeams, p, 8)) { mission = { pos: p, until: state.time + 40, smoke: true, teamId: null }; plan.smoked.add(smokeKey); }
     }
     if (!mission) {
@@ -1677,7 +1678,7 @@ function stepAttackMortar(
       if (tank && busy < 1) {
         const from = centroidOf(fit, t.pos);
         const ang = angleTo(tank.pos, from);
-        const p = { x: tank.pos.x + Math.sin(ang) * 6, y: tank.pos.y - Math.cos(ang) * 6 };
+        const p = { x: tank.pos.x + dm.sin(ang) * 6, y: tank.pos.y - dm.cos(ang) * 6 };
         if (!friendlyWithin(myTeams, p, 8)) mission = { pos: p, until: state.time + 50, smoke: true, teamId: tank.teamId };
       }
     }
@@ -1766,8 +1767,8 @@ function stepAttackVehicle(
   const lateral = (idx - (count - 1) / 2) * (exploiting ? 3 : TANK_STATION_SPREAD_TILES) * (weapon ? 1 : 0.5);
   const behind = exploiting ? 0 : TANK_STATION_BEHIND_TILES + (weapon ? 0 : 10);
   const anchor = {
-    x: anchorBase.x + Math.sin(back) * behind + Math.cos(back) * lateral,
-    y: anchorBase.y - Math.cos(back) * behind + Math.sin(back) * lateral,
+    x: anchorBase.x + dm.sin(back) * behind + dm.cos(back) * lateral,
+    y: anchorBase.y - dm.cos(back) * behind + dm.sin(back) * lateral,
   };
   let post = plan.posts.get(team.id);
   const stale = !post || post.objectiveId !== plan.objectiveId || dist(post.pos, anchor) > 10 || state.time - post.at > 60

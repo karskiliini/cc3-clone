@@ -1,6 +1,7 @@
 import type { DecorItem, DecorKind, ElevationApi, HillFalloff, MapDef, MapVectorFeature, Rect, Terrain, Vec2 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import { hash2 } from '@/shared/rng';
+import * as dm from '@/shared/dmath';
 
 const NON_DECOR_TILES = new Set<Terrain>(['water', 'buildingWood', 'buildingStone', 'floor']);
 /** Ground a foxhole can be dug into. */
@@ -56,9 +57,9 @@ export class MapPainter {
     for (let yy = y0; yy <= y1; yy++) {
       for (let xx = x0; xx <= x1; xx++) {
         const dx = xx + 0.5 - cx, dy = yy + 0.5 - cy;
-        const dist = Math.hypot(dx, dy);
+        const dist = dm.hypot(dx, dy);
         if (dist > r * 1.3) continue;
-        const angle = Math.atan2(dy, dx);
+        const angle = dm.atan2(dy, dx);
         const angleBucket = Math.round(((angle + Math.PI) / (2 * Math.PI)) * steps);
         const noise = hash2(angleBucket, Math.round(r * 100), this.seed);
         const localR = r * (0.75 + noise * 0.5); // +-25%
@@ -79,9 +80,9 @@ export class MapPainter {
         if (xx < 0 || yy < 0 || xx >= this.w || yy >= this.h) continue;
         if (restrict && !restrict.has(this.tiles[yy * this.w + xx])) continue;
         const dx = xx + 0.5 - cx, dy = yy + 0.5 - cy;
-        const dist = Math.hypot(dx, dy);
+        const dist = dm.hypot(dx, dy);
         if (dist > r * 1.3) continue;
-        const angle = Math.atan2(dy, dx);
+        const angle = dm.atan2(dy, dx);
         const angleBucket = Math.round(((angle + Math.PI) / (2 * Math.PI)) * steps);
         const noise = hash2(angleBucket, Math.round(r * 100) + seedOffset, this.seed);
         const localR = r * (0.75 + noise * 0.5); // +-25%
@@ -115,7 +116,7 @@ export class MapPainter {
     let t = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
     t = Math.max(0, Math.min(1, t));
     const cx = ax + t * dx, cy = ay + t * dy;
-    return Math.hypot(px - cx, py - cy);
+    return dm.hypot(px - cx, py - cy);
   }
 
   private rasterizeLine(points: Vec2[], width: number, t: Terrain): void {
@@ -194,7 +195,7 @@ export class MapPainter {
     if (near) {
       let bestD = Infinity;
       for (const h of hits) {
-        const d = Math.hypot(h.pt.x - near.x, h.pt.y - near.y);
+        const d = dm.hypot(h.pt.x - near.x, h.pt.y - near.y);
         if (d < bestD) { bestD = d; chosen = h; }
       }
     }
@@ -232,9 +233,9 @@ export class MapPainter {
     for (let yy = y0; yy <= y1; yy++) {
       for (let xx = x0; xx <= x1; xx++) {
         const dx = (xx + 0.5 - cx) / rx, dy = (yy + 0.5 - cy) / ry;
-        const dist = Math.hypot(dx, dy);
+        const dist = dm.hypot(dx, dy);
         if (dist > 1.3) continue;
-        const angle = Math.atan2(dy, dx);
+        const angle = dm.atan2(dy, dx);
         const angleBucket = Math.round(((angle + Math.PI) / (2 * Math.PI)) * steps);
         const noise = hash2(angleBucket, Math.round((rx + ry) * 100), this.seed + 303);
         const localR = 0.75 + noise * 0.5;
@@ -286,9 +287,9 @@ export class MapPainter {
     for (let yy = y0; yy <= y1; yy++) {
       for (let xx = x0; xx <= x1; xx++) {
         const dx = (xx + 0.5 - cx) / rx, dy = (yy + 0.5 - cy) / ry;
-        const dist = Math.hypot(dx, dy);
+        const dist = dm.hypot(dx, dy);
         if (dist > 1.3) continue;
-        const angle = Math.atan2(dy, dx);
+        const angle = dm.atan2(dy, dx);
         const angleBucket = Math.round(((angle + Math.PI) / (2 * Math.PI)) * steps);
         // average the neighbouring angle buckets' hashes so single-bucket spikes (spiky star
         // outline) are smoothed into lobes, while keeping the 0.7-1.3 irregular range.
@@ -308,7 +309,7 @@ export class MapPainter {
     let n = 0;
     for (let s = 0; s < points.length - 1; s++) {
       const a = points[s], b = points[s + 1];
-      const dist = Math.hypot(b.x - a.x, b.y - a.y);
+      const dist = dm.hypot(b.x - a.x, b.y - a.y);
       const steps = Math.max(1, Math.round(dist));
       for (let i = 0; i <= steps; i++) {
         const t = steps === 0 ? 0 : i / steps;
@@ -335,7 +336,7 @@ export class MapPainter {
     let carry = 0;
     for (let s = 0; s < points.length - 1; s++) {
       const a = points[s], b = points[s + 1];
-      const dist = Math.hypot(b.x - a.x, b.y - a.y);
+      const dist = dm.hypot(b.x - a.x, b.y - a.y);
       let d = carry;
       while (d < dist) {
         const t = dist === 0 ? 0 : d / dist;
@@ -394,7 +395,7 @@ export class MapPainter {
     let total = 0;
     for (let s = 0; s < points.length - 1; s++) {
       const a = points[s], b = points[s + 1];
-      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      const len = dm.hypot(b.x - a.x, b.y - a.y);
       segs.push({ a, b, len });
       total += len;
     }
@@ -414,18 +415,18 @@ export class MapPainter {
           const py = seg.a.y + (seg.b.y - seg.a.y) * t;
           const off = 1.5 + hash2(n, 3, this.seed + seedOffset + 9501) * 2;
           const angle = hash2(n, 5, this.seed + seedOffset + 9502) * Math.PI * 2;
-          const cx = px + Math.cos(angle) * off;
-          const cy = py + Math.sin(angle) * off;
+          const cx = px + dm.cos(angle) * off;
+          const cy = py + dm.sin(angle) * off;
           // never let two craters bunch up into a "cluster of grapes" — even where the road
           // curves back near itself, enforce a randomized 3-6 tile minimum separation from the
           // previously placed crater before painting another one.
           const minSep = 3 + hash2(n, 9, this.seed + seedOffset + 9504) * 3;
-          if (!lastPt || Math.hypot(cx - lastPt.x, cy - lastPt.y) >= minSep) {
+          if (!lastPt || dm.hypot(cx - lastPt.x, cy - lastPt.y) >= minSep) {
             // a single 'crater' tile, not a multi-tile patch() blob: each 'crater' terrain tile
             // already renders as its own complete crater shape, so a radius-based blob here used
             // to paint several adjacent crater tiles that each drew their own circle — reading as
             // a tight cluster of grey spheres ("bunch of grapes") instead of one shell-hole.
-            this.set(Math.round(px + Math.cos(angle) * off * 0.4), Math.round(py + Math.sin(angle) * off * 0.4), 'crater');
+            this.set(Math.round(px + dm.cos(angle) * off * 0.4), Math.round(py + dm.sin(angle) * off * 0.4), 'crater');
             const variant = Math.floor(hash2(n, 11, this.seed + seedOffset + 9505) * 4);
             this.addDecor('shellhole', cx, cy, variant);
             lastPt = { x: cx, y: cy };
@@ -450,7 +451,7 @@ export class MapPainter {
     const h1 = hash2(xi, yi, this.seed + 9701), h2 = hash2(xi, yi, this.seed + 9702), h3 = hash2(xi, yi, this.seed + 9703);
     const v = variant ?? ((h1 < 0.55 ? 1 : 0) | ((h2 < 0.55 ? 0 : h2 < 0.8 ? 1 : 2) << 1));
     const cx = xi + 0.5, cy = yi + 0.5;
-    const angle = Math.atan2(toward.y - cy, toward.x - cx) + (h3 - 0.5) * 0.5;
+    const angle = dm.atan2(toward.y - cy, toward.x - cx) + (h3 - 0.5) * 0.5;
     this.tiles[yi * this.w + xi] = 'trench';
     this.decor.push({ kind: 'foxhole', x: cx, y: cy, variant: v, angle });
     return true;
@@ -465,7 +466,7 @@ export class MapPainter {
     let placed = 0, n = 0;
     for (let s = 0; s < points.length - 1; s++) {
       const a = points[s], b = points[s + 1];
-      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      const len = dm.hypot(b.x - a.x, b.y - a.y);
       if (len <= 0) continue;
       const ux = (b.x - a.x) / len, uy = (b.y - a.y) / len;
       // perpendicular pointing toward the enemy, for the forward/back stagger
@@ -478,7 +479,7 @@ export class MapPainter {
         const x = a.x + ux * (d + along) + px * off, y = a.y + uy * (d + along) + py * off;
         d += spacing * (0.8 + hash2(n, 3, hs) * 0.4);
         if (hash2(n, 4, hs) < gapProb) continue;
-        if (keepClear.some((c) => Math.hypot(c.x - x, c.y - y) < c.r)) continue;
+        if (keepClear.some((c) => dm.hypot(c.x - x, c.y - y) < c.r)) continue;
         if (this.foxhole(x, y, toward)) placed++;
       }
     }
@@ -601,10 +602,10 @@ export class ElevationPainter implements ElevationApi {
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
         const dx = x + 0.5 - cx, dy = y + 0.5 - cy;
-        const d = Math.hypot(dx, dy) / radiusTiles;
+        const d = dm.hypot(dx, dy) / radiusTiles;
         if (d >= 1) continue;
         // a gentle irregularity so a hill is not a perfect cone of revolution
-        const wob = 1 + (hash2(Math.round(Math.atan2(dy, dx) * 6), Math.round(radiusTiles), this.seed + 6601) - 0.5) * 0.18;
+        const wob = 1 + (hash2(Math.round(dm.atan2(dy, dx) * 6), Math.round(radiusTiles), this.seed + 6601) - 0.5) * 0.18;
         this.e[y * this.w + x] += peakM * falloffAt(falloff, d * wob);
       }
     }
@@ -645,7 +646,7 @@ export class ElevationPainter implements ElevationApi {
   }
 
   slope(rect: Rect, fromM: number, toM: number, angleRad: number): void {
-    const ux = Math.cos(angleRad), uy = Math.sin(angleRad);
+    const ux = dm.cos(angleRad), uy = dm.sin(angleRad);
     const x0 = Math.max(0, Math.floor(rect.x)), x1 = Math.min(this.w - 1, Math.ceil(rect.x + rect.w) - 1);
     const y0 = Math.max(0, Math.floor(rect.y)), y1 = Math.min(this.h - 1, Math.ceil(rect.y + rect.h) - 1);
     // project the rect's own corners on the axis so t spans 0..1 across it
@@ -671,7 +672,7 @@ export class ElevationPainter implements ElevationApi {
         const cx = x + 0.5, cy = y + 0.5;
         const dx = Math.max(rect.x - cx, cx - (rect.x + rect.w), 0);
         const dy = Math.max(rect.y - cy, cy - (rect.y + rect.h), 0);
-        const d = Math.hypot(dx, dy);
+        const d = dm.hypot(dx, dy);
         if (d >= feather) continue;
         const wgt = 1 - smoothstep(d / feather);
         const i = y * this.w + x;
@@ -764,7 +765,7 @@ export class ElevationPainter implements ElevationApi {
     let travelled = 0;
     for (let s = 0; s < points.length - 1; s++) {
       const a = points[s], b = points[s + 1];
-      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      const len = dm.hypot(b.x - a.x, b.y - a.y);
       const n = Math.max(1, Math.round(len));
       for (let k = 0; k < n; k++) {
         const t = k / n;
@@ -819,7 +820,7 @@ export class ElevationPainter implements ElevationApi {
           if ((raw < 0 && !isFirst) || (raw > 1 && !isLast)) continue;
           const t = clamp01e(raw);
           const qx = a.x + abx * t, qy = a.y + aby * t;
-          const d = Math.hypot(px - qx, py - qy);
+          const d = dm.hypot(px - qx, py - qy);
           const shoulder = shA + (shB - shA) * t;
           if (d >= half + shoulder) continue;
           const target = a.h + (b.h - a.h) * t;
@@ -893,7 +894,7 @@ export class ElevationPainter implements ElevationApi {
           const raw = len2 > 0 ? ((px - a.x) * abx + (py - a.y) * aby) / len2 : 0;
           if ((raw < 0 && !isFirst) || (raw > 1 && !isLast)) continue; // see paintCorridor
           const t = clamp01e(raw);
-          const d = Math.hypot(px - (a.x + abx * t), py - (a.y + aby * t));
+          const d = dm.hypot(px - (a.x + abx * t), py - (a.y + aby * t));
           if (d >= reach) continue;
           const bed = a.h + (b.h - a.h) * t;
           const i = y * this.w + x;
@@ -925,7 +926,7 @@ function distToSeg(px: number, py: number, ax: number, ay: number, bx: number, b
   const dx = bx - ax, dy = by - ay;
   const len2 = dx * dx + dy * dy;
   const t = len2 > 0 ? clamp01e(((px - ax) * dx + (py - ay) * dy) / len2) : 0;
-  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+  return dm.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
 /** Runs a map definition's `elevation()` hook, returning the per-tile ground field (metres), or

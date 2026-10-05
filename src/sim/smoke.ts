@@ -1,5 +1,6 @@
 import type { GameMap, Vec2 } from '@/shared/types';
 import { idx, inBounds } from './map';
+import * as dm from '@/shared/dmath';
 
 export function addSmoke(map: GameMap, center: Vec2, radiusTiles: number, density: number): void {
   const cx = Math.floor(center.x), cy = Math.floor(center.y);
@@ -7,7 +8,7 @@ export function addSmoke(map: GameMap, center: Vec2, radiusTiles: number, densit
   for (let y = cy - r; y <= cy + r; y++) {
     for (let x = cx - r; x <= cx + r; x++) {
       if (!inBounds(map, x, y)) continue;
-      const d = Math.hypot(x + 0.5 - center.x, y + 0.5 - center.y);
+      const d = dm.hypot(x + 0.5 - center.x, y + 0.5 - center.y);
       if (d > radiusTiles) continue;
       const falloff = Math.max(0, 1 - d / radiusTiles);
       const i = idx(map, x, y);

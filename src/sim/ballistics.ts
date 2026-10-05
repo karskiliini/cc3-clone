@@ -2,6 +2,7 @@ import type { Health, RoundType, Soldier, Stance, Vec2, Vehicle, WeaponDef } fro
 import type { Rng } from '@/shared/rng';
 import { clamp, wrapAngle, angleTo } from '@/shared/math';
 import { hastyAccuracy } from './hastyFire';
+import * as dm from '@/shared/dmath';
 
 const DEG60 = (60 * Math.PI) / 180;
 const DEG135 = (135 * Math.PI) / 180;
@@ -21,7 +22,7 @@ function exposureStanceFactor(stance: Stance): number {
 function rangeFactor(weapon: WeaponDef, distM: number): number {
   if (distM > weapon.rangeM) return 0;
   if (distM <= 100) return 1;
-  return Math.pow(100 / distM, 0.8);
+  return dm.pow(100 / distM, 0.8);
 }
 
 function shooterFactor(shooter: Soldier): number {
@@ -86,7 +87,7 @@ function erf(x: number): number {
   const ax = Math.abs(x);
   const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741, a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
   const t = 1 / (1 + p * ax);
-  const y = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-ax * ax);
+  const y = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * dm.exp(-ax * ax);
   return sign * y;
 }
 

@@ -1,3 +1,4 @@
+import * as dm from './dmath';
 /** Seeded deterministic RNG (mulberry32). All sim randomness goes through one instance. */
 export class Rng {
   private s: number;
@@ -18,7 +19,7 @@ export class Rng {
   pick<T>(arr: readonly T[]): T { return arr[Math.floor(this.next() * arr.length)]; }
   gauss(): number { // Box-Muller
     const u = 1 - this.next(), v = this.next();
-    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    return Math.sqrt(-2 * dm.log(u)) * dm.cos(2 * Math.PI * v);
   }
 }
 /** Stateless hash noise 0..1 for procedural textures (not for sim). */

@@ -11,6 +11,7 @@ import { dist } from '@/shared/math';
 import { hasLOS } from './los';
 import { isPassable } from './path';
 import { addMessage } from './messages';
+import * as dm from '@/shared/dmath';
 
 /** Seconds a bandage / stabilise takes (the medic's `bandageUntil`, which the renderer plays). */
 export const MEDIC_TREAT_S = 3;
@@ -203,7 +204,7 @@ export function stepMedic(state: BattleState, rng: Rng, dt: number): void {
 function dragBehind(state: BattleState, medic: Soldier, patient: Soldier): void {
   const next = medic.path[0];
   const ahead = next ? { x: next.x - medic.pos.x, y: next.y - medic.pos.y } : { x: medic.pos.x - patient.pos.x, y: medic.pos.y - patient.pos.y };
-  const len = Math.hypot(ahead.x, ahead.y);
+  const len = dm.hypot(ahead.x, ahead.y);
   if (len < 1e-4) return;
   const r = DRAG_M / TILE_M;
   const p = { x: medic.pos.x - (ahead.x / len) * r, y: medic.pos.y - (ahead.y / len) * r };
