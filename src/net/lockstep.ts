@@ -37,6 +37,9 @@ import { SIM_DT, type BattleConfig, type Side } from '@/shared/types';
 import type { NetMessage, Transport, TurnHash } from './transport';
 
 const SIDES: readonly Side[] = ['german', 'soviet'];
+/** Turns after a resync before the authority honours another resync request from the peer (10 s
+ * at 1x). A real mismatch is also seen by the authority's own hash check, which is not limited. */
+const REQUEST_COOLDOWN_TURNS = 100;
 
 export interface LockstepOptions {
   battle: Battle;
@@ -76,6 +79,8 @@ export interface DesyncReport {
   /** Rebuild attempts this mismatch took (1 = the first rebuild matched). */
   attempts: number;
   recovered: boolean;
+  /** Why recovery stopped, when it did not recover (e.g. a payload that forged our commands). */
+  reason?: string;
 }
 
 export interface LockstepStats {
@@ -128,6 +133,9 @@ export class LockstepSession {
   private config: BattleConfig;
   /** Commands given since the last bundle was sealed. */
   private outgoing: CommandBody[] = [];
+  /** Every command we ever sealed, by turn and in issue order: our own record of our side's
+   * history, which a resync payload from the authority must not contradict (trust boundary). */
+  private sent: { turn: number; key: string; body: CommandBody }[] = [];
   /** Sealed bundles per side by turn (ours are kept until the peer acks them and they have run). */
   private bundles: Record<Side, Map<number, CommandBody[]>> = { german: new Map(), soviet: new Map() };
   /** The highest turn our bundles were sealed for. */
@@ -152,6 +160,9 @@ export class LockstepSession {
   private peerRebuiltHash: number | null = null;
   private lastResyncSend = -Infinity;
   private failedAttempts = 0;
+  /** The turn play last resumed at after a resync (a peer's request is not honoured again
+   * within REQUEST_COOLDOWN_TURNS of it, so it cannot keep the host rebuilding). */
+  private resumedTurn = -Infinity;
 
   constructor(opts: LockstepOptions) {
     this.battle = opts.battle;
@@ -280,6 +291,7 @@ export class LockstepSession {
     while (this.sealedTo < turn) {
       const t = ++this.sealedTo;
       this.bundles[this.side].set(t, this.outgoing);
+      for (const body of this.outgoing) this.sent.push({ turn: t, key: canonical(body), body: structuredClone(body) });
       this.outgoing = [];
       this.unacked.set(t, nowMs);
       this.sendBundle(t);
@@ -349,8 +361,13 @@ export class LockstepSession {
         return;
       case 'resyncRequest':
         // the peer saw a mismatch first: the authority starts the resync it asks for
-        if (this.authority && msg.epoch > this.epoch) this.startResync(msg.epoch, msg.turn, NaN, NaN);
-        else if (this.authority && this.payload && msg.epoch === this.epoch) this.transport.send(this.payload);
+        if (!this.authority) return;
+        // honoured only while playing, and not again right after a resync; during a resync the
+        // peer gets the current payload again instead of restarting the rebuild
+        if (this.status === 'playing' && msg.epoch > this.epoch) {
+          if (this.turn - this.resumedTurn < REQUEST_COOLDOWN_TURNS) return;
+          this.startResync(msg.epoch, msg.turn, NaN, NaN);
+        } else if (this.status === 'resyncing' && this.payload) this.transport.send(this.payload);
         return;
       case 'resync':
         if (this.authority) return;
@@ -439,6 +456,22 @@ export class LockstepSession {
       this.stallSince = null;
       this.reports.push(this.report(this.turn, this.battle.state.tick ?? 0, NaN, NaN));
     }
+    // Trust boundary: the authority may decide the order of history and drop a command it never
+    // got, but it may not speak for us. Our side's commands in its log must be ones we sent, in
+    // the order we sent them; anything else (a forged order for our teams, a flee or truce in our
+    // name) ends the session instead of being replayed.
+    if (!this.authority) {
+      const why = this.payloadProblem(p);
+      if (why) {
+        const report = this.reports[this.reports.length - 1];
+        report.authorityLog = Array.isArray(p.log) ? p.log : null;
+        report.reason = why;
+        this.status = 'failed';
+        this.rebuild = null;
+        this.lastResyncSend = -Infinity;
+        return;
+      }
+    }
     this.epoch = p.epoch;
     this.rebuiltHash = null;
     this.peerRebuiltHash = null;
@@ -448,10 +481,31 @@ export class LockstepSession {
     const battle = new Battle(structuredClone(this.config));
     battle.loadCommands(p.log);
     this.rebuild = { epoch: p.epoch, turn: p.turn, tick: p.tick, log: p.log, battle, done: false };
-    // every bundle from the resume turn on, as the authority holds them; ours where it lacks them
-    for (const s of SIDES) {
-      for (const [t, cmds] of p.bundles[s]) if (!this.bundles[s].has(t)) this.bundles[s].set(t, cmds);
+    // the authority's bundles from the resume turn on; our own come from our record, never from it
+    for (const [t, cmds] of p.bundles[this.peer]) if (!this.bundles[this.peer].has(t)) this.bundles[this.peer].set(t, cmds);
+    if (!this.authority) {
+      for (let t = p.turn; t <= this.sealedTo; t++) {
+        if (!this.bundles[this.side].has(t)) this.bundles[this.side].set(t, this.sent.filter((e) => e.turn === t).map((e) => structuredClone(e.body)));
+      }
     }
+  }
+
+  /** Why a resync payload cannot be trusted, or null. */
+  private payloadProblem(p: Extract<NetMessage, { kind: 'resync' }>): string | null {
+    if (!Array.isArray(p.log) || !p.bundles || !Array.isArray(p.bundles[this.peer])) return 'malformed resync payload';
+    if (!Number.isInteger(p.turn) || !Number.isInteger(p.tick) || p.turn < 0 || p.tick < 0) return 'malformed resync payload';
+    let i = 0;
+    for (const c of p.log) {
+      if (!c || (c.side !== 'german' && c.side !== 'soviet') || !Number.isInteger(c.tick)) return 'malformed command in the authority log';
+      if (c.side !== this.side) continue;
+      // our command: it must come next in what we sent (skipping any the authority never got)
+      const { side: _s, tick: _t, seq: _q, ...body } = c;
+      const key = canonical(body);
+      while (i < this.sent.length && this.sent[i].key !== key) i++;
+      if (i === this.sent.length) return `the authority log holds a ${c.type} command in our name that we never sent`;
+      i++;
+    }
+    return null;
   }
 
   /** One update's worth of resync work: (re)send what the peer may be missing, rebuild a slice. */
@@ -517,6 +571,7 @@ export class LockstepSession {
       this.stats.resyncs++;
       report.recovered = true;
       report.resumedAt = { turn: this.turn, tick: this.battle.state.tick ?? 0 };
+      this.resumedTurn = this.turn;
       this.hashChain.push([this.turn, this.rebuiltHash]);
       this.latestHash = { turn: this.turn, hash: this.rebuiltHash, epoch: this.epoch };
       return;
@@ -537,4 +592,12 @@ export class LockstepSession {
       this.lastResyncSend = -Infinity;
     }
   }
+}
+
+/** JSON with object keys sorted, so equal commands compare equal however they were built. */
+function canonical(v: unknown): string {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? 'undefined';
+  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
+  const o = v as Record<string, unknown>;
+  return `{${Object.keys(o).filter((k) => o[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${canonical(o[k])}`).join(',')}}`;
 }

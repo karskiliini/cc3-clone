@@ -9,6 +9,7 @@ import type { NetMessage, Transport } from '@/net/transport';
 import { Rng } from '@/shared/rng';
 import { DEFAULT_FORCES } from '@/data/operation';
 import type { BattleConfig, Order, Side } from '@/shared/types';
+import type { Command } from '@/sim/commands';
 
 /** Multiplayer M1 (plan §7): two lockstep sessions over an in-memory transport. */
 
@@ -330,6 +331,64 @@ describe('desync recovery (047)', () => {
     });
     expect(corrupted).toBe(true);
     expectRecovered(p);
+  }, 300_000);
+
+  it('a resync payload that forges commands in our name is refused, not replayed', () => {
+    let forged = 0;
+    let victimTeam = -1;
+    const p = pair({ seed: 61 }, undefined, {
+      german: (t) => tamper(t, (m) => {
+        if (m.kind !== 'resync') return m;
+        // a hostile host slips in an order for a Soviet team, and a Soviet flee
+        const sov = m.log.find((c) => c.side === 'soviet' && c.type === 'order') as Extract<Command, { type: 'order' }> | undefined;
+        if (!sov) return m;
+        victimTeam = sov.teamId;
+        forged++;
+        const tick = m.log[m.log.length - 1].tick;
+        return {
+          ...m,
+          log: [...m.log,
+            { ...sov, order: { ...sov.order, target: { x: 1, y: 1 } }, tick, seq: 1e6 },
+            { type: 'flee', side: 'soviet', tick, seq: 1e6 + 1 }],
+        };
+      }),
+    });
+    let corrupted = false;
+    drive(p, () => p.peers.soviet.status === 'failed' && p.peers.german.status === 'failed', 10 * 60_000, () => {
+      const s = p.peers.soviet;
+      if (!corrupted && s.battle.state.phase === 'running' && tick(s) >= 300) {
+        s.battle.state.soldiers.values().next().value!.ammo += 1;
+        corrupted = true;
+      }
+    });
+    expect(forged).toBeGreaterThan(0);
+    const sov = p.peers.soviet;
+    expect(sov.status).toBe('failed');
+    expect(sov.desync!.reason).toMatch(/never sent/);
+    // nothing of the forged history reached the Soviet battle
+    expect(sov.battle.state.phase).not.toBe('ended');
+    expect(sov.battle.state.teams.get(victimTeam)!.order?.target).not.toEqual({ x: 1, y: 1 });
+    expect(p.peers.german.status).toBe('failed');
+  }, 300_000);
+
+  it('a peer flooding resync requests cannot keep the host rebuilding', () => {
+    const p = pair({ seed: 62 });
+    const flood = (s: LockstepSession, epoch: number) =>
+      (s as unknown as { transport: Transport }).transport.send({ kind: 'resyncRequest', side: 'soviet', epoch, turn: s.turn });
+    let corrupted = false;
+    let epoch = 1000;
+    recoverAndPlay(p, 1, 400, () => {
+      const s = p.peers.soviet;
+      if (!corrupted && s.battle.state.phase === 'running' && tick(s) >= 150) {
+        s.battle.state.soldiers.values().next().value!.ammo += 1;
+        corrupted = true;
+      }
+      // after the honest resync, a request every frame
+      if (p.peers.german.stats.resyncs >= 1) flood(s, epoch++);
+    });
+    // the flood got at most one more resync per cooldown window, and play went on
+    expect(p.peers.german.stats.resyncs).toBeLessThanOrEqual(1 + Math.ceil(400 / 100));
+    expect(p.peers.german.status).toBe('playing');
   }, 300_000);
 
   it('garbage on the wire never throws', () => {
