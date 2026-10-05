@@ -3,7 +3,7 @@ import type {
   AimPoint, BattleEvent, BattleMessage, BattleState, Health, RoundType, Side, Soldier, Team, Vec2, Vehicle, WeaponDef,
 } from '@/shared/types';
 import type { GameMap, Terrain } from '@/shared/types';
-import { AMBUSH_TRIGGER_M, TILE_M, otherSide } from '@/shared/types';
+import { AMBUSH_TRIGGER_M, TILE_M, TRACER_LIFE, otherSide } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { clamp, dist, facingAngle, facingFromAngle, facingTo, angleTo, turnTowards, wrapAngle } from '@/shared/math';
 import { hitChance, penetrates, damageRoll } from './ballistics';
@@ -11,6 +11,7 @@ import { tileAt, coverAt, setTile, idx, inBounds } from './map';
 import { isPassable } from './path';
 import { hasLOS, hasLineOfFire, roundCanReach, eyeHeightM, EYE_VEHICLE_M, VEHICLE_GUN_M } from './los';
 import type { LosHeights } from './los';
+import { armourRicochet, groundStrike, missPoint } from './shellFx';
 import { estimateAim, traceRound, traceTracers } from './shotTrace';
 import { clearInfantryAim, infantryAimReady, infantryCanAim, infantryDidFire, observeInfantryMotion } from './infantryAim';
 import { createSmgBurst, smgBodyFacing, smgHullIntercept, smgMuzzle, smgMuzzleHeight, smgRoundAim } from './smgFire';
@@ -885,16 +886,22 @@ function fireAtVehicle(
   const rw = roundWeapon(weapon, round);
   const shotPath = traceRound(state, rng, shooterPos, vehicle.pos, rw, { eyeM: EYE_VEHICLE_M, targetM: EYE_VEHICLE_M });
   const intercepted = shotPath.blocked || shotPath.deflected;
+  // a clean miss is seen to fly past the hull and strike the ground beyond it (visual only: the
+  // physics above traced the line to the hull)
+  const missedClean = !intercepted && r >= pAny;
+  const seenAt = missedClean ? missPoint(state, shooterPos, vehicle.pos, state.time) : shotPath.impact;
+  if (missedClean) shotPath.points[shotPath.points.length - 1] = { ...seenAt };
   if (wantTracer) traceTracers(state, shotPath, kind, !intercepted && r < pAny);
   // the round is in flight (A1, visual): shells at ~600 m/s, rockets at 80 m/s. Damage is
   // resolved at once (the visual catches up); the renderer plays the arrival on landing.
   const projKind: 'shell' | 'atrocket' = weapon.cls === 'atrocket' ? 'atrocket' : 'shell';
   const speed = projKind === 'atrocket' ? 80 : 600;
-  const flightS = Math.max(0.08, dist(shooterPos, shotPath.impact) * TILE_M / speed);
+  const flightS = Math.max(0.08, dist(shooterPos, seenAt) * TILE_M / speed);
   const arrive = state.time + flightS; // the strike shows when the round gets there
+  const lineOfFire = angleTo(shooterPos, seenAt);
   state.projectiles.push({
-    kind: projKind, weaponId: weapon.id, from: { ...shooterPos }, to: { ...shotPath.impact },
-    t0: state.time, flightS, dirRad: angleTo(shooterPos, shotPath.impact),
+    kind: projKind, weaponId: weapon.id, from: { ...shooterPos }, to: { ...seenAt },
+    t0: state.time, flightS, dirRad: lineOfFire,
     arcM: 0, hitKind: r >= pAny ? 'ricochet' : 'impact', preResolved: true,
   });
   if (intercepted) {
@@ -902,7 +909,8 @@ function fireAtVehicle(
     return false;
   }
   if (r >= pAny) {
-    state.sparks.push({ pos: { ...vehicle.pos }, t: arrive, kind: 'dust' });
+    if (atRocket) state.sparks.push({ pos: { ...seenAt }, t: arrive, kind: 'dust' });
+    else groundStrike(state, seenAt, lineOfFire, arrive, rw);
     onVehicleNearMiss(state, vehicle, weapon, shooterPos);
     return false;
   }
@@ -914,6 +922,7 @@ function fireAtVehicle(
   if (!res.penetrated) {
     state.events.push({ kind: 'armorClank', pos: { ...vehicle.pos }, side: shooterSide });
     state.sparks.push({ pos: { ...vehicle.pos }, t: arrive, kind: 'armor' });
+    if (!atRocket) armourRicochet(state, vehicle.pos, lineOfFire, arrive, rw);
   } else {
     state.events.push({ kind: 'penHit', pos: { ...vehicle.pos }, side: shooterSide });
     state.sparks.push({ pos: { ...vehicle.pos }, t: arrive, kind: 'pen' });
@@ -1777,17 +1786,24 @@ function vehicleHitChance(weapon: WeaponDef, distM: number, cover: number, stanc
 /** Main-gun HE is for real infantry targets, not for one man: a tank's machine guns (coax, bow)
  * engage infantry first; the main gun joins only for (a) a GROUP — several spotted men of the
  * same team clustered within GROUP_RADIUS_TILES of one another — (b) both MGs out of usable
- * ammo, or (c) an MG engagement that has failed to pin the team after MG_ESCALATE_S. Men in
- * strong cover (trench, stone building, bunker interior: omni cover >= STRONG_COVER) are never
- * worth main-gun HE unless (b)/(c) — the MG keeps them suppressed there while an assault or an
- * AT gun does the work. AP is never chosen against infantry (aimPoint.ts already routes soft
+ * ammo, or (c) the MGs not doing the job: the team not pinned after MG_ESCALATE_S (5 s when the
+ * man is close enough to hurt the tank), or pinned but still there after MG_ESCALATE_PINNED_S.
+ * Men in strong cover (trench, stone building, bunker interior: omni cover >= STRONG_COVER) are
+ * not worth main-gun HE as a mere group, only through (b)/(c). AP is never chosen against infantry (aimPoint.ts already routes soft
  * targets to HE; the gates here keep a lone rifleman from even being laid on). */
 export const MG_GROUP_MIN = 3;
 export const MG_GROUP_RADIUS_TILES = 6;
 /** Trench/bunker/stone-building strength: at or above this omni cover, main-gun HE is wasted. */
 export const MG_STRONG_COVER = 0.8;
-/** An MG engagement unresolved (the team not pinned) for this long unlocks the main gun. */
-export const MG_ESCALATE_S = 20;
+/** An MG engagement unresolved (the team not pinned) for this long unlocks the main gun: one man
+ * must not hold a tank up — standing still is dangerous for the tank itself. */
+export const MG_ESCALATE_S = 12;
+/** A man this close (an AT grenade's or a Panzerfaust's reach) gets the HE much sooner. */
+export const MG_CLOSE_M = 40;
+export const MG_ESCALATE_CLOSE_S = 5;
+/** Pinned is not done: men the MGs keep down but cannot finish (a trench, a stone house) get the
+ * HE after this long anyway. */
+export const MG_ESCALATE_PINNED_S = 25;
 /** Pinned: suppression at or above this stops the escalation clock (the MGs did their job). */
 export const MG_SUPPRESS_LEVEL = 60;
 
@@ -1805,8 +1821,7 @@ export function mainGunAtInfantry(state: BattleState, vehicle: Vehicle, s: Soldi
   const strongCover = omniCoverAt(state.map, s.pos) >= MG_STRONG_COVER
     || tileAt(state.map, Math.floor(s.pos.x), Math.floor(s.pos.y)) === 'buildingStone'
     || behindGunShield(state, s, vehicle.pos);
-  if (strongCover) return null;
-  // group: several spotted living men of this team within GROUP_RADIUS_TILES of the target man
+  // group (not worth it against men in strong cover until the MGs have shown they can't do the job): several spotted living men of this team within GROUP_RADIUS_TILES of the target man
   const team = state.teams.get(s.teamId);
   if (team) {
     let clustered = 0;
@@ -1816,11 +1831,14 @@ export function mainGunAtInfantry(state: BattleState, vehicle: Vehicle, s: Soldi
       if (!state.spotted[vehicle.side].has(id)) continue;
       if (dist(m.pos, s.pos) <= MG_GROUP_RADIUS_TILES) clustered++;
     }
-    if (clustered >= MG_GROUP_MIN) return 'group';
+    if (clustered >= MG_GROUP_MIN && !strongCover) return 'group';
   }
   // escalation: the machine guns have worked this team for MG_ESCALATE_S and it is still not pinned
-  if (vehicle.mgTargetKey === `t${s.teamId}` && vehicle.mgSince != null
-    && state.time - vehicle.mgSince >= MG_ESCALATE_S) {
+  // (quickly when he is close enough to hurt the tank), or has pinned it but not finished it
+  const close = dist(vehicle.pos, s.pos) * TILE_M <= MG_CLOSE_M;
+  const engagedS = vehicle.mgTargetKey === `t${s.teamId}` && vehicle.mgSince != null ? state.time - vehicle.mgSince : 0;
+  if (engagedS >= MG_ESCALATE_PINNED_S) return 'escalated';
+  if (engagedS >= (close ? MG_ESCALATE_CLOSE_S : MG_ESCALATE_S)) {
     let bestSupp = 0;
     if (team) {
       for (const id of team.soldierIds) {
@@ -2456,6 +2474,8 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
         const shot = traceRound(state, rng, vehicle.pos, at, fired, { eyeM: VEHICLE_GUN_M, targetM: estimated ? 0.5 : 1.7 });
         traceTracers(state, shot, tracerKindFor(fired), !shot.blocked && !shot.deflected);
         areaImpact(state, rng, vehicle.pos, vehicle.side, fired, shot.impact, gunner);
+        // solid shot at men or a spot: the dirt it throws up, and its skip on off the ground
+        if (!shot.blocked && fired.heRadiusM <= 0) groundStrike(state, shot.impact, angleTo(vehicle.pos, shot.impact), state.time + TRACER_LIFE * 0.7, fired);
         // the gunner watches the burst: on the spot needs no correction
         missed = shot.blocked || dist(shot.impact, tPos) * TILE_M > Math.max(3, fired.heRadiusM * 0.5);
       }

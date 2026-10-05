@@ -347,7 +347,7 @@ export class Battle {
       state.projectiles = state.projectiles.filter((p) => state.time < p.t0 + p.flightS + (p.kind === 'mortar' ? 0.25 : 0.1));
     }
     // impact sparks / puffs (A2): t = spawn time; the renderer fades on state.time - t
-    if (state.sparks.length > 0) state.sparks = state.sparks.filter((s) => state.time - s.t < 0.8);
+    if (state.sparks.length > 0) state.sparks = state.sparks.filter((s) => state.time - s.t < 1.3); // a ground splash hangs 1.2 s
     // delayed grenade/satchel bursts are consumed by sim/combat.ts stepPendingBursts
     // structure FX visuals linger for the renderer, capped (B3)
     if (state.structureFx.length > 32) state.structureFx.splice(0, state.structureFx.length - 32);

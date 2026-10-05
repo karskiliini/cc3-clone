@@ -570,7 +570,8 @@ export interface Debris {
   landAt?: number;
 }
 // ----------------------------------------------------------------- projectiles
-export type ProjectileKind = 'shell' | 'atrocket' | 'grenade' | 'satchel' | 'mortar';
+/** 'ricochet': a solid shot skipping off the ground or glancing off armour (sim/shellFx.ts). */
+export type ProjectileKind = 'shell' | 'atrocket' | 'grenade' | 'satchel' | 'mortar' | 'ricochet';
 /** A round in flight, VISUAL ONLY (sim damage resolution stays instant). Pushed by sim/combat.ts
  * + sim/structures triggers; drawn by render/effects.ts `drawProjectiles`; expired when
  * `state.time >= t0 + flightS`. */
@@ -593,7 +594,7 @@ export interface Spark {
   pos: Vec2;
   /** battle time the spark shows (may lie a little in the future: a shell still in flight) */
   t: number;
-  kind: 'armor' | 'dust' | 'wood' | 'stone' | 'brick' | 'body' | 'pen' | 'backblast' | 'leaf' | 'ricochet';
+  kind: 'armor' | 'dust' | 'wood' | 'stone' | 'brick' | 'body' | 'pen' | 'backblast' | 'leaf' | 'ricochet' | 'groundSplash';
 }
 /** Delayed burst (A1): a thrown grenade/satchel or a mortar bomb in flight; the HE splash (or, for
  * a smoke bomb, the smoke cloud) happens when `state.time >= at`. */

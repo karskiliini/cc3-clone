@@ -255,7 +255,7 @@ function drawExplosions(ctx: CanvasRenderingContext2D, cam: Camera, state: Battl
 
 // ------------------------------------------------------------------- sparks
 /** Lifetimes of the sparks drawn here; leaves and ricochets are drawVegetationImpacts'. */
-const SPARK_S: Partial<Record<Spark['kind'], number>> = { armor: 0.35, pen: 0.5, dust: 0.55, wood: 0.5, stone: 0.5, brick: 0.5, body: 0.35, backblast: 0.8 };
+const SPARK_S: Partial<Record<Spark['kind'], number>> = { armor: 0.35, pen: 0.5, dust: 0.55, wood: 0.5, stone: 0.5, brick: 0.5, body: 0.35, backblast: 0.8, groundSplash: 1.2 };
 const CHIP: Partial<Record<Spark['kind'], string>> = { wood: '#7a5a34', stone: '#77736c', brick: '#8a4a36', body: '#6a1c14' };
 
 /** Impact sparks and puffs (A2): hot streaks off armour, a flash through a pierced plate, dirt,
@@ -303,6 +303,8 @@ function drawSparks(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSta
         const d = (2 + k * 3) * f * z * 3;
         drawFxAt(ctx, 'puff.light', 0, p.x + Math.cos(a) * d, p.y + Math.sin(a) * d, z * (0.35 + 0.35 * f + k * 0.05), 0.75 * (1 - f));
       }
+    } else if (s.kind === 'groundSplash') {
+      drawGroundSplash(ctx, p.x, p.y, z, age, f, seed, winter, tileAt(state.map, Math.floor(s.pos.x), Math.floor(s.pos.y)) === 'water');
     } else if (s.kind === 'dust') {
       drawFxAt(ctx, fxSeasonKey('impact', winter), age, p.x, p.y, z * 1.8);
     } else {
@@ -322,6 +324,67 @@ function drawSparks(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSta
   }
 }
 
+/** A shell striking the ground: a dark blast mark, a fountain of clods (snow, spray) thrown a few
+ * metres up and falling back, the impact flipbook, and a dust cloud that rises, spreads and hangs. */
+function drawGroundSplash(ctx: CanvasRenderingContext2D, x: number, y: number, z: number, age: number, f: number, seed: number, winter: boolean, water: boolean): void {
+  const soft = winter || water;
+  if (!water) {
+    // the scar of thrown-up earth (snow: darker earth showing through)
+    ctx.save();
+    ctx.globalAlpha = 0.45 * (1 - f * f);
+    ctx.fillStyle = winter ? '#8a8a80' : '#2e2416';
+    ctx.beginPath(); ctx.ellipse(x, y, (4 + 3 * Math.min(1, age * 8)) * z, (2.6 + 2 * Math.min(1, age * 8)) * z, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  if (age < 0.6) drawFxAt(ctx, fxSeasonKey('impact', soft), age, x, y, z * 3);
+  // the column of dirt rising and then the cloud drifting and thinning
+  const rise = Math.min(1, age * 5);
+  drawDustPuff(ctx, x, y - (6 + 12 * rise + f * 6) * z, (18 + 40 * Math.sqrt(f)) * z, (water ? 0.5 : 0.85) * (1 - f) * rise, soft);
+  drawDustPuff(ctx, x + (2 + 8 * f) * z, y - (2 + 4 * f) * z, (14 + 34 * Math.sqrt(f)) * z, (water ? 0.4 : 0.7) * (1 - f) * rise, soft);
+  const dark = water ? '#f2f8fc' : winter ? '#ffffff' : '#2e2414';
+  const light = water ? '#b8d0dc' : winter ? '#c8d2da' : '#6b5638';
+  ctx.save();
+  for (let k = 0; k < 22; k++) {
+    const a = hash2(seed, k, 21) * Math.PI * 2;
+    const vh = (10 + 34 * hash2(seed, k, 23)) * z;   // px/s outwards
+    const vz = (60 + 110 * hash2(seed, k, 29)) * z;  // px/s up: a column a few metres high
+    const up = vz * age - 0.5 * 300 * z * age * age;
+    const r = vh * age;
+    const gx = x + Math.cos(a) * r, gy = y + Math.sin(a) * r * 0.6;
+    const sz = Math.max(1, Math.round((k % 4 === 0 ? 3 : k % 2 ? 2 : 1.5) * z));
+    ctx.fillStyle = k % 3 ? dark : light;
+    if (up > 0) { ctx.globalAlpha = 1; ctx.fillRect(Math.round(gx - sz / 2), Math.round(gy - up), sz, sz); }
+    else if (!water) { ctx.globalAlpha = 0.85 * (1 - f); ctx.fillRect(Math.round(gx - sz / 2), Math.round(gy), sz, sz); }
+  }
+  ctx.restore();
+}
+
+/** A solid shot skipping off the ground (a low hop) or glancing off armour (hot, and up and away
+ * out of sight when it went skyward): a glowing slug with a short streak. */
+function drawRicochet(ctx: CanvasRenderingContext2D, from: Vec2, to: Vec2, k: number, z: number, skyward: boolean, glance: boolean): void {
+  const dx = to.x - from.x, dy = to.y - from.y, len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len, uy = dy / len;
+  const lift = skyward ? k * k * 40 * z : Math.sin(Math.PI * k) * 5 * z;
+  const x = from.x + dx * k, y = from.y + dy * k - lift;
+  const tail = Math.min(len * k, 40 * z);
+  const fade = skyward ? 1 - k : 1 - k * 0.4;
+  const hot = glance ? '255,160,70' : '255,190,110';
+  drawGlow(ctx, x, y, (glance ? 11 : 8) * z * (skyward ? 1 - k * 0.6 : 1), 0.85 * fade, hot);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineCap = 'round';
+  const tx = x - ux * tail, ty = y - uy * tail + (skyward ? tail * 0.6 * k : 0);
+  ctx.globalAlpha = 0.55 * fade;
+  ctx.strokeStyle = glance ? '#ff8a30' : '#ffb060';
+  ctx.lineWidth = Math.max(2, 3 * z);
+  ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(x, y); ctx.stroke();
+  ctx.globalAlpha = fade;
+  ctx.strokeStyle = '#fff2c8';
+  ctx.lineWidth = Math.max(1.5, 1.5 * z);
+  ctx.beginPath(); ctx.moveTo(x - ux * tail * 0.35, y - uy * tail * 0.35); ctx.lineTo(x, y); ctx.stroke();
+  ctx.restore();
+}
+
 // ---------------------------------------------------------------- projectiles
 /** Rounds in flight (A1). Shells and mortar bombs are carried by their tracer / burst; what is drawn
  * here is the slow, visible stuff: an AT rocket with its flame and smoke trail, and a grenade or
@@ -339,7 +402,9 @@ function drawProjectiles(ctx: CanvasRenderingContext2D, cam: Camera, state: Batt
     const prFrom = muzzleSnap(pr)?.pos ?? pr.from;
     const from = worldToScreen(cam, prFrom), to = worldToScreen(cam, pr.to);
     const x = from.x + (to.x - from.x) * k, y = from.y + (to.y - from.y) * k;
-    if (pr.kind === 'atrocket') {
+    if (pr.kind === 'ricochet') {
+      drawRicochet(ctx, from, to, k, z, pr.arcM > 0, pr.hitKind === 'ricochet');
+    } else if (pr.kind === 'atrocket') {
       const dx = to.x - from.x, dy = to.y - from.y, len = Math.hypot(dx, dy) || 1;
       const ux = dx / len, uy = dy / len;
       // smoke trail: a soft grey streak, each stretch fading and widening from when the rocket

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { makeState, addTank, soldier, mkTeam, addGun } from './vehicleDamageHelpers';
 import { stepCombat } from '@/sim/combat';
 import { pickVehicleTarget } from '@/sim/combat';
-import { MG_GROUP_MIN, MG_GROUP_RADIUS_TILES, MG_ESCALATE_S, MG_SUPPRESS_LEVEL, mainGunAtInfantry, noteMgBurst } from '@/sim/combat';
+import { MG_GROUP_MIN, MG_GROUP_RADIUS_TILES, MG_ESCALATE_S, MG_ESCALATE_CLOSE_S, MG_ESCALATE_PINNED_S, MG_SUPPRESS_LEVEL, mainGunAtInfantry, noteMgBurst } from '@/sim/combat';
 import { Rng } from '@/shared/rng';
 import { setTile } from '@/sim/map';
 import { findPath } from '@/sim/path';
@@ -124,16 +124,42 @@ describe('item 018 — main-gun-at-infantry doctrine (mainGunAtInfantry)', () =>
     const state = scene();
     const v = tank(state);
     const { men } = addTeam(state, 1, { x: 202.5, y: 191 });
+    men[0].pos = { x: 202.5, y: 170 }; // ~62 m: not close
     noteMgBurst(state, v, men[0]);
-    state.time = 5;
+    state.time = MG_ESCALATE_S - 1;
     expect(mainGunAtInfantry(state, v, men[0])).toBeNull();
-    state.time = MG_ESCALATE_S + 6;
+    state.time = MG_ESCALATE_S;
     expect(mainGunAtInfantry(state, v, men[0])).toBe('escalated');
-    // once the team is pinned (>= MG_SUPPRESS_LEVEL) the clock stops earning the gun
-    state.time = MG_ESCALATE_S + 6;
-    for (const m of []) void m;
+    // pinned (>= MG_SUPPRESS_LEVEL): the MGs keep him down for now...
     men[0].suppression = MG_SUPPRESS_LEVEL;
     expect(mainGunAtInfantry(state, v, men[0])).toBeNull();
+    // ...but one man must not hold the tank up for long: pinned and still there, he gets the HE
+    state.time = MG_ESCALATE_PINNED_S;
+    expect(mainGunAtInfantry(state, v, men[0])).toBe('escalated');
+  });
+
+  it('a man close enough to hurt the tank gets the HE after only a few seconds of MG failing', () => {
+    const state = scene();
+    const v = tank(state);
+    const { men } = addTeam(state, 1, { x: 202.5, y: 191 }); // ~20 m
+    noteMgBurst(state, v, men[0]);
+    state.time = MG_ESCALATE_CLOSE_S - 1;
+    expect(mainGunAtInfantry(state, v, men[0])).toBeNull();
+    state.time = MG_ESCALATE_CLOSE_S;
+    expect(mainGunAtInfantry(state, v, men[0])).toBe('escalated');
+  });
+
+  it('men in strong cover the MGs cannot finish get the HE in the end', () => {
+    const state = scene();
+    const v = tank(state);
+    const { men } = addTeam(state, 1, { x: 202.5, y: 170 });
+    setTile(state.map, 202, 170, 'buildingStone');
+    men[0].suppression = 100;
+    noteMgBurst(state, v, men[0]);
+    state.time = MG_ESCALATE_S;
+    expect(mainGunAtInfantry(state, v, men[0])).toBeNull();
+    state.time = MG_ESCALATE_PINNED_S;
+    expect(mainGunAtInfantry(state, v, men[0])).toBe('escalated');
   });
 
   it('switching the MG engagement to another team resets the escalation clock', () => {
