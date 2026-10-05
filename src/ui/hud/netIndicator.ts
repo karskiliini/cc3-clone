@@ -1,72 +1,56 @@
 // ============================================================================
 // netIndicator.ts — the red "disconnected" symbol in the top-right corner of the battle view
 // (multiplayer). It lights while the network is in trouble and for a moment after each incident
-// (netHealth.ts), so the player reads the connection's state from how often it shows: a pulled
-// plug, its two halves apart, on a dark disc, with a short word under it.
+// (netHealth.ts), so the player reads the connection's state from how often it shows. The icon —
+// a pulled plug and its socket with a spark between them, on a dark disc with a red rim — is
+// public/hud/net_disconnected.png, rendered by tools/blender/hud.py; a word goes under it. Until
+// the image has loaded, a plain red ring stands in.
 // ============================================================================
 import type { NetHealth } from '@/net/netHealth';
 import { VIEW_W } from '@/shared/types';
 import { setHudFont } from './hudChrome';
 
-const R = 18;                 // disc radius
-const CX = VIEW_W - 8 - R;    // disc centre, 8 px in from the view's top-right corner
-const CY = 8 + R;
+const SIZE = 36;                  // the icon (px), as rendered
+const X = VIEW_W - 8 - SIZE;      // 8 px in from the view's top-right corner
+const Y = 8;
 const RED = '#ff2a1a';
-const RED_DARK = '#5a0804';
+
+let icon: HTMLImageElement | null = null;
+
+function iconImage(): HTMLImageElement | null {
+  if (!icon && typeof Image !== 'undefined') {
+    icon = new Image();
+    const env = (import.meta as unknown as { env?: { BASE_URL?: string } }).env;
+    icon.src = `${env?.BASE_URL ?? '/'}hud/net_disconnected.png`;
+  }
+  return icon && icon.complete && icon.naturalWidth > 0 ? icon : null;
+}
 
 /** Draws the symbol when `health` reports trouble at `nowMs`. */
 export function drawNetIndicator(ctx: CanvasRenderingContext2D, health: NetHealth, nowMs: number): void {
+  const img = iconImage(); // start loading before it is first needed
   if (!health.troubled(nowMs)) return;
   ctx.save();
-  ctx.fillStyle = 'rgba(0,0,0,0.78)';
-  ctx.beginPath();
-  ctx.arc(CX, CY, R, 0, Math.PI * 2);
-  ctx.fill();
-  // the ring pulses, so it reads as a live warning rather than part of the HUD
-  ctx.globalAlpha = 0.6 + 0.4 * Math.sin(nowMs / 160);
-  ctx.lineWidth = 2.5;
-  ctx.strokeStyle = RED;
-  ctx.stroke();
+  // a slow pulse while it lasts, so it reads as a live warning rather than part of the HUD
+  ctx.globalAlpha = 0.8 + 0.2 * Math.sin(nowMs / 160);
+  if (img) {
+    ctx.drawImage(img, X, Y, SIZE, SIZE);
+  } else {
+    ctx.strokeStyle = RED;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(X + SIZE / 2, Y + SIZE / 2, SIZE / 2 - 2, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  // the word under it, right-aligned to the icon
   ctx.globalAlpha = 1;
-
-  ctx.fillStyle = RED;
-  ctx.strokeStyle = RED;
-  ctx.lineCap = 'round';
-  // left: the plug, its two prongs pointing at the gap, and its cable out to the lower left
-  ctx.fillRect(CX - 10, CY - 5, 6, 10);
-  ctx.fillRect(CX - 4, CY - 4, 3, 2);
-  ctx.fillRect(CX - 4, CY + 2, 3, 2);
-  ctx.lineWidth = 2.5;
-  ctx.beginPath();
-  ctx.moveTo(CX - 10, CY);
-  ctx.lineTo(CX - 15, CY + 7);
-  ctx.stroke();
-  // right: the socket with its two holes, and its cable out to the upper right
-  ctx.fillRect(CX + 4, CY - 5, 6, 10);
-  ctx.fillStyle = RED_DARK;
-  ctx.fillRect(CX + 4, CY - 4, 2, 2);
-  ctx.fillRect(CX + 4, CY + 2, 2, 2);
-  ctx.beginPath();
-  ctx.moveTo(CX + 10, CY);
-  ctx.lineTo(CX + 15, CY - 7);
-  ctx.stroke();
-  // a spark in the gap
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(CX + 1, CY - 10);
-  ctx.lineTo(CX - 1, CY - 7);
-  ctx.moveTo(CX - 1, CY + 7);
-  ctx.lineTo(CX + 1, CY + 10);
-  ctx.stroke();
-
-  // the word under it, right-aligned to the disc
   setHudFont(ctx, 'tiny');
   ctx.textAlign = 'right';
   ctx.textBaseline = 'top';
   const text = health.label();
   ctx.fillStyle = 'rgba(0,0,0,0.85)';
-  ctx.fillText(text, CX + R + 1, CY + R + 4);
+  ctx.fillText(text, X + SIZE + 1, Y + SIZE + 4);
   ctx.fillStyle = RED;
-  ctx.fillText(text, CX + R, CY + R + 3);
+  ctx.fillText(text, X + SIZE, Y + SIZE + 3);
   ctx.restore();
 }

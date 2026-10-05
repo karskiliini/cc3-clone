@@ -13,6 +13,7 @@ following the atlas contract in `docs/superpowers/specs/2026-09-17-soldier-anima
 | `contact_sheet.py` | contact sheets over the game's painted grass/snow (plain python3 + Pillow). |
 | `vehicles.py`, `vehicles_common.py` | tanks and vehicles (per-vehicle atlases, see below); `vehicles_common.py` also serves `weapons.py` (crew weapons). |
 | `menu.py` | the menu poster backdrops `public/menu/poster.png` (Soviet rifleman pointing, burning town) and `poster_plain.png` (the town alone, behind the working screens): perspective Cycles render, metaball figure, graded to one maroon-to-flame palette in numpy. `npm run sprites:menu` (~25 s, 4 threads). |
+| `hud.py` | HUD icons: `public/hud/net_disconnected.png` (36×36), the red pulled-plug sign of network trouble in multiplayer; Cycles at 4× supersample, box-filtered down. `npm run sprites:hud` (~5 s). |
 | `fx.py` | combat FX flipbooks (`fx_s` / `fx_m` / `fx_l`): bursts, fire loop, smoke puffs, impact kicks. |
 
 ## Commands
