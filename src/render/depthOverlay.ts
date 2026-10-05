@@ -17,7 +17,7 @@
 // ============================================================================
 import type { Camera, GameMap, HeightField } from '@/shared/types';
 import { TILE_PX, VIEW_H, VIEW_W } from '@/shared/types';
-import { getHeightField, syncCraterMarks } from '@/sim/heightField';
+import { getHeightField } from '@/sim/heightField';
 import { getGrowth } from '@/sim/growth';
 import { drawText } from './pixelfont';
 
@@ -183,8 +183,8 @@ export class DepthOverlay {
 
   /** Rebuilds the raster when the field changed or the camera left the cached region. */
   update(map: GameMap, cam: Camera): void {
+    // read-only: the sim keeps the field's craters in step (combat.ts leaveCrater)
     const field = getHeightField(map);
-    syncCraterMarks(map, field);
     const want = depthRegion(map, cam);
     const s = this.shown;
     const growth = getGrowth(map);

@@ -60,6 +60,8 @@ export class Battle {
   private applied: Command[] = [];
   private seq = 0;
   private ready = new Set<Side>();
+  /** Replaying a log (loadCommands): commands apply in the log's own order, see flushCommands. */
+  private replaying = false;
 
   constructor(config: BattleConfig) {
     this.rng = new Rng(config.seed);
@@ -161,7 +163,8 @@ export class Battle {
    * while the battle is not running, on the next `step` call). Returns the stamped command. */
   submit(side: Side, body: CommandBody, atTick?: number): Command {
     const tick = Math.max(this.state.tick ?? 0, atTick ?? 0);
-    const cmd = { ...body, side, tick, seq: this.seq++ } as Command;
+    // a deep copy: the log must not change if the caller later edits what it submitted
+    const cmd = { ...structuredClone(body), side, tick, seq: this.seq++ } as Command;
     this.pending.push(cmd);
     return cmd;
   }
@@ -171,11 +174,27 @@ export class Battle {
     return this.applied;
   }
 
+  /** Queues a recorded command log (`commandLog()` of an earlier run of the same config) so this
+   * battle replays it. Each command applies at its recorded tick and in its recorded order: while
+   * the battle is not running several step() calls can each apply commands of one tick, so the
+   * canonical (tick, side, sequence) sort of a single flush would not always restore the order. */
+  loadCommands(log: readonly Command[]): void {
+    this.replaying = true;
+    this.pending = log.map((c, i) => ({ ...structuredClone(c), seq: i }));
+    this.seq = log.length;
+  }
+
+  /** Commands submitted but not applied yet. */
+  pendingCount(): number {
+    return this.pending.length;
+  }
+
   /** Apply every pending command due by the current tick, in canonical order. */
   private flushCommands(): void {
     if (this.pending.length === 0) return;
     const now = this.state.tick ?? 0;
-    const due = this.pending.filter((c) => c.tick <= now).sort(compareCommands);
+    const due = this.pending.filter((c) => c.tick <= now)
+      .sort(this.replaying ? (a, b) => a.seq - b.seq : compareCommands);
     if (due.length === 0) return;
     this.pending = this.pending.filter((c) => c.tick > now);
     for (const cmd of due) {

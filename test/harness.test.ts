@@ -5,6 +5,7 @@ import { getSmallArmsStats, getCombatInstrumentation } from '@/sim/combat';
 import { prisonerCount } from '@/sim/victory';
 import { otherSide } from '@/shared/types';
 import { MAPS } from '@/data/maps';
+import { hashState } from '@/sim/stateHash';
 import { DEFAULT_FORCES } from '@/data/operation';
 import { SIM_DT } from '@/shared/types';
 import type { BattleConfig, Side } from '@/shared/types';
@@ -487,11 +488,14 @@ describe('determinism', () => {
       const battle = new Battle(config);
       for (const side of SIDES) aiDeploy(battle.state, side, battle.rng, battle);
       battle.start();
+      const chain: number[] = [];
       for (let i = 0; i < config.durationS / SIM_DT; i++) {
         battle.step(SIM_DT);
         battle.drainEvents();
+        chain.push(hashState(battle));
       }
       return {
+        chain,
         time: battle.state.time,
         result: battle.state.result,
         german: { ...battle.state.sides.german },
@@ -507,5 +511,8 @@ describe('determinism', () => {
     expect(b.german).toEqual(a.german);
     expect(b.soviet).toEqual(a.soviet);
     expect(b.soldierPositions).toEqual(a.soldierPositions);
+    // item 043: the per-tick state hash (RNG position, clock, every soldier and vehicle) agrees
+    // on every tick, not just at the end
+    expect(b.chain).toEqual(a.chain);
   }, 120_000); // bun's runner defaults to 5 s; two 60 s sims need far more
 });

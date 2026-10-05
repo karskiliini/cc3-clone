@@ -2,6 +2,10 @@
 export class Rng {
   private s: number;
   constructor(seed: number) { this.s = seed >>> 0; }
+  /** The generator's position (a uint32): the cheapest strong desync signal for a state hash. */
+  state(): number { return this.s >>> 0; }
+  /** Restores a position read by `state()`. */
+  setState(s: number): void { this.s = s >>> 0; }
   next(): number {
     let t = (this.s += 0x6d2b79f5);
     t = Math.imul(t ^ (t >>> 15), t | 1);

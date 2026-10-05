@@ -7,6 +7,8 @@ import { teamCanFire, teamHasSmoke } from '@/sim/team';
 import { VEHICLE_DEFS } from '@/data/units';
 import { clamp } from '@/shared/math';
 import type { CommandBody } from '@/sim/commands';
+import type { ReplayLog } from '@/sim/replay';
+import { hashHex, hashState } from '@/sim/stateHash';
 import { centerCamera, clampCamera, panCamera, screenToWorld, worldToScreen, zoomIn, zoomOut } from '@/engine/camera';
 import { TerrainRenderer } from '@/render/terrainRender';
 import { drawUnits } from '@/render/unitRender';
@@ -171,8 +173,14 @@ export class BattleScreen implements Screen {
 
   /** `terrain` is the deploy screen's renderer, handed over so its baked chunks carry into battle
    * instead of re-baking the whole map on Begin. */
-  constructor(battle: Battle, terrain?: TerrainRenderer) {
+  /** Watching a replay (the debrief's Watch replay): the battle replays its command log, the
+   * player's input submits nothing, F3 and the speed keys act on the viewing only, and the end
+   * (or ESC) returns to `exitTo`. */
+  private replay: { log: ReplayLog; exitTo: Screen; paused: boolean; checked: boolean } | null = null;
+
+  constructor(battle: Battle, terrain?: TerrainRenderer, replay?: { log: ReplayLog; exitTo: Screen }) {
     this.battle = battle;
+    if (replay) this.replay = { ...replay, paused: false, checked: false };
     this.terrain = terrain ?? new TerrainRenderer(battle.state.map);
     this.combatMessages.setViewer(battle.playerSide());
     this.requestedSpeed = battle.state.speed ?? 1;
@@ -185,6 +193,7 @@ export class BattleScreen implements Screen {
 
   /** Everything the player does to the battle goes through the command queue (item 042). */
   private command(body: CommandBody): void {
+    if (this.replay) return; // a replay plays its log, nothing else
     this.battle.submit(this.battle.playerSide(), body);
   }
 
@@ -294,12 +303,16 @@ export class BattleScreen implements Screen {
       return;
     }
 
-    if (game.settings.speed !== this.requestedSpeed) {
-      this.requestedSpeed = game.settings.speed;
-      this.command({ type: 'setSpeed', speed: game.settings.speed });
+    if (this.replay) {
+      this.stepReplay(dt, input);
+    } else {
+      if (game.settings.speed !== this.requestedSpeed) {
+        this.requestedSpeed = game.settings.speed;
+        this.command({ type: 'setSpeed', speed: game.settings.speed });
+      }
+      // always step: while paused no tick runs, but due commands (resume, orders) still apply
+      battle.step(dt * (state.speed ?? 1));
     }
-    // always step: while paused no tick runs, but due commands (resume, orders) still apply
-    battle.step(dt * (state.speed ?? 1));
 
     const selectableIds = new Set(battle.selectableTeams(battle.playerSide()).map((team) => team.id));
     this.controlGroups.prune(selectableIds);
@@ -315,7 +328,7 @@ export class BattleScreen implements Screen {
     if (state.phase === 'ended') {
       this.endedElapsed += dt;
       if (this.endedElapsed > BATTLE_END_HOLD_S) {
-        game.setScreen(new DebriefScreen(battle));
+        game.setScreen(this.replay ? this.replay.exitTo : new DebriefScreen(battle));
         return;
       }
     }
@@ -1011,8 +1024,14 @@ export class BattleScreen implements Screen {
     if (this.commandMenu.isOpen) this.commandMenu.draw(ctx);
     if (this.quitConfirm) this.drawQuitConfirm(ctx);
 
-    if (this.paused) {
+    if (this.paused || this.replay?.paused) {
       drawCenteredOverlayBanner(ctx, 'PAUSED');
+    }
+    if (this.replay) {
+      const label = `REPLAY ${game.settings.speed}X`, w = textWidth(label, 'big');
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(Math.round(VIEW_W / 2 - w / 2 - 6), 26, Math.round(w + 12), FONT_BIG_H + 8);
+      drawTextCentered(ctx, label, VIEW_W / 2, 30, PALETTE.gold, 'big');
     }
     if (state.phase === 'ended') {
       const word = (state.result ?? 'draw').toUpperCase();
@@ -1042,13 +1061,30 @@ export class BattleScreen implements Screen {
     if (input.keysPressed.has('n') || input.keysPressed.has('escape')) this.quitConfirm = null;
   }
 
+  /** A replay steps at the viewer's own speed (and F3 pauses the viewing); when it reaches the
+   * recorded battle's last tick it checks the state hash against the log's. */
+  private stepReplay(dt: number, input: InputState): void {
+    const r = this.replay!;
+    const battle = this.battle;
+    if (input.keysPressed.has('f3') || input.keysPressed.has('pause')) r.paused = !r.paused;
+    if (!r.paused) battle.step(dt * game.settings.speed);
+    const final = r.log.final;
+    const tick = battle.state.tick ?? 0;
+    if (final && !r.checked && tick >= final.tick) {
+      r.checked = true;
+      const h = hashState(battle);
+      if (tick === final.tick && h === final.hash) this.notice(`Replay complete: the battle reproduced exactly (state ${hashHex(h)}).`);
+      else this.notice(`Replay diverged from the recorded battle (state ${hashHex(h)}, recorded ${hashHex(final.hash)}).`, 'warn');
+    }
+  }
+
   /** ESC quit (manual input card): the battle is abandoned without a save and
    * without a debrief — casualties, results and the chronicle are not recorded.
    * The operation keeps its current battle index, so the player can re-fight it
    * from Continue Operation, exactly like the original's quit without saving. */
   private doQuit(): void {
     game.audio?.play('click');
-    game.setScreen(new MainMenuScreen());
+    game.setScreen(this.replay ? this.replay.exitTo : new MainMenuScreen());
   }
 
   private drawQuitConfirm(ctx: CanvasRenderingContext2D): void {

@@ -1,4 +1,5 @@
-import type { BattleResult, CursorKind, InputState, Screen, Side, Team } from '@/shared/types';
+import type { BattleResult, CursorKind, InputState, Rect, Screen, Side, Team } from '@/shared/types';
+import { pointInRect } from '@/shared/math';
 import { experienceLevel } from '@/data/experience';
 import { medalById } from '@/data/medals';
 import { OPERATION } from '@/data/operation';
@@ -7,12 +8,14 @@ import { appendHistory } from '@/data/history';
 import { game } from '@/game';
 import type { Battle } from '@/sim/battle';
 import { prisonerCount } from '@/sim/victory';
-import { drawDarkPanel, drawHeading, drawLabel, drawShadowText, UI } from '@/ui/chrome';
+import { drawDarkPanel, drawHeading, drawLabel, drawShadowText, drawSmallMetalButton, UI } from '@/ui/chrome';
+import { makeReplayLog, replayBattle, type ReplayLog } from '@/sim/replay';
 import { drawMenuFrame, toMenuInput, BottomStrip, truncateText } from './common';
 import { CoaScreen } from './coa';
 import { MainMenuScreen } from './mainMenu';
 import { advanceOperation } from './operation';
 import { RosterScreen } from './roster';
+import { BattleScreen } from './battle';
 
 export const RESULT_WORDS: Record<BattleResult, string> = {
   totalVictory: 'Total Victory',
@@ -44,6 +47,22 @@ export function finalStateLabel(team: Team, fled: boolean): string {
 type Box = { x: number; y: number; w: number; h: number };
 const SCORE: Box = { x: 40, y: 96, w: 720, h: 170 };
 const AWARDS: Box = { x: 40, y: 274, w: 720, h: 44 };
+/** The replay buttons, top right beside the result (item 043). */
+const SAVE_REPLAY: Rect = { x: 586, y: 50, w: 84, h: 24 };
+const WATCH_REPLAY: Rect = { x: 676, y: 50, w: 84, h: 24 };
+
+/** Hands the browser a replay log as a .json download. */
+function downloadReplay(log: ReplayLog): void {
+  const blob = new Blob([JSON.stringify(log)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `cc3-replay-${log.config.mapId}-seed${log.config.seed}-${new Date().toISOString().slice(0, 16).replace('T', '-').replace(':', '')}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 /** After the battle: the result, a side-by-side scoreboard, any commendations and the
  * player's teams. In an operation the battle is folded into the campaign on arrival (so the
@@ -55,6 +74,9 @@ export class DebriefScreen implements Screen {
   /** operation battle just fought: index + land expectation captured before advancing */
   private opBattle: { index: number; expectedVLs?: number } | null = null;
   private recorded = false;
+  /** The battle's replay log, taken once when the debrief opens (config + command log). */
+  private replayLog: ReplayLog | null = null;
+  private mouse = { x: -1, y: -1 };
 
   constructor(battle: Battle) {
     this.battle = battle;
@@ -89,7 +111,20 @@ export class DebriefScreen implements Screen {
 
   update(_dt: number, input: InputState): void {
     this.record();
-    const result = this.strip.update(toMenuInput(input));
+    const m = toMenuInput(input);
+    this.mouse = m.mouse;
+    this.replayLog ??= makeReplayLog(this.battle);
+    for (const c of m.clicks) {
+      if (c.button !== 0) continue;
+      if (pointInRect(c, SAVE_REPLAY)) { game.audio?.play('click'); downloadReplay(this.replayLog); return; }
+      if (pointInRect(c, WATCH_REPLAY)) {
+        // the log rebuilds the battle from its config and replays every command at its tick
+        game.audio?.play('click');
+        game.setScreen(new BattleScreen(replayBattle(this.replayLog), undefined, { log: this.replayLog, exitTo: this }));
+        return;
+      }
+    }
+    const result = this.strip.update(m);
     if (result.soldiers) {
       game.setScreen(new RosterScreen(this));
       return;
@@ -106,6 +141,8 @@ export class DebriefScreen implements Screen {
       this.drawScoreboard(ctx);
       const hasAwards = this.drawAwards(ctx);
       this.drawTeams(ctx, hasAwards ? AWARDS.y + AWARDS.h + 8 : AWARDS.y);
+      drawSmallMetalButton(ctx, SAVE_REPLAY, 'Save Replay', { hot: pointInRect(this.mouse, SAVE_REPLAY) });
+      drawSmallMetalButton(ctx, WATCH_REPLAY, 'Watch Replay', { hot: pointInRect(this.mouse, WATCH_REPLAY) });
       this.strip.draw(ctx);
     });
   }

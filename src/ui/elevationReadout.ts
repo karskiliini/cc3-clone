@@ -1,5 +1,5 @@
 import type { GameMap, Vec2 } from '@/shared/types';
-import { featureHeightAt, getHeightField, groundAt, syncCraterMarks } from '@/sim/heightField';
+import { featureHeightAt, getHeightField, groundAt } from '@/sim/heightField';
 import { growthHeightAt } from '@/sim/growth';
 
 /** "12.4 m" for bare ground; with something standing on it or dug into it, the difference too:
@@ -15,7 +15,6 @@ export function elevationLabel(groundM: number, featureM: number): string {
  * pointer readout (ui/hoverInfo.ts) under the name of what is there. */
 export function elevationTextAt(map: GameMap, w: Vec2): string | null {
   if (w.x < 0 || w.y < 0 || w.x >= map.width || w.y >= map.height) return null;
-  const field = getHeightField(map);
-  syncCraterMarks(map, field);
+  const field = getHeightField(map); // read-only: the sim keeps its craters in step
   return elevationLabel(groundAt(field, w.x, w.y), featureHeightAt(field, w.x, w.y) + growthHeightAt(map, w.x, w.y));
 }

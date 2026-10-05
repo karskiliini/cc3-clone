@@ -50,6 +50,7 @@ import { isCrawlingUnderFire } from './hitTheDirt';
 import { treesInBlast } from './trees';
 import { blastThrowEnd, dismember, isSevereBlast, throwDebris } from './debris';
 import { applyBlastDamage } from './structures';
+import { getHeightField, syncCraterMarks } from './heightField';
 import { dropKit, shedGearInBlast, throwItems } from './items';
 import type { Order } from '@/shared/types';
 
@@ -746,6 +747,10 @@ export function leaveCrater(state: BattleState, pos: Vec2, weapon: WeaponDef, un
   if (!marks.some((m) => m.kind === kind && m.sizeM >= sizeM && dist(m, pos) < 0.35)) {
     marks.push({ x: pos.x, y: pos.y, sizeM: Math.round(sizeM * 100) / 100, kind });
   }
+  // the height field takes the new bowl now, whatever made it (multiplayer plan §2 D1): a
+  // vehicle blowing up has no blast-damage pass after it, and the field must never wait for a
+  // viewer's depth map or elevation readout to stamp it
+  syncCraterMarks(map, getHeightField(map));
   if (weapon.heRadiusM < 4 || !CRATERABLE_TERRAIN.has(t)) return;
   setTile(map, tx, ty, 'crater');
   map.craters.push(idx(map, tx, ty));

@@ -13,6 +13,7 @@ import { WEAPONS } from '@/data/weapons';
 import { drawFxAt, drawFxFrame, drawGlow, fxDuration, fxSeasonKey } from '@/render/fxSprites';
 import { drawFires, drawStructureFx } from '@/render/fireFx';
 import { tileAt } from '@/sim/map';
+import { muzzleSnap } from '@/render/muzzleSnap';
 import type { Terrain } from '@/shared/types';
 
 // ------------------------------------------------------------------- flashes
@@ -31,19 +32,21 @@ function drawFlashes(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     if (frac >= 1) continue;
     const big = f.kind === 'shell';
     const alpha = frac < 0.4 ? 1 : 1 - (frac - 0.4) / 0.6;
-    const ux = Math.sin(f.facing), uy = -Math.cos(f.facing);
-    const p = worldToScreen(cam, f.pos);
+    const snap = muzzleSnap(f);
+    const facing = snap?.facing ?? f.facing, fpos = snap?.pos ?? f.pos;
+    const ux = Math.sin(facing), uy = -Math.cos(facing);
+    const p = worldToScreen(cam, fpos);
     const standoff = f.atMuzzle ? 0 : (big ? 13 : 7) * z;
     const sx = p.x + ux * standoff, sy = p.y + uy * standoff - (f.heightM ?? 0) * MUZZLE_HEIGHT_PX_PER_M * z;
     if (big) {
-      drawFxFrame(ctx, 'puff.light', Math.floor(f.pos.x * 7) % 6, sx + ux * 6 * z, sy + uy * 6 * z, 0.45 * z * (0.8 + frac * 0.8), (1 - frac) * 0.6);
+      drawFxFrame(ctx, 'puff.light', Math.floor(fpos.x * 7) % 6, sx + ux * 6 * z, sy + uy * 6 * z, 0.45 * z * (0.8 + frac * 0.8), (1 - frac) * 0.6);
     }
     drawGlow(ctx, sx, sy, (big ? 22 : 8) * z, alpha * (big ? 0.8 : 0.55), '255,190,90');
     if (frac > 0.5) continue; // the flame itself is over in an instant; the glow and smoke linger
     const len = (big ? 7 : 3.2) * z * (1 - frac), wid = (big ? 2.6 : 1.3) * z;
     ctx.save();
     ctx.translate(sx, sy);
-    ctx.rotate(f.facing);
+    ctx.rotate(facing);
     ctx.globalAlpha = alpha;
     ctx.fillStyle = '#ffb040';
     ctx.beginPath(); ctx.ellipse(0, -len * 0.5, wid, len, 0, 0, Math.PI * 2); ctx.fill();
@@ -66,7 +69,7 @@ function drawTracers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     if (t.kind === 'shell' && rockets.some((r) => r.from.x === t.from.x && r.from.y === t.from.y)) continue;
     const lifeFrac = clamp(t.t / TRACER_LIFE, 0, 1);
     if (lifeFrac >= 1) continue;
-    const from = worldToScreen(cam, t.from);
+    const from = worldToScreen(cam, muzzleSnap(t)?.pos ?? t.from);
     from.y -= (t.fromHeightM ?? 0) * MUZZLE_HEIGHT_PX_PER_M * cam.zoom;
     const to = worldToScreen(cam, t.to);
     const dx = to.x - from.x, dy = to.y - from.y;
@@ -333,7 +336,8 @@ function drawProjectiles(ctx: CanvasRenderingContext2D, cam: Camera, state: Batt
     const age = state.time - pr.t0;
     if (age < 0 || age > pr.flightS) continue;
     const k = age / pr.flightS;
-    const from = worldToScreen(cam, pr.from), to = worldToScreen(cam, pr.to);
+    const prFrom = muzzleSnap(pr)?.pos ?? pr.from;
+    const from = worldToScreen(cam, prFrom), to = worldToScreen(cam, pr.to);
     const x = from.x + (to.x - from.x) * k, y = from.y + (to.y - from.y) * k;
     if (pr.kind === 'atrocket') {
       const dx = to.x - from.x, dy = to.y - from.y, len = Math.hypot(dx, dy) || 1;
@@ -378,7 +382,7 @@ function drawProjectiles(ctx: CanvasRenderingContext2D, cam: Camera, state: Batt
       if (age < MORTAR_PUFF_S) {
         if (age < 0.12) drawGlow(ctx, from.x, from.y, 12 * z, 0.85 * (1 - age / 0.12), '255,200,120');
         const t = age / MORTAR_PUFF_S;
-        const variant = Math.abs(Math.floor(pr.from.x * 13 + pr.from.y * 7)) % 6;
+        const variant = Math.abs(Math.floor(prFrom.x * 13 + prFrom.y * 7)) % 6;
         for (let i = 0; i < 2; i++) {
           const q = Math.min(1, t * (1.2 - i * 0.35));
           drawFxFrame(ctx, 'puff.light', (variant + i * 3) % 6,

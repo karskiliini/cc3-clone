@@ -34,6 +34,7 @@ import {
 import { ragdollSample, metresToPx } from '@/render/soldierAnim';
 import type { Debris, GroundItem, Season } from '@/shared/types';
 import { drawRagdollFlight, drawRagdollLanded, ragdollBeginFrame, ragdollPhase } from '@/render/ragdoll';
+import { snapToMuzzle } from '@/render/muzzleSnap';
 
 // ------------------------------------------------------------ pre-rendered atlases (spec §5) ---
 /** Battles whose atlases have been requested (loading is async; until an atlas is ready — or when
@@ -812,7 +813,8 @@ function crewTeamVisible(state: BattleState, team: Team, playerSide: Side): bool
 }
 
 /** Weapons on the ground (under the crew), their firing cues, and the zoom-0.5 weapon symbol.
- * Also moves this frame's muzzle flashes / tracer origins from the gunner to the weapon muzzle. */
+ * Also snaps this frame's muzzle flashes / tracer origins from the gunner to the weapon muzzle
+ * (render-local, muzzleSnap.ts: the renderer never writes BattleState). */
 export function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side): void {
   const px = (m: number) => (m / TILE_M) * 20 * cam.zoom; // metres -> screen px
   for (const team of state.teams.values()) {
@@ -845,13 +847,13 @@ export function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, stat
     const muzzle = weaponFramePoint(cw.pos, cw.facing, weaponMuzzleM(cw.weaponId));
     if (gunnerOk && !cw.abandoned) {
       for (const f of state.flashes) {
-        if (f.t < FLASH_LIFE && dist(f.pos, gunner!.pos) < 0.02) { f.pos = { ...muzzle }; f.facing = cw.facing; }
+        if (f.t < FLASH_LIFE && dist(f.pos, gunner!.pos) < 0.02) snapToMuzzle(f, muzzle, cw.facing);
       }
       for (const t of state.tracers) {
-        if (t.t < 0.1 && dist(t.from, gunner!.pos) < 0.02) t.from = { ...muzzle };
+        if (t.t < 0.1 && dist(t.from, gunner!.pos) < 0.02) snapToMuzzle(t, muzzle);
       }
       for (const pr of state.projectiles) {
-        if (pr.kind === 'mortar' && state.time - pr.t0 < 0.1 && dist(pr.from, gunner!.pos) < 0.02) pr.from = { ...muzzle };
+        if (pr.kind === 'mortar' && state.time - pr.t0 < 0.1 && dist(pr.from, gunner!.pos) < 0.02) snapToMuzzle(pr, muzzle);
       }
     }
     if (!teamVisible || !visible(cw.pos, cam)) continue;
