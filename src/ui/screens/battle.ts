@@ -36,6 +36,8 @@ import { BottomStrip } from '@/ui/hud/bottomStrip';
 import { SoldierMonitorPopup } from '@/ui/hud/soldierMonitor';
 import { Minimap } from '@/ui/hud/minimap';
 import { drawHudBase } from '@/ui/hud/hudChrome';
+import { drawNetIndicator } from '@/ui/hud/netIndicator';
+import type { NetHealth } from '@/net/netHealth';
 import { CommandMenu } from '@/ui/commandMenu';
 import { ControlGroups, controlGroupKeyAction } from '@/ui/controlGroups';
 import { ControlGroupBar } from '@/ui/hud/controlGroupBar';
@@ -185,6 +187,9 @@ export class BattleScreen implements Screen {
     this.combatMessages.setViewer(battle.playerSide());
     this.requestedSpeed = battle.state.speed ?? 1;
   }
+
+  /** Multiplayer: the network health shown as the red symbol in the top-right corner. */
+  netHealth: NetHealth | null = null;
 
   /** Paused by the shared pause command (F3/PAUSE), not a screen-local flag. */
   private get paused(): boolean {
@@ -1022,6 +1027,7 @@ export class BattleScreen implements Screen {
     this.controlGroupBar.draw(ctx, this.controlGroups.slots(this.selectedTeamIds));
 
     if (this.commandMenu.isOpen) this.commandMenu.draw(ctx);
+    if (this.netHealth) drawNetIndicator(ctx, this.netHealth, performance.now());
     if (this.quitConfirm) this.drawQuitConfirm(ctx);
 
     if (this.paused || this.replay?.paused) {

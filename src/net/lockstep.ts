@@ -38,6 +38,7 @@ import type { Command, CommandBody } from '@/sim/commands';
 import { hashState } from '@/sim/stateHash';
 import { SIM_DT, type BattleConfig, type Side } from '@/shared/types';
 import type { NetMessage, Transport, TurnHash } from './transport';
+import type { NetHealth } from './netHealth';
 
 const SIDES: readonly Side[] = ['german', 'soviet'];
 /** Turns after a resync before the authority honours another resync request from the peer (10 s
@@ -65,6 +66,8 @@ export interface LockstepOptions {
   maxResyncAttempts?: number;
   /** Told when a resync swaps in a rebuilt battle (the UI must draw the new one). */
   onBattleReplaced?: (battle: Battle) => void;
+  /** Where long waits, resyncs and a failed session are reported for the HUD's network symbol. */
+  health?: NetHealth;
 }
 
 export interface DesyncReport {
@@ -137,6 +140,7 @@ export class LockstepSession {
   private rebuildTurnsPerUpdate: number;
   private maxResyncAttempts: number;
   private onBattleReplaced?: (battle: Battle) => void;
+  private health?: NetHealth;
   private peer: Side;
   /** The config both battles were built from, for rebuilding. */
   private config: BattleConfig;
@@ -186,6 +190,7 @@ export class LockstepSession {
     this.rebuildTurnsPerUpdate = Math.max(1, opts.rebuildTurnsPerUpdate ?? 600);
     this.maxResyncAttempts = Math.max(1, opts.maxResyncAttempts ?? 3);
     this.onBattleReplaced = opts.onBattleReplaced;
+    this.health = opts.health;
     this.config = structuredClone(opts.battle.state.config);
     // the first D turns have no bundles on the wire: both peers know they are empty
     for (let t = 0; t < this.inputDelay; t++) for (const s of SIDES) this.bundles[s].set(t, []);
@@ -246,13 +251,15 @@ export class LockstepSession {
    * returns the number of turns run. After a stall or a resync the schedule restarts from the
    * moment play resumes (no catch-up burst). Never throws. */
   update(nowMs: number): number {
+    let ran = 0;
     try {
-      return this.updateUnsafe(nowMs);
+      ran = this.updateUnsafe(nowMs);
     } catch {
       // a bug in the sim or the session: give up cleanly rather than crash the page
       if (this.status !== 'failed') this.fail('internal error');
-      return 0;
     }
+    this.health?.update(nowMs, this.stallSince !== null, this.status === 'resyncing', this.status === 'failed', this.reports[this.reports.length - 1]?.reason);
+    return ran;
   }
 
   private updateUnsafe(nowMs: number): number {

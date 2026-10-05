@@ -64,8 +64,9 @@ export class IntegrityTransport implements Transport {
   private recent = new Map<number, Envelope>();
   private handler: ((msg: NetMessage) => void) | null = null;
 
-  /** @param keep how many recent messages are kept for NACKs */
-  constructor(private wire: WireTransport, private keep = 4096) {
+  /** @param keep how many recent messages are kept for NACKs
+   * @param onCorrupt told of every damaged message (the HUD's network symbol) */
+  constructor(private wire: WireTransport, private keep = 4096, private onCorrupt?: (detail: string) => void) {
     wire.onMessage((env) => this.receive(env));
   }
 
@@ -102,6 +103,8 @@ export class IntegrityTransport implements Transport {
     }
     if (!msg) {
       this.stats.corrupted++;
+      const seq = typeof env.seq === 'number' && Number.isSafeInteger(env.seq) ? env.seq : null;
+      this.onCorrupt?.(seq !== null ? `message ${seq} arrived damaged; asked for it again` : 'an unreadable message arrived');
       // ask again when we can still read which message it was; otherwise the session's own
       // resend timer recovers it
       if (typeof env.seq === 'number' && Number.isSafeInteger(env.seq)) {
