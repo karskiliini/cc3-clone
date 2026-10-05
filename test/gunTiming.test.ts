@@ -9,6 +9,7 @@ import { stepCombat } from '@/sim/combat';
 import { stepVehicles } from '@/sim/vehicle';
 import {
   BRACKET_LOST_M, bracketMul, designateS, fineLayBaseS, fineLayS, followUpLayS, laySkillMul, loadSkillMul, timeToFirstShotS,
+  followUpS, hullAssistMinS, missCorrectionS, recoilAimFloor, recoilSettleS,
   vehicleLoadS, weaponLoadS,
 } from '@/sim/gunTiming';
 import { crewEffects } from '@/sim/vehicleDamage';
@@ -68,8 +69,10 @@ describe('tables', () => {
     for (const w of Object.values(WEAPONS)) if (w.cls === 'tankgun' || w.cls === 'atgun') expect(w.loadS, w.id).toBeGreaterThan(0);
   });
 
-  it('fine lay: 4 s to 200 m, +1 s per further 200 m, moving x1.5, aim point, shaken, damaged sight', () => {
-    expect(fineLayBaseS(100)).toBe(4);
+  it('fine lay: 1.5 s point-blank to 4 s at 200 m, +1 s per further 200 m, moving x1.5, aim point, shaken, damaged sight', () => {
+    expect(fineLayBaseS(0)).toBe(1.5);
+    expect(fineLayBaseS(100)).toBeCloseTo(2.75, 5);
+    expect(fineLayBaseS(200)).toBe(4);
     expect(fineLayBaseS(400)).toBe(5);
     expect(fineLayBaseS(800)).toBe(7);
     const base = { distM: 400, experience: 50, targetMoving: false, aimMul: 1, shaken: false, sightDamaged: false };
@@ -78,9 +81,10 @@ describe('tables', () => {
     expect(fineLayS({ ...base, aimMul: 1.4 })).toBeCloseTo(7, 5);
     expect(fineLayS({ ...base, shaken: true })).toBeCloseTo(7, 5);
     expect(fineLayS({ ...base, sightDamaged: true })).toBeCloseTo(7.5, 5);
-    expect(followUpLayS(95)).toBeCloseTo(1.5, 5);
-    expect(followUpLayS(50)).toBeCloseTo(2, 5);
-    expect(followUpLayS(25)).toBeCloseTo(2.5, 5);
+    // a follow-up is only a correction once the recoil has settled
+    expect(followUpLayS(95)).toBeCloseTo(0.525, 5);
+    expect(followUpLayS(50)).toBeCloseTo(0.7, 5);
+    expect(followUpLayS(25)).toBeCloseTo(1.0, 5);
     expect(designateS(75, false)).toBeCloseTo(1, 5);
     expect(designateS(25, false)).toBeCloseTo(3, 5);
     expect(designateS(50, true)).toBeCloseTo(4, 5);
@@ -238,6 +242,50 @@ describe('bracketing', () => {
   });
 });
 
+describe('follow-up shots: the gun stays laid', () => {
+  it('after a shot the aim dips only to the floor and is back on target after the sway and a short correction', () => {
+    const sc = duel('pz4gh', 50, 150, 0); // regular gunner: correction 0.7 s
+    const relaid: number[] = [];
+    let firedAt: number | null = null, minAfter = 1;
+    run(sc, new Rng(3), 40, {
+      each: (shot) => {
+        const lay = sc.v.layProgress ?? 0;
+        if (shot) { firedAt = sc.state.time; return; }
+        if (firedAt == null) return;
+        minAfter = Math.min(minAfter, lay);
+        if (lay >= 1) { relaid.push(sc.state.time - firedAt); firedAt = null; }
+      },
+    });
+    expect(relaid.length).toBeGreaterThanOrEqual(1);
+    expect(minAfter).toBeGreaterThanOrEqual(recoilAimFloor(WEAPONS.kwk40_75) - 1e-9);
+    // recoil settle of the 7.5 cm KwK 40 + at most a regular's correction after a miss
+    expect(relaid[0]).toBeLessThanOrEqual(recoilSettleS(WEAPONS.kwk40_75) + missCorrectionS(50) + 0.15);
+  });
+
+  it('a tank gun stays nearly laid after a shot: the heavier the gun, the bigger the sway', () => {
+    expect(recoilAimFloor(WEAPONS.kwk39_50)).toBeGreaterThan(recoilAimFloor(WEAPONS.kwk36_88));
+    expect(recoilAimFloor(WEAPONS.kwk36_88)).toBeGreaterThanOrEqual(0.85);
+    expect(recoilSettleS(WEAPONS.kwk36_88)).toBeGreaterThan(recoilSettleS(WEAPONS.kwk39_50));
+  });
+
+  it('after a hit there is nothing to correct; after a miss the correction is the gunner\'s experience', () => {
+    const i = { distM: 300, experience: 50, targetMoving: false, aimMul: 1, shaken: false, sightDamaged: false };
+    expect(followUpS(i, false)).toBe(0);
+    expect(followUpS(i, true)).toBeCloseTo(1, 5);
+    expect(missCorrectionS(25)).toBeCloseTo(2.2, 5);
+    expect(missCorrectionS(95)).toBeCloseTo(0.45, 5);
+    // a moving target is tracked again whether the last round hit or not
+    expect(followUpS({ ...i, targetMoving: true }, false)).toBeGreaterThan(1);
+  });
+
+  it('an experienced commander calls the hull round to help a slow turret much sooner', () => {
+    expect(hullAssistMinS(25)).toBeCloseTo(10, 5);
+    expect(hullAssistMinS(50)).toBeCloseTo(5, 5);
+    expect(hullAssistMinS(75)).toBeCloseTo(3, 5);
+    expect(hullAssistMinS(95)).toBeCloseTo(2, 5);
+  });
+});
+
 describe('gun state', () => {
   it('exposes loading / laying / ready; both progress values only ever rise within a phase', () => {
     const sc = duel('pz4gh', 50, 400, 60);
@@ -248,7 +296,10 @@ describe('gun state', () => {
         const v = sc.v;
         if (v.gunState) seen.add(v.gunState);
         const load = v.loadProgress ?? 1, lay = v.layProgress ?? 0;
-        if (shot) { lastLoad = 0; lastLay = 0; expect(load).toBe(0); expect(lay).toBe(0); expect(v.gunState).toBe('loading'); return; }
+        // after a round the gun is still laid: aiming dips only to the follow-up floor while the
+        // recoil sway settles, it does not start from nothing
+        const floor = recoilAimFloor(WEAPONS.kwk40_75);
+        if (shot) { lastLoad = 0; lastLay = floor; expect(load).toBe(0); expect(lay).toBeCloseTo(floor, 9); expect(v.gunState).toBe('loading'); return; }
         expect(load).toBeGreaterThanOrEqual(lastLoad - 1e-9);
         expect(lay).toBeGreaterThanOrEqual(lastLay - 1e-9);
         expect(load).toBeLessThanOrEqual(1); expect(lay).toBeLessThanOrEqual(1);

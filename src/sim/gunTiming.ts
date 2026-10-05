@@ -95,14 +95,35 @@ export function vehicleLoadS(state: BattleState, v: Vehicle, def: VehicleDef, we
 }
 
 // ------------------------------------------------------------------ laying
-/** Fine lay of a regular gunner: 4 s up to 200 m, +1 s per further 200 m. */
-export function fineLayBaseS(distM: number): number { return 4 + Math.max(0, distM - 200) / 200; }
+/** Fine lay of a regular gunner on a new target: 1.5 s point-blank rising to 4 s at 200 m (close
+ * up the sight picture is big and the lay coarse), +1 s per further 200 m. */
+export function fineLayBaseS(distM: number): number {
+  return 1.5 + 2.5 * Math.min(distM, 200) / 200 + Math.max(0, distM - 200) / 200;
+}
 export const LAY_MOVING_TARGET_MUL = 1.5;
 export const LAY_SHAKEN_MUL = 1.4;
 export const LAY_DAMAGED_SIGHT_MUL = 1.5;
-/** Follow-up on the same stationary target: a correction only, 1.5 (hero) to 2.5 s (recruit). */
-export const FOLLOW_UP_S: [number, number] = [1.5, 2.5];
-export function followUpLayS(experience: number): number { return clamp(2 * laySkillMul(experience), FOLLOW_UP_S[0], FOLLOW_UP_S[1]); }
+/** Follow-up on the same stationary target, neither vehicle having moved: the gun is still laid,
+ * only the fall of the last round is corrected once the recoil has settled: 0.4 (hero) to 1 s.
+ * (AT guns, sim/crewWeapon.ts; a tank's own correction after a miss is `missCorrectionS`.) */
+export const FOLLOW_UP_S: [number, number] = [0.4, 1.0];
+export function followUpLayS(experience: number): number { return clamp(0.7 * laySkillMul(experience), FOLLOW_UP_S[0], FOLLOW_UP_S[1]); }
+/** After a round the vehicle rocks on its suspension and the sight swings off and back: the gunner
+ * waits it out. 0.6 s for a light gun up to 1.3 s for the heaviest. Experience does not shorten it. */
+export function recoilSettleS(weapon: { penetrationMm: number }): number {
+  return 0.6 + clamp(weapon.penetrationMm / 250, 0, 1) * 0.7;
+}
+/** Aiming shown while the gun rocks back from its recoil: the gun is still laid, the sway only
+ * swings it a little off — 95% for a light gun, 85% for the heaviest. */
+export function recoilAimFloor(weapon: { penetrationMm: number }): number {
+  return 0.95 - clamp(weapon.penetrationMm / 250, 0, 1) * 0.1;
+}
+/** Aiming shown when a laid gun needs a correction (its own tank moved, the next man of a lot). */
+export const CORRECTION_AIM_FLOOR = 0.7;
+/** A tank gunner whose round MISSED lays off the observed fall of shot: the one place a tank
+ * gunner's experience shows. Recruit 2.2 s, regular 1 s, veteran 0.7 s, hero 0.45 s. After a hit
+ * there is nothing to correct: the next round goes as soon as the sway settles. */
+export function missCorrectionS(experience: number): number { return qualityCurve(experience, 2.2, 0.7, 0.45); }
 /** The commander spots and designates a new target: 1 s (veteran) to 3 s (recruit); doubled when he
  * is buttoned up under fire or is the gunner himself. */
 export function designateS(commanderExperience: number, doubled: boolean): number {
@@ -120,10 +141,11 @@ export function fineLayS(i: FineLayInput): number {
   return fineLayBaseS(i.distM) * (i.targetMoving ? LAY_MOVING_TARGET_MUL : 1) * laySkillMul(i.experience) * i.aimMul
     * (i.shaken ? LAY_SHAKEN_MUL : 1) * (i.sightDamaged ? LAY_DAMAGED_SIGHT_MUL : 1);
 }
-/** Seconds of lay for the NEXT round on the same target: a correction when it stands still; a
- * target that keeps moving has to be tracked and laid again (half a fine lay, at least the correction). */
-export function followUpS(i: FineLayInput): number {
-  const c = followUpLayS(i.experience) * (i.shaken ? LAY_SHAKEN_MUL : 1) * (i.sightDamaged ? LAY_DAMAGED_SIGHT_MUL : 1);
+/** Seconds of lay for the NEXT round on the same target: a correction when it stands still (none
+ * at all after a hit: `missed` false); a target that keeps moving has to be tracked and laid again
+ * (half a fine lay, at least the correction). */
+export function followUpS(i: FineLayInput, missed = true): number {
+  const c = missed ? missCorrectionS(i.experience) * (i.shaken ? LAY_SHAKEN_MUL : 1) * (i.sightDamaged ? LAY_DAMAGED_SIGHT_MUL : 1) : 0;
   return i.targetMoving ? Math.max(c, 0.5 * fineLayS(i)) : c;
 }
 
@@ -143,6 +165,8 @@ export const SNAP_SHOT_MIN = 0.35;
 export const SNAP_SHOT_MIN_EXPERIENCE = 70;
 /** Firing the main gun from a moving vehicle. */
 export const FIRE_ON_MOVE_MUL = 0.25;
+/** Aiming shown at most while the tank's own motion throws the gun about. */
+export const MOVING_AIM_CAP = 0.4;
 /** A short halt lasts at most this long; then the vehicle drives on at least `FIRE_HALT_GAP_S`. */
 export const FIRE_HALT_MAX_S = 20;
 export const FIRE_HALT_GAP_S = 8;
@@ -175,17 +199,21 @@ export function turretTraverseRad(def: VehicleDef, v: Vehicle, gunnerExperience 
 /** Half-arc of the gun relative to the hull: all round for a turret, `gunArcDeg` for a casemate. */
 export function gunArcRad(def: VehicleDef): number { return def.hasTurret ? Math.PI : (def.gunArcDeg ?? 10) * DEG; }
 
-/** A slow turret is helped by the hull: when the turret alone would need longer than this. */
+/** A slow turret is helped by the hull: when the turret alone would need longer than this (a
+ * regular commander; see `hullAssistMinS`). */
 export const HULL_ASSIST_MIN_S = 5;
+/** An experienced commander calls the driver in sooner to bring the gun round: recruit 10 s,
+ * regular 5 s, veteran 3 s, hero 2 s of turret traverse before he does. */
+export function hullAssistMinS(commanderExperience: number): number { return HULL_ASSIST_MIN_S * qualityCurve(commanderExperience, 2, 0.6, 0.4); }
 /** Should a standing vehicle swing its HULL toward `bearing` (absolute, rad)? Casemates: whenever the
  * target is outside the gun arc. Turreted tanks: when the turret alone needs more than
- * HULL_ASSIST_MIN_S (a Tiger starts its hull turning at once; a T-34 just swings the turret). */
-export function wantsHullTurn(def: VehicleDef, v: Vehicle, bearing: number, gunnerExperience = EXP_REGULAR): boolean {
+ * `hullAssistMinS` (a Tiger starts its hull turning at once; a T-34 just swings the turret). */
+export function wantsHullTurn(def: VehicleDef, v: Vehicle, bearing: number, gunnerExperience = EXP_REGULAR, commanderExperience = EXP_REGULAR): boolean {
   if (!def.hasTurret || turretFrozen(v)) return Math.abs(wrapAngle(bearing - v.hullFacing)) > gunArcRad(def) * 0.9;
   const rate = turretTraverseRad(def, v, gunnerExperience);
   const off = Math.abs(wrapAngle(bearing - v.turretFacing));
   if (off <= COARSE_LAY_RAD * 2) return false;
-  return rate <= 1e-6 || off / rate > HULL_ASSIST_MIN_S;
+  return rate <= 1e-6 || off / rate > hullAssistMinS(commanderExperience);
 }
 
 // ------------------------------------------------------------------ time to first shot
@@ -216,7 +244,7 @@ export function timeToFirstShotS(state: BattleState, v: Vehicle, targetPos: Vec2
   if (def.hasTurret && !turretFrozen(v)) {
     const off = Math.abs(wrapAngle(bearing - v.turretFacing));
     const tr = turretTraverseRad(def, v, exp);
-    const rate = tr + (wantsHullTurn(def, v, bearing, exp) && v.path.length === 0 ? hullRate : 0);
+    const rate = tr + (wantsHullTurn(def, v, bearing, exp, cmd?.experience) && v.path.length === 0 ? hullRate : 0);
     traverseS = rate > 1e-6 ? off / rate : Infinity;
   } else {
     const off = Math.abs(wrapAngle(bearing - v.hullFacing));

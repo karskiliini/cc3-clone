@@ -26,7 +26,7 @@ import { onIncomingFire, onExplosionNear, onOwnWound, onCasualtySeen, onGunnerHi
 import { isVehicleReversing, onVehicleHit, onVehicleNearMiss } from './vehicle';
 import {
   COARSE_LAY_RAD, FIRE_HALT_GAP_S, FIRE_HALT_MAX_S, FIRE_ON_MOVE_MUL, LAY_TOLERANCE_RAD, READY_RACK_RESTOCK_S, SNAP_SHOT_MIN,
-  SNAP_SHOT_MIN_EXPERIENCE, bracketLost, bracketMul, crewShaken, designateS, fineLayS, followUpS, gunArcRad, loadPaceMul,
+  SNAP_SHOT_MIN_EXPERIENCE, bracketLost, bracketMul, crewShaken, designateS, fineLayS, followUpS, gunArcRad, loadPaceMul, recoilSettleS, recoilAimFloor, CORRECTION_AIM_FLOOR, MOVING_AIM_CAP,
   timeToFirstShotS, turretTraverseRad, vehicleCommander, vehicleLoadS,
 } from './gunTiming';
 import { isButtonedUp } from './vehicleVision';
@@ -1859,7 +1859,7 @@ function pickNearestInfantry(state: BattleState, vehicle: Vehicle, rangeM: numbe
 
 /** Main-gun target for a vehicle on an attack-unit Fire order: AP at the target vehicle, HE at the
  * best visible member of a target infantry team, HE on the tracked/last known position otherwise. */
-function pickVehicleAttackTarget(state: BattleState, vehicle: Vehicle, weapon: WeaponDef | null, order: Order): Target | null | 'free' {
+function pickVehicleAttackTarget(state: BattleState, vehicle: Vehicle, weapon: WeaponDef | null, order: Order): Target | null | 'free' | 'mg' {
   const phase = attackPhase(state, order);
   if (phase === 'hold') return 'free';
   const tgt = state.teams.get(order.targetTeamId!);
@@ -1883,7 +1883,14 @@ function pickVehicleAttackTarget(state: BattleState, vehicle: Vehicle, weapon: W
       const sc = exposureScore(state, vehicle.pos, e);
       if (sc > bestScore) { bestScore = sc; best = e; }
     }
-    if (best) return { kind: 'soldier', soldier: best };
+    if (best) {
+      // an ordered attack on infantry follows the same doctrine as free fire: the machine guns
+      // mow the men; the main gun's HE joins for a real group, when the MGs are out, or when their
+      // fire has not pinned the team (mainGunAtInfantry). Otherwise the gun stays silent and the
+      // coax (pickCoaxTarget: the ordered team first) brings the turret round.
+      if (!weapon || mainGunAtInfantry(state, vehicle, best)) return { kind: 'soldier', soldier: best };
+      return 'mg';
+    }
   }
   if (weapon && weapon.heRadiusM > 0 && dist(vehicle.pos, order.target) * TILE_M <= rangeM) return { kind: 'point', pos: order.target };
   return null;
@@ -1921,7 +1928,9 @@ function pickCoaxTarget(state: BattleState, vehicle: Vehicle, rangeM: number): S
   return best;
 }
 
-function pickVisibleVehicleTarget(state: BattleState, vehicle: Vehicle): Target | null {
+/** 'mg': the ordered target is in sight but is the machine guns' — no main-gun target, not even
+ * the area fallback on the order point. */
+function pickVisibleVehicleTarget(state: BattleState, vehicle: Vehicle): Target | null | 'mg' {
   const def = VEHICLE_DEFS[vehicle.defId];
   const weapon = def?.mainWeaponId ? WEAPONS[def.mainWeaponId] : null;
   const order = state.teams.get(vehicle.teamId)?.order;
@@ -2027,6 +2036,7 @@ export function pickVehicleTarget(state: BattleState, vehicle: Vehicle): Target 
   // A deliberate area order takes precedence over opportunistic spotted targets.
   if (order?.type === 'fire' && order.targetTeamId == null) return vehicleAreaTarget(state, vehicle, weapon?.rangeM ?? 400);
   const target = pickVisibleVehicleTarget(state, vehicle);
+  if (target === 'mg') return null;
   if (target) {
     const pos = targetPosOf(target);
     if (dist(vehicle.pos, pos) * TILE_M <= (weapon?.rangeM ?? 400)) {
@@ -2070,6 +2080,13 @@ function gunLos(state: BattleState, vehicle: Vehicle, tPos: Vec2): boolean {
   const clear = hasLOS(state.map, vehicle.pos, tPos, { eyeM: EYE_VEHICLE_M });
   gunLosCache.set(vehicle, { until: state.time + GUN_LOS_EVERY_S, fx, fy, tx, ty, clear });
   return clear;
+}
+
+/** Is the crew in a hurry to be somewhere else (Move Fast) with a soft target in its sights — men
+ * or a gun? The commander fires on the move rather than halting where he is meant to get away from. */
+function vehicleInHurry(state: BattleState, vehicle: Vehicle, target: Target): boolean {
+  if (target.kind === 'vehicle' || vehicle.path.length === 0) return false;
+  return state.teams.get(vehicle.teamId)?.order?.type === 'moveFast';
 }
 
 /** A vehicle under way halts for an aimed shot unless it has just given one up. */
@@ -2331,7 +2348,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
     } else {
       if (jumpM > GUN_LAY_RELAY_M) {
         // another man of the same lot, some way off: a correction, not a new lay
-        if (lay.fineLeftS <= 0) { lay.fineLeftS = followUpS(layIn); lay.totalS = lay.fineLeftS; lay.followUp = true; vehicle.layProgress = 0; }
+        if (lay.fineLeftS <= 0) { lay.fineLeftS = followUpS(layIn); lay.totalS = lay.fineLeftS; lay.followUp = true; lay.floor = CORRECTION_AIM_FLOOR; vehicle.layProgress = CORRECTION_AIM_FLOOR; }
         lay.misses = 0; lay.bracketFrom = undefined; lay.bracketAt = undefined;
       }
       lay.key = layKey;
@@ -2356,12 +2373,29 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
     }
     const facingRef = vehicle.turretFacing;
     const facingDiff = Math.abs(wrapAngle(desired - facingRef));
-    // only a halted vehicle is laid properly; one backing out of trouble shoots on the move
-    const fireOnMove = ownMoving && (reversing || vehicle.path.length === 0 || !canHaltToFire(state, vehicle));
-    if (designated && los && facingDiff <= COARSE_LAY_RAD && lay.fineLeftS > 0 && (!ownMoving || fireOnMove)) {
+    // only a halted vehicle is laid properly; one backing out of trouble shoots on the move, and
+    // so does one in a hurry (Move Fast) at men or a gun: the round is unlikely to hit, but it
+    // keeps heads down and the tank does not stop where it is meant to get away from
+    const hurry = vehicleInHurry(state, vehicle, target);
+    const fireOnMove = ownMoving && (reversing || hurry || vehicle.path.length === 0 || !canHaltToFire(state, vehicle));
+    // the tank drove after the gun was laid (and is not shooting on the move): the lay is off by
+    // its own motion and needs a correction once it stops
+    if (ownMoving && !fireOnMove && designated && lay.fineLeftS <= 0 && !(lay.swayLeftS! > 0)) {
+      lay.fineLeftS = followUpS(layIn); lay.totalS = lay.fineLeftS; lay.followUp = true;
+      lay.floor = CORRECTION_AIM_FLOOR; vehicle.layProgress = CORRECTION_AIM_FLOOR;
+    }
+    if (lay.swayLeftS! > 0) {
+      lay.swayLeftS = Math.max(0, lay.swayLeftS! - dt); // the recoil settles whatever else happens
+    } else if (designated && los && facingDiff <= COARSE_LAY_RAD && lay.fineLeftS > 0 && (!ownMoving || fireOnMove)) {
       lay.fineLeftS = Math.max(0, lay.fineLeftS - dt);
     }
-    vehicle.layProgress = Math.max(vehicle.layProgress ?? 0, clamp(1 - (lay.designateLeftS + lay.fineLeftS) / Math.max(1e-6, lay.totalS), 0, 1));
+    const left = clamp(1 - (lay.designateLeftS + lay.fineLeftS + (lay.swayLeftS ?? 0)) / Math.max(1e-6, lay.totalS), 0, 1);
+    // a follow-up starts from a gun that is still nearly on target, not from nothing
+    const floor = lay.followUp ? lay.floor ?? CORRECTION_AIM_FLOOR : 0;
+    const progress = floor + (1 - floor) * left;
+    vehicle.layProgress = Math.max(vehicle.layProgress ?? 0, progress);
+    // its own motion throws the gun about: a tank under way is never well laid
+    if (ownMoving) vehicle.layProgress = Math.min(vehicle.layProgress, MOVING_AIM_CAP);
 
     // item 038: hull-down creep — the gun sits below the crest (the gun line is blocked) while
     // the commander's eye still sees the target. The tank creeps forward until the gun clears.
@@ -2374,7 +2408,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
     const loaded = !!vehicle.loadedRound && vehicle.mainFireTimer <= 0;
     // (a turret comes round while the vehicle drives; a casemate or a jammed turret needs the halt to turn the hull)
     const gunComesRound = def.hasTurret && !turretFrozen(vehicle);
-    if (vehicle.path.length > 0 && !reversing && los && gunLine && designated && (facingDiff <= COARSE_LAY_RAD * 2 || !gunComesRound)
+    if (vehicle.path.length > 0 && !reversing && !hurry && los && gunLine && designated && (facingDiff <= COARSE_LAY_RAD * 2 || !gunComesRound)
       && !!vehicle.loadedRound && vehicle.mainFireTimer <= 1 && canHaltToFire(state, vehicle)) {
       if (vehicle.fireHaltSince == null) vehicle.fireHaltSince = state.time;
       if (state.time - vehicle.fireHaltSince > FIRE_HALT_MAX_S) { vehicle.fireHaltSince = undefined; vehicle.noFireHaltUntil = state.time + FIRE_HALT_GAP_S; vehicle.fireHaltUntil = undefined; }
@@ -2388,7 +2422,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
     const sightMul = sightAccuracyMul(vehicle, distM);
     // snap shot: a veteran about to be fired at does not finish his lay
     let layMul = 1;
-    let laid = lay.fineLeftS <= 0;
+    let laid = lay.fineLeftS <= 0 && !(lay.swayLeftS! > 0);
     if (!laid && designated && loaded && target.kind === 'vehicle' && gunner.experience >= SNAP_SHOT_MIN_EXPERIENCE
       && aboutToFireAt(target.vehicle, vehicle, lay.fineLeftS)) {
       const fineTotal = Math.max(1e-6, lay.followUp ? lay.totalS : fineLayS(layIn));
@@ -2401,6 +2435,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
       const round = vehicle.loadedRound!;
       const fired = roundWeapon(weapon, round);
       const moveMul = ownMoving ? FIRE_ON_MOVE_MUL : 1;
+      let missed = true;
       vehicle.loadedRound = undefined;
       vehicle.lastMainShotAt = state.time;
       addShots(state, vehicle.side, 1);
@@ -2413,6 +2448,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
         const hit = fireAtVehicle(state, rng, weapon, vehicle.pos, vehicle.side, target.vehicle, p, true, { round, aimPoint: aim, skill, shooterTeamId: vehicle.teamId });
         // bracketing: the fall of a missed round is observed and corrected for
         if (!hit) { lay.misses = Math.min(2, (lay.misses ?? 0) + 1); lay.bracketFrom ??= { ...vehicle.pos }; lay.bracketAt ??= { ...tPos }; }
+        missed = !hit;
       } else {
         // a round fired on the move lands wide of a point target
         const at = estimated ? estimateAim(state, rng, vehicle.pos, tPos) : { ...tPos };
@@ -2420,6 +2456,8 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
         const shot = traceRound(state, rng, vehicle.pos, at, fired, { eyeM: VEHICLE_GUN_M, targetM: estimated ? 0.5 : 1.7 });
         traceTracers(state, shot, tracerKindFor(fired), !shot.blocked && !shot.deflected);
         areaImpact(state, rng, vehicle.pos, vehicle.side, fired, shot.impact, gunner);
+        // the gunner watches the burst: on the spot needs no correction
+        missed = shot.blocked || dist(shot.impact, tPos) * TILE_M > Math.max(3, fired.heRadiusM * 0.5);
       }
       // the loader rams the next round for the same kind of target straight away
       const next = chooseRound(weapon, counts, roundTarget);
@@ -2429,12 +2467,16 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
         if (counts[next] === 0 && weapon.rounds && team) noteOutOf(state, team.id, next);
         startMainGunLoad(state, vehicle, def, weapon, crew, 0);
       }
-      // the next round on this target needs only a correction (a moving one has to be tracked again)
+      // the next round on this target: the gun stays laid, only the recoil sway is waited out; a
+      // miss is corrected from the observed fall of shot (the gunner's experience), a moving
+      // target has to be tracked again
       lay.followUp = true;
       lay.designateLeftS = 0;
-      lay.fineLeftS = followUpS(layIn);
-      lay.totalS = lay.fineLeftS;
-      vehicle.layProgress = 0;
+      lay.swayLeftS = recoilSettleS(weapon);
+      lay.fineLeftS = followUpS(layIn, missed);
+      lay.totalS = lay.fineLeftS + lay.swayLeftS;
+      lay.floor = recoilAimFloor(weapon);
+      vehicle.layProgress = lay.floor;
       vehicle.gunState = vehicle.loadedRound ? 'loading' : 'laying';
       // move on
       if (vehicle.fireHaltSince != null) { vehicle.fireHaltSince = undefined; vehicle.fireHaltUntil = undefined; }
