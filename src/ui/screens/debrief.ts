@@ -109,13 +109,22 @@ export class DebriefScreen implements Screen {
     }
   }
 
+  /** A battle started outside the command layer (boot camp starts and pauses it directly) has
+   * no 'ready' in its log, so a replay of it would never leave deployment: no replay buttons. */
+  private replayable(): boolean {
+    const log = this.replayLog;
+    if (!log) return false;
+    const c = log.config.controllers;
+    return log.commands.some((cmd) => cmd.type === 'ready') || (c?.german === 'ai' && c?.soviet === 'ai');
+  }
+
   update(_dt: number, input: InputState): void {
     this.record();
     const m = toMenuInput(input);
     this.mouse = m.mouse;
     this.replayLog ??= makeReplayLog(this.battle);
     for (const c of m.clicks) {
-      if (c.button !== 0) continue;
+      if (c.button !== 0 || !this.replayable()) continue;
       if (pointInRect(c, SAVE_REPLAY)) { game.audio?.play('click'); downloadReplay(this.replayLog); return; }
       if (pointInRect(c, WATCH_REPLAY)) {
         // the log rebuilds the battle from its config and replays every command at its tick
@@ -141,8 +150,10 @@ export class DebriefScreen implements Screen {
       this.drawScoreboard(ctx);
       const hasAwards = this.drawAwards(ctx);
       this.drawTeams(ctx, hasAwards ? AWARDS.y + AWARDS.h + 8 : AWARDS.y);
-      drawSmallMetalButton(ctx, SAVE_REPLAY, 'Save Replay', { hot: pointInRect(this.mouse, SAVE_REPLAY) });
-      drawSmallMetalButton(ctx, WATCH_REPLAY, 'Watch Replay', { hot: pointInRect(this.mouse, WATCH_REPLAY) });
+      if (this.replayable()) {
+        drawSmallMetalButton(ctx, SAVE_REPLAY, 'Save Replay', { hot: pointInRect(this.mouse, SAVE_REPLAY) });
+        drawSmallMetalButton(ctx, WATCH_REPLAY, 'Watch Replay', { hot: pointInRect(this.mouse, WATCH_REPLAY) });
+      }
       this.strip.draw(ctx);
     });
   }

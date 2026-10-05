@@ -14,7 +14,7 @@ import { spawnTeam, layoutTeamPositions } from './spawn';
 import { applyOrder, stepAttackOrders, spottedEnemyTeamAt } from './orders';
 import { stepMovement } from './movement';
 import { stepVehicles } from './vehicle';
-import { stepGrowth } from './growth';
+import { getGrowth, stepGrowth } from './growth';
 import { flee, stepVictory } from './victory';
 import { compareCommands, resolveControllers, type Command, type CommandBody } from './commands';
 import { updateSpotting } from './spotting';
@@ -69,6 +69,10 @@ export class Battle {
     config.controllers = { ...this.controllers };
     const mapDef = getMap(config.mapId);
     const map = buildMap(mapDef);
+    // the growth field is built now, from the map's original tiles: built lazily it would depend
+    // on when a reader (the UI's elevation readout, the AI) first asked, after craters may have
+    // turned crops into 'crater' tiles (multiplayer plan D1)
+    getGrowth(map);
 
     this.state = {
       config,
@@ -189,6 +193,13 @@ export class Battle {
     return this.pending.length;
   }
 
+  /** Applies the commands due by the current tick without running a tick: a replay stopping at
+   * the recorded last tick takes the commands the original applied after it (a flee ending the
+   * battle at a flush) before it compares the state hash. */
+  flushDue(): void {
+    this.flushCommands();
+  }
+
   /** Apply every pending command due by the current tick, in canonical order. */
   private flushCommands(): void {
     if (this.pending.length === 0) return;
@@ -198,6 +209,9 @@ export class Battle {
     if (due.length === 0) return;
     this.pending = this.pending.filter((c) => c.tick > now);
     for (const cmd of due) {
+      // after the end only the viewing speed may change: a late order or flee would alter the
+      // state after the result, and the log (and so a replay) would have to carry it too
+      if (this.state.phase === 'ended' && cmd.type !== 'setSpeed') continue;
       this.applied.push(cmd);
       this.applyCommand(cmd);
     }

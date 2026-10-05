@@ -11,7 +11,7 @@
 // ============================================================================
 import { readFileSync, writeFileSync } from 'node:fs';
 import { runReplay, type ReplayLog } from '@/sim/replay';
-import { hashHex } from '@/sim/stateHash';
+import { hashHex, hashState } from '@/sim/stateHash';
 import { BUILD_VERSION } from '@/shared/version';
 
 const args = process.argv.slice(2);
@@ -37,7 +37,8 @@ if (!args.includes('--quiet')) for (const line of lines) console.log(line);
 
 const last = chain.length > 0 ? chain[chain.length - 1] : null;
 const f = log.final;
-const reached = f ? battle.state.tick === f.tick && last === f.hash : null;
+// compare the state after the last tick's trailing commands (runTicks flushed them), not chain's last
+const reached = f ? battle.state.tick === f.tick && hashState(battle) === f.hash : null;
 if (log.buildVersion !== BUILD_VERSION) console.error(`note: recorded by build ${log.buildVersion}, replayed by ${BUILD_VERSION}`);
 console.error(`replayed ${log.config.mapId} seed ${log.config.seed}: ${chain.length} ticks, ${log.commands.length} commands, `
   + `final ${last == null ? '-' : hashHex(last)} in ${(ms / 1000).toFixed(1)} s`

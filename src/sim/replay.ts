@@ -70,5 +70,7 @@ export function runTicks(battle: Battle, untilTick: number, chain: number[] = []
     // deploy or paused, and no command applied: nothing left that could start or resume it
     else if (state.phase !== 'running' && battle.pendingCount() === waiting) break;
   }
+  // the commands stamped with the last tick (a flee, a truce, setSpeed) applied after it ran
+  if ((state.tick ?? 0) <= untilTick) battle.flushDue();
   return chain;
 }

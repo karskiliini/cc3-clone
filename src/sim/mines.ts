@@ -2,6 +2,7 @@ import type { BattleState, GameMap, Soldier, Vehicle } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { addMessage } from './messages';
+import { getHeightField, syncCraterMarks } from './heightField';
 import { applyHit } from './combat';
 import { WEAPONS } from '@/data/weapons';
 
@@ -44,7 +45,10 @@ function tileIdx(map: GameMap, x: number, y: number): number {
 
 function consumeMine(map: GameMap, idx: number): void {
   map.mines![idx] = MINE_NONE;
-  if (map.craterMarks) map.craterMarks.push({ x: (idx % map.width) + 0.5, y: Math.floor(idx / map.width) + 0.5, sizeM: 4, kind: 'grenade' });
+  if (map.craterMarks) {
+    map.craterMarks.push({ x: (idx % map.width) + 0.5, y: Math.floor(idx / map.width) + 0.5, sizeM: 4, kind: 'grenade' });
+    syncCraterMarks(map, getHeightField(map)); // the bowl enters the height field now (D1)
+  }
   if (map.dirtyTiles) map.dirtyTiles.push(idx);
 }
 /** Clear the mine tile nearest a soldier (engineer work, ~8 s of digging handled by

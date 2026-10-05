@@ -206,3 +206,53 @@ describe('replay (P4)', () => {
     expect(chain.length).toBe(110);
   });
 });
+
+describe('replay of a battle ended by a command (043 review)', () => {
+  function fled(): Battle {
+    const b = new Battle(config({ seed: 3 }));
+    b.submit('german', { type: 'ready' });
+    b.step(0);
+    for (let i = 0; i < 100; i++) b.step(SIM_DT);
+    b.submit('german', { type: 'flee' });
+    b.step(SIM_DT);
+    expect(b.state.phase).toBe('ended');
+    return b;
+  }
+
+  it('a battle that ended by a flee replays to the recorded final hash', () => {
+    const log = makeReplayLog(fled());
+    const run = runReplay(log);
+    expect(run.battle.state.tick).toBe(log.final!.tick);
+    expect(run.battle.pendingCount()).toBe(0);
+    expect(hashState(run.battle)).toBe(log.final!.hash);
+  });
+
+  it('orders after the end are neither applied nor logged; setSpeed still is', () => {
+    const b = fled();
+    const n = b.commandLog().length, h = hashState(b);
+    const team = b.selectableTeams('german')[0];
+    b.submit('german', { type: 'order', teamId: team.id, order: { type: 'moveFast', target: { x: team.pos.x + 5, y: team.pos.y }, issuedAt: b.state.time } });
+    b.submit('german', { type: 'flee' });
+    b.step(SIM_DT);
+    expect(b.commandLog().length).toBe(n);
+    expect(hashState(b)).toBe(h);
+    b.submit('german', { type: 'setSpeed', speed: 2 });
+    b.step(SIM_DT);
+    expect(b.commandLog().length).toBe(n + 1);
+    const log = makeReplayLog(b);
+    expect(hashState(runReplay(log).battle)).toBe(log.final!.hash);
+  });
+
+  it('tools/replay.ts accepts the fled battle (exit 0)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc3-flee-'));
+    try {
+      const file = join(dir, 'fled.json');
+      writeFileSync(file, JSON.stringify(makeReplayLog(fled())));
+      const r = spawnSync('npx', ['vite-node', 'tools/replay.ts', file, '--quiet'], { cwd: ROOT, encoding: 'utf8' });
+      expect(r.stderr).toContain('matches the recorded final hash');
+      expect(r.status).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60000);
+});

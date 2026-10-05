@@ -590,7 +590,8 @@ export function getHeightField(map: GameMap): HeightField {
 export function syncCraterMarks(map: GameMap, field: HeightField): void {
   const marks = map.craterMarks;
   if (!marks) return;
-  for (let k = field.marksApplied; k < marks.length; k++) applyCrater(field, marks[k], marks[k].sizeM);
+  // a vehicle's 'track' rut is a growth/decal mark, not a bowl (stepGrowth skips it the same way)
+  for (let k = field.marksApplied; k < marks.length; k++) if (marks[k].kind !== 'track') applyCrater(field, marks[k], marks[k].sizeM);
   field.marksApplied = marks.length;
 }
 

@@ -1070,11 +1070,13 @@ export class BattleScreen implements Screen {
     if (!r.paused) battle.step(dt * game.settings.speed);
     const final = r.log.final;
     const tick = battle.state.tick ?? 0;
-    if (final && !r.checked && tick >= final.tick) {
+    // at the last tick, or a diverged replay that ended early: a desync never passes silently
+    if (final && !r.checked && (tick >= final.tick || battle.state.phase === 'ended')) {
       r.checked = true;
+      battle.flushDue(); // the commands the original applied after its last tick (a flee)
       const h = hashState(battle);
       if (tick === final.tick && h === final.hash) this.notice(`Replay complete: the battle reproduced exactly (state ${hashHex(h)}).`);
-      else this.notice(`Replay diverged from the recorded battle (state ${hashHex(h)}, recorded ${hashHex(final.hash)}).`, 'warn');
+      else this.notice(`Replay diverged from the recorded battle (tick ${tick} state ${hashHex(h)}, recorded tick ${final.tick} ${hashHex(final.hash)}).`, 'warn');
     }
   }
 
