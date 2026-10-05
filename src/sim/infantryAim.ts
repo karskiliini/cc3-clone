@@ -54,7 +54,9 @@ function aimSeconds(s: Soldier, weapon: WeaponDef, at: Vec2, now: number, follow
   const base = followUp ? (light ? 0.6 : mg ? 0.85 : heavy ? 1.5 : 0.95)
     : (light ? 0.8 : mg ? 2.1 : heavy ? 3 : 1.8) + turn + (weapon.id.includes('scoped') ? 1.2 : 0);
   const settle = !followUp && now - memory(s).movedAt < 1 ? 0.8 : 0;
-  const skill = 1.3 - clamp(s.experience, 0, 100) * 0.006;
+  // a rifleman's aiming is mostly his training: a recruit takes about twice a regular's time, a
+  // veteran two thirds, a hero not much over a third
+  const skill = Math.max(0.4, 1 + (50 - clamp(s.experience, 0, 100)) * 0.014);
   const condition = 1 + s.fatigue * 0.008 + s.suppression * 0.008 + (s.mind?.stress ?? 0) * 0.004 + (s.health === 'wounded' ? 0.35 : 0);
   return Math.max(0.5, (base + range * (followUp ? 0.3 : 1) + settle) * skill * condition * (hip ? 0.6 : 1));
 }

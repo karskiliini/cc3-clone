@@ -924,7 +924,8 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
       // A wheel-steered halftrack cannot turn where it stands.
       if (canDrive && !frozen && def.turnRadiusM == null && def.mainWeaponId) {
         const ownTeam = state.teams.get(v.teamId);
-        const mind = ownTeam ? pickCommander(state, ownTeam)?.mind : undefined;
+        const cmdr = ownTeam ? pickCommander(state, ownTeam) : undefined;
+        const mind = cmdr?.mind;
         const bearing = layPos ? angleTo(v.pos, layPos) : targetPos ? angleTo(v.pos, targetPos) : mind && mind.threatLevel >= 0.7 ? mind.threatDir : null;
         // standing on an ORDERED arc (Defend/Ambush) the crew must hold: the driver swings the HULL
         // toward it when the turret alone is the slower way round, and then keeps the hull coming
@@ -948,7 +949,11 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
         // a casemate gun (StuG, Marder, SU-76/85) swings only a few degrees either way: to bring it
         // onto a target outside that arc the driver turns the whole vehicle, whatever the order
         const casemate = !def.hasTurret;
-        if (bearing != null && (worthHull || ((threat || casemate) && wantsHullTurn(def, v, bearing, gunnerExp)))) turnHull(state, v, def, bearing, dt);
+        // a target the slow turret would take too long to reach: the commander has the driver
+        // swing the hull to catch it — sooner the more experienced he is (gunTiming.hullAssistMinS)
+        // — unless an armour threat elsewhere wants the front plate
+        const catchTarget = layPos != null && (armourThreat || !mind || mind.threatLevel < 0.7);
+        if (bearing != null && (worthHull || ((threat || casemate || catchTarget) && wantsHullTurn(def, v, bearing, gunnerExp, cmdr?.experience)))) turnHull(state, v, def, bearing, dt);
       }
       continue;
     }

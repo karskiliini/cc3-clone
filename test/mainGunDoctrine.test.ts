@@ -5,6 +5,9 @@ import { pickVehicleTarget } from '@/sim/combat';
 import { MG_GROUP_MIN, MG_GROUP_RADIUS_TILES, MG_ESCALATE_S, MG_SUPPRESS_LEVEL, mainGunAtInfantry, noteMgBurst } from '@/sim/combat';
 import { Rng } from '@/shared/rng';
 import { setTile } from '@/sim/map';
+import { findPath } from '@/sim/path';
+import { stepVehicles } from '@/sim/vehicle';
+import { SIM_DT } from '@/shared/types';
 
 /** Register a spotted enemy infantry team of `n` men around `pos`. */
 function addTeam(state: ReturnType<typeof makeState>, n: number, pos: { x: number; y: number }, opts: { lastFiredAt?: number; suppression?: number } = {}) {
@@ -154,6 +157,25 @@ describe('item 018 — vehicle target selection honours the doctrine', () => {
     expect(pickVehicleTarget(state, v)).toBeNull();
   });
 
+  it('an ORDERED attack on infantry follows the doctrine: a lone man is the MGs\' (no main-gun target)', () => {
+    const state = scene();
+    const v = tank(state);
+    const { team } = addTeam(state, 1, { x: 202.5, y: 191 });
+    const own = state.teams.get(v.teamId)!;
+    own.order = { type: 'fire', target: { ...team.pos }, targetTeamId: team.id, issuedAt: 0, lastSeenAt: 0, lastKnownPos: { ...team.pos } };
+    expect(pickVehicleTarget(state, v)).toBeNull();
+  });
+
+  it('an ORDERED attack on a clustered group gets the main gun as well', () => {
+    const state = scene();
+    const v = tank(state);
+    const { team } = addTeam(state, MG_GROUP_MIN, { x: 202.5, y: 191 });
+    const own = state.teams.get(v.teamId)!;
+    own.order = { type: 'fire', target: { ...team.pos }, targetTeamId: team.id, issuedAt: 0, lastSeenAt: 0, lastKnownPos: { ...team.pos } };
+    const t = pickVehicleTarget(state, v);
+    expect(t?.kind).toBe('soldier');
+  });
+
   it('pickVehicleTarget DOES return a clustered group', () => {
     const state = scene();
     const v = tank(state);
@@ -183,5 +205,38 @@ describe('item 018 — vehicle target selection honours the doctrine', () => {
     expect(mainShots).toBe(0);
     expect(coaxShots).toBeGreaterThan(0);
     void men;
+  });
+});
+
+describe('firing on the move when in a hurry', () => {
+  // a tank driving past a group of riflemen: the main gun's HE is worth it (a group)
+  function drive(type: 'move' | 'moveFast') {
+    const state = scene();
+    const { v, team: own } = addTank(state, 'pz4gh', { x: 200.5, y: 230.5 }, 0, 50);
+    addTeam(state, MG_GROUP_MIN, { x: 215.5, y: 210.5 });
+    const goal = { x: 200.5, y: 170.5 };
+    own.order = { type, target: goal, issuedAt: 0 };
+    v.path = findPath(state.map, v.pos, goal, 'vehicle');
+    const rng = new Rng(4);
+    let shotSpeed: number | null = null;
+    for (let i = 0; i < Math.round(40 / SIM_DT) && shotSpeed == null; i++) {
+      state.time += SIM_DT;
+      stepVehicles(state, rng, SIM_DT);
+      stepCombat(state, rng, SIM_DT);
+      for (const ev of state.events) if (ev.kind === 'shot' && ev.weaponId === 'kwk40_75') shotSpeed = Math.abs(v.speed);
+      state.events.length = 0;
+      for (const id of state.teams.get(900)!.soldierIds) { const s = state.soldiers.get(id)!; s.health = 'healthy'; s.suppression = 0; }
+    }
+    return shotSpeed;
+  }
+
+  it('on a plain Move the tank halts for an aimed shot', () => {
+    expect(drive('move')).toBe(0);
+  });
+
+  it('on Move Fast the commander fires on the move at the men rather than stop', () => {
+    const s = drive('moveFast');
+    expect(s).not.toBeNull();
+    expect(s!).toBeGreaterThan(0.1);
   });
 });

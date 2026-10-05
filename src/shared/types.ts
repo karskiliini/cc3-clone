@@ -671,6 +671,10 @@ export interface GunLay {
   totalS: number;
   /** follow-up correction on a target already fired at */
   followUp?: boolean;
+  /** seconds of recoil sway left after the last round (the gunner waits for the sight to settle) */
+  swayLeftS?: number;
+  /** Aiming shown at the start of a follow-up (the gun is still nearly laid). */
+  floor?: number;
   /** observed misses on this target (bracketing), where we and the target stood when they fell */
   misses?: number;
   bracketFrom?: Vec2;
