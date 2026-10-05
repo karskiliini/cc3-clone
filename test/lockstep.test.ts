@@ -371,6 +371,31 @@ describe('desync recovery (047)', () => {
     expect(p.peers.german.status).toBe('failed');
   }, 300_000);
 
+  it('a resync payload that re-times one of our real commands is refused', () => {
+    let moved = 0;
+    const p = pair({ seed: 63 }, undefined, {
+      german: (t) => tamper(t, (m) => {
+        if (m.kind !== 'resync') return m;
+        // a genuine Soviet order, applied a few seconds early
+        const log = m.log.map((c) => {
+          if (moved === 0 && c.side === 'soviet' && c.type === 'order' && c.tick > 50) { moved++; return { ...c, tick: c.tick - 30 }; }
+          return c;
+        });
+        return { ...m, log };
+      }),
+    });
+    let corrupted = false;
+    drive(p, () => p.peers.soviet.status === 'failed' && p.peers.german.status === 'failed', 10 * 60_000, () => {
+      const s = p.peers.soviet;
+      if (!corrupted && s.battle.state.phase === 'running' && tick(s) >= 400) {
+        s.battle.state.soldiers.values().next().value!.ammo += 1;
+        corrupted = true;
+      }
+    });
+    expect(moved).toBe(1);
+    expect(p.peers.soviet.desync!.reason).toMatch(/moves our order command/);
+  }, 300_000);
+
   it('a peer flooding resync requests cannot keep the host rebuilding', () => {
     const p = pair({ seed: 62 });
     const flood = (s: LockstepSession, epoch: number) =>

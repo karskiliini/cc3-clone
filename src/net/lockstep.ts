@@ -136,6 +136,10 @@ export class LockstepSession {
   /** Every command we ever sealed, by turn and in issue order: our own record of our side's
    * history, which a resync payload from the authority must not contradict (trust boundary). */
   private sent: { turn: number; key: string; body: CommandBody }[] = [];
+  /** The battle tick each turn we ran submitted its commands at: our sent commands are pinned to
+   * it, so a resync log cannot re-time them either. */
+  private turnTicks = new Map<number, number>();
+  private maxTurnTick = 0;
   /** Sealed bundles per side by turn (ours are kept until the peer acks them and they have run). */
   private bundles: Record<Side, Map<number, CommandBody[]>> = { german: new Map(), soviet: new Map() };
   /** The highest turn our bundles were sealed for. */
@@ -315,6 +319,9 @@ export class LockstepSession {
   private runTurn(): void {
     const battle = this.battle;
     const turn = this.turn;
+    const turnTick = battle.state.tick ?? 0;
+    this.turnTicks.set(turn, turnTick);
+    this.maxTurnTick = Math.max(this.maxTurnTick, turnTick);
     for (const side of SIDES) {
       const tick = battle.state.tick ?? 0;
       for (const body of this.bundles[side].get(turn) ?? []) battle.submit(side, body, tick);
@@ -503,6 +510,12 @@ export class LockstepSession {
       const key = canonical(body);
       while (i < this.sent.length && this.sent[i].key !== key) i++;
       if (i === this.sent.length) return `the authority log holds a ${c.type} command in our name that we never sent`;
+      // and at the tick it really ran: the one its turn ran at here, or (for a turn we never ran)
+      // no earlier than anything we ran
+      const ran = this.turnTicks.get(this.sent[i].turn);
+      if (ran !== undefined ? c.tick !== ran : c.tick < this.maxTurnTick) {
+        return `the authority log moves our ${c.type} command to tick ${c.tick}`;
+      }
       i++;
     }
     return null;
