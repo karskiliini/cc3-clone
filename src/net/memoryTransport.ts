@@ -49,6 +49,9 @@ export interface LinkOptions {
   reorderMs?: number;
   /** Share of messages lost (the session's resends recover bundles). */
   dropChance?: number;
+  /** Share of messages with one character of their JSON changed on the way (a damaged packet);
+   * if that breaks the JSON, the receiver gets the raw string. */
+  corruptChance?: number;
 }
 
 class MemoryEnd implements Transport {
@@ -64,9 +67,18 @@ class MemoryEnd implements Transport {
     if (o.dropChance > 0 && this.rng.chance(o.dropChance)) return;
     let delay = this.rng.range(o.minDelayMs, o.maxDelayMs);
     if (this.rng.chance(o.reorderChance)) delay += this.rng.range(0, o.reorderMs);
-    const wire = JSON.stringify(msg);
+    let wire = JSON.stringify(msg);
+    if (o.corruptChance > 0 && this.rng.chance(o.corruptChance)) {
+      const i = this.rng.int(0, wire.length - 1);
+      const c = wire.charCodeAt(i);
+      wire = wire.slice(0, i) + String.fromCharCode(c === 0x31 ? 0x32 : 0x31) + wire.slice(i + 1);
+    }
     const peer = this.peer;
-    this.clock.schedule(delay, () => peer.handler?.(JSON.parse(wire) as NetMessage));
+    this.clock.schedule(delay, () => {
+      let got: unknown;
+      try { got = JSON.parse(wire); } catch { got = wire; }
+      peer.handler?.(got as NetMessage);
+    });
   }
 
   onMessage(handler: (msg: NetMessage) => void): void {
@@ -77,7 +89,7 @@ class MemoryEnd implements Transport {
 /** Two transports wired to each other through `clock`; each direction has its own random stream. */
 export function memoryLink(clock: VirtualClock, options: LinkOptions): [Transport, Transport] {
   const opts: Required<LinkOptions> = {
-    minDelayMs: 20, maxDelayMs: 300, reorderChance: 0.15, reorderMs: 40, dropChance: 0, ...options,
+    minDelayMs: 20, maxDelayMs: 300, reorderChance: 0.15, reorderMs: 40, dropChance: 0, corruptChance: 0, ...options,
   };
   const a = new MemoryEnd(clock, new Rng(opts.seed), opts);
   const b = new MemoryEnd(clock, new Rng(opts.seed ^ 0x9e3779b9), opts);
