@@ -5,7 +5,7 @@
 // reorder and lose messages; the session copes (bundles carry their turn, acks drive resends,
 // bundles repeat the latest hash, and resync messages are repeated until answered).
 // ============================================================================
-import type { Command, CommandBody } from '@/sim/commands';
+import type { CommandBody } from '@/sim/commands';
 import type { Side } from '@/shared/types';
 
 /** A state hash taken after `turn` turns, in resync epoch `epoch`. */
@@ -20,11 +20,12 @@ export type NetMessage =
   | { kind: 'hash'; side: Side } & TurnHash
   /** The sender found a hash mismatch and asks the authority to resynchronise. */
   | { kind: 'resyncRequest'; side: Side; epoch: number; turn: number }
-  /** The authority's ground truth for resync `epoch`: both peers rebuild the battle from `log` up
-   * to `tick` and continue at `turn`, with every sealed bundle for turns >= `turn`. */
+  /** The authority's side of resync `epoch`: play resumes at `turn`, and `bundles` lists every
+   * non-empty bundle it sealed (up to `sealedTo`; a turn not listed is empty). It speaks only for
+   * the authority's own side: the follower rebuilds its side from its own record. */
   | {
-    kind: 'resync'; side: Side; epoch: number; turn: number; tick: number; log: Command[];
-    bundles: Record<Side, [number, CommandBody[]][]>;
+    kind: 'resync'; side: Side; epoch: number; turn: number; sealedTo: number;
+    bundles: [number, CommandBody[]][];
   }
   /** The sender finished rebuilding for `epoch`; `hash` is its state hash after the rebuild. */
   | { kind: 'resynced'; side: Side; epoch: number; hash: number }

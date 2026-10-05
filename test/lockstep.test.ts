@@ -9,7 +9,7 @@ import type { NetMessage, Transport } from '@/net/transport';
 import { Rng } from '@/shared/rng';
 import { DEFAULT_FORCES } from '@/data/operation';
 import type { BattleConfig, Order, Side } from '@/shared/types';
-import type { Command } from '@/sim/commands';
+import type { CommandBody } from '@/sim/commands';
 
 /** Multiplayer M1 (plan §7): two lockstep sessions over an in-memory transport. */
 
@@ -176,7 +176,7 @@ describe('desync recovery (047)', () => {
       expect(s.stats.resyncs).toBe(resyncs);
       const r = s.reports[resyncs - 1];
       expect(r.recovered).toBe(true);
-      expect(r.authorityLog?.length).toBeGreaterThan(0);
+      expect(r.resumeTurn).not.toBeNull();
       expect(r.localLog.length).toBeGreaterThan(0);
     }
     // both resumed at the authority's turn and tick, and agree on everything since
@@ -333,114 +333,67 @@ describe('desync recovery (047)', () => {
     expectRecovered(p);
   }, 300_000);
 
-  it('a resync payload that forges commands in our name is refused, not replayed', () => {
-    let forged = 0;
-    let victimTeam = -1;
+  /** A Soviet ammo nudge at `atTick`, to set a resync off. */
+  function nudgeSoviet(p: Pair, atTick: number): (p: Pair) => void {
+    let done = false;
+    return () => {
+      const s = p.peers.soviet;
+      if (!done && s.battle.state.phase === 'running' && tick(s) >= atTick) {
+        s.battle.state.soldiers.values().next().value!.ammo += 1;
+        done = true;
+      }
+    };
+  }
+
+  it('a hostile host cannot order our teams through its resync bundles', () => {
+    let victim: { id: number; target: { x: number; y: number } } | null = null;
     const p = pair({ seed: 61 }, undefined, {
       german: (t) => tamper(t, (m) => {
-        if (m.kind !== 'resync') return m;
-        // a hostile host slips in an order for a Soviet team, and a Soviet flee
-        const sov = m.log.find((c) => c.side === 'soviet' && c.type === 'order') as Extract<Command, { type: 'order' }> | undefined;
-        if (!sov) return m;
-        victimTeam = sov.teamId;
-        forged++;
-        const tick = m.log[m.log.length - 1].tick;
-        return {
-          ...m,
-          log: [...m.log,
-            { ...sov, order: { ...sov.order, target: { x: 1, y: 1 } }, tick, seq: 1e6 },
-            { type: 'flee', side: 'soviet', tick, seq: 1e6 + 1 }],
-        };
+        if (m.kind !== 'resync' || victim) return m;
+        // a bundle of its own that orders a Soviet team (and a German-side flee would only lose it the battle)
+        const team = [...p.peers.soviet.battle.state.teams.values()].find((x) => x.side === 'soviet')!;
+        victim = { id: team.id, target: { x: 1.5, y: 1.5 } };
+        const forged = { type: 'order', teamId: team.id, order: { type: 'move', target: victim.target, issuedAt: 0 } } as CommandBody;
+        return { ...m, bundles: [...m.bundles, [Math.max(0, m.turn - 5), [forged]]] };
       }),
     });
-    let corrupted = false;
-    drive(p, () => p.peers.soviet.status === 'failed' && p.peers.german.status === 'failed', 10 * 60_000, () => {
-      const s = p.peers.soviet;
-      if (!corrupted && s.battle.state.phase === 'running' && tick(s) >= 300) {
-        s.battle.state.soldiers.values().next().value!.ammo += 1;
-        corrupted = true;
-      }
-    });
-    expect(forged).toBeGreaterThan(0);
-    const sov = p.peers.soviet;
-    expect(sov.status).toBe('failed');
-    expect(sov.desync!.reason).toMatch(/did not send there/);
-    // nothing of the forged history reached the Soviet battle
-    expect(sov.battle.state.phase).not.toBe('ended');
-    expect(sov.battle.state.teams.get(victimTeam)!.order?.target).not.toEqual({ x: 1, y: 1 });
-    expect(p.peers.german.status).toBe('failed');
+    recoverAndPlay(p, 1, 200, nudgeSoviet(p, 300));
+    expect(victim).not.toBeNull();
+    // the battle refused the order (wrong side's team), so both rebuilt the same history
+    for (const s of [p.peers.german, p.peers.soviet]) {
+      expect(s.battle.state.teams.get(victim!.id)!.order?.target).not.toEqual(victim!.target);
+    }
+    expectRecovered(p);
   }, 300_000);
 
-  it('a resync payload that re-times one of our real commands is refused', () => {
-    let moved = 0;
-    const p = pair({ seed: 63 }, undefined, {
-      german: (t) => tamper(t, (m) => {
-        if (m.kind !== 'resync') return m;
-        // a genuine Soviet order, applied a few seconds early
-        const log = m.log.map((c) => {
-          if (moved === 0 && c.side === 'soviet' && c.type === 'order' && c.tick > 50) { moved++; return { ...c, tick: c.tick - 30 }; }
-          return c;
-        });
-        return { ...m, log };
-      }),
-    });
-    let corrupted = false;
-    drive(p, () => p.peers.soviet.status === 'failed' && p.peers.german.status === 'failed', 10 * 60_000, () => {
-      const s = p.peers.soviet;
-      if (!corrupted && s.battle.state.phase === 'running' && tick(s) >= 400) {
-        s.battle.state.soldiers.values().next().value!.ammo += 1;
-        corrupted = true;
-      }
-    });
-    expect(moved).toBe(1);
-    expect(p.peers.soviet.desync!.reason).toMatch(/moves our order command/);
-  }, 300_000);
-
-  it('a resync payload that quietly leaves out one of our acknowledged commands is refused', () => {
-    let removed = 0;
+  it('our own commands always come from our own record, whatever the host sends', () => {
     const p = pair({ seed: 64 }, undefined, {
-      german: (t) => tamper(t, (m) => {
-        if (m.kind !== 'resync') return m;
-        const k = m.log.findIndex((c) => c.side === 'soviet' && c.type === 'order');
-        if (k < 0) return m;
-        removed++;
-        return { ...m, log: m.log.filter((_, i) => i !== k) };
-      }),
+      // the host's payload drops all of its bundles: that only rewrites its own side's history
+      german: (t) => tamper(t, (m) => (m.kind === 'resync' ? { ...m, bundles: [] } : m)),
     });
-    let corrupted = false;
-    drive(p, () => p.peers.soviet.status === 'failed' && p.peers.german.status === 'failed', 10 * 60_000, () => {
-      const s = p.peers.soviet;
-      if (!corrupted && s.battle.state.phase === 'running' && tick(s) >= 400) {
-        s.battle.state.soldiers.values().next().value!.ammo += 1;
-        corrupted = true;
-      }
+    const sovietCmds = (s: LockstepSession) => s.battle.commandLog().filter((c) => c.side === 'soviet').map(({ seq: _q, tick: _t, ...c }) => JSON.stringify(c));
+    const nudge = nudgeSoviet(p, 300);
+    let before: string[] | null = null;
+    // (the forged payload no longer matches the host's real history, so this ends as 'failed':
+    // what matters is what the Soviet machine rebuilt)
+    drive(p, () => p.peers.soviet.status === 'failed', 10 * 60_000, (pp) => {
+      nudge(pp);
+      if (pp.peers.soviet.status === 'resyncing' && !before) before = sovietCmds(pp.peers.soviet);
     });
-    expect(removed).toBeGreaterThan(0);
-    expect(p.peers.soviet.desync!.reason).toMatch(/did not send there|leaves out/);
+    expect(p.peers.soviet.reports[0].attempts).toBeGreaterThan(0);
+    // every Soviet command applied before the resync is in the rebuilt battle, in order (on the
+    // same turns; their ticks may move, since the payload rewrote the host's side of history)
+    expect(before!.length).toBeGreaterThan(0);
+    expect(sovietCmds(p.peers.soviet).slice(0, before!.length)).toEqual(before);
   }, 300_000);
 
-  it('a resync payload that drops our latest commands from a running battle is refused after the rebuild', () => {
-    let cut = 0;
-    const p = pair({ seed: 65 }, undefined, {
-      german: (t) => tamper(t, (m) => {
-        if (m.kind !== 'resync') return m;
-        let k = -1;
-        m.log.forEach((c, i) => { if (c.side === 'soviet') k = i; });
-        if (k < 0) return m;
-        cut++;
-        return { ...m, log: m.log.filter((_, i) => i !== k) };
-      }),
+  it('an impossible resume turn is refused cleanly', () => {
+    const p = pair({ seed: 66 }, undefined, {
+      german: (t) => tamper(t, (m) => (m.kind === 'resync' ? { ...m, turn: m.turn + 5000, sealedTo: m.turn + 5000 } : m)),
     });
-    let corrupted = false;
-    drive(p, () => p.peers.soviet.status === 'failed' && p.peers.german.status === 'failed', 10 * 60_000, () => {
-      const s = p.peers.soviet;
-      if (!corrupted && s.battle.state.phase === 'running' && tick(s) >= 400) {
-        s.battle.state.soldiers.values().next().value!.ammo += 1;
-        corrupted = true;
-      }
-    });
-    expect(cut).toBeGreaterThan(0);
-    expect(p.peers.soviet.desync!.reason).toMatch(/leaves out/);
+    drive(p, () => p.peers.soviet.status === 'failed' && p.peers.german.status === 'failed', 10 * 60_000, nudgeSoviet(p, 300));
+    expect(p.peers.soviet.desync!.reason).toMatch(/impossible resync/);
+    expect(p.peers.german.status).toBe('failed');
   }, 300_000);
 
   it('a peer flooding resync requests cannot keep the host rebuilding', () => {

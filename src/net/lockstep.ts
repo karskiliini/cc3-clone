@@ -17,18 +17,21 @@
 // repeats its latest hash on every bundle, for lossy links). A mismatch never freezes the game for
 // good — it starts a resync:
 //   1. play stops on both peers (no command is lost: bundles stay queued);
-//   2. the authority (the host, German by default) sends its command log, its battle tick and
-//      every sealed bundle from its current turn on;
-//   3. BOTH peers rebuild the battle from the config and that log, fast-forwarding a slice of
-//      ticks per update() so the page stays responsive, and swap the rebuilt battle in
-//      (`onBattleReplaced`). A state corrupted on either machine, or a command one of them
-//      lost or misordered, is gone: both now hold the authority's history;
-//   4. each sends the hash of its rebuilt state; equal hashes resume play at the authority's turn.
-//      Unequal hashes (real nondeterminism) retry with a new epoch; after `maxResyncAttempts`
-//      failures in a row the session reports `failed` — it never throws.
-// Every resync leaves a DesyncReport (turns, ticks, hashes, both command logs) in `reports` for
-// offline reproduction with tools/replay.ts. The session is headless: no DOM, no timers — the
-// owner calls update(nowMs) from its frame loop (or a test's virtual clock).
+//   2. the authority (the host, German by default) names the turn R play resumes at (its own
+//      current turn) and sends its own bundles — its side's commands, turn by turn;
+//   3. BOTH peers rebuild the battle from the config, turn by turn up to R, exactly as lockstep
+//      ran it: our own commands from our own record of every bundle we sealed, the authority's
+//      from its payload. A slice of turns runs per update() so the page stays responsive, then
+//      the rebuilt battle is swapped in (`onBattleReplaced`). A state corrupted on either
+//      machine, or an authority command one of them lost or got out of order, is gone;
+//   4. each sends the hash of its rebuilt state; equal hashes resume play at R. Unequal hashes
+//      (real nondeterminism) retry with a new epoch; after `maxResyncAttempts` failures in a row
+//      the session reports `failed` — it never throws.
+// Trust: nothing in a resync is taken on the peer's word except its own side's commands, which
+// the battle only applies to that side's teams. R is bounded by what we sealed (the authority
+// cannot have run a turn without our bundle for it); ticks follow from replaying the turns.
+// Every resync leaves a DesyncReport in `reports`. The session is headless: no DOM, no timers —
+// the owner calls update(nowMs) from its frame loop (or a test's virtual clock).
 // ============================================================================
 import { Battle } from '@/sim/battle';
 import type { Command, CommandBody } from '@/sim/commands';
@@ -40,6 +43,8 @@ const SIDES: readonly Side[] = ['german', 'soviet'];
 /** Turns after a resync before the authority honours another resync request from the peer (10 s
  * at 1x). A real mismatch is also seen by the authority's own hash check, which is not limited. */
 const REQUEST_COOLDOWN_TURNS = 100;
+/** How far past the resume turn a resync payload may pre-commit the authority's bundles. */
+const MAX_PAYLOAD_LOOKAHEAD = 1000;
 
 export interface LockstepOptions {
   battle: Battle;
@@ -54,8 +59,8 @@ export interface LockstepOptions {
   resendMs?: number;
   /** Whether this peer is the resync authority (default: the German side, i.e. the host). */
   authority?: boolean;
-  /** Ticks a resync rebuild runs per update() call (keeps a browser frame short). */
-  rebuildTicksPerUpdate?: number;
+  /** Turns a resync rebuild runs per update() call (keeps a browser frame short). */
+  rebuildTurnsPerUpdate?: number;
   /** Failed resyncs in a row before the session gives up (status 'failed'). */
   maxResyncAttempts?: number;
   /** Told when a resync swaps in a rebuilt battle (the UI must draw the new one). */
@@ -72,14 +77,14 @@ export interface DesyncReport {
   remoteHash: number;
   /** This peer's command log when the mismatch was found. */
   localLog: Command[];
-  /** The authority's log the battle was rebuilt from (null until it arrives). */
-  authorityLog: Command[] | null;
-  /** Where play resumed (the authority's turn and tick), once recovered. */
+  /** The turn the authority resumed play at (null until its resync payload arrives). */
+  resumeTurn: number | null;
+  /** Where play resumed (turn and tick), once recovered. */
   resumedAt: { turn: number; tick: number } | null;
   /** Rebuild attempts this mismatch took (1 = the first rebuild matched). */
   attempts: number;
   recovered: boolean;
-  /** Why recovery stopped, when it did not recover (e.g. a payload that forged our commands). */
+  /** Why recovery stopped, when it did not recover (e.g. an impossible resync payload). */
   reason?: string;
 }
 
@@ -89,23 +94,24 @@ export interface LockstepStats {
   totalStallMs: number;
   stalls: number;
   bundlesResent: number;
-  /** Resyncs completed, and ticks fast-forwarded by them in all. */
+  /** Resyncs completed, and turns replayed by them in all. */
   resyncs: number;
-  rebuiltTicks: number;
+  rebuiltTurns: number;
 }
 
 export type LockstepStatus = 'playing' | 'resyncing' | 'failed';
 
+type ResyncPayload = Extract<NetMessage, { kind: 'resync' }>;
+
 interface Rebuild {
   epoch: number;
+  /** Turns to replay (play resumes at this turn). */
   turn: number;
-  tick: number;
-  log: Command[];
+  /** The authority's commands by turn, for the turns being replayed. */
+  authorityTurns: Map<number, CommandBody[]>;
   battle: Battle;
-  done: boolean;
-  /** Set when the log ends before our last commands: only a battle that had already ended
-   * (and so dropped them itself) by this tick may do that. */
-  mustHaveEndedBy: number | null;
+  /** The next turn to replay. */
+  next: number;
 }
 
 export class LockstepSession {
@@ -117,18 +123,18 @@ export class LockstepSession {
   /** Turns run so far (turn N is the next to run). */
   turn = 0;
   /** [turn, hash] after every hash exchange: the chain both peers must agree on. A resync
-   * rewrites history, so entries from before it are dropped from the turn it resumed at. */
+   * rewrites history, so entries from the turn it resumed at on are replaced. */
   readonly hashChain: [number, number][] = [];
   status: LockstepStatus = 'playing';
   /** Every mismatch so far, oldest first (recovered or not). */
   readonly reports: DesyncReport[] = [];
-  readonly stats: LockstepStats = { maxStallMs: 0, totalStallMs: 0, stalls: 0, bundlesResent: 0, resyncs: 0, rebuiltTicks: 0 };
+  readonly stats: LockstepStats = { maxStallMs: 0, totalStallMs: 0, stalls: 0, bundlesResent: 0, resyncs: 0, rebuiltTurns: 0 };
   /** Resync epoch: 0 until the first resync; hashes of an older epoch are ignored. */
   epoch = 0;
 
   private transport: Transport;
   private resendMs: number;
-  private rebuildTicksPerUpdate: number;
+  private rebuildTurnsPerUpdate: number;
   private maxResyncAttempts: number;
   private onBattleReplaced?: (battle: Battle) => void;
   private peer: Side;
@@ -136,15 +142,12 @@ export class LockstepSession {
   private config: BattleConfig;
   /** Commands given since the last bundle was sealed. */
   private outgoing: CommandBody[] = [];
-  /** Every command we ever sealed, by turn and in issue order: our own record of our side's
-   * history, which a resync payload from the authority must not contradict (trust boundary). */
-  private sent: { turn: number; key: string; body: CommandBody }[] = [];
-  /** The battle tick each turn we ran submitted its commands at: our sent commands are pinned to
-   * it, so a resync log cannot re-time them either. */
-  private turnTicks = new Map<number, number>();
-  private maxTurnTick = 0;
-  /** Sealed bundles per side by turn (ours are kept until the peer acks them and they have run). */
+  /** Live bundles per side by turn: sealed and not yet run (ours also until the peer acks them). */
   private bundles: Record<Side, Map<number, CommandBody[]>> = { german: new Map(), soviet: new Map() };
+  /** History for rebuilds (non-empty bundles only): every bundle we sealed, and every peer
+   * bundle of a turn we ran. Ours is the only source of our side's commands in a rebuild. */
+  private ownHistory = new Map<number, CommandBody[]>();
+  private peerHistory = new Map<number, CommandBody[]>();
   /** The highest turn our bundles were sealed for. */
   private sealedTo: number;
   /** Our sealed bundles not yet acked: turn -> last send time. */
@@ -162,7 +165,7 @@ export class LockstepSession {
   // ---- resync
   private rebuild: Rebuild | null = null;
   /** The authority's payload for the current epoch (kept to answer a peer that missed it). */
-  private payload: Extract<NetMessage, { kind: 'resync' }> | null = null;
+  private payload: ResyncPayload | null = null;
   private rebuiltHash: number | null = null;
   private peerRebuiltHash: number | null = null;
   private lastResyncSend = -Infinity;
@@ -180,7 +183,7 @@ export class LockstepSession {
     this.inputDelay = Math.max(1, opts.inputDelay ?? 3);
     this.hashInterval = Math.max(1, opts.hashInterval ?? 10);
     this.resendMs = opts.resendMs ?? 1000;
-    this.rebuildTicksPerUpdate = Math.max(1, opts.rebuildTicksPerUpdate ?? 600);
+    this.rebuildTurnsPerUpdate = Math.max(1, opts.rebuildTurnsPerUpdate ?? 600);
     this.maxResyncAttempts = Math.max(1, opts.maxResyncAttempts ?? 3);
     this.onBattleReplaced = opts.onBattleReplaced;
     this.config = structuredClone(opts.battle.state.config);
@@ -221,7 +224,7 @@ export class LockstepSession {
     if (this.status !== 'resyncing') return null;
     const r = this.rebuild;
     if (!r) return 0;
-    return r.tick > 0 ? Math.min(1, (r.battle.state.tick ?? 0) / r.tick) : 1;
+    return r.turn > 0 ? Math.min(1, r.next / r.turn) : 1;
   }
 
   /** Milliseconds one turn takes at the shared speed. */
@@ -245,11 +248,9 @@ export class LockstepSession {
   update(nowMs: number): number {
     try {
       return this.updateUnsafe(nowMs);
-    } catch (e) {
+    } catch {
       // a bug in the sim or the session: give up cleanly rather than crash the page
-      this.status = 'failed';
-      this.reports.push(this.report(this.turn, this.battle.state.tick ?? 0, NaN, NaN));
-      void e;
+      if (this.status !== 'failed') this.fail('internal error');
       return 0;
     }
   }
@@ -298,7 +299,7 @@ export class LockstepSession {
     while (this.sealedTo < turn) {
       const t = ++this.sealedTo;
       this.bundles[this.side].set(t, this.outgoing);
-      for (const body of this.outgoing) this.sent.push({ turn: t, key: canonical(body), body: structuredClone(body) });
+      if (this.outgoing.length > 0) this.ownHistory.set(t, structuredClone(this.outgoing));
       this.outgoing = [];
       this.unacked.set(t, nowMs);
       this.sendBundle(t);
@@ -306,7 +307,7 @@ export class LockstepSession {
   }
 
   private sendBundle(turn: number): void {
-    const commands = this.bundles[this.side].get(turn) ?? [];
+    const commands = this.bundles[this.side].get(turn) ?? this.ownHistory.get(turn) ?? [];
     this.transport.send({ kind: 'bundle', side: this.side, turn, commands, ack: this.receivedTo, hash: this.latestHash });
   }
 
@@ -322,9 +323,8 @@ export class LockstepSession {
   private runTurn(): void {
     const battle = this.battle;
     const turn = this.turn;
-    const turnTick = battle.state.tick ?? 0;
-    this.turnTicks.set(turn, turnTick);
-    this.maxTurnTick = Math.max(this.maxTurnTick, turnTick);
+    const peerCmds = this.bundles[this.peer].get(turn) ?? [];
+    if (peerCmds.length > 0) this.peerHistory.set(turn, peerCmds);
     for (const side of SIDES) {
       const tick = battle.state.tick ?? 0;
       for (const body of this.bundles[side].get(turn) ?? []) battle.submit(side, body, tick);
@@ -351,6 +351,7 @@ export class LockstepSession {
     if (!msg || msg.side !== this.peer) return;
     switch (msg.kind) {
       case 'bundle': {
+        if (!Number.isSafeInteger(msg.turn) || msg.turn < 0 || !Array.isArray(msg.commands)) return;
         // a duplicate or a bundle for a turn already run is ignored; the ack still counts.
         // While resyncing, keep everything: the turn play resumes at is not known yet.
         const floor = this.status === 'resyncing' ? 0 : this.turn;
@@ -358,10 +359,12 @@ export class LockstepSession {
           this.bundles[this.peer].set(msg.turn, msg.commands);
         }
         while (this.bundles[this.peer].has(this.receivedTo + 1)) this.receivedTo++;
-        for (const t of [...this.unacked.keys()]) {
-          if (t > msg.ack) continue;
-          this.unacked.delete(t);
-          if (t < this.turn) this.bundles[this.side].delete(t);
+        if (Number.isSafeInteger(msg.ack)) {
+          for (const t of [...this.unacked.keys()]) {
+            if (t > msg.ack) continue;
+            this.unacked.delete(t);
+            if (t < this.turn) this.bundles[this.side].delete(t);
+          }
         }
         if (msg.hash) this.takeRemoteHash(msg.hash);
         return;
@@ -370,17 +373,17 @@ export class LockstepSession {
         this.takeRemoteHash(msg);
         return;
       case 'resyncRequest':
-        // the peer saw a mismatch first: the authority starts the resync it asks for
+        // the peer saw a mismatch first: the authority starts the resync it asks for — only while
+        // playing, and not again right after one; during a resync the peer gets the current
+        // payload again instead of restarting the rebuild
         if (!this.authority) return;
-        // honoured only while playing, and not again right after a resync; during a resync the
-        // peer gets the current payload again instead of restarting the rebuild
-        if (this.status === 'playing' && msg.epoch > this.epoch) {
+        if (this.status === 'playing' && Number.isSafeInteger(msg.epoch) && msg.epoch > this.epoch) {
           if (this.turn - this.resumedTurn < REQUEST_COOLDOWN_TURNS) return;
-          this.startResync(msg.epoch, msg.turn, NaN, NaN);
+          this.startResync(this.epoch + 1, this.turn, NaN, NaN);
         } else if (this.status === 'resyncing' && this.payload) this.transport.send(this.payload);
         return;
       case 'resync':
-        if (this.authority) return;
+        if (this.authority || !Number.isSafeInteger(msg.epoch)) return;
         if (msg.epoch > this.epoch || (msg.epoch === this.epoch && this.status === 'resyncing' && !this.rebuild)) this.adoptPayload(msg);
         // a repeat of a resync we already finished: the authority missed our answer
         else if (msg.epoch === this.epoch && this.rebuiltHash !== null) {
@@ -389,13 +392,10 @@ export class LockstepSession {
         return;
       case 'resyncFailed':
         // the peer stopped: no more bundles will come, whatever state we are in
-        if (this.status !== 'failed') {
-          this.status = 'failed';
-          this.lastResyncSend = -Infinity;
-        }
+        if (this.status !== 'failed') this.fail('the other player gave up resynchronising');
         return;
       case 'resynced':
-        if (msg.epoch !== this.epoch) return;
+        if (msg.epoch !== this.epoch || !Number.isSafeInteger(msg.hash)) return;
         this.peerRebuiltHash = msg.hash;
         if (this.status === 'playing' && this.rebuiltHash !== null) {
           // we resumed already; the peer is still waiting, so it missed our answer
@@ -409,7 +409,7 @@ export class LockstepSession {
 
   private takeRemoteHash(h: TurnHash): void {
     if (h.epoch !== this.epoch || this.status !== 'playing') return;
-    if (this.remoteHashes.has(h.turn)) return;
+    if (!Number.isSafeInteger(h.turn) || this.remoteHashes.has(h.turn)) return;
     this.remoteHashes.set(h.turn, h.hash);
     this.compare(h.turn);
   }
@@ -429,12 +429,22 @@ export class LockstepSession {
     return {
       epoch: this.epoch, turn, tick, localHash, remoteHash,
       localLog: structuredClone([...this.battle.commandLog()]),
-      authorityLog: null, resumedAt: null, attempts: 0, recovered: false,
+      resumeTurn: null, resumedAt: null, attempts: 0, recovered: false,
     };
   }
 
-  /** Stops play for resync `epoch`. The authority freezes its history and sends it; a follower
-   * asks for it (and keeps asking until it arrives). */
+  /** Ends the session cleanly, telling the peer. */
+  private fail(why: string): void {
+    const report = this.reports[this.reports.length - 1];
+    if (report && !report.recovered) report.reason ??= why;
+    else this.reports.push({ ...this.report(this.turn, this.battle.state.tick ?? 0, NaN, NaN), reason: why });
+    this.status = 'failed';
+    this.rebuild = null;
+    this.lastResyncSend = -Infinity;
+  }
+
+  /** Stops play for resync `epoch`. The authority names its current turn as the resume turn and
+   * sends its own bundles; a follower asks for that (and keeps asking until it arrives). */
   private startResync(epoch: number, turn: number, localHash: number, remoteHash: number, tick = this.battle.state.tick ?? 0): void {
     const continuing = this.status === 'resyncing';
     this.status = 'resyncing';
@@ -447,96 +457,49 @@ export class LockstepSession {
     this.lastResyncSend = -Infinity;
     if (!continuing || !this.desync) this.reports.push(this.report(turn, tick, localHash, remoteHash));
     if (!this.authority) return; // stepResync sends the request
-    const bundles: Record<Side, [number, CommandBody[]][]> = { german: [], soviet: [] };
-    for (const s of SIDES) {
-      for (const [t, cmds] of this.bundles[s]) if (t >= this.turn) bundles[s].push([t, cmds]);
-    }
-    this.payload = {
-      kind: 'resync', side: this.side, epoch, turn: this.turn, tick: this.battle.state.tick ?? 0,
-      log: structuredClone([...this.battle.commandLog()]), bundles,
-    };
-    this.adoptPayload(this.payload);
+    const bundles: [number, CommandBody[]][] = [];
+    for (const [t, cmds] of this.ownHistory) bundles.push([t, cmds]);
+    this.payload = { kind: 'resync', side: this.side, epoch, turn: this.turn, sealedTo: this.sealedTo, bundles };
+    this.beginRebuild(this.turn, this.peerHistory);
   }
 
-  /** Begins rebuilding the battle from the authority's history for its epoch. */
-  private adoptPayload(p: Extract<NetMessage, { kind: 'resync' }>): void {
+  /** A follower checks the authority's payload and starts its own rebuild from it. */
+  private adoptPayload(p: ResyncPayload): void {
     if (this.status !== 'resyncing') {
       // the authority saw the mismatch first
       this.status = 'resyncing';
       this.stallSince = null;
       this.reports.push(this.report(this.turn, this.battle.state.tick ?? 0, NaN, NaN));
     }
-    // Trust boundary: the authority may decide the order of history and drop a command it never
-    // got, but it may not speak for us. Our side's commands in its log must be ones we sent, in
-    // the order we sent them; anything else (a forged order for our teams, a flee or truce in our
-    // name) ends the session instead of being replayed.
-    if (!this.authority) {
-      const why = this.payloadProblem(p);
-      if (why) {
-        this.reports[this.reports.length - 1].authorityLog = Array.isArray(p.log) ? p.log : null;
-        this.refuse(why);
-        return;
-      }
-    }
     this.epoch = p.epoch;
     this.rebuiltHash = null;
     this.peerRebuiltHash = null;
+    // The resume turn is the one thing the authority decides. It cannot have run a turn without
+    // our bundle for it, so it cannot be past what we sealed; anything else is refused.
+    const ok = Number.isSafeInteger(p.turn) && p.turn >= 0 && p.turn <= this.sealedTo + 1
+      && Number.isSafeInteger(p.sealedTo) && p.sealedTo >= p.turn - 1 && p.sealedTo <= p.turn + MAX_PAYLOAD_LOOKAHEAD
+      && Array.isArray(p.bundles)
+      && p.bundles.every((b) => Array.isArray(b) && Number.isSafeInteger(b[0]) && b[0] >= 0 && b[0] <= p.sealedTo && Array.isArray(b[1]));
+    if (!ok) {
+      this.fail('the authority sent an impossible resync');
+      return;
+    }
+    // its own commands, by turn; a turn it does not list is an empty bundle
+    const authorityTurns = new Map<number, CommandBody[]>();
+    for (const [t, cmds] of p.bundles) authorityTurns.set(t, cmds);
+    // its live bundles from the resume turn on are what it says they are (they are its commands)
+    for (let t = p.turn; t <= p.sealedTo; t++) this.bundles[this.peer].set(t, authorityTurns.get(t) ?? []);
+    this.beginRebuild(p.turn, authorityTurns);
+  }
+
+  private beginRebuild(turn: number, peerTurns: Map<number, CommandBody[]>): void {
     const report = this.reports[this.reports.length - 1];
-    report.authorityLog = p.log;
+    report.resumeTurn = turn;
     report.attempts++;
-    const battle = new Battle(structuredClone(this.config));
-    battle.loadCommands(p.log);
-    this.rebuild = { epoch: p.epoch, turn: p.turn, tick: p.tick, log: p.log, battle, done: false, mustHaveEndedBy: this.tailEndBy };
-    // the authority's bundles from the resume turn on; our own come from our record, never from it
-    for (const [t, cmds] of p.bundles[this.peer]) if (!this.bundles[this.peer].has(t)) this.bundles[this.peer].set(t, cmds);
-    if (!this.authority) {
-      for (let t = p.turn; t <= this.sealedTo; t++) {
-        if (!this.bundles[this.side].has(t)) this.bundles[this.side].set(t, this.sent.filter((e) => e.turn === t).map((e) => structuredClone(e.body)));
-      }
-    }
+    this.rebuild = { epoch: this.epoch, turn, authorityTurns: peerTurns, battle: new Battle(structuredClone(this.config)), next: 0 };
   }
 
-  /** Set by payloadProblem: see Rebuild.mustHaveEndedBy. */
-  private tailEndBy: number | null = null;
-
-  /** Why a resync payload cannot be trusted, or null. The authority ran every turn before its
-   * resume turn, which it can only do holding our bundle for it, so all our commands of those
-   * turns must be in its log: the same commands, in the order we sent them, each at the tick its
-   * turn ran at here (for a turn we never ran, no earlier than any we ran). The one exception is
-   * a tail the battle itself dropped because it had already ended (checked after the rebuild). */
-  private payloadProblem(p: Extract<NetMessage, { kind: 'resync' }>): string | null {
-    this.tailEndBy = null;
-    if (!Array.isArray(p.log) || !p.bundles || !Array.isArray(p.bundles[this.peer])) return 'malformed resync payload';
-    if (!Number.isInteger(p.turn) || !Number.isInteger(p.tick) || p.turn < 0 || p.tick < 0) return 'malformed resync payload';
-    const owed = this.sent.filter((e) => e.turn < p.turn);
-    let i = 0;
-    for (const c of p.log) {
-      if (!c || (c.side !== 'german' && c.side !== 'soviet') || !Number.isInteger(c.tick)) return 'malformed command in the authority log';
-      if (c.side !== this.side) continue;
-      const { side: _s, tick: _t, seq: _q, ...body } = c;
-      if (i >= owed.length || owed[i].key !== canonical(body)) {
-        return `the authority log holds a ${c.type} command in our name that we did not send there`;
-      }
-      const ran = this.turnTicks.get(owed[i].turn);
-      if (ran !== undefined ? c.tick !== ran : c.tick < this.maxTurnTick) {
-        return `the authority log moves our ${c.type} command to tick ${c.tick}`;
-      }
-      i++;
-    }
-    if (i < owed.length) this.tailEndBy = this.turnTicks.get(owed[i].turn) ?? Math.max(this.maxTurnTick, p.tick);
-    return null;
-  }
-
-  /** Ends the session over a resync payload we cannot trust. */
-  private refuse(why: string): void {
-    const report = this.reports[this.reports.length - 1];
-    if (report) report.reason = why;
-    this.status = 'failed';
-    this.rebuild = null;
-    this.lastResyncSend = -Infinity;
-  }
-
-  /** One update's worth of resync work: (re)send what the peer may be missing, rebuild a slice. */
+  /** One update's worth of resync work: (re)send what the peer may be missing, replay a slice. */
   private stepResync(nowMs: number): void {
     const r = this.rebuild;
     if (nowMs - this.lastResyncSend >= this.resendMs) {
@@ -545,41 +508,41 @@ export class LockstepSession {
       if (this.authority && this.payload && this.peerRebuiltHash === null) this.transport.send(this.payload);
       if (this.rebuiltHash !== null) this.transport.send({ kind: 'resynced', side: this.side, epoch: this.epoch, hash: this.rebuiltHash });
     }
-    if (!r || r.done) return;
+    if (!r || r.next > r.turn) return;
+    // the turns exactly as lockstep ran them: both bundles submitted at the tick, then one tick
     const battle = r.battle;
-    const state = battle.state;
-    let stuck = false;
-    for (let n = 0; n < this.rebuildTicksPerUpdate; n++) {
-      if ((state.tick ?? 0) >= r.tick || state.phase === 'ended') break;
-      const before = state.tick ?? 0, waiting = battle.pendingCount();
-      battle.step(SIM_DT);
+    for (let n = 0; n < this.rebuildTurnsPerUpdate && r.next < r.turn && battle.state.phase !== 'ended'; n++, r.next++) {
+      const t = r.next;
+      for (const side of SIDES) {
+        const cmds = side === this.side ? this.ownHistory.get(t) : r.authorityTurns.get(t);
+        const tick = battle.state.tick ?? 0;
+        for (const body of cmds ?? []) battle.submit(side, structuredClone(body), tick);
+      }
+      battle.advanceTick();
       battle.drainEvents();
-      this.stats.rebuiltTicks += (state.tick ?? 0) - before;
-      // deploy or paused with nothing applied: no command left that could move it on
-      if ((state.tick ?? 0) === before && state.phase !== 'running' && battle.pendingCount() === waiting) { stuck = true; break; }
+      this.stats.rebuiltTurns++;
     }
-    if ((state.tick ?? 0) < r.tick && state.phase !== 'ended' && !stuck) return;
-    // the commands the authority applied after its last tick (a pause, a flee) land now
-    battle.flushDue();
-    battle.drainEvents();
-    r.done = true;
-    if (r.mustHaveEndedBy !== null && !(state.phase === 'ended' && (state.tick ?? 0) <= r.mustHaveEndedBy)) {
-      this.refuse('the authority log leaves out commands we sent before its resume turn');
-      return;
-    }
+    if (r.next < r.turn && battle.state.phase !== 'ended') return;
+    r.next = r.turn + 1;
     this.adoptRebuilt(r, nowMs);
   }
 
-  /** Swaps the rebuilt battle in at the authority's turn and reports its hash. */
+  /** Swaps the rebuilt battle in at the resume turn and reports its hash. */
   private adoptRebuilt(r: Rebuild, nowMs: number): void {
     this.battle = r.battle;
     this.turn = r.turn;
-    // history before the resume turn is the authority's now
+    // the replayed peer history is now the one both machines share
+    if (!this.authority) {
+      for (const t of [...this.peerHistory.keys()]) if (t < r.turn) this.peerHistory.delete(t);
+      for (const [t, cmds] of r.authorityTurns) if (t < r.turn && cmds.length > 0) this.peerHistory.set(t, cmds);
+    }
     for (let i = this.hashChain.length - 1; i >= 0 && this.hashChain[i][0] >= r.turn; i--) this.hashChain.pop();
     for (const s of SIDES) for (const t of [...this.bundles[s].keys()]) if (t < r.turn && !(s === this.side && this.unacked.has(t))) this.bundles[s].delete(t);
+    // our own live bundles from the resume turn on come from our record
+    for (let t = r.turn; t <= this.sealedTo; t++) if (!this.bundles[this.side].has(t)) this.bundles[this.side].set(t, this.ownHistory.get(t) ?? []);
+    this.sealedTo = Math.max(this.sealedTo, r.turn - 1);
     this.receivedTo = r.turn - 1;
     while (this.bundles[this.peer].has(this.receivedTo + 1)) this.receivedTo++;
-    this.sealedTo = Math.max(this.sealedTo, r.turn - 1);
     this.localHashes.clear();
     this.remoteHashes.clear();
     this.rebuiltHash = hashState(r.battle);
@@ -611,8 +574,7 @@ export class LockstepSession {
     // the same history gave different states: rebuild again under a new epoch, or give up
     this.failedAttempts++;
     if (this.failedAttempts >= this.maxResyncAttempts) {
-      this.status = 'failed';
-      this.lastResyncSend = -Infinity;
+      this.fail('the rebuilt states kept disagreeing');
       return;
     }
     if (this.authority) this.startResync(this.epoch + 1, this.turn, this.rebuiltHash, this.peerRebuiltHash);
@@ -624,12 +586,4 @@ export class LockstepSession {
       this.lastResyncSend = -Infinity;
     }
   }
-}
-
-/** JSON with object keys sorted, so equal commands compare equal however they were built. */
-function canonical(v: unknown): string {
-  if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? 'undefined';
-  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
-  const o = v as Record<string, unknown>;
-  return `{${Object.keys(o).filter((k) => o[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${canonical(o[k])}`).join(',')}}`;
 }
