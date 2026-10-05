@@ -17,6 +17,15 @@ BLOCKER (2026-09-21, re-confirmed 2026-09-25): pushing to github.com fails with 
 
 ## Queued
 
+**046 — Bug: M1 review findings, not yet fixed (found 2026-10-05 04:20, after the night's cutoff).**
+
+Request: fix the open findings of the two M1 reviews before M2 builds on the session.
+- Critical (`src/sim/battle.ts`): the sim still takes side iteration order from `config.playerSide` (the viewer): `aiDeployOrder()`, the AI tick order, `truceOrder()` and therefore subordinate initiative. Two clients viewing different sides would run these in different orders and desync. Use a fixed order (german, soviet) everywhere in the sim. This changes the RNG stream of seeded single-player battles, so re-check the harness and determinism tests.
+- Major (`src/net/lockstep.ts`): the input delay is a fixed 3 turns, so its budget in milliseconds shrinks with speed (300 ms at 1x, 75 ms at 4x). Make D follow the speed, or schedule it in milliseconds.
+- Minor (`src/net/lockstep.ts`): hash and desync messages are never resent or acked on lossy links, and the 'desync' branch stores the peer hash without calling `compare`. The two peers apply different object copies of the same command (local clone vs wire JSON); normalize both through JSON. A battle ending on a turn that is not a multiple of 10 never compares its final hash.
+
+Completion: each finding fixed with a test (two sessions with different viewer sides keep matching hashes; delay budget holds at 4x; final hash compared at the end), full suite and build pass.
+
 **045 — Feature: Deterministic math for the sim (`src/shared/dmath.ts`, plan §2 D5; split out of 043).**
 
 Request: 043's completion says that if the cross-engine check disagrees, the sim moves to a deterministic `dmath`. It disagrees (043 result below): Node 26 (V8 14.6) and Chromium 151 already differ in the last bit of a soldier position at battle construction, so every one of the 5 maps × 2 seeds gives a different hash chain from tick 0. A 200 000-input probe of the `Math` functions shows `sin cos tan atan asin acos atan2 exp log log2 log10 cbrt expm1 log1p sinh cosh tanh` all differ between the two engines (0.5–28 % of inputs), while `sqrt`, `hypot` and `pow` agree. Firefox and WebKit were not measured, since Playwright has only Chromium installed here.
@@ -50,7 +59,7 @@ Completion: plan milestones M1–M5 are met.
 - A reloaded tab rejoins by fast-forwarding the command log.
 - A desync produces a downloadable log that reproduces offline.
 
-The next request receives ID 046.
+The next request receives ID 047.
 
 ## Completed
 
