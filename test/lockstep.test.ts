@@ -364,7 +364,7 @@ describe('desync recovery (047)', () => {
     expect(forged).toBeGreaterThan(0);
     const sov = p.peers.soviet;
     expect(sov.status).toBe('failed');
-    expect(sov.desync!.reason).toMatch(/never sent/);
+    expect(sov.desync!.reason).toMatch(/did not send there/);
     // nothing of the forged history reached the Soviet battle
     expect(sov.battle.state.phase).not.toBe('ended');
     expect(sov.battle.state.teams.get(victimTeam)!.order?.target).not.toEqual({ x: 1, y: 1 });
@@ -394,6 +394,53 @@ describe('desync recovery (047)', () => {
     });
     expect(moved).toBe(1);
     expect(p.peers.soviet.desync!.reason).toMatch(/moves our order command/);
+  }, 300_000);
+
+  it('a resync payload that quietly leaves out one of our acknowledged commands is refused', () => {
+    let removed = 0;
+    const p = pair({ seed: 64 }, undefined, {
+      german: (t) => tamper(t, (m) => {
+        if (m.kind !== 'resync') return m;
+        const k = m.log.findIndex((c) => c.side === 'soviet' && c.type === 'order');
+        if (k < 0) return m;
+        removed++;
+        return { ...m, log: m.log.filter((_, i) => i !== k) };
+      }),
+    });
+    let corrupted = false;
+    drive(p, () => p.peers.soviet.status === 'failed' && p.peers.german.status === 'failed', 10 * 60_000, () => {
+      const s = p.peers.soviet;
+      if (!corrupted && s.battle.state.phase === 'running' && tick(s) >= 400) {
+        s.battle.state.soldiers.values().next().value!.ammo += 1;
+        corrupted = true;
+      }
+    });
+    expect(removed).toBeGreaterThan(0);
+    expect(p.peers.soviet.desync!.reason).toMatch(/did not send there|leaves out/);
+  }, 300_000);
+
+  it('a resync payload that drops our latest commands from a running battle is refused after the rebuild', () => {
+    let cut = 0;
+    const p = pair({ seed: 65 }, undefined, {
+      german: (t) => tamper(t, (m) => {
+        if (m.kind !== 'resync') return m;
+        let k = -1;
+        m.log.forEach((c, i) => { if (c.side === 'soviet') k = i; });
+        if (k < 0) return m;
+        cut++;
+        return { ...m, log: m.log.filter((_, i) => i !== k) };
+      }),
+    });
+    let corrupted = false;
+    drive(p, () => p.peers.soviet.status === 'failed' && p.peers.german.status === 'failed', 10 * 60_000, () => {
+      const s = p.peers.soviet;
+      if (!corrupted && s.battle.state.phase === 'running' && tick(s) >= 400) {
+        s.battle.state.soldiers.values().next().value!.ammo += 1;
+        corrupted = true;
+      }
+    });
+    expect(cut).toBeGreaterThan(0);
+    expect(p.peers.soviet.desync!.reason).toMatch(/leaves out/);
   }, 300_000);
 
   it('a peer flooding resync requests cannot keep the host rebuilding', () => {

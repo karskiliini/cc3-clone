@@ -103,6 +103,9 @@ interface Rebuild {
   log: Command[];
   battle: Battle;
   done: boolean;
+  /** Set when the log ends before our last commands: only a battle that had already ended
+   * (and so dropped them itself) by this tick may do that. */
+  mustHaveEndedBy: number | null;
 }
 
 export class LockstepSession {
@@ -470,12 +473,8 @@ export class LockstepSession {
     if (!this.authority) {
       const why = this.payloadProblem(p);
       if (why) {
-        const report = this.reports[this.reports.length - 1];
-        report.authorityLog = Array.isArray(p.log) ? p.log : null;
-        report.reason = why;
-        this.status = 'failed';
-        this.rebuild = null;
-        this.lastResyncSend = -Infinity;
+        this.reports[this.reports.length - 1].authorityLog = Array.isArray(p.log) ? p.log : null;
+        this.refuse(why);
         return;
       }
     }
@@ -487,7 +486,7 @@ export class LockstepSession {
     report.attempts++;
     const battle = new Battle(structuredClone(this.config));
     battle.loadCommands(p.log);
-    this.rebuild = { epoch: p.epoch, turn: p.turn, tick: p.tick, log: p.log, battle, done: false };
+    this.rebuild = { epoch: p.epoch, turn: p.turn, tick: p.tick, log: p.log, battle, done: false, mustHaveEndedBy: this.tailEndBy };
     // the authority's bundles from the resume turn on; our own come from our record, never from it
     for (const [t, cmds] of p.bundles[this.peer]) if (!this.bundles[this.peer].has(t)) this.bundles[this.peer].set(t, cmds);
     if (!this.authority) {
@@ -497,28 +496,44 @@ export class LockstepSession {
     }
   }
 
-  /** Why a resync payload cannot be trusted, or null. */
+  /** Set by payloadProblem: see Rebuild.mustHaveEndedBy. */
+  private tailEndBy: number | null = null;
+
+  /** Why a resync payload cannot be trusted, or null. The authority ran every turn before its
+   * resume turn, which it can only do holding our bundle for it, so all our commands of those
+   * turns must be in its log: the same commands, in the order we sent them, each at the tick its
+   * turn ran at here (for a turn we never ran, no earlier than any we ran). The one exception is
+   * a tail the battle itself dropped because it had already ended (checked after the rebuild). */
   private payloadProblem(p: Extract<NetMessage, { kind: 'resync' }>): string | null {
+    this.tailEndBy = null;
     if (!Array.isArray(p.log) || !p.bundles || !Array.isArray(p.bundles[this.peer])) return 'malformed resync payload';
     if (!Number.isInteger(p.turn) || !Number.isInteger(p.tick) || p.turn < 0 || p.tick < 0) return 'malformed resync payload';
+    const owed = this.sent.filter((e) => e.turn < p.turn);
     let i = 0;
     for (const c of p.log) {
       if (!c || (c.side !== 'german' && c.side !== 'soviet') || !Number.isInteger(c.tick)) return 'malformed command in the authority log';
       if (c.side !== this.side) continue;
-      // our command: it must come next in what we sent (skipping any the authority never got)
       const { side: _s, tick: _t, seq: _q, ...body } = c;
-      const key = canonical(body);
-      while (i < this.sent.length && this.sent[i].key !== key) i++;
-      if (i === this.sent.length) return `the authority log holds a ${c.type} command in our name that we never sent`;
-      // and at the tick it really ran: the one its turn ran at here, or (for a turn we never ran)
-      // no earlier than anything we ran
-      const ran = this.turnTicks.get(this.sent[i].turn);
+      if (i >= owed.length || owed[i].key !== canonical(body)) {
+        return `the authority log holds a ${c.type} command in our name that we did not send there`;
+      }
+      const ran = this.turnTicks.get(owed[i].turn);
       if (ran !== undefined ? c.tick !== ran : c.tick < this.maxTurnTick) {
         return `the authority log moves our ${c.type} command to tick ${c.tick}`;
       }
       i++;
     }
+    if (i < owed.length) this.tailEndBy = this.turnTicks.get(owed[i].turn) ?? Math.max(this.maxTurnTick, p.tick);
     return null;
+  }
+
+  /** Ends the session over a resync payload we cannot trust. */
+  private refuse(why: string): void {
+    const report = this.reports[this.reports.length - 1];
+    if (report) report.reason = why;
+    this.status = 'failed';
+    this.rebuild = null;
+    this.lastResyncSend = -Infinity;
   }
 
   /** One update's worth of resync work: (re)send what the peer may be missing, rebuild a slice. */
@@ -548,6 +563,10 @@ export class LockstepSession {
     battle.flushDue();
     battle.drainEvents();
     r.done = true;
+    if (r.mustHaveEndedBy !== null && !(state.phase === 'ended' && (state.tick ?? 0) <= r.mustHaveEndedBy)) {
+      this.refuse('the authority log leaves out commands we sent before its resume turn');
+      return;
+    }
     this.adoptRebuilt(r, nowMs);
   }
 
