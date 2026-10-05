@@ -280,6 +280,17 @@ export class Battle {
     }
   }
 
+  /** One lockstep turn (multiplayer plan §3): applies the due commands and, if the battle is
+   * running, runs exactly one SIM_DT tick, ignoring the frame accumulator. Returns whether a tick
+   * ran (no tick runs in deploy, paused or ended). */
+  advanceTick(): boolean {
+    if (this.state.phase !== 'running') this.flushCommands();
+    if (this.state.phase !== 'running') return false;
+    const before = this.state.tick ?? 0;
+    this.subStep(SIM_DT);
+    return (this.state.tick ?? 0) > before;
+  }
+
   private subStep(dt: number): void {
     const state = this.state;
     this.flushCommands();
