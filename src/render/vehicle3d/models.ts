@@ -1,7 +1,7 @@
 // ============================================================================
 // Loads public/models/vehicles.json and the battle's .glb files (three.js
 // GLTFLoader, tools/blender/vehicles_lowpoly.py) into per-node meshes with a
-// Lambert material on the baked texture; the sprite atlases cover the wait.
+// standard material (roughness 0.85, like the sprites' paint) on the baked texture; the sprite atlases cover the wait.
 // ============================================================================
 import { Mesh, MeshLambertMaterial, SRGBColorSpace, type Texture } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -34,6 +34,17 @@ function getManifest(): Promise<Record<string, ManifestEntry> | null> {
   return manifest;
 }
 
+/** Paint and soot are matte: no specular at all (user, 2026-10-07: "still too glossy, way too
+ * glossy"). The baked texture carries the sprites' edge and cavity shading; the lights do the rest. */
+export function nodeMaterial(name: string, map: Texture | null): MeshLambertMaterial {
+  const m = new MeshLambertMaterial({ map });
+  if (/_(ko|blown)$/.test(name)) m.color.setScalar(BURNT_GAIN);
+  return m;
+}
+
+/** Burnt looks bake darker than the sprites show them once matte (0.63x in tools/vehicle3dPreview). */
+export const BURNT_GAIN = 1.6;
+
 async function loadVariant(v: ManifestVariant): Promise<Map<string, Mesh>> {
   const gltf = await new GLTFLoader().loadAsync(`${base()}${v.file}`);
   const out = new Map<string, Mesh>();
@@ -42,7 +53,7 @@ async function loadVariant(v: ManifestVariant): Promise<Map<string, Mesh>> {
     if (!m?.isMesh) throw new Error(`${v.file}: node ${name} missing`);
     const map = (m.material as { map?: Texture | null }).map ?? null;
     if (map) map.colorSpace = SRGBColorSpace;
-    m.material = new MeshLambertMaterial({ map });
+    m.material = nodeMaterial(name, map);
     m.removeFromParent();
     m.position.set(0, 0, 0); m.rotation.set(0, 0, 0); m.scale.set(1, 1, 1);
     out.set(name, m);

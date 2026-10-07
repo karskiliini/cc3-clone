@@ -51,6 +51,12 @@ describe('vehiclePose', () => {
     expect(p.turretPivot).toEqual([24, 0, 42]);
     expect(p.turretYaw).toBeCloseTo(-0.7, 12);
   });
+  it('a blown turret without a landing lies beside the hull like the sprite (no pivot offset)', () => {
+    const p = vehiclePose(look({ turretBlown: true }), true, { x: 0, y: 0.4 });
+    expect(p.turretPivot![0]).toBeCloseTo(20 + 2.2 * 0.9, 9);
+    expect(p.turretPivot![2]).toBeCloseTo(40 - 1.0 * 0.9, 9);
+    expect(p.turretYaw).toBeCloseTo(-2.3, 12);
+  });
   it('a turretless vehicle has no turret pivot', () => {
     expect(vehiclePose(look({ defId: 'stug3g' }), false, null).turretPivot).toBeNull();
   });

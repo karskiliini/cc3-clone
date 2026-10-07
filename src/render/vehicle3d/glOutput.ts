@@ -4,7 +4,8 @@
 // SHADOW_ALPHA (one flat darkness however many hulls overlap), then the
 // vehicles, box-downsampled into the 2D view.
 // ============================================================================
-import { Camera, WebGLRenderer } from 'three';
+import { Camera, PCFShadowMap, WebGLRenderer } from 'three';
+import { TILE_M, TILE_PX } from '@/shared/types';
 import type { VehicleScene } from './vehicleScene';
 import { viewProjection, type ViewCam } from './projection';
 
@@ -24,15 +25,17 @@ export class GlOutput {
     r.setPixelRatio(SUPERSAMPLE);
     r.setSize(w, h, false);
     r.setClearColor(0x000000, 0);
+    r.shadowMap.enabled = true;
+    r.shadowMap.type = PCFShadowMap;
     this.camera.matrixAutoUpdate = false;
     canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); this.lost = true; });
     canvas.addEventListener('webglcontextrestored', () => { this.lost = false; });
   }
 
   /** null when WebGL cannot be created: the vehicles stay sprites. */
-  static create(w: number, h: number, factory: (canvas: HTMLCanvasElement) => WebGLRenderer = defaultFactory): GlOutput | null {
+  static create(w: number, h: number, factory: (canvas: HTMLCanvasElement) => WebGLRenderer = defaultFactory, canvasIn?: HTMLCanvasElement): GlOutput | null {
     try {
-      const canvas = typeof document !== 'undefined' ? document.createElement('canvas') : ({} as HTMLCanvasElement);
+      const canvas = canvasIn ?? (typeof document !== 'undefined' ? document.createElement('canvas') : ({} as HTMLCanvasElement));
       return new GlOutput(factory(canvas), canvas, w, h);
     } catch (err) {
       console.warn('[vehicle3d] WebGL unavailable, vehicles stay sprites', err);
@@ -46,6 +49,8 @@ export class GlOutput {
     if (this.lost) return;
     this.camera.projectionMatrix.fromArray(viewProjection(cam, this.w, this.h));
     this.camera.projectionMatrixInverse.copy(this.camera.projectionMatrix).invert();
+    const ppm = (TILE_PX * cam.zoom) / TILE_M;
+    vs.fitSun(cam.x * TILE_M + this.w / (2 * ppm), cam.y * TILE_M + this.h / (2 * ppm), Math.hypot(this.w, this.h) / (2 * ppm) + 6);
     const smooth = ctx.imageSmoothingEnabled, quality = ctx.imageSmoothingQuality, alpha = ctx.globalAlpha;
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
     if (opts.shadow !== false) {

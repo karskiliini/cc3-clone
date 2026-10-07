@@ -10,10 +10,12 @@ import { modelNodes, vehiclePose, type VehicleLook } from './look';
 import { shadowMatrix, SUN_TO } from './projection';
 
 /** Tuned against the sprites (tools/vehicle3dPreview: mean brightness of the lit hull). */
-export const SUN_INTENSITY = 2.6;
-export const FILL_SKY = 0xcfd8e0, FILL_GROUND = 0x6b6455, FILL_INTENSITY = 1.1;
+export const SUN_INTENSITY = 5.7;
+export const FILL_SKY = 0xcfd8e0, FILL_GROUND = 0x6b6455, FILL_INTENSITY = 2.5;
 
 const SHADOW_MAT = new MeshBasicMaterial({ color: 0x000000 });
+/** self-shadow map: at zoom 1 the view's ~62 m half-diagonal gives ~3 cm per texel */
+const SHADOW_MAP_PX = 4096;
 
 interface Part { group: Group; meshes: Map<string, Mesh>; shadowGroup: Group; shadowMeshes: Map<string, Mesh> }
 interface Instance { model: VehicleModel; hull: Part; turret: Part; used: boolean }
@@ -23,14 +25,32 @@ export class VehicleScene {
   readonly shadowScene = new Scene();
   private readonly shadowRoot = new Group();
   private readonly inst = new Map<number, Instance>();
+  /** casts the self-shadows (turret on deck, open compartments) the sprites have baked in */
+  readonly sun = new DirectionalLight(0xfff5e0, SUN_INTENSITY);
 
   constructor(private readonly models: ModelSource) {
-    const sun = new DirectionalLight(0xfff5e0, SUN_INTENSITY);
-    sun.position.set(SUN_TO[0] * 100, SUN_TO[1] * 100, SUN_TO[2] * 100);
+    const sun = this.sun;
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(SHADOW_MAP_PX, SHADOW_MAP_PX);
+    sun.shadow.bias = -0.0005;
+    sun.shadow.normalBias = 0.02;
+    this.fitSun(0, 0, 50);
     this.scene.add(sun, sun.target, new HemisphereLight(FILL_SKY, FILL_GROUND, FILL_INTENSITY));
     this.shadowRoot.matrixAutoUpdate = false;
     this.shadowRoot.matrix = new Matrix4().fromArray(shadowMatrix());
     this.shadowScene.add(this.shadowRoot);
+  }
+
+  /** Aims the sun's orthographic shadow camera at the view centre (world metres) so it covers a
+   * circle of radiusM: the view's half-diagonal plus margin. */
+  fitSun(centerX: number, centerZ: number, radiusM: number): void {
+    this.sun.target.position.set(centerX, 0, centerZ);
+    this.sun.position.set(centerX + SUN_TO[0] * 100, SUN_TO[1] * 100, centerZ + SUN_TO[2] * 100);
+    const c = this.sun.shadow.camera;
+    c.left = -radiusM; c.right = radiusM; c.top = radiusM; c.bottom = -radiusM;
+    c.near = 1; c.far = 220;
+    c.updateProjectionMatrix();
+    this.sun.target.updateMatrixWorld();
   }
 
   begin(): void { for (const i of this.inst.values()) i.used = false; }
@@ -47,14 +67,14 @@ export class VehicleScene {
     }
     const names = modelNodes(look, new Set(model.nodes.keys()), model.winterNodes !== null);
     const pose = vehiclePose(look, model.hasTurret, model.turretPivotM);
-    this.show(it.hull, model, names.hull, names.winterHull, null);
+    this.show(it.hull, model, names.hull, names.winterHull);
     it.hull.group.position.fromArray(pose.hullPos);
     it.hull.group.rotation.set(0, pose.hullYaw, 0);
     if (names.turret && pose.turretPivot && model.turretPivotM) {
-      this.show(it.turret, model, names.turret, names.winterTurret, model.turretPivotM);
+      this.show(it.turret, model, names.turret, names.winterTurret);
       it.turret.group.position.fromArray(pose.turretPivot);
       it.turret.group.rotation.set(0, pose.turretYaw, 0);
-    } else this.show(it.turret, model, null, false, null);
+    } else this.show(it.turret, model, null, false);
     for (const p of [it.hull, it.turret]) {
       p.shadowGroup.position.copy(p.group.position);
       p.shadowGroup.rotation.copy(p.group.rotation);
@@ -78,18 +98,18 @@ export class VehicleScene {
     return p;
   }
 
-  /** Shows one node (winter variant if asked and present) in the part, hides the rest. pivot: the
-   * node's meshes are in the hull frame, so they sit at -pivot inside the pivot group (three's
-   * (x, z) = Blender (x, -y)). */
-  private show(p: Part, model: VehicleModel, name: string | null, winter: boolean, pivot: { x: number; y: number } | null): void {
+  /** Shows one node (winter variant if asked and present) in the part, hides the rest. Hull nodes
+   * are built about the hull centre and turret nodes about their ring centre, so both sit at the
+   * origin of their group. */
+  private show(p: Part, model: VehicleModel, name: string | null, winter: boolean): void {
     const useWinter = winter && !!model.winterNodes?.has(name ?? '');
     const key = name ? `${useWinter ? 'w:' : ''}${name}` : null;
     if (name && key && !p.meshes.has(key)) {
       const srcMesh = (useWinter ? model.winterNodes!.get(name) : model.nodes.get(name))!;
       const m = srcMesh.clone();
+      m.castShadow = true; m.receiveShadow = true;
       const s = new Mesh(srcMesh.geometry, SHADOW_MAT);
       s.name = m.name;
-      if (pivot) { m.position.set(-pivot.x, 0, pivot.y); s.position.copy(m.position); }
       p.meshes.set(key, m); p.group.add(m);
       p.shadowMeshes.set(key, s); p.shadowGroup.add(s);
     }

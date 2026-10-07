@@ -91,14 +91,16 @@ export function vehiclePose(look: VehicleLook, hasTurret: boolean, turretPivotM:
     pose.turretYaw = -look.turretLanding.dirRad;
     return pose;
   }
+  if (look.turretBlown) {
+    // no landing recorded: beside the hull centre (not the ring), as drawVehicleSprite does
+    const c = Math.cos(look.hullRad), sn = Math.sin(look.hullRad);
+    pose.turretPivot = [e + (2.2 * c + 1.0 * sn) * 0.9, 0, s + (2.2 * sn - 1.0 * c) * 0.9];
+    pose.turretYaw = -(look.turretRad + 2.3);
+    return pose;
+  }
   const [pe, ps] = localToWorldXZ(turretPivotM.x, turretPivotM.y, look.hullRad);
   let te = e + pe, ts = s + ps;
-  if (look.turretBlown) {
-    // no landing recorded: beside the hull, as drawVehicleSprite does
-    const c = Math.cos(look.hullRad), sn = Math.sin(look.hullRad);
-    te += (2.2 * c + 1.0 * sn) * 0.9; ts += (2.2 * sn - 1.0 * c) * 0.9;
-    pose.turretYaw = -(look.turretRad + 2.3);
-  } else if (r > 0) {
+  if (r > 0) {
     te -= Math.sin(look.turretRad) * r * 0.5; ts += Math.cos(look.turretRad) * r * 0.5;
   }
   pose.turretPivot = [te, 0, ts];

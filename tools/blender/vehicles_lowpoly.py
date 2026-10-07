@@ -4,10 +4,10 @@
 
 Every atlas entry of tools/blender/vehicles.py (hull.ok/ko/blown/trackL/trackR, turret.ok/ko/blown)
 is built from the same procedural model, collapse-decimated to its budget, smart-UV unwrapped, and
-baked (Cycles, CPU) selected-to-active from the full-detail model: albedo x ambient occlusion in one
-texture.  One GLB per vehicle (public/models/<id>.glb, whitewashed live looks in <id>_winter.glb),
-nodes named hull_ok ... turret_blown (underscores: three.js strips dots from node names), all in the
-hull-local frame (vehicles.FRAME).  public/models/vehicles.json is the manifest the game reads.
+baked (Cycles, CPU) selected-to-active from the full-detail model into one albedo texture (the paint
+materials already darken cavities with their own AO node, so no separate AO pass).  One GLB per vehicle (public/models/<id>.glb, whitewashed live looks in <id>_winter.glb),
+nodes named hull_ok ... turret_blown (underscores: three.js strips dots from node names); hull nodes
+are built about the hull centre, turret nodes about their turret-ring centre (vehicles.FRAME axes).  public/models/vehicles.json is the manifest the game reads.
 """
 import json
 import math
@@ -24,9 +24,8 @@ import vehicles_common as VC  # noqa: E402
 MODELS = os.path.join(VC.ROOT, "public", "models")
 BUDGET = {"hull": 2400, "turret": 1200}     # triangles per node
 BUDGET_OVERRIDE = {}                        # {"<defId>": {"hull": n}} where identity needs more
-TEX = {"hull": 256, "turret": 256}          # baked texture size (px)
+TEX = {"hull": 512, "turret": 512}          # baked texture size (px): 256 blurred camo and hatches
 TEX_OVERRIDE = {}                           # {"<defId>": {"turret": n}}
-AO_FLOOR = 0.55                             # fully occluded texels keep this much of their albedo
 SAMPLES = 16
 
 
@@ -62,9 +61,9 @@ def tri_count(me):
     return sum(len(p.vertices) - 2 for p in me.polygons)
 
 
-def bake_image(lo, src, name, size, kind):
-    """Bake into a fresh float image on lo.  kind DIFFUSE: colour from src (selected-to-active);
-    AO: lo's own occlusion.  Only the objects taking part are renderable."""
+def bake_image(lo, src, name, size):
+    """Bake the colour of src into a fresh float image on lo (selected-to-active).  Only the two
+    objects taking part are renderable."""
     for o in bpy.data.objects:
         o.hide_render = o not in (lo, src)
     img = bpy.data.images.new(name, size, size, alpha=False, float_buffer=True)
@@ -76,14 +75,9 @@ def bake_image(lo, src, name, size, kind):
     lo.data.materials.clear()
     lo.data.materials.append(mat)
     lo.data.polygons.foreach_set("material_index", [0] * len(lo.data.polygons))
-    if kind == "DIFFUSE":
-        select_only(src, lo)
-        bpy.ops.object.bake(type="DIFFUSE", pass_filter={"COLOR"}, use_selected_to_active=True,
-                            cage_extrusion=0.03, max_ray_distance=0.12, margin=4)
-    else:
-        src.hide_render = True
-        select_only(lo)
-        bpy.ops.object.bake(type="AO", margin=4)
+    select_only(src, lo)
+    bpy.ops.object.bake(type="DIFFUSE", pass_filter={"COLOR"}, use_selected_to_active=True,
+                        cage_extrusion=0.03, max_ray_distance=0.12, margin=4)
     return img
 
 
@@ -92,7 +86,7 @@ def linear_to_srgb(a):
 
 
 def lowpoly(src, name, budget, size):
-    """Decimated, unwrapped copy of src with one baked material (albedo x AO)."""
+    """Decimated, unwrapped copy of src with one baked albedo material."""
     lo = bpy.data.objects.new(name, src.data.copy())
     bpy.context.scene.collection.objects.link(lo)
     n = tri_count(lo.data)
@@ -108,11 +102,9 @@ def lowpoly(src, name, budget, size):
     bpy.ops.mesh.quads_convert_to_tris()
     bpy.ops.uv.smart_project(angle_limit=math.radians(66), island_margin=0.03)
     bpy.ops.object.mode_set(mode="OBJECT")
-    albedo = bake_image(lo, src, name + "_albedo", size, "DIFFUSE")
-    ao = bake_image(lo, src, name + "_ao", size, "AO")
+    albedo = bake_image(lo, src, name + "_albedo", size)
     a = np.array(albedo.pixels[:], dtype=np.float32).reshape(-1, 4)
-    o = np.array(ao.pixels[:], dtype=np.float32).reshape(-1, 4)
-    a[:, :3] = linear_to_srgb(a[:, :3] * (AO_FLOOR + (1 - AO_FLOOR) * o[:, :1]))
+    a[:, :3] = linear_to_srgb(a[:, :3])
     a[:, 3] = 1.0
     final = bpy.data.images.new(name, size, size, alpha=False)       # byte image, sRGB
     final.pixels[:] = np.clip(a, 0, 1).ravel()
