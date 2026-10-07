@@ -854,6 +854,14 @@ function segmentPassesHull(a: Vec2, b: Vec2, c: Vec2, widthM: number): boolean {
   return dx * dx + dy * dy <= hw * hw;
 }
 
+/** Half the width (m) of the silhouette a vehicle shows a shooter at `from`: its width head-on,
+ * its length side-on. */
+function presentedHalfM(v: Vehicle, from: Vec2): number {
+  const def = VEHICLE_DEFS[v.defId];
+  const rel = angleTo(from, v.pos) - v.hullFacing;
+  return (Math.abs(dm.sin(rel)) * (def?.lengthM ?? 6) + Math.abs(dm.cos(rel)) * (def?.widthM ?? 3)) / 2;
+}
+
 /** One round at a vehicle: `p` is the chance to hit it at all. An aimed round lands on its spot
  * with the smaller spot chance; most of the rest still hit the vehicle somewhere; every hit goes
  * through the ONE locational damage model (sim/vehicleDamage.ts). */
@@ -889,7 +897,9 @@ function fireAtVehicle(
   // a clean miss is seen to fly past the hull and strike the ground beyond it (visual only: the
   // physics above traced the line to the hull)
   const missedClean = !intercepted && r >= pAny;
-  const seenAt = missedClean ? missPoint(state, shooterPos, vehicle.pos, state.time) : shotPath.impact;
+  const seenAt = missedClean
+    ? missPoint(state, shooterPos, vehicle.pos, state.time, presentedHalfM(vehicle, shooterPos), atRocket ? 80 : 600)
+    : shotPath.impact;
   if (missedClean) shotPath.points[shotPath.points.length - 1] = { ...seenAt };
   if (wantTracer) traceTracers(state, shotPath, kind, !intercepted && r < pAny);
   // the round is in flight (A1, visual): shells at ~600 m/s, rockets at 80 m/s. Damage is

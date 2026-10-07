@@ -4,7 +4,7 @@
 // so a battle resolves the same with or without these effects. Drawn by render/effects.ts.
 import type { BattleState, Vec2, WeaponDef } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
-import { angleTo, clamp } from '@/shared/math';
+import { angleTo, clamp, dist } from '@/shared/math';
 import { hash2 } from '@/shared/rng';
 import * as dm from '@/shared/dmath';
 
@@ -23,12 +23,41 @@ function along(p: Vec2, dirRad: number, tiles: number, state: BattleState): Vec2
   };
 }
 
-/** Where a round that missed a vehicle strikes the ground: a few metres past it on the line of
- * fire, a little to one side (an over, never a hit on the hull it missed). */
-export function missPoint(state: BattleState, from: Vec2, target: Vec2, t: number): Vec2 {
-  const dir = angleTo(from, target);
-  const over = along(target, dir, (4 + 10 * h(target, t, 1)) / TILE_M, state);
-  return along(over, dir + Math.PI / 2, ((h(target, t, 2) - 0.5) * 7) / TILE_M, state);
+/** Muzzle height, height of the hull top, and the gunner's aim point on it (m). */
+const MUZZLE_M = 2.0;
+const HULL_TOP_M = 2.4;
+const AIM_M = 1.2;
+const G = 9.81;
+
+/** Where a round that missed a vehicle strikes the ground, from its trajectory: it passed the
+ * target's range beside the hull (wide), above it (over) or below its aim, into the ground in
+ * front (short). `halfM` is half the silhouette the target shows the shooter, `speedMs` the
+ * round's speed. A flat, fast round that cleared the hull top keeps flying for hundreds of metres;
+ * only a wide one can land close behind the target. Clipped to the map along the line of fire. */
+export function missPoint(state: BattleState, from: Vec2, target: Vec2, t: number, halfM: number, speedMs: number): Vec2 {
+  const rangeM = Math.max(1, dist(from, target) * TILE_M);
+  const mode = h(target, t, 1), u = h(target, t, 2), side = h(target, t, 3) < 0.5 ? -1 : 1;
+  // the miss at the target's range: height z (m) and sideways offset (m) from the aim line
+  let z: number, sideM: number;
+  if (mode < 0.45) { z = AIM_M + (u - 0.5) * 1.6; sideM = side * (halfM + 0.4 + 3 * u); }
+  else if (mode < 0.8) { z = HULL_TOP_M + 0.3 + 2.5 * u; sideM = (u - 0.5) * halfM; }
+  else { z = -(0.3 + 1.7 * u); sideM = (u - 0.5) * halfM; }
+  // y(x) = MUZZLE + s·x − k·x² through (rangeM, z); it lands where y(x) = 0
+  const k = G / (2 * speedMs * speedMs);
+  const s = (z - MUZZLE_M + k * rangeM * rangeM) / rangeM;
+  const landM = (s + Math.sqrt(s * s + 4 * k * MUZZLE_M)) / (2 * k);
+  const dir = angleTo(from, target) + dm.atan2(sideM, rangeM);
+  const fullM = landM * dm.hypot(1, sideM / rangeM);
+  return { x: from.x + dm.sin(dir) * clipTiles(state, from, dir, fullM / TILE_M), y: from.y - dm.cos(dir) * clipTiles(state, from, dir, fullM / TILE_M) };
+}
+
+/** `tiles`, shortened so the point that far from `p` along `dirRad` stays on the map. */
+function clipTiles(state: BattleState, p: Vec2, dirRad: number, tiles: number): number {
+  const dx = dm.sin(dirRad), dy = -dm.cos(dirRad), lo = 0.01;
+  let t = tiles;
+  if (dx > 0) t = Math.min(t, (state.map.width - lo - p.x) / dx); else if (dx < 0) t = Math.min(t, (lo - p.x) / dx);
+  if (dy > 0) t = Math.min(t, (state.map.height - lo - p.y) / dy); else if (dy < 0) t = Math.min(t, (lo - p.y) / dy);
+  return Math.max(0, t);
 }
 
 /** A solid shot has struck the ground at `at` (showing at battle time `t`, flying along `dirRad`):
