@@ -4,7 +4,7 @@
 // shown or hidden per frame by modelNodes; the same structure again under the
 // shadow root with a flat black material. Pure scene graph: tested in Node.
 // ============================================================================
-import { DirectionalLight, DoubleSide, Group, HemisphereLight, Matrix4, Mesh, MeshBasicMaterial, Scene } from 'three';
+import { BackSide, DirectionalLight, DoubleSide, Group, HemisphereLight, Matrix4, Mesh, MeshBasicMaterial, Scene } from 'three';
 import type { ModelSource, VehicleModel } from './models';
 import { modelNodes, vehiclePose, type VehicleLook } from './look';
 import { shadowMatrix, SUN_TO } from './projection';
@@ -16,10 +16,16 @@ export const FILL_SKY = 0xcfd8e0, FILL_GROUND = 0x6b6455, FILL_INTENSITY = 2.5;
 // both faces: flattening onto the ground flips the winding of some triangles, and culling them
 // left holes (a skirt plate cast a lone thin line)
 const SHADOW_MAT = new MeshBasicMaterial({ color: 0x000000, side: DoubleSide });
+/** Width (m) of the dark rim round every hull and turret: the sprites darken each part's silhouette
+ * pixels (tools/blender OUTLINE 0.3), which is what makes a turret's outline read against its hull
+ * (round T-26 turret vs the T-70's). */
+export const OUTLINE_M = 0.07;
+const RIM_MAT = new MeshBasicMaterial({ color: 0x000000, side: BackSide, transparent: true, opacity: 0.32, depthWrite: false });
+
 /** self-shadow map: at zoom 1 the view's ~62 m half-diagonal gives ~3 cm per texel */
 const SHADOW_MAP_PX = 4096;
 
-interface Part { group: Group; meshes: Map<string, Mesh>; shadowGroup: Group; shadowMeshes: Map<string, Mesh> }
+interface Part { group: Group; meshes: Map<string, Mesh>; rims: Map<string, Mesh>; shadowGroup: Group; shadowMeshes: Map<string, Mesh> }
 interface Instance { model: VehicleModel; hull: Part; turret: Part; used: boolean }
 
 export class VehicleScene {
@@ -94,7 +100,7 @@ export class VehicleScene {
   visibleCount(): number { let n = 0; for (const i of this.inst.values()) if (i.used) n++; return n; }
 
   private part(): Part {
-    const p: Part = { group: new Group(), meshes: new Map(), shadowGroup: new Group(), shadowMeshes: new Map() };
+    const p: Part = { group: new Group(), meshes: new Map(), rims: new Map(), shadowGroup: new Group(), shadowMeshes: new Map() };
     this.scene.add(p.group);
     this.shadowRoot.add(p.shadowGroup);
     return p;
@@ -113,13 +119,35 @@ export class VehicleScene {
       const s = new Mesh(srcMesh.geometry, SHADOW_MAT);
       s.name = m.name;
       p.meshes.set(key, m); p.group.add(m);
+      const rim = rimFor(srcMesh);
+      p.rims.set(key, rim); p.group.add(rim);
       p.shadowMeshes.set(key, s); p.shadowGroup.add(s);
     }
     for (const [k, m] of p.meshes) m.visible = k === key;
+    for (const [k, r] of p.rims) r.visible = k === key;
     for (const [k, s] of p.shadowMeshes) s.visible = k === key;
   }
 
   private dispose(it: Instance): void {
     for (const p of [it.hull, it.turret]) { p.group.removeFromParent(); p.shadowGroup.removeFromParent(); }
   }
+}
+
+/** A back-face copy grown OUTLINE_M on every side about the mesh's box centre: drawn behind the
+ * body, only its fringe shows, as a thin translucent dark rim. */
+function rimFor(src: Mesh): Mesh {
+  const g = src.geometry;
+  if (!g.boundingBox) g.computeBoundingBox();
+  const bb = g.boundingBox!;
+  const rim = new Mesh(g, RIM_MAT);
+  rim.name = `${src.name}_rim`;
+  const axes = ['x', 'y', 'z'] as const;
+  for (const a of axes) {
+    const size = Math.max(bb.max[a] - bb.min[a], 1e-3), c = (bb.max[a] + bb.min[a]) / 2;
+    const k = 1 + (2 * OUTLINE_M) / size;
+    rim.scale[a] = k;
+    rim.position[a] = c * (1 - k);
+  }
+  rim.renderOrder = 1;
+  return rim;
 }

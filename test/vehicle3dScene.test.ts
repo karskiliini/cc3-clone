@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { BoxGeometry, DoubleSide, Mesh, MeshLambertMaterial, Vector3 } from 'three';
+import { BackSide, Box3, BoxGeometry, DoubleSide, Mesh, MeshLambertMaterial, Vector3 } from 'three';
+import { OUTLINE_M } from '@/render/vehicle3d/vehicleScene';
 import { VehicleScene } from '@/render/vehicle3d/vehicleScene';
 import type { ModelSource, VehicleModel } from '@/render/vehicle3d/models';
 import { GlOutput } from '@/render/vehicle3d/glOutput';
@@ -18,7 +19,7 @@ function look(over: Partial<VehicleLook> = {}): VehicleLook {
 }
 function visibleNames(vs: VehicleScene): string[] {
   const out: string[] = [];
-  vs.scene.traverseVisible((o) => { if ((o as Mesh).isMesh) out.push(o.name); });
+  vs.scene.traverseVisible((o) => { if ((o as Mesh).isMesh && !o.name.endsWith('_rim')) out.push(o.name); });
   return out.sort();
 }
 
@@ -52,6 +53,23 @@ describe('VehicleScene', () => {
     expect(hull.getWorldPosition(new Vector3()).toArray().map((v) => +v.toFixed(6))).toEqual([20, 0, 40]);
     // pivot 0.5 m forward of the hull centre, hull facing east
     expect(turret.getWorldPosition(new Vector3()).toArray().map((v) => +v.toFixed(6))).toEqual([20.5, 0, 40]);
+  });
+  it('every shown hull and turret gets a dark rim like the sprites (a slightly larger back-face copy)', () => {
+    const vs = new VehicleScene(src);
+    vs.begin(); vs.add(look()); vs.end();
+    vs.scene.updateMatrixWorld(true);
+    for (const name of ['hull_ok', 'turret_ok']) {
+      const body = vs.scene.getObjectByName(name) as Mesh;
+      const rim = vs.scene.getObjectByName(name + '_rim') as Mesh;
+      expect(rim, name).toBeTruthy();
+      expect((rim.material as MeshLambertMaterial).side).toBe(BackSide);
+      expect(rim.visible).toBe(true);
+      const a = new Box3().setFromObject(body), b = new Box3().setFromObject(rim);
+      expect(b.max.x - a.max.x).toBeCloseTo(OUTLINE_M, 6);
+      expect(a.min.z - b.min.z).toBeCloseTo(OUTLINE_M, 6);
+    }
+    vs.begin(); vs.add(look({ ko: true })); vs.end();
+    expect(vs.scene.getObjectByName('hull_ok_rim')!.visible && vs.scene.getObjectByName('hull_ok')!.visible).toBe(false);
   });
   it('ground-shadow copies draw both faces (flattening flips some triangles; culling them leaves holes)', () => {
     const vs = new VehicleScene(src);
