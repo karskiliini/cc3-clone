@@ -27,6 +27,7 @@ BUDGET = {"hull": 4000, "turret": 2000}     # triangles per node: above every so
 BUDGET_OVERRIDE = {"t28": {"hull": 4400}}    # the T-28 wreck hulls are ~4200 triangles
 TEX = {"hull": 1024, "turret": 1024}        # baked texture size (px): 256 and 512 blurred camo, hatches, fans
 TEX_OVERRIDE = {}                           # {"<defId>": {"turret": n}}
+TEX_STATE = {"ko": 512, "blown": 512}       # burnt looks: dark, rarely studied; quarter the VRAM of 1024
 SAMPLES = 16
 
 
@@ -148,7 +149,7 @@ def export_vehicle(vid, d, season):
         for extra, _vis in objs[1:]:          # the hull's turret-ring drum: only the sprites need it
             bpy.data.objects.remove(extra)
         budget = BUDGET_OVERRIDE.get(vid, {}).get(part, BUDGET[part])
-        size = TEX_OVERRIDE.get(vid, {}).get(part, TEX[part])
+        size = TEX_STATE.get(st) or TEX_OVERRIDE.get(vid, {}).get(part, TEX[part])
         out.append(lowpoly(src, "%s_%s" % (part, st), budget, size))
         bpy.data.objects.remove(src)
     fname = "%s%s.glb" % (vid, "_winter" if season == "winter" else "")

@@ -43,15 +43,35 @@ export class GlOutput {
     }
   }
 
-  get ready(): boolean { return !this.lost; }
+  /** false after a lost context (the event, or the GL reporting it before the event is queued) or a
+   * failed draw: the caller draws sprites. */
+  get ready(): boolean {
+    if (this.lost) return false;
+    try { return !this.r.getContext().isContextLost(); } catch { return false; }
+  }
 
-  draw(ctx: CanvasRenderingContext2D, vs: VehicleScene, cam: ViewCam, opts: { shadow?: boolean; vehicles?: boolean } = {}): void {
-    if (this.lost) return;
+  /** Renders the vehicle layer into ctx; false when it could not (lost context, renderer failure),
+   * and then the caller must draw the frame's vehicles as sprites. Never throws. */
+  draw(ctx: CanvasRenderingContext2D, vs: VehicleScene, cam: ViewCam, opts: { shadow?: boolean; vehicles?: boolean } = {}): boolean {
+    if (!this.ready) return false;
+    const smooth = ctx.imageSmoothingEnabled, quality = ctx.imageSmoothingQuality, alpha = ctx.globalAlpha;
+    try {
+      this.render(ctx, vs, cam, opts, alpha);
+      return true;
+    } catch (err) {
+      console.warn('[vehicle3d] draw failed, vehicles fall back to sprites', err);
+      this.lost = true;
+      return false;
+    } finally {
+      ctx.globalAlpha = alpha; ctx.imageSmoothingEnabled = smooth; ctx.imageSmoothingQuality = quality;
+    }
+  }
+
+  private render(ctx: CanvasRenderingContext2D, vs: VehicleScene, cam: ViewCam, opts: { shadow?: boolean; vehicles?: boolean }, alpha: number): void {
     this.camera.projectionMatrix.fromArray(viewProjection(cam, this.w, this.h));
     this.camera.projectionMatrixInverse.copy(this.camera.projectionMatrix).invert();
     const ppm = (TILE_PX * cam.zoom) / TILE_M;
     vs.fitSun(cam.x * TILE_M + this.w / (2 * ppm), cam.y * TILE_M + this.h / (2 * ppm), Math.hypot(this.w, this.h) / (2 * ppm) + 6);
-    const smooth = ctx.imageSmoothingEnabled, quality = ctx.imageSmoothingQuality, alpha = ctx.globalAlpha;
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
     if (opts.shadow !== false) {
       this.r.clear(); this.r.render(vs.shadowScene, this.camera);
@@ -61,6 +81,5 @@ export class GlOutput {
       this.r.clear(); this.r.render(vs.scene, this.camera);
       ctx.globalAlpha = alpha; ctx.drawImage(this.canvas, 0, 0, this.w, this.h);
     }
-    ctx.globalAlpha = alpha; ctx.imageSmoothingEnabled = smooth; ctx.imageSmoothingQuality = quality;
   }
 }

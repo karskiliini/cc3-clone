@@ -97,6 +97,13 @@ export class VehicleScene {
     }
   }
 
+  /** Drops every pooled instance: a new battle (vehicle ids restart at 1, other vehicle types). The
+   * meshes share the model cache's geometry and materials, which the cache disposes. */
+  reset(): void {
+    for (const it of this.inst.values()) this.dispose(it);
+    this.inst.clear();
+  }
+
   visibleCount(): number { let n = 0; for (const i of this.inst.values()) if (i.used) n++; return n; }
 
   private part(): Part {

@@ -85,6 +85,19 @@ describe('VehicleScene', () => {
   });
 });
 
+describe('VehicleScene.reset', () => {
+  it('drops every instance (a new battle reuses vehicle ids from 1)', () => {
+    const vs = new VehicleScene(src);
+    vs.begin(); vs.add(look()); vs.add(look({ id: 8 })); vs.end();
+    vs.reset();
+    expect(vs.visibleCount()).toBe(0);
+    let meshes = 0;
+    vs.scene.traverse((o) => { if ((o as Mesh).isMesh) meshes++; });
+    vs.shadowScene.traverse((o) => { if ((o as Mesh).isMesh) meshes++; });
+    expect(meshes).toBe(0);
+  });
+});
+
 describe('VehicleScene self-shadows', () => {
   it('vehicle meshes cast and receive the sun shadow; shadow-scene copies do not', () => {
     const vs = new VehicleScene(src);
@@ -110,7 +123,8 @@ describe('VehicleScene self-shadows', () => {
 
 describe('GlOutput', () => {
   it('turns shadow maps on and aims the sun at the view centre each frame', () => {
-    const fake = { shadowMap: { enabled: false, type: 0 }, setPixelRatio() {}, setSize() {}, setClearColor() {}, clear() {}, render() {} };
+    const fake = { shadowMap: { enabled: false, type: 0 }, setPixelRatio() {}, setSize() {}, setClearColor() {}, clear() {}, render() {},
+      getContext: () => ({ isContextLost: () => false }) };
     const canvas = { addEventListener() {} } as unknown as HTMLCanvasElement;
     const out = GlOutput.create(1000, 600, () => fake as never, canvas)!;
     expect(fake.shadowMap.enabled).toBe(true);
@@ -119,6 +133,29 @@ describe('GlOutput', () => {
     out.draw(ctx, vs, { x: 10, y: 20, zoom: 1 });     // 10 px/m: view 100 m x 60 m from (20 m, 40 m)
     expect(vs.sun.target.position.toArray()).toEqual([70, 0, 70]);
     expect(vs.sun.shadow.camera.right).toBeGreaterThanOrEqual(Math.hypot(50, 30));
+  });
+  it('is not ready once the canvas reports the context lost (event) or the GL says so (before the event)', () => {
+    let lost = false; let onLost: ((e: Event) => void) | null = null;
+    const fake = { shadowMap: { enabled: false, type: 0 }, setPixelRatio() {}, setSize() {}, setClearColor() {}, clear() {}, render() {},
+      getContext: () => ({ isContextLost: () => lost }) };
+    const canvas = { addEventListener(t: string, f: (e: Event) => void) { if (t === 'webglcontextlost') onLost = f; } } as unknown as HTMLCanvasElement;
+    const out = GlOutput.create(100, 100, () => fake as never, canvas)!;
+    expect(out.ready).toBe(true);
+    lost = true;
+    expect(out.ready).toBe(false);
+    lost = false;
+    onLost!({ preventDefault() {} } as Event);
+    expect(out.ready).toBe(false);
+  });
+  it('a renderer failure mid-draw reports false and stops 3D (the caller draws sprites), never throws', () => {
+    const fake = { shadowMap: { enabled: false, type: 0 }, setPixelRatio() {}, setSize() {}, setClearColor() {}, clear() {},
+      render() { throw new Error('GL_OUT_OF_MEMORY'); }, getContext: () => ({ isContextLost: () => false }) };
+    const canvas = { addEventListener() {} } as unknown as HTMLCanvasElement;
+    const out = GlOutput.create(100, 100, () => fake as never, canvas)!;
+    const ctx = { drawImage() {}, globalAlpha: 1, imageSmoothingEnabled: false, imageSmoothingQuality: 'low' } as unknown as CanvasRenderingContext2D;
+    expect(out.draw(ctx, new VehicleScene(src), { x: 0, y: 0, zoom: 1 })).toBe(false);
+    expect(ctx.globalAlpha).toBe(1);
+    expect(out.ready).toBe(false);
   });
   it('returns null when WebGL cannot be created', () => {
     expect(GlOutput.create(1024, 670, () => { throw new Error('no webgl'); })).toBeNull();

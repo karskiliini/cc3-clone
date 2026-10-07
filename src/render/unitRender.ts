@@ -50,6 +50,8 @@ function ensureAtlases(state: BattleState): void {
   const defs = new Set<string>();
   for (const v of state.vehicles.values()) defs.add(v.defId);
   void requestBattleAtlases(Array.from(sides), state.map.def.season, undefined, Array.from(defs));
+  // a new battle: drop the last battle's 3D instances (ids restart) and keep only this battle's models
+  vehicles3d()?.scene.reset();
   loadVehicleModels(Array.from(defs), state.map.def.season);
 }
 
@@ -605,15 +607,21 @@ function drawVehicleLookSprite(ctx: CanvasRenderingContext2D, cam: Camera, look:
 function drawVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side): void {
   const gl = vehicles3d();
   const shown: { veh: Vehicle; look: VehicleLook }[] = [];
+  const in3d: VehicleLook[] = [];
   gl?.scene.begin();
   for (const veh of state.vehicles.values()) {
     if (!isEnemyVisible(state, playerSide, veh.side, veh.id, true)) continue;
     if (!visible(veh.pos, cam)) continue;
     const look = vehicleLook(veh, state);
-    if (!gl || !gl.scene.add(look)) drawVehicleLookSprite(ctx, cam, look);
+    if (gl && gl.scene.add(look)) in3d.push(look);
+    else drawVehicleLookSprite(ctx, cam, look);
     shown.push({ veh, look });
   }
-  if (gl) { gl.scene.end(); gl.out.draw(ctx, gl.scene, cam); }
+  if (gl) {
+    gl.scene.end();
+    // a lost context or a renderer failure mid-frame: this frame's 3D vehicles are drawn as sprites
+    if (!gl.out.draw(ctx, gl.scene, cam)) for (const look of in3d) drawVehicleLookSprite(ctx, cam, look);
+  }
   for (const { veh, look } of shown) {
     const p = worldToScreen(cam, veh.pos);
     const dmg = vehicleDamageView(veh);
