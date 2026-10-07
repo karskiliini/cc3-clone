@@ -17,6 +17,10 @@ None — next is 044 M2 (relay server and browser transport).
 
 ## Queued
 
+**050 — Feature: 3D vehicle meshes with deterministic hull physics (umbrella, P1–P5).**
+Request (2026-10-07): "i want the vehicles in the game to be actual 3d meshes, so if they run over a tree, or a stone, the vehicle can actually roll realistically", low-poly from Blender, "they shall all be identifiable by looking"; gameplay physics (option B), all obstacle kinds (logs, trunks, rocks, craters/trenches/rubble/walls/slopes, wrecks); "large explosions can rock a vehicle, or even topple it"; "driving onto an anti-tank mine may easily topple a smaller vehicle". Spec: `docs/superpowers/specs/2026-10-07-3d-vehicle-physics-design.md`. Done when each sub-project meets its acceptance in the spec: P1 every vehicle identifiable from its 3D render (critic check); P2 the physics tests pass and cross-engine determinism holds; P3–P5 per their addenda.
+Blocked on: spec review by the user.
+
 **047b — Feature: Desync recovery in the real game (remaining part of 047).**
 
 The session-level recovery is done (047 below). Remaining, after M2/M3 exist:
