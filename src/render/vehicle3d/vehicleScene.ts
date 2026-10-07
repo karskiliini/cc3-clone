@@ -4,7 +4,7 @@
 // shown or hidden per frame by modelNodes; the same structure again under the
 // shadow root with a flat black material. Pure scene graph: tested in Node.
 // ============================================================================
-import { DirectionalLight, Group, HemisphereLight, Matrix4, Mesh, MeshBasicMaterial, Scene } from 'three';
+import { DirectionalLight, DoubleSide, Group, HemisphereLight, Matrix4, Mesh, MeshBasicMaterial, Scene } from 'three';
 import type { ModelSource, VehicleModel } from './models';
 import { modelNodes, vehiclePose, type VehicleLook } from './look';
 import { shadowMatrix, SUN_TO } from './projection';
@@ -13,7 +13,9 @@ import { shadowMatrix, SUN_TO } from './projection';
 export const SUN_INTENSITY = 5.7;
 export const FILL_SKY = 0xcfd8e0, FILL_GROUND = 0x6b6455, FILL_INTENSITY = 2.5;
 
-const SHADOW_MAT = new MeshBasicMaterial({ color: 0x000000 });
+// both faces: flattening onto the ground flips the winding of some triangles, and culling them
+// left holes (a skirt plate cast a lone thin line)
+const SHADOW_MAT = new MeshBasicMaterial({ color: 0x000000, side: DoubleSide });
 /** self-shadow map: at zoom 1 the view's ~62 m half-diagonal gives ~3 cm per texel */
 const SHADOW_MAP_PX = 4096;
 

@@ -216,7 +216,7 @@ Scale 2 renders at 2x2 supersampling (`SUPERSAMPLE`), as fine as 3x3 at scale 1 
 `npm run models:vehicles [-- --only t34_76,kv1] [--season summer|winter|both]` runs
 `vehicles_lowpoly.py`: every atlas entry of `vehicles.py` (hull ok/ko/blown/trackL/trackR,
 turret ok/ko/blown) becomes one mesh node (`hull_ok` … `turret_blown`, underscores because three.js
-strips dots from node names), collapse-decimated to `BUDGET` (hull 2400, turret 1200 triangles),
+strips dots from node names), collapse-decimated only above `BUDGET` (hull 4000, turret 2000 triangles: above every model today),
 smart-UV unwrapped and baked on the CPU (albedo selected-to-active from the full model; the paint materials carry their own cavity AO).
 Outputs `public/models/<id>.glb`, `<id>_winter.glb` (whitewashed live looks, not for `NO_WASH`) and
 the manifest `public/models/vehicles.json`:

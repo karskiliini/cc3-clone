@@ -42,8 +42,9 @@ export function nodeMaterial(name: string, map: Texture | null): MeshLambertMate
   return m;
 }
 
-/** Burnt looks bake darker than the sprites show them once matte (0.63x in tools/vehicle3dPreview). */
-export const BURNT_GAIN = 1.6;
+/** Burnt looks bake darker than the sprites show them once matte (0.63x in tools/vehicle3dPreview);
+ * 1.4 lands them at ~0.98x (1.6 read lighter and browner than the sprite wrecks in battle). */
+export const BURNT_GAIN = 1.4;
 
 async function loadVariant(v: ManifestVariant): Promise<Map<string, Mesh>> {
   const gltf = await new GLTFLoader().loadAsync(`${base()}${v.file}`);

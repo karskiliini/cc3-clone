@@ -22,9 +22,10 @@ import vehicles as V  # noqa: E402
 import vehicles_common as VC  # noqa: E402
 
 MODELS = os.path.join(VC.ROOT, "public", "models")
-BUDGET = {"hull": 2400, "turret": 1200}     # triangles per node
-BUDGET_OVERRIDE = {}                        # {"<defId>": {"hull": n}} where identity needs more
-TEX = {"hull": 512, "turret": 512}          # baked texture size (px): 256 blurred camo and hatches
+BUDGET = {"hull": 4000, "turret": 2000}     # triangles per node: above every source model, so nothing is decimated
+                                            # (collapse decimation warped decks: a pale triangle on the Panther)
+BUDGET_OVERRIDE = {"t28": {"hull": 4400}}    # the T-28 wreck hulls are ~4200 triangles
+TEX = {"hull": 1024, "turret": 1024}        # baked texture size (px): 256 and 512 blurred camo, hatches, fans
 TEX_OVERRIDE = {}                           # {"<defId>": {"turret": n}}
 SAMPLES = 16
 

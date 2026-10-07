@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BoxGeometry, Mesh, MeshLambertMaterial, Vector3 } from 'three';
+import { BoxGeometry, DoubleSide, Mesh, MeshLambertMaterial, Vector3 } from 'three';
 import { VehicleScene } from '@/render/vehicle3d/vehicleScene';
 import type { ModelSource, VehicleModel } from '@/render/vehicle3d/models';
 import { GlOutput } from '@/render/vehicle3d/glOutput';
@@ -52,6 +52,11 @@ describe('VehicleScene', () => {
     expect(hull.getWorldPosition(new Vector3()).toArray().map((v) => +v.toFixed(6))).toEqual([20, 0, 40]);
     // pivot 0.5 m forward of the hull centre, hull facing east
     expect(turret.getWorldPosition(new Vector3()).toArray().map((v) => +v.toFixed(6))).toEqual([20.5, 0, 40]);
+  });
+  it('ground-shadow copies draw both faces (flattening flips some triangles; culling them leaves holes)', () => {
+    const vs = new VehicleScene(src);
+    vs.begin(); vs.add(look()); vs.end();
+    vs.shadowScene.traverse((o) => { if ((o as Mesh).isMesh) expect(((o as Mesh).material as MeshLambertMaterial).side).toBe(DoubleSide); });
   });
   it('mirrors every visible vehicle into the shadow scene', () => {
     const vs = new VehicleScene(src);

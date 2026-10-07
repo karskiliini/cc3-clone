@@ -4,7 +4,7 @@
 // vehicle. Judges the vehicle atlases in context at true 1:1 (or zoom 2).
 //   vehicleBattle.html?map=steppe_1943&year=1943&t=40&zoom=1&focus=0
 //     &ger=ger_pz4gh,ger_tiger,ger_rifle_43&sov=sov_t34_76,sov_kv1,sov_rifle_43
-// Sets window.__vbReady when drawn.
+// Sets window.__vbReady when drawn; window.__vbUnitsMs(n) times n unit-layer draws (ms per draw).
 // ============================================================================
 import type { BattleConfig, Camera, GameSettings } from '@/shared/types';
 import { SIM_DT, VIEW_W, VIEW_H, TILE_PX } from '@/shared/types';
@@ -14,7 +14,7 @@ import { drawUnits } from '@/render/unitRender';
 import { drawEffects } from '@/render/effects';
 import { requestBattleAtlases, loadAtlas, vehicleDefAtlasName } from '@/render/spriteAtlas';
 
-declare global { interface Window { __vbReady?: boolean } }
+declare global { interface Window { __vbReady?: boolean; __vbUnitsMs?: (n: number) => number } }
 
 const q = new URLSearchParams(location.search);
 const list = (k: string, d: string): string[] => (q.get(k) ?? d).split(',').filter(Boolean);
@@ -70,5 +70,11 @@ void Promise.all([
   frame();
   document.getElementById('status')!.textContent =
     `t=${state.time.toFixed(1)} vehicles: ${vehicles.map((v) => `${v.defId}:${v.state}@${v.pos.x.toFixed(0)},${v.pos.y.toFixed(0)}`).join(' ')}`;
+  window.__vbUnitsMs = (n: number): number => {
+    const t0 = performance.now();
+    for (let i = 0; i < n; i++) drawUnits(ctx, cam, state, focus?.side ?? 'german', [], settings);
+    ctx.getImageData(0, 0, 1, 1);            // wait for the GPU work the draws queued
+    return (performance.now() - t0) / n;
+  };
   window.__vbReady = true;
 });

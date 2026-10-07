@@ -5,7 +5,8 @@ import { VEHICLE_DEFS } from '@/data/units';
 
 const DIR = path.resolve(__dirname, '../public/models');
 const manifest = JSON.parse(fs.readFileSync(path.join(DIR, 'vehicles.json'), 'utf8'));
-const BUDGET: Record<string, number> = { hull: 2400, turret: 1200 };
+const BUDGET: Record<string, number> = { hull: 4000, turret: 2000 };
+const BUDGET_OVERRIDE: Record<string, Record<string, number>> = { t28: { hull: 4400 } };   // = vehicles_lowpoly.py
 
 function glbJson(file: string): any {
   const buf = fs.readFileSync(path.join(DIR, file));
@@ -35,7 +36,7 @@ describe('vehicle models', () => {
       for (const variant of [m.summer, m.winter].filter(Boolean)) {
         expect(fs.statSync(path.join(DIR, variant.file)).size).toBeLessThanOrEqual(1.5 * 1024 * 1024);
         const g = glbJson(variant.file);
-        for (const n of variant.nodes) expect(nodeTris(g, n)).toBeLessThanOrEqual(BUDGET[n.split('_')[0]]);
+        for (const n of variant.nodes) expect(nodeTris(g, n)).toBeLessThanOrEqual(BUDGET_OVERRIDE[id]?.[n.split('_')[0]] ?? BUDGET[n.split('_')[0]]);
       }
       if (m.winter) expect(m.winter.nodes).toContain('hull_ok');
     });
