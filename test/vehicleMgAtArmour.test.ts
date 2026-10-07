@@ -19,7 +19,7 @@ function duel(enemyDef: string, seconds: number, enemySide: 'soviet' | 'german' 
     state.spottedVehicles.german.add(t.id); state.spottedVehicles.soviet.add(v.id);
     stepVehicles(state, rng, SIM_DT); stepCombat(state, rng, SIM_DT);
     if (t.state !== 'ok') break;   // a crew bailing out of a wreck is fair game
-    for (const e of state.events) if (e.kind === 'shot' && /^(coax|bow)_/.test(e.weaponId)) mg[e.side]++;
+    for (const e of state.events) if (e.kind === 'shot' && e.side && /^(coax|bow)_/.test(e.weaponId ?? '')) mg[e.side]++;
   }
   return mg;
 }

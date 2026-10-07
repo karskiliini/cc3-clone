@@ -870,6 +870,8 @@ export interface Order {
   /** Move/MoveFast/Sneak only: additional waypoints after `target`, placed by
    * holding Shift while clicking (HUD-side chain; sim support may follow). */
   waypoints?: Vec2[];
+  /** Fire orders on a vehicle's main gun: the reason last reported that it cannot fire (sim/gunBlock.ts) */
+  gunBlockReported?: string;
 }
 
 export type TeamMoraleWord = 'Fanatic' | 'Confident' | 'Steady' | 'Shaken' | 'Broken';
@@ -885,6 +887,8 @@ export type TeamStatusWord =
   // engaging reads "Not Firing"; a team whose fire is in reply to recent incoming fire reads
   // "Returning Fire"
   | 'Not Firing' | 'Returning Fire'
+  // a vehicle whose main gun cannot carry out its Fire order (sim/gunBlock.ts)
+  | "Can't Fire"
   // crew-served weapons follow their open task (spec 2026-09-17 §6)
   | 'Unlimbering' | 'Spreading trails' | 'Digging in' | 'Packing up'
   | 'Need carrier' | 'Recovering mount'

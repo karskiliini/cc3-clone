@@ -55,6 +55,7 @@ import { getHeightField, syncCraterMarks } from './heightField';
 import { dropKit, shedGearInBlast, throwItems } from './items';
 import type { Order } from '@/shared/types';
 import * as dm from '@/shared/dmath';
+import { gunBlockText, mainGunBlock, orderedGunBlock } from './gunBlock';
 
 export { hitChance, penetrates };
 
@@ -2292,12 +2293,19 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
     return;
   }
 
+  // an order the gun cannot carry out is reported once, saying why (sim/gunBlock.ts)
+  if (team?.order?.type === 'fire' && mainWeapon && !mainWeapon.indirect) {
+    const block = orderedGunBlock(state, vehicle, team.order);
+    if (block && team.order.gunBlockReported !== block) addMessage(state, `${team.name}\nCan't fire: ${gunBlockText(block)}.`, 'warn', team.side);
+    team.order.gunBlockReported = block ?? undefined;
+  }
+
   const target = mainWeapon?.indirect ? null : pickVehicleTarget(state, vehicle);
 
   if (mainWeapon?.indirect && gunWorks) {
     // item 020: rocket launchers never fire direct main-gun shots — indirect salvos only
     stepVehicleRockets(state, rng, dt, vehicle, def, mainWeapon, crew, track);
-  } else if (target && mainWeapon && gunWorks && (vehicle.mainAmmo > 0 || vehicle.loadedRound)) {
+  } else if (target && mainWeapon && gunWorks && (vehicle.mainAmmo > 0 || vehicle.loadedRound) && !mainGunBlock(state, vehicle, targetPosOf(target))) {
     const weapon = mainWeapon;
     const gunner = crew.gunner!;
     const tPos = targetPosOf(target);
