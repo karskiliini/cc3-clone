@@ -36,6 +36,7 @@ import type { Debris, GroundItem, Season } from '@/shared/types';
 import { drawRagdollFlight, drawRagdollLanded, ragdollBeginFrame, ragdollPhase } from '@/render/ragdoll';
 import { snapToMuzzle } from '@/render/muzzleSnap';
 import { RECOIL_M, vehicleLook, type VehicleLook } from '@/render/vehicle3d/look';
+import { vehicles3d, loadVehicleModels } from '@/render/vehicle3d';
 
 // ------------------------------------------------------------ pre-rendered atlases (spec §5) ---
 /** Battles whose atlases have been requested (loading is async; until an atlas is ready — or when
@@ -49,6 +50,7 @@ function ensureAtlases(state: BattleState): void {
   const defs = new Set<string>();
   for (const v of state.vehicles.values()) defs.add(v.defId);
   void requestBattleAtlases(Array.from(sides), state.map.def.season, undefined, Array.from(defs));
+  loadVehicleModels(Array.from(defs), state.map.def.season);
 }
 
 /** Render-side memory per soldier: measured ground speed (for gait cadence) and the last posture
@@ -598,12 +600,21 @@ function drawVehicleLookSprite(ctx: CanvasRenderingContext2D, cam: Camera, look:
     look.season, look.recoil);
 }
 
+/** Vehicle bodies first (the 3D layer, or a vehicle's sprite while it has no model, without
+ * WebGL, or with ?vehicles=sprites), then each vehicle's overlays on top. */
 function drawVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side): void {
+  const gl = vehicles3d();
+  const shown: { veh: Vehicle; look: VehicleLook }[] = [];
+  gl?.scene.begin();
   for (const veh of state.vehicles.values()) {
     if (!isEnemyVisible(state, playerSide, veh.side, veh.id, true)) continue;
     if (!visible(veh.pos, cam)) continue;
     const look = vehicleLook(veh, state);
-    drawVehicleLookSprite(ctx, cam, look);
+    if (!gl || !gl.scene.add(look)) drawVehicleLookSprite(ctx, cam, look);
+    shown.push({ veh, look });
+  }
+  if (gl) { gl.scene.end(); gl.out.draw(ctx, gl.scene, cam); }
+  for (const { veh, look } of shown) {
     const p = worldToScreen(cam, veh.pos);
     const dmg = vehicleDamageView(veh);
     // a serviceable hull whose crew is outside keeps its live look, hatches open (spec §10)
