@@ -210,3 +210,18 @@ IS-3, OT-34 (T-34/76 with the hull flame projector), SU-100 / SU-122 (from `su85
 Sherman (olive drab, Soviet stars), BM-13 on the Studebaker; Nebelwerfer 41 in `weapons.py` (the AT-gun carriage
 with the six-tube cluster, same drill states as the PaK 38). Wheeled vehicles (`NO_TRACK`) have no trackL / trackR.
 Scale 2 renders at 2x2 supersampling (`SUPERSAMPLE`), as fine as 3x3 at scale 1 and twice as fast.
+
+## Low-poly glTF vehicles (3D renderer, BACKLOG 050)
+
+`npm run models:vehicles [-- --only t34_76,kv1] [--season summer|winter|both]` runs
+`vehicles_lowpoly.py`: every atlas entry of `vehicles.py` (hull ok/ko/blown/trackL/trackR,
+turret ok/ko/blown) becomes one mesh node (`hull_ok` … `turret_blown`, underscores because three.js
+strips dots from node names), collapse-decimated to `BUDGET` (hull 2400, turret 1200 triangles),
+smart-UV unwrapped and baked on the CPU (albedo selected-to-active from the full model × its own AO).
+Outputs `public/models/<id>.glb`, `<id>_winter.glb` (whitewashed live looks, not for `NO_WASH`) and
+the manifest `public/models/vehicles.json`:
+`{version, frame, vehicles: {id: {hasTurret, lengthM, widthM, turretPivotM {x,y} | null,
+summer: {file, nodes}, winter: {file, nodes} | null}}}`. Meshes are in the hull-local frame; the game
+rotates turrets about `turretPivotM`. Re-run after any model change in `vehicles.py`, and squash-merge
+the branch so only the final binaries enter history. `test/vehicleModels.test.ts` checks the
+manifest, node names, triangle budgets and the 1.5 MB per-file limit.

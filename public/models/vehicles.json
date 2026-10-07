@@ -1,0 +1,979 @@
+{
+ "frame": "hull-local metres: x = right, y = FORWARD, origin = hull centre = hull cell anchor",
+ "vehicles": {
+  "bm13": {
+   "hasTurret": false,
+   "lengthM": 6.5,
+   "summer": {
+    "file": "bm13.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko"
+    ]
+   },
+   "turretPivotM": null,
+   "widthM": 2.3,
+   "winter": {
+    "file": "bm13_winter.glb",
+    "nodes": [
+     "hull_ok"
+    ]
+   }
+  },
+  "bt7": {
+   "hasTurret": true,
+   "lengthM": 5.7,
+   "summer": {
+    "file": "bt7.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.62
+   },
+   "widthM": 2.3,
+   "winter": {
+    "file": "bt7_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok"
+    ]
+   }
+  },
+  "flammpanzer3": {
+   "hasTurret": true,
+   "lengthM": 6.3,
+   "summer": {
+    "file": "flammpanzer3.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.1
+   },
+   "widthM": 2.9,
+   "winter": {
+    "file": "flammpanzer3_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok"
+    ]
+   }
+  },
+  "hetzer": {
+   "hasTurret": false,
+   "lengthM": 4.9,
+   "summer": {
+    "file": "hetzer.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   },
+   "turretPivotM": null,
+   "widthM": 2.6,
+   "winter": {
+    "file": "hetzer_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   }
+  },
+  "is1": {
+   "hasTurret": true,
+   "lengthM": 6.8,
+   "summer": {
+    "file": "is1.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.85
+   },
+   "widthM": 3.1,
+   "winter": {
+    "file": "is1_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok"
+    ]
+   }
+  },
+  "is2": {
+   "hasTurret": true,
+   "lengthM": 6.8,
+   "summer": {
+    "file": "is2.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.85
+   },
+   "widthM": 3.1,
+   "winter": {
+    "file": "is2_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok"
+    ]
+   }
+  },
+  "is3": {
+   "hasTurret": true,
+   "lengthM": 6.9,
+   "summer": {
+    "file": "is3.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.55
+   },
+   "widthM": 3.1,
+   "winter": {
+    "file": "is3_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok"
+    ]
+   }
+  },
+  "kettenkrad": {
+   "hasTurret": false,
+   "lengthM": 3.0,
+   "summer": {
+    "file": "kettenkrad.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   },
+   "turretPivotM": null,
+   "widthM": 1.6,
+   "winter": {
+    "file": "kettenkrad_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   }
+  },
+  "kubelwagen": {
+   "hasTurret": false,
+   "lengthM": 3.1,
+   "summer": {
+    "file": "kubelwagen.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko"
+    ]
+   },
+   "turretPivotM": null,
+   "widthM": 1.6,
+   "winter": {
+    "file": "kubelwagen_winter.glb",
+    "nodes": [
+     "hull_ok"
+    ]
+   }
+  },
+  "kv1": {
+   "hasTurret": true,
+   "lengthM": 6.8,
+   "summer": {
+    "file": "kv1.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.75
+   },
+   "widthM": 3.3,
+   "winter": {
+    "file": "kv1_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok"
+    ]
+   }
+  },
+  "marder3": {
+   "hasTurret": false,
+   "lengthM": 4.65,
+   "summer": {
+    "file": "marder3.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   },
+   "turretPivotM": null,
+   "widthM": 2.95,
+   "winter": {
+    "file": "marder3_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   }
+  },
+  "ot34": {
+   "hasTurret": true,
+   "lengthM": 6.7,
+   "summer": {
+    "file": "ot34.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.62
+   },
+   "widthM": 3.0,
+   "winter": {
+    "file": "ot34_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok"
+    ]
+   }
+  },
+  "panther": {
+   "hasTurret": true,
+   "lengthM": 6.9,
+   "summer": {
+    "file": "panther.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.3
+   },
+   "widthM": 3.4,
+   "winter": {
+    "file": "panther_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok"
+    ]
+   }
+  },
+  "pantherA": {
+   "hasTurret": true,
+   "lengthM": 6.9,
+   "summer": {
+    "file": "pantherA.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.3
+   },
+   "widthM": 3.4,
+   "winter": {
+    "file": "pantherA_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok"
+    ]
+   }
+  },
+  "pantherD": {
+   "hasTurret": true,
+   "lengthM": 6.9,
+   "summer": {
+    "file": "pantherD.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.3
+   },
+   "widthM": 3.3,
+   "winter": {
+    "file": "pantherD_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok"
+    ]
+   }
+  },
+  "pz3j": {
+   "hasTurret": true,
+   "lengthM": 5.6,
+   "summer": {
+    "file": "pz3j.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.1
+   },
+   "widthM": 2.9,
+   "winter": null
+  },
+  "pz4f1": {
+   "hasTurret": true,
+   "lengthM": 5.9,
+   "summer": {
+    "file": "pz4f1.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.18
+   },
+   "widthM": 2.9,
+   "winter": null
+  },
+  "pz4g": {
+   "hasTurret": true,
+   "lengthM": 5.9,
+   "summer": {
+    "file": "pz4g.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.18
+   },
+   "widthM": 2.9,
+   "winter": {
+    "file": "pz4g_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok"
+    ]
+   }
+  },
+  "pz4gh": {
+   "hasTurret": true,
+   "lengthM": 5.9,
+   "summer": {
+    "file": "pz4gh.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.18
+   },
+   "widthM": 2.9,
+   "winter": {
+    "file": "pz4gh_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok"
+    ]
+   }
+  },
+  "sdkfz251": {
+   "hasTurret": false,
+   "lengthM": 5.8,
+   "summer": {
+    "file": "sdkfz251.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   },
+   "turretPivotM": null,
+   "widthM": 2.1,
+   "winter": null
+  },
+  "sdkfz251_rocket": {
+   "hasTurret": false,
+   "lengthM": 5.8,
+   "summer": {
+    "file": "sdkfz251_rocket.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   },
+   "turretPivotM": null,
+   "widthM": 2.1,
+   "winter": {
+    "file": "sdkfz251_rocket_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   }
+  },
+  "sherman76": {
+   "hasTurret": true,
+   "lengthM": 6.3,
+   "summer": {
+    "file": "sherman76.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.25
+   },
+   "widthM": 2.6,
+   "winter": {
+    "file": "sherman76_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok"
+    ]
+   }
+  },
+  "stug3g": {
+   "hasTurret": false,
+   "lengthM": 5.4,
+   "summer": {
+    "file": "stug3g.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   },
+   "turretPivotM": null,
+   "widthM": 2.9,
+   "winter": {
+    "file": "stug3g_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   }
+  },
+  "stug4": {
+   "hasTurret": false,
+   "lengthM": 5.9,
+   "summer": {
+    "file": "stug4.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   },
+   "turretPivotM": null,
+   "widthM": 2.9,
+   "winter": {
+    "file": "stug4_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   }
+  },
+  "su100": {
+   "hasTurret": false,
+   "lengthM": 6.1,
+   "summer": {
+    "file": "su100.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   },
+   "turretPivotM": null,
+   "widthM": 3.0,
+   "winter": {
+    "file": "su100_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   }
+  },
+  "su122": {
+   "hasTurret": false,
+   "lengthM": 6.1,
+   "summer": {
+    "file": "su122.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   },
+   "turretPivotM": null,
+   "widthM": 3.0,
+   "winter": {
+    "file": "su122_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   }
+  },
+  "su152": {
+   "hasTurret": false,
+   "lengthM": 6.8,
+   "summer": {
+    "file": "su152.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   },
+   "turretPivotM": null,
+   "widthM": 3.3,
+   "winter": {
+    "file": "su152_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   }
+  },
+  "su76": {
+   "hasTurret": false,
+   "lengthM": 5.0,
+   "summer": {
+    "file": "su76.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   },
+   "turretPivotM": null,
+   "widthM": 2.7,
+   "winter": {
+    "file": "su76_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   }
+  },
+  "su85": {
+   "hasTurret": false,
+   "lengthM": 6.1,
+   "summer": {
+    "file": "su85.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   },
+   "turretPivotM": null,
+   "widthM": 3.0,
+   "winter": {
+    "file": "su85_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR"
+    ]
+   }
+  },
+  "t26": {
+   "hasTurret": true,
+   "lengthM": 4.6,
+   "summer": {
+    "file": "t26.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.42
+   },
+   "widthM": 2.4,
+   "winter": {
+    "file": "t26_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok"
+    ]
+   }
+  },
+  "t28": {
+   "hasTurret": true,
+   "lengthM": 7.4,
+   "summer": {
+    "file": "t28.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": 0.0,
+    "y": -0.1
+   },
+   "widthM": 2.9,
+   "winter": {
+    "file": "t28_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok"
+    ]
+   }
+  },
+  "t34_76": {
+   "hasTurret": true,
+   "lengthM": 6.7,
+   "summer": {
+    "file": "t34_76.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.62
+   },
+   "widthM": 3.0,
+   "winter": {
+    "file": "t34_76_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok"
+    ]
+   }
+  },
+  "t34_85": {
+   "hasTurret": true,
+   "lengthM": 6.7,
+   "summer": {
+    "file": "t34_85.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.55
+   },
+   "widthM": 3.0,
+   "winter": {
+    "file": "t34_85_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok"
+    ]
+   }
+  },
+  "t70": {
+   "hasTurret": true,
+   "lengthM": 4.3,
+   "summer": {
+    "file": "t70.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": -0.28,
+    "y": 0.05
+   },
+   "widthM": 2.3,
+   "winter": {
+    "file": "t70_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok"
+    ]
+   }
+  },
+  "tiger": {
+   "hasTurret": true,
+   "lengthM": 6.3,
+   "summer": {
+    "file": "tiger.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.05
+   },
+   "widthM": 3.6,
+   "winter": {
+    "file": "tiger_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok"
+    ]
+   }
+  },
+  "tiger2": {
+   "hasTurret": true,
+   "lengthM": 7.3,
+   "summer": {
+    "file": "tiger2.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_ko",
+     "hull_blown",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok",
+     "turret_ko",
+     "turret_blown"
+    ]
+   },
+   "turretPivotM": {
+    "x": 0.0,
+    "y": 0.2
+   },
+   "widthM": 3.7,
+   "winter": {
+    "file": "tiger2_winter.glb",
+    "nodes": [
+     "hull_ok",
+     "hull_trackL",
+     "hull_trackR",
+     "turret_ok"
+    ]
+   }
+  }
+ },
+ "version": 1
+}

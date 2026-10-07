@@ -18,7 +18,8 @@
     "sprites:sheets": "python3 tools/blender/contact_sheet.py",
     "sprites": "npm run sprites:soldiers && npm run sprites:smg && npm run sprites:items && npm run sprites:vehicles && npm run sprites:weapons && npm run sprites:fx",
     "sprites:menu": "blender -b -P tools/blender/menu.py --",
-    "sprites:hud": "blender -b -P tools/blender/hud.py --"
+    "sprites:hud": "blender -b -P tools/blender/hud.py --",
+    "models:vehicles": "blender -b -P tools/blender/vehicles_lowpoly.py --"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",
