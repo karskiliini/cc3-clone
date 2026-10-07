@@ -2582,7 +2582,22 @@ function pickVehicleMgTarget(state: BattleState, vehicle: Vehicle, rangeM: numbe
   }
   // An MG cannot damage the closed tank an attack-unit order is tracking.
   if (order?.targetTeamId != null && state.teams.get(order.targetTeamId)?.vehicleId != null) return null;
-  return vehicleAreaTarget(state, vehicle, rangeM, accepts);
+  // nor the closed hull the commander's belief is about: area fire only where men may be
+  return vehicleAreaTarget(state, vehicle, rangeM, (p) => accepts(p) && !atClosedEnemyArmour(state, vehicle.side, p));
+}
+
+/** Metres from a known enemy hull within which an MG's area fire would only rattle its armour. */
+const MG_ARMOUR_CLEAR_M = 6;
+/** Is `p` where a spotted enemy vehicle with a closed fighting compartment stands? */
+function atClosedEnemyArmour(state: BattleState, side: Side, p: Vec2): boolean {
+  for (const id of state.spottedVehicles[side]) {
+    const v = state.vehicles.get(id);
+    if (!v || v.side === side || v.state === 'knockedOut') continue;
+    const def = VEHICLE_DEFS[v.defId];
+    if (!def || vehicleLayout(def).openTop) continue;
+    if (dist(v.pos, p) * TILE_M <= MG_ARMOUR_CLEAR_M) return true;
+  }
+  return false;
 }
 
 function fireVehicleMgRound(
