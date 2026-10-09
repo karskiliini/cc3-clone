@@ -128,3 +128,50 @@ export function bendBlade(b: Blade, hulls: readonly HullPatch[], crush: CrushAt 
   }
   return best;
 }
+
+/** One blade as drawn this frame: where it stands, how it bends, how much of it survives the patch fade. */
+export interface BladeInst extends Blade, Bend { fade: number }
+
+/** The blades of every hull's patch, nearest to the view centre first. A patch that would overrun
+ * the budget is dropped whole (its vehicle keeps the 2D fringe). Cells shared by two patches grow
+ * one blade, bent by every hull near it. */
+export function bladesFor(
+  hulls: readonly HullPatch[], growthAt: GrowthAt, crush: CrushAt | null, season: SeasonKey,
+  viewXM: number, viewZM: number, budget = MAX_BLADES,
+): { blades: BladeInst[]; dropped: number[] } {
+  const reach = (h: HullPatch): number => Math.hypot(h.halfLenM, h.halfWidM) + PATCH_PAD_M;
+  const dist = (h: HullPatch): number => Math.hypot(h.xM - viewXM, h.zM - viewZM);
+  const order = [...hulls].sort((a, b) => dist(a) - dist(b) || a.id - b.id);
+  const blades: BladeInst[] = [], dropped: number[] = [];
+  const seen = new Set<number>();
+  for (const h of order) {
+    const near = hulls.filter((o) => Math.hypot(o.xM - h.xM, o.zM - h.zM) <= reach(h) + reach(o));
+    const r = reach(h);
+    const cx0 = Math.floor((h.xM - r) / CELL_M), cx1 = Math.floor((h.xM + r) / CELL_M);
+    const cz0 = Math.floor((h.zM - r) / CELL_M), cz1 = Math.floor((h.zM + r) / CELL_M);
+    const mine: BladeInst[] = [], keys: number[] = [];
+    for (let cz = cz0; cz <= cz1; cz++) {
+      for (let cx = cx0; cx <= cx1; cx++) {
+        const key = cx * 100000 + cz;
+        if (seen.has(key)) continue;
+        if (hullLocal(h, (cx + 0.5) * CELL_M, (cz + 0.5) * CELL_M).d >= PATCH_PAD_M + CELL_M) continue;
+        const b = bladeAt(cx, cz, growthAt, season);
+        if (!b || hullLocal(h, b.xM, b.zM).d >= PATCH_PAD_M) continue;
+        let fade = 0;
+        for (const o of near) fade = Math.max(fade, patchFade(hullLocal(o, b.xM, b.zM).d));
+        if (fade <= 0) continue;
+        mine.push({ ...b, ...bendBlade(b, near, crush), fade });
+        keys.push(key);
+      }
+    }
+    if (blades.length + mine.length > budget) { dropped.push(h.id); continue; }
+    for (const k of keys) seen.add(k);
+    for (const b of mine) blades.push(b);
+  }
+  return { blades, dropped };
+}
+
+/** The vehicles whose 2D fringe the 3D grass replaces this frame: none if the GL draw failed. */
+export function grassHandOver(patchIds: readonly number[], dropped: readonly number[], drewOk: boolean): Set<number> {
+  return drewOk ? new Set(patchIds.filter((id) => !dropped.includes(id))) : new Set();
+}

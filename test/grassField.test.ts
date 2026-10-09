@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { bendBlade, bladeAt, CELL_M, FLAT, patchFade, PUSH_M, type Blade, type GrowthAt, type HullPatch } from '@/render/vehicle3d/grassField';
+import { bendBlade, bladeAt, bladesFor, CELL_M, FLAT, grassHandOver, hullLocal, MAX_BLADES, patchFade, PUSH_M, type Blade, type BladeInst, type GrowthAt, type HullPatch } from '@/render/vehicle3d/grassField';
 
 const grass: GrowthAt = () => 'tallgrass';
 const crops: GrowthAt = () => 'crops';
@@ -84,5 +84,61 @@ describe('bending', () => {
     const a = hull(), b = hull({ id: 2, xM: 4 });            // b's left side at x = 2.5
     const r = bendBlade(blade(2.3, 0), [a, b], null);        // 0.8 m from a, 0.2 m from b
     expect(r.dirX).toBeCloseTo(-1);
+  });
+});
+
+describe('patches', () => {
+  const H = hull({ xM: 100, zM: 100 });
+  it('fill the rounded rectangle 5 m round the hull at 25 blades per m²', () => {
+    const { blades } = bladesFor([H], grass, null, 'summer', 100, 100);
+    const area = (7 + 10) * (3 + 10) - (4 - Math.PI) * 25;      // 199.5 m²
+    expect(blades.length).toBeGreaterThan(area * 25 * 0.95);
+    expect(blades.length).toBeLessThan(area * 25 * 1.05);
+  });
+  it('grow nothing where nothing tall grows, and wheat only on crops', () => {
+    expect(bladesFor([H], none, null, 'summer', 100, 100).blades).toHaveLength(0);
+    const half: GrowthAt = (x) => (x > 100 ? 'crops' : 'tallgrass');
+    for (const b of bladesFor([H], half, null, 'summer', 100, 100).blades) expect(b.kind).toBe(b.xM > 100 ? 'wheat' : 'grass');
+  });
+  it('fade full within 2.5 m of the hull and never reach 5 m', () => {
+    for (const b of bladesFor([H], grass, null, 'summer', 100, 100).blades) {
+      const d = hullLocal(H, b.xM, b.zM).d;
+      if (d <= 2.5) expect(b.fade).toBe(1);
+      expect(d).toBeLessThan(5);
+      expect(b.fade).toBeGreaterThan(0);
+    }
+  });
+  it('two hulls side by side share one field: no blade twice', () => {
+    const { blades } = bladesFor([H, hull({ id: 2, xM: 104, zM: 100 })], grass, null, 'summer', 100, 100);
+    expect(new Set(blades.map((b) => `${b.xM},${b.zM}`)).size).toBe(blades.length);
+  });
+  it('a moving hull drives through a fixed field: the blades away from it keep their places and shapes', () => {
+    const key = (b: BladeInst): string => `${b.xM},${b.zM}`;
+    const a = new Map(bladesFor([H], grass, null, 'summer', 100, 100).blades.map((b) => [key(b), b]));
+    let shared = 0;
+    for (const b of bladesFor([hull({ xM: 100, zM: 99.7 })], grass, null, 'summer', 100, 100).blades) {
+      const o = a.get(key(b));
+      if (!o) continue;
+      shared++;
+      expect(b.heightM).toBe(o.heightM); expect(b.colour).toBe(o.colour);
+    }
+    expect(shared).toBeGreaterThan(4000);
+  });
+  it('the budget keeps the nearest patches whole and reports the rest as dropped', () => {
+    const one = bladesFor([H], grass, null, 'summer', 100, 100).blades.length;
+    const near = H, mid = hull({ id: 2, xM: 140, zM: 100 }), far = hull({ id: 3, xM: 180, zM: 100 });
+    const r = bladesFor([far, near, mid], grass, null, 'summer', 100, 100, Math.round(one * 1.5));
+    expect(r.blades.length).toBe(one);
+    expect(r.dropped.sort()).toEqual([2, 3]);
+    expect(bladesFor([near, mid, far], grass, null, 'summer', 100, 100).blades.length).toBeLessThanOrEqual(MAX_BLADES);
+  });
+});
+
+describe('hand-over to the 2D fringe', () => {
+  it('3D grass replaces the fringe only for drawn, undropped patches', () => {
+    expect([...grassHandOver([1, 2, 3], [2], true)].sort()).toEqual([1, 3]);
+  });
+  it('a failed or lost GL draw gives every vehicle its 2D fringe back', () => {
+    expect(grassHandOver([1, 2, 3], [], false).size).toBe(0);
   });
 });
