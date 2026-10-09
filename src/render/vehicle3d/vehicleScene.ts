@@ -8,6 +8,7 @@ import { BackSide, DirectionalLight, DoubleSide, Group, HemisphereLight, Matrix4
 import type { ModelSource, VehicleModel } from './models';
 import { modelNodes, vehiclePose, type VehicleLook } from './look';
 import { shadowMatrix, SUN_TO } from './projection';
+import { GrassLayer } from './grassPatch';
 
 /** Tuned against the sprites (tools/vehicle3dPreview: mean brightness of the lit hull). */
 export const SUN_INTENSITY = 5.7;
@@ -35,6 +36,8 @@ export class VehicleScene {
   private readonly inst = new Map<number, Instance>();
   /** casts the self-shadows (turret on deck, open compartments) the sprites have baked in */
   readonly sun = new DirectionalLight(0xfff5e0, SUN_INTENSITY);
+  /** the 3D tall grass round the hulls standing in growth (grassField.bladesFor fills it each frame) */
+  readonly grass = new GrassLayer();
 
   constructor(private readonly models: ModelSource) {
     const sun = this.sun;
@@ -44,6 +47,7 @@ export class VehicleScene {
     sun.shadow.normalBias = 0.02;
     this.fitSun(0, 0, 50);
     this.scene.add(sun, sun.target, new HemisphereLight(FILL_SKY, FILL_GROUND, FILL_INTENSITY));
+    this.scene.add(this.grass.grass, this.grass.wheat);
     this.shadowRoot.matrixAutoUpdate = false;
     this.shadowRoot.matrix = new Matrix4().fromArray(shadowMatrix());
     this.shadowScene.add(this.shadowRoot);
@@ -102,6 +106,7 @@ export class VehicleScene {
   reset(): void {
     for (const it of this.inst.values()) this.dispose(it);
     this.inst.clear();
+    this.grass.clear();
   }
 
   visibleCount(): number { let n = 0; for (const i of this.inst.values()) if (i.used) n++; return n; }

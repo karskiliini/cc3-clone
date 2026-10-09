@@ -92,7 +92,7 @@ describe('VehicleScene.reset', () => {
     vs.reset();
     expect(vs.visibleCount()).toBe(0);
     let meshes = 0;
-    vs.scene.traverse((o) => { if ((o as Mesh).isMesh) meshes++; });
+    vs.scene.traverse((o) => { if ((o as Mesh).isMesh && !o.name.startsWith('grass3d_')) meshes++; });   // the grass layer stays
     vs.shadowScene.traverse((o) => { if ((o as Mesh).isMesh) meshes++; });
     expect(meshes).toBe(0);
   });
