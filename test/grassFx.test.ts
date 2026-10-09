@@ -166,3 +166,62 @@ describe('soldier mini-trails', () => {
     expect(crushMapFor(state.map).at({ x: 30, y: 15 })).toBeNull();
   });
 });
+
+
+describe('grass final-review regressions', () => {
+  it('reacquiring a vehicle never paints its hidden route', () => {
+    let rects = 0;
+    const { ctx } = strokeCounter();
+    ctx.fillRect = () => { rects++; };
+    vi.stubGlobal('document', { createElement: () => ({ getContext: () => ctx }) });
+    try {
+      const state = makeState(); tallField(state);
+      const { v } = addTank(state, 't34_76', { x: 30, y: 30 }, 0, 50, 'soviet');
+      state.spottedVehicles.german.add(v.id);
+      const fx = new GrassFx(); fx.update(state, 'german');
+      state.spottedVehicles.german.clear();
+      v.pos = { x: 30, y: 20 }; state.time = 1;
+      fx.update(state, 'german');
+      state.spottedVehicles.german.add(v.id); state.time = 2;
+      fx.update(state, 'german');
+      expect(crushMapFor(state.map).at({ x: 30, y: 25 })).toBeNull();
+      expect(rects).toBe(0);
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it.each([0.2, 0])('rewind from 0.4 to %s clears paint, crush, and movement history', (time) => {
+    const { ctx } = strokeCounter();
+    vi.stubGlobal('document', { createElement: () => ({ getContext: () => ctx }) });
+    try {
+      const state = makeState(); tallField(state);
+      const { v } = addTank(state, 'pz4gh', { x: 30, y: 30 }, 0, 50, 'german');
+      const fx = new GrassFx(); fx.update(state, 'german');
+      v.pos = { x: 30, y: 28 }; state.time = 0.4; fx.update(state, 'german');
+      let images = 0;
+      const out = { drawImage() { images++; } } as unknown as CanvasRenderingContext2D;
+      const cam = { x: 0, y: 0, zoom: 1 };
+      fx.drawTrails(out, cam); expect(images).toBe(1);
+      state.time = time; v.pos = { x: 30, y: 10 }; fx.update(state, 'german');
+      fx.drawTrails(out, cam); expect(images).toBe(1);
+      expect(crushMapFor(state.map).at({ x: 30, y: 30 })).toBeNull();
+      expect(crushMapFor(state.map).at({ x: 30, y: 20 })).toBeNull();
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it('stopping after 0.4m flushes the residual driven strip instead of restoring standing grass', () => {
+    const state = makeState(); tallField(state);
+    const { v } = addTank(state, 'pz4gh', { x: 30.125, y: 30 }, 0, 50, 'german');
+    const fx = new GrassFx(); fx.update(state, 'german');
+    v.speed = 0.15; v.pos = { x: 30.125, y: 29.8 }; state.time = 1; fx.update(state, 'german');
+    v.speed = 0; state.time = 2; fx.update(state, 'german');
+    const tail = VEHICLE_DEFS.pz4gh.lengthM / 2 / TILE_M;
+    expect(crushMapFor(state.map).at({ x: 30.125, y: 29.875 + tail })?.level).toBe(1);
+  });
+});
+
+
+it('a stationary vehicle leaves no wake paint or crushed ground across repeated updates', () => {
+  const state = makeState(); tallField(state);
+  addTank(state, 'pz4gh', { x: 30, y: 30 }, 0, 50, 'german');
+  const fx = new GrassFx();
+  for (let i = 0; i < 10; i++) { state.time = i; fx.update(state, 'german'); }
+  expect(crushMapFor(state.map).at({ x: 30, y: 32 })).toBeNull();
+});

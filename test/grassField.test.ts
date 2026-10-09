@@ -142,3 +142,10 @@ describe('hand-over to the 2D fringe', () => {
     expect(grassHandOver([1, 2, 3], [], false).size).toBe(0);
   });
 });
+
+
+it('slow 0.15m/s movement still flattens the tail gap without strong bow push', () => {
+  const slow = hull({ speedMs: 0.15 });
+  expect(bendBlade(blade(0, 4), [slow], null).heightScale).toBe(0.12);
+  expect(bendBlade(blade(0, -5), [slow], null).angle).toBe(0);
+});

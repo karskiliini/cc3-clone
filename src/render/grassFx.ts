@@ -69,18 +69,23 @@ export class GrassFx {
 
   /** Lay wakes and faint soldier trails for visible units moving through tall growth. Call once per frame. */
   update(state: BattleState, playerSide: Side): void {
-    if (state.map !== this.mapRef || state.time < this.lastTime - 0.5) {
+    if (state.map !== this.mapRef || state.time < this.lastTime) {
       this.reset(); this.mapRef = state.map;
       crushMapFor(state.map).clear();
     }
     this.lastTime = state.time;
     const season = seasonKey(state.map.def?.season);
     for (const v of state.vehicles.values()) {
-      if (v.side !== playerSide && !state.spottedVehicles[playerSide].has(v.id)) continue;
+      if (v.side !== playerSide && !state.spottedVehicles[playerSide].has(v.id)) {
+        this.last.delete(v.id);
+        continue;
+      }
       const growth = tallGrowthAt(state, v.pos);
       const prev = this.last.get(v.id);
       if (!growth) { if (prev) this.last.set(v.id, { ...v.pos }); continue; }
-      if (!needsStamp(prev, v.pos)) continue;
+      // Flush the last sub-step once a vehicle stops: its temporary 3D tail gap must stay flat.
+      const residual = prev && Math.hypot(v.pos.x - prev.x, v.pos.y - prev.y) > 1e-4;
+      if (!needsStamp(prev, v.pos) && !(residual && Math.abs(v.speed) < 1e-4)) continue;
       // a vehicle first seen standing still in the field has no wake yet: just remember it
       if (prev) this.stamp(state, { pos: v.pos, facing: v.hullFacing, lengthM: VEHICLE_DEFS[v.defId]?.lengthM ?? 6, widthM: VEHICLE_DEFS[v.defId]?.widthM ?? 3 }, growth, season, prev);
       this.last.set(v.id, { ...v.pos });

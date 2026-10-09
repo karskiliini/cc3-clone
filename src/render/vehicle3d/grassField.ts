@@ -92,6 +92,7 @@ export const FLAT = Math.PI / 2;
 const UNDER_PAD_M = 0.15;
 const PUSH_MAX_RAD = (70 * Math.PI) / 180;
 const BOW_SPEED_MS = 0.3;
+const WAKE_SPEED_MS = 1e-4;
 
 /** How the hulls and the wakes bend a blade (strongest wins): under a hull flat; in a moving hull's
  * wake gap or on crushed ground flat along the travel; beside a hull pushed away from it (ahead of
@@ -105,7 +106,7 @@ export function bendBlade(b: Blade, hulls: readonly HullPatch[], crush: CrushAt 
       return { dirX: fx, dirZ: fz, angle: FLAT, heightScale: 0.08 };
     }
     // the stretch the tail has just left and the next wake stamp has not yet reached
-    if (Math.abs(h.speedMs) > BOW_SPEED_MS && Math.abs(l.lx) <= h.halfWidM) {
+    if (Math.abs(h.speedMs) > WAKE_SPEED_MS && Math.abs(l.lx) <= h.halfWidM) {
       const behind = -s * l.ly - h.halfLenM;
       if (behind > 0 && behind <= WAKE_GAP_M) return { dirX: s * fx, dirZ: s * fz, angle: FLAT, heightScale: 0.12 };
     }

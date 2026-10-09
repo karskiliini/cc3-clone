@@ -161,3 +161,14 @@ describe('GlOutput', () => {
     expect(GlOutput.create(1024, 670, () => { throw new Error('no webgl'); })).toBeNull();
   });
 });
+
+
+it('context loss during render reports false in the same frame without needing an exception', () => {
+  let lost = false;
+  const fake = { shadowMap: { enabled: false, type: 0 }, setPixelRatio() {}, setSize() {}, setClearColor() {}, clear() {},
+    render() { lost = true; }, getContext: () => ({ isContextLost: () => lost }) };
+  const canvas = { addEventListener() {} } as unknown as HTMLCanvasElement;
+  const out = GlOutput.create(100, 100, () => fake as never, canvas)!;
+  const ctx = { drawImage() {}, globalAlpha: 1, imageSmoothingEnabled: false, imageSmoothingQuality: 'low' } as unknown as CanvasRenderingContext2D;
+  expect(out.draw(ctx, new VehicleScene(src), { x: 0, y: 0, zoom: 1 })).toBe(false);
+});

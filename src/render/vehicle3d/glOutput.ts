@@ -57,7 +57,7 @@ export class GlOutput {
     const smooth = ctx.imageSmoothingEnabled, quality = ctx.imageSmoothingQuality, alpha = ctx.globalAlpha;
     try {
       this.render(ctx, vs, cam, opts, alpha);
-      return true;
+      return this.ready;
     } catch (err) {
       console.warn('[vehicle3d] draw failed, vehicles fall back to sprites', err);
       this.lost = true;

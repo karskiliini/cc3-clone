@@ -1165,3 +1165,24 @@ Tasks 8 and 9 completed in Codex. Grass blades now use 8–12cm widths and 29–
 Final grass cost: median 3.5833ms with fill versus 1.2067ms without, extra 2.3767ms (limit6ms). CUA JPEG comparisons are saved under `/private/tmp/grass-validation`; final3D summer and full winter matrix include parked/driving, zoom1/2, grass/crops. Earlier `winter_1941` captures are invalid map-name inputs. Winter painted terrain remains nearly blank snow, so local stalk texture is more apparent than summer.
 
 Soldier trails follow the approved deterministic walking/crawling design and discard history across hidden, dead, aboard, or non-growth intervals. Crush-map half-width rounds up to at least0.25m to represent the narrower painted0.35m trail on0.5m cells. Final fresh whole-branch review is coordinated by the parent executor; PR #2 remains unmerged.
+
+### Final whole-feature review and retained decisions
+
+Astra reviewed the grass implementation independently and identified four Important findings. One fix pass addressed all four with failing reproducers: hidden vehicle routes no longer connect on reacquisition; every backward time change resets paint/crush/history; slow movement uses a separate wake threshold, and stopping flushes a residual strip; WebGL readiness is rechecked after render for same-frame fallback. The targeted reproducers failed 6 tests before fixes and passed 55 afterward, with an additional stationary-vehicle assertion included in the final full suite.
+
+All rulings retained from the execution ledger (including earlier tasks):
+
+- Ruling: user (2026-10-09) added soldier mini-trails in tall growth — appended as Task 9 (design posted in chat: ~1/3 chance per 1.5 m pressed 0.35 m streak, crawling 0.6 m always, faint 2D + crush map, visibility rule, hashed) — cost if wrong: rework of one small task
+- Task 2: Ruling: plan's `const tail` clashed with stamp()'s existing `tail` — named it tailT — cost if wrong: none (rename)
+- Task 2: Ruling: the rewind test passes before the impl (nothing stamped yet) — proved it instead by removing the clear line after GREEN: it failed, restored → green — cost if wrong: none
+- Task 6: Ruling: existing VehicleScene tests count every visible/any mesh — grass meshes now hide when empty (visible = count > 0) and the reset test counts vehicle meshes only (grass3d_* excluded; the layer persists across battles, cleared) — cost if wrong: a test edit
+- Task 8: Ruling: grass width 8–12 cm and tip offset 29–43% replace spec 4–6 cm / 15–30% — near-top-down preview made old blades indistinguishable; exaggeration preserves depth/bending while making grass readable — cost if wrong: excess visual density, reversible constants.
+- Task 8: Ruling: fade starts 0.5m from hull (4.5m fade), rest lean NE with ±0.3rad hashed variation — root visual review found oval halo and mismatched painted prevailing direction — cost if wrong: thinner outer coverage and less direction variety.
+- Task 8: Ruling: preview fill includes snow — winter map moscow_1941 has snowy open ground, original open/grass hook produced no winter growth — cost if wrong: preview-only snow replacement.
+- Task 8: Ruling: use supported CUA captures/JPEG and DOM perf hook instead of standalone Playwright PNG — browser policy requires CUA; read-only scope cannot invoke __vbUnitsMs — cost if wrong: different browser performance baseline.
+- Task 9: Ruling: crush-map half-width minimum 0.25m for soldier streaks while painted width remains 0.35m/0.6m — 0.35m is narrower than the 0.5m cell spacing and axis-aligned paths otherwise hit no cells — cost if wrong: slightly broader 3D flattened trail (quantization).
+- Final: Ruling: unrelated backlog 053–055 remains outside this grass feature — parent executor confirmed scope — cost if wrong: none to this feature.
+
+Deferred minor: winter painted growth remains nearly blank snow, so nearby 3D stalk texture is more apparent than summer. No second review was dispatched; final fixes are verified by the regression suite. PR #2 remains unmerged.
+
+Final verification on the complete fixed tree: `npx vitest run` — **158 files passed, 1320 tests passed, 2 skipped** (777.94s); `npm run build` — passed (includes typecheck, existing bundle-size warning); `git diff --check` — clean.
