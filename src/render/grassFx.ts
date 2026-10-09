@@ -4,7 +4,8 @@
 //     lower edge of the figure, so a tank no longer seems to float on top of the field.
 //   * Vehicles leave a wake of flattened growth: two crushed ruts and a bent-over band between
 //     them, stamped into a half-resolution map-sized layer as they advance.
-// Trails are stamped only for vehicles the player can see, so a rut never betrays a hidden enemy.
+// Soldiers sometimes press a faint narrow trail, and crawling men always press one.
+// Trails are stamped only for units the player can see, so a trail never betrays a hidden enemy.
 // Nothing here feeds back into the simulation.
 // ============================================================================
 import type { BattleState, Camera, Season, Side, Terrain, Vec2 } from '@/shared/types';
@@ -60,12 +61,13 @@ export class GrassFx {
   private trail: HTMLCanvasElement | null = null;
   private tctx: CanvasRenderingContext2D | null = null;
   private last = new Map<number, Vec2>();
+  private lastSoldier = new Map<number, Vec2>();
   private lastTime = -1;
   private mapRef: unknown = null;
 
-  private reset(): void { this.trail = null; this.tctx = null; this.last.clear(); }
+  private reset(): void { this.trail = null; this.tctx = null; this.last.clear(); this.lastSoldier.clear(); }
 
-  /** Lay wake stamps for visible vehicles moving through tall growth. Call once per frame. */
+  /** Lay wakes and faint soldier trails for visible units moving through tall growth. Call once per frame. */
   update(state: BattleState, playerSide: Side): void {
     if (state.map !== this.mapRef || state.time < this.lastTime - 0.5) {
       this.reset(); this.mapRef = state.map;
@@ -83,6 +85,42 @@ export class GrassFx {
       if (prev) this.stamp(state, { pos: v.pos, facing: v.hullFacing, lengthM: VEHICLE_DEFS[v.defId]?.lengthM ?? 6, widthM: VEHICLE_DEFS[v.defId]?.widthM ?? 3 }, growth, season, prev);
       this.last.set(v.id, { ...v.pos });
     }
+    for (const s of state.soldiers.values()) {
+      const growth = tallGrowthAt(state, s.pos);
+      if (s.vehicleId != null || s.health === 'dead' || !growth ||
+          (s.side !== playerSide && !state.spotted[playerSide].has(s.id))) {
+        this.lastSoldier.delete(s.id);
+        continue;
+      }
+      const prev = this.lastSoldier.get(s.id);
+      if (!prev) { this.lastSoldier.set(s.id, { ...s.pos }); continue; }
+      if (Math.hypot(s.pos.x - prev.x, s.pos.y - prev.y) < 0.75) continue;
+      if (s.stance === 'prone' || hash2(Math.floor(s.pos.x * 4), Math.floor(s.pos.y * 4), 31) < 0.35)
+        this.stampSoldier(state, prev, s.pos, s.stance === 'prone' ? 0.6 : 0.35, growth, season);
+      this.lastSoldier.set(s.id, { ...s.pos });
+    }
+  }
+
+  private stampSoldier(state: BattleState, from: Vec2, to: Vec2, widthM: number, growth: TallGrowth, season: SeasonKey): void {
+    // At least half a crush cell: a narrow visible streak must not fall between all cell centres.
+    crushMapFor(state.map).stampBand(from, to, Math.max(0.25, widthM / 2));
+    const g = this.ensure(state);
+    if (!g) return;
+    const k = TRAIL_PX_PER_TILE, dx = to.x - from.x, dy = to.y - from.y;
+    const length = Math.hypot(dx, dy) * k, width = widthM * k / TILE_M;
+    g.save();
+    g.translate(from.x * k, from.y * k);
+    g.rotate(Math.atan2(dx, -dy));
+    g.globalAlpha = 0.16;
+    g.fillStyle = BLADES[season][growth].flat;
+    g.fillRect(-width / 2, -length, width, length);
+    g.globalAlpha = 0.3;
+    g.strokeStyle = BLADES[season][growth].flat;
+    g.lineWidth = 0.4;
+    for (const x of [-width / 4, width / 4]) {
+      g.beginPath(); g.moveTo(x, 0); g.lineTo(x, -length); g.stroke();
+    }
+    g.restore();
   }
 
   private ensure(state: BattleState): CanvasRenderingContext2D | null {

@@ -1157,3 +1157,11 @@ Ledger: `.superpowers/sdd/2026-10-08-3d-tall-grass/progress.md` (git-ignored; al
   - Then Steps 2–5 (captures, frame-cost check ≤ 6 ms, commit).
 - Task 9: not started.
 - After Task 9: a final whole-branch review (most capable model), then finishing-a-development-branch (PR #2 on `vehicles-3d-p1` is still open against `play-feedback`; the user merges).
+
+## Continued execution result (2026-10-09)
+
+Tasks 8 and 9 completed in Codex. Grass blades now use 8–12cm widths and 29–43% tip offsets; outer fade starts 0.5m outside the hull, and hashed rest lean follows the painted field’s prevailing northeast direction. This replaces the original numerical sizing/fade choices to make the layer readable without an oval halo. Winter preview fill also replaces snow tiles; the winter map’s actual id is `moscow_1941`.
+
+Final grass cost: median 3.5833ms with fill versus 1.2067ms without, extra 2.3767ms (limit6ms). CUA JPEG comparisons are saved under `/private/tmp/grass-validation`; final3D summer and full winter matrix include parked/driving, zoom1/2, grass/crops. Earlier `winter_1941` captures are invalid map-name inputs. Winter painted terrain remains nearly blank snow, so local stalk texture is more apparent than summer.
+
+Soldier trails follow the approved deterministic walking/crawling design and discard history across hidden, dead, aboard, or non-growth intervals. Crush-map half-width rounds up to at least0.25m to represent the narrower painted0.35m trail on0.5m cells. Final fresh whole-branch review is coordinated by the parent executor; PR #2 remains unmerged.
