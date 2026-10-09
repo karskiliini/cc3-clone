@@ -13,6 +13,7 @@ import { VEHICLE_DEFS } from '@/data/units';
 import { worldToScreen } from '@/engine/camera';
 import { tileAt } from '@/sim/map';
 import { hash2 } from '@/shared/rng';
+import { crushMapFor } from './grassCrush';
 
 export type TallGrowth = 'tallgrass' | 'crops';
 export function tallGrowthAt(state: BattleState, p: Vec2): TallGrowth | null {
@@ -21,7 +22,8 @@ export function tallGrowthAt(state: BattleState, p: Vec2): TallGrowth | null {
 }
 
 /** Standing blades (dark to light) and the paler, straw-like tone of growth pressed flat. */
-const BLADES: Record<'summer' | 'autumn' | 'winter', Record<TallGrowth, { up: string[]; flat: string; rut: string }>> = {
+export type SeasonKey = 'summer' | 'autumn' | 'winter';
+export const BLADES: Record<SeasonKey, Record<TallGrowth, { up: string[]; flat: string; rut: string }>> = {
   summer: {
     tallgrass: { up: ['#4c5823', '#5c6829', '#6e7831', '#80883b'], flat: '#8f9450', rut: '#4a4a24' },
     crops: { up: ['#8f8438', '#9a8f3f', '#a39847', '#b8a850'], flat: '#c2b26a', rut: '#6a5a2c' },
@@ -35,7 +37,7 @@ const BLADES: Record<'summer' | 'autumn' | 'winter', Record<TallGrowth, { up: st
     crops: { up: ['#a09a7c', '#bcb8a2', '#d2d8e2', '#e4e8ee'], flat: '#e8ebf0', rut: '#94969e' },
   },
 };
-function seasonKey(season: Season | undefined): 'summer' | 'autumn' | 'winter' {
+export function seasonKey(season: Season | undefined): SeasonKey {
   return season === 'winter' ? 'winter' : season === 'autumn' ? 'autumn' : 'summer';
 }
 
@@ -63,7 +65,10 @@ export class GrassFx {
 
   /** Lay wake stamps for visible vehicles moving through tall growth. Call once per frame. */
   update(state: BattleState, playerSide: Side): void {
-    if (state.map !== this.mapRef || state.time < this.lastTime - 0.5) { this.reset(); this.mapRef = state.map; }
+    if (state.map !== this.mapRef || state.time < this.lastTime - 0.5) {
+      this.reset(); this.mapRef = state.map;
+      crushMapFor(state.map).clear();
+    }
     this.lastTime = state.time;
     const season = seasonKey(state.map.def?.season);
     for (const v of state.vehicles.values()) {
@@ -89,15 +94,18 @@ export class GrassFx {
     return this.tctx;
   }
 
-  private stamp(state: BattleState, f: Footprint, growth: TallGrowth, season: 'summer' | 'autumn' | 'winter', from: Vec2): void {
-    const g = this.ensure(state);
-    if (!g) return;
-    const k = TRAIL_PX_PER_TILE, mPx = k / TILE_M;
-    const pal = BLADES[season][growth];
+  private stamp(state: BattleState, f: Footprint, growth: TallGrowth, season: SeasonKey, from: Vec2): void {
     // the wake runs from the previous stamp to the vehicle's tail, along the path actually driven
     const dx = f.pos.x - from.x, dy = f.pos.y - from.y;
     const len = Math.hypot(dx, dy);
     if (len < 1e-4) return;
+    // the 3D grass lies flat over the same stretch the painted wake covers: old tail -> new tail
+    const tailT = f.lengthM / 2 / TILE_M, ux = dx / len, uy = dy / len;
+    crushMapFor(state.map).stampBand({ x: from.x - ux * tailT, y: from.y - uy * tailT }, { x: f.pos.x - ux * tailT, y: f.pos.y - uy * tailT }, f.widthM / 2);
+    const g = this.ensure(state);
+    if (!g) return;
+    const k = TRAIL_PX_PER_TILE, mPx = k / TILE_M;
+    const pal = BLADES[season][growth];
     const ang = Math.atan2(dx, -dy); // 0 = north, clockwise
     const halfW = (f.widthM / 2) * mPx;
     const trackW = Math.max(1.2, 0.5 * mPx);
