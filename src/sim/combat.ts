@@ -55,6 +55,7 @@ import { getHeightField, syncCraterMarks } from './heightField';
 import { dropKit, shedGearInBlast, throwItems } from './items';
 import type { Order } from '@/shared/types';
 import * as dm from '@/shared/dmath';
+import { gunBlockText, mainGunBlock, orderedGunBlock } from './gunBlock';
 
 export { hitChance, penetrates };
 
@@ -854,6 +855,14 @@ function segmentPassesHull(a: Vec2, b: Vec2, c: Vec2, widthM: number): boolean {
   return dx * dx + dy * dy <= hw * hw;
 }
 
+/** Half the width (m) of the silhouette a vehicle shows a shooter at `from`: its width head-on,
+ * its length side-on. */
+function presentedHalfM(v: Vehicle, from: Vec2): number {
+  const def = VEHICLE_DEFS[v.defId];
+  const rel = angleTo(from, v.pos) - v.hullFacing;
+  return (Math.abs(dm.sin(rel)) * (def?.lengthM ?? 6) + Math.abs(dm.cos(rel)) * (def?.widthM ?? 3)) / 2;
+}
+
 /** One round at a vehicle: `p` is the chance to hit it at all. An aimed round lands on its spot
  * with the smaller spot chance; most of the rest still hit the vehicle somewhere; every hit goes
  * through the ONE locational damage model (sim/vehicleDamage.ts). */
@@ -889,7 +898,9 @@ function fireAtVehicle(
   // a clean miss is seen to fly past the hull and strike the ground beyond it (visual only: the
   // physics above traced the line to the hull)
   const missedClean = !intercepted && r >= pAny;
-  const seenAt = missedClean ? missPoint(state, shooterPos, vehicle.pos, state.time) : shotPath.impact;
+  const seenAt = missedClean
+    ? missPoint(state, shooterPos, vehicle.pos, state.time, presentedHalfM(vehicle, shooterPos), atRocket ? 80 : 600)
+    : shotPath.impact;
   if (missedClean) shotPath.points[shotPath.points.length - 1] = { ...seenAt };
   if (wantTracer) traceTracers(state, shotPath, kind, !intercepted && r < pAny);
   // the round is in flight (A1, visual): shells at ~600 m/s, rockets at 80 m/s. Damage is
@@ -2282,12 +2293,19 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
     return;
   }
 
+  // an order the gun cannot carry out is reported once, saying why (sim/gunBlock.ts)
+  if (team?.order?.type === 'fire' && mainWeapon && !mainWeapon.indirect) {
+    const block = orderedGunBlock(state, vehicle, team.order);
+    if (block && team.order.gunBlockReported !== block) addMessage(state, `${team.name}\nCan't fire: ${gunBlockText(block)}.`, 'warn', team.side);
+    team.order.gunBlockReported = block ?? undefined;
+  }
+
   const target = mainWeapon?.indirect ? null : pickVehicleTarget(state, vehicle);
 
   if (mainWeapon?.indirect && gunWorks) {
     // item 020: rocket launchers never fire direct main-gun shots — indirect salvos only
     stepVehicleRockets(state, rng, dt, vehicle, def, mainWeapon, crew, track);
-  } else if (target && mainWeapon && gunWorks && (vehicle.mainAmmo > 0 || vehicle.loadedRound)) {
+  } else if (target && mainWeapon && gunWorks && (vehicle.mainAmmo > 0 || vehicle.loadedRound) && !mainGunBlock(state, vehicle, targetPosOf(target))) {
     const weapon = mainWeapon;
     const gunner = crew.gunner!;
     const tPos = targetPosOf(target);
@@ -2572,7 +2590,22 @@ function pickVehicleMgTarget(state: BattleState, vehicle: Vehicle, rangeM: numbe
   }
   // An MG cannot damage the closed tank an attack-unit order is tracking.
   if (order?.targetTeamId != null && state.teams.get(order.targetTeamId)?.vehicleId != null) return null;
-  return vehicleAreaTarget(state, vehicle, rangeM, accepts);
+  // nor the closed hull the commander's belief is about: area fire only where men may be
+  return vehicleAreaTarget(state, vehicle, rangeM, (p) => accepts(p) && !atClosedEnemyArmour(state, vehicle.side, p));
+}
+
+/** Metres from a known enemy hull within which an MG's area fire would only rattle its armour. */
+const MG_ARMOUR_CLEAR_M = 6;
+/** Is `p` where a spotted enemy vehicle with a closed fighting compartment stands? */
+function atClosedEnemyArmour(state: BattleState, side: Side, p: Vec2): boolean {
+  for (const id of state.spottedVehicles[side]) {
+    const v = state.vehicles.get(id);
+    if (!v || v.side === side || v.state === 'knockedOut') continue;
+    const def = VEHICLE_DEFS[v.defId];
+    if (!def || vehicleLayout(def).openTop) continue;
+    if (dist(v.pos, p) * TILE_M <= MG_ARMOUR_CLEAR_M) return true;
+  }
+  return false;
 }
 
 function fireVehicleMgRound(

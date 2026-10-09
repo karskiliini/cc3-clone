@@ -4,17 +4,18 @@
 // vehicle. Judges the vehicle atlases in context at true 1:1 (or zoom 2).
 //   vehicleBattle.html?map=steppe_1943&year=1943&t=40&zoom=1&focus=0
 //     &ger=ger_pz4gh,ger_tiger,ger_rifle_43&sov=sov_t34_76,sov_kv1,sov_rifle_43
-// Sets window.__vbReady when drawn.
+// Sets window.__vbReady when drawn; window.__vbUnitsMs(n) times n unit-layer draws (ms per draw).
 // ============================================================================
 import type { BattleConfig, Camera, GameSettings } from '@/shared/types';
 import { SIM_DT, VIEW_W, VIEW_H, TILE_PX } from '@/shared/types';
 import { Battle } from '@/sim/battle';
 import { TerrainRenderer } from '@/render/terrainRender';
-import { drawUnits } from '@/render/unitRender';
+import { drawUnits, vehiclesWithGrass3d } from '@/render/unitRender';
+import { GrassFx } from '@/render/grassFx';
 import { drawEffects } from '@/render/effects';
 import { requestBattleAtlases, loadAtlas, vehicleDefAtlasName } from '@/render/spriteAtlas';
 
-declare global { interface Window { __vbReady?: boolean } }
+declare global { interface Window { __vbReady?: boolean; __vbUnitsMs?: (n: number) => number } }
 
 const q = new URLSearchParams(location.search);
 const list = (k: string, d: string): string[] => (q.get(k) ?? d).split(',').filter(Boolean);
@@ -33,8 +34,15 @@ const cfg: BattleConfig = {
 };
 const battle = new Battle(cfg);
 battle.start();
+// fill=tallgrass|crops: every open/grass/snow tile becomes that growth (3D grass check)
+const fill = q.get('fill');
+if (fill === 'tallgrass' || fill === 'crops') {
+  const tiles = battle.state.map.tiles;
+  for (let i = 0; i < tiles.length; i++) if (tiles[i] === 'open' || tiles[i] === 'grass' || tiles[i] === 'snow') tiles[i] = fill;
+}
+const grassFx = new GrassFx();
 const steps = Math.round(Number(q.get('t') ?? 30) / SIM_DT);
-for (let i = 0; i < steps && battle.state.phase === 'running'; i++) battle.step(SIM_DT);
+for (let i = 0; i < steps && battle.state.phase === 'running'; i++) { battle.step(SIM_DT); grassFx.update(battle.state, 'german'); }
 
 const state = battle.state;
 const zoom = Number(q.get('zoom') ?? 1);
@@ -62,7 +70,9 @@ void Promise.all([
   const frame = (): void => {
     terrain.draw(ctx, cam);
     terrain.drawOverlays(ctx, cam, state);
+    grassFx.drawTrails(ctx, cam);
     drawUnits(ctx, cam, state, focus?.side ?? 'german', [], settings);
+    grassFx.drawStanding(ctx, cam, state, focus?.side ?? 'german', vehiclesWithGrass3d());
     drawEffects(ctx, cam, state);
   };
   // the terrain bakes its chunks lazily over a few frames: keep drawing
@@ -70,5 +80,20 @@ void Promise.all([
   frame();
   document.getElementById('status')!.textContent =
     `t=${state.time.toFixed(1)} vehicles: ${vehicles.map((v) => `${v.defId}:${v.state}@${v.pos.x.toFixed(0)},${v.pos.y.toFixed(0)}`).join(' ')}`;
+  window.__vbUnitsMs = (n: number): number => {
+    const t0 = performance.now();
+    for (let i = 0; i < n; i++) drawUnits(ctx, cam, state, focus?.side ?? 'german', [], settings);
+    ctx.getImageData(0, 0, 1, 1);            // wait for the GPU work the draws queued
+    return (performance.now() - t0) / n;
+  };
+  // DOM timing output allows restricted browser automation to read the existing benchmark.
+  if (q.has('perf')) setTimeout(() => {
+    const samples = Array.from({ length: 3 }, () => window.__vbUnitsMs!(30));
+    const report = document.createElement('output');
+    report.id = 'units-ms';
+    report.textContent = JSON.stringify(samples);
+    document.body.append(report);
+    frame();
+  }, 3500);
   window.__vbReady = true;
 });

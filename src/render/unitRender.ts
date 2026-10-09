@@ -35,6 +35,11 @@ import { ragdollSample, metresToPx } from '@/render/soldierAnim';
 import type { Debris, GroundItem, Season } from '@/shared/types';
 import { drawRagdollFlight, drawRagdollLanded, ragdollBeginFrame, ragdollPhase } from '@/render/ragdoll';
 import { snapToMuzzle } from '@/render/muzzleSnap';
+import { RECOIL_M, vehicleLook, type VehicleLook } from '@/render/vehicle3d/look';
+import { vehicles3d, loadVehicleModels } from '@/render/vehicle3d';
+import { bladesFor, grassHandOver, type HullPatch } from '@/render/vehicle3d/grassField';
+import { crushMapFor } from '@/render/grassCrush';
+import { seasonKey, tallGrowthAt } from '@/render/grassFx';
 
 // ------------------------------------------------------------ pre-rendered atlases (spec §5) ---
 /** Battles whose atlases have been requested (loading is async; until an atlas is ready — or when
@@ -48,6 +53,9 @@ function ensureAtlases(state: BattleState): void {
   const defs = new Set<string>();
   for (const v of state.vehicles.values()) defs.add(v.defId);
   void requestBattleAtlases(Array.from(sides), state.map.def.season, undefined, Array.from(defs));
+  // a new battle: drop the last battle's 3D instances (ids restart) and keep only this battle's models
+  vehicles3d()?.scene.reset();
+  loadVehicleModels(Array.from(defs), state.map.def.season);
 }
 
 /** Render-side memory per soldier: measured ground speed (for gait cadence) and the last posture
@@ -413,15 +421,6 @@ function drawCorpses(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
   ctx.restore();
 }
 
-/** How far (m) the shot throws a gun back, and for how long (s) the kick eases out. */
-const RECOIL_M = 0.26;
-const RECOIL_S = 0.4;
-function recoilOf(veh: Vehicle, time: number): number {
-  if (veh.lastMainShotAt == null) return 0;
-  const t = (time - veh.lastMainShotAt) / RECOIL_S;
-  return t >= 0 && t < 1 ? (1 - t) * (1 - t) : 0;
-}
-
 /** One whole vehicle at screen (cx,cy) from its Blender atlas (64 directions; light, the soft
  * ground shadow and the turret's shadow on the deck are baked per direction): hull, then the turret
  * on its ring. Nothing is drawn until the vehicle's atlas has loaded (battles preload them).
@@ -597,20 +596,64 @@ function drawHatchFire(
   ctx.restore();
 }
 
+/** One vehicle body from its sprite atlas, as its look says. */
+function drawVehicleLookSprite(ctx: CanvasRenderingContext2D, cam: Camera, look: VehicleLook): void {
+  const p = worldToScreen(cam, look.posTiles);
+  const tl = look.turretLanding ? worldToScreen(cam, look.turretLanding.posTiles) : null;
+  drawVehicleSprite(ctx, look.defId, look.ko ? 'knockedOut' : 'ok', p.x, p.y, look.hullRad, look.turretRad, cam.zoom,
+    look.turretBlown, look.brokenTrack, tl ? { x: tl.x, y: tl.y, dirRad: look.turretLanding!.dirRad } : undefined,
+    look.season, look.recoil);
+}
+
+/** Vehicle bodies first (the 3D layer, or a vehicle's sprite while it has no model, without
+ * WebGL, or with ?vehicles=sprites), then each vehicle's overlays on top. */
+let grass3d: ReadonlySet<number> = new Set();
+/** Vehicles that stood in 3D grass in the last drawn frame: GrassFx.drawStanding skips their 2D fringe. */
+export function vehiclesWithGrass3d(): ReadonlySet<number> { return grass3d; }
+
+function hullPatch(veh: Vehicle, look: VehicleLook): HullPatch {
+  const def = VEHICLE_DEFS[veh.defId];
+  return { id: veh.id, xM: veh.pos.x * TILE_M, zM: veh.pos.y * TILE_M, facing: veh.hullFacing,
+    halfLenM: (def?.lengthM ?? 6) / 2, halfWidM: (def?.widthM ?? 3) / 2, speedMs: look.ko ? 0 : veh.speed };
+}
+
 function drawVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side): void {
+  const gl = vehicles3d();
+  const shown: { veh: Vehicle; look: VehicleLook }[] = [];
+  const in3d: VehicleLook[] = [];
+  const patches: HullPatch[] = [];
+  grass3d = new Set();
+  gl?.scene.begin();
   for (const veh of state.vehicles.values()) {
     if (!isEnemyVisible(state, playerSide, veh.side, veh.id, true)) continue;
     if (!visible(veh.pos, cam)) continue;
-    // a serviceable hull whose crew is outside keeps its live look, hatches open (spec §10)
-    const left = veh.state === 'abandoned' && isServiceable(veh);
-    const koLike = veh.state === 'knockedOut' || veh.state === 'burning' || (veh.state === 'abandoned' && !left);
+    const look = vehicleLook(veh, state);
+    if (gl && gl.scene.add(look)) {
+      in3d.push(look);
+      if (tallGrowthAt(state, veh.pos)) patches.push(hullPatch(veh, look));
+    } else drawVehicleLookSprite(ctx, cam, look);
+    shown.push({ veh, look });
+  }
+  if (gl) {
+    gl.scene.end();
+    // the 3D grass round the hulls standing in tall growth, nearest the view centre first
+    const ppt = TILE_PX * cam.zoom, crush = crushMapFor(state.map);
+    const field = bladesFor(patches,
+      (x, z) => tallGrowthAt(state, { x: x / TILE_M, y: z / TILE_M }),
+      (x, z) => crush.at({ x: x / TILE_M, y: z / TILE_M }),
+      seasonKey(state.map.def.season),
+      (cam.x + VIEW_W / (2 * ppt)) * TILE_M, (cam.y + VIEW_H / (2 * ppt)) * TILE_M);
+    gl.scene.grass.update(field.blades);
+    // a lost context or a renderer failure mid-frame: this frame's 3D vehicles are drawn as sprites
+    const ok = gl.out.draw(ctx, gl.scene, cam);
+    if (!ok) for (const look of in3d) drawVehicleLookSprite(ctx, cam, look);
+    grass3d = grassHandOver(patches.map((p) => p.id), field.dropped, ok);
+  }
+  for (const { veh, look } of shown) {
     const p = worldToScreen(cam, veh.pos);
     const dmg = vehicleDamageView(veh);
-    const tl = veh.turretLanding ? worldToScreen(cam, veh.turretLanding) : null;
-    drawVehicleSprite(ctx, veh.defId, koLike ? 'knockedOut' : 'ok', p.x, p.y, veh.hullFacing, veh.turretFacing, cam.zoom, dmg.turretBlown, dmg.brokenTrack,
-      tl ? { x: tl.x, y: tl.y, dirRad: veh.turretLandingDir ?? veh.turretFacing + 2.3 } : undefined, state.map.def.season,
-      koLike ? 0 : recoilOf(veh, state.time));
-    if ((left || veh.exiting) && cam.zoom > 0.5) drawOpenHatches(ctx, cam, state, veh);
+    // a serviceable hull whose crew is outside keeps its live look, hatches open (spec §10)
+    if ((look.liveButLeft || veh.exiting) && cam.zoom > 0.5) drawOpenHatches(ctx, cam, state, veh);
     // item 011: a dead hull whose hatches blew shows fire spewing from the open hatches
     if (dmg.hatchesBlown && cam.zoom > 0.4) drawHatchFire(ctx, cam, state, veh, p, state.time);
     if (dmg.engineSmoke || dmg.engineFire) drawEngineSmoke(ctx, veh, p, state.time, cam.zoom, VEHICLE_DEFS[veh.defId]?.lengthM ?? 6, dmg.engineFire);

@@ -19,7 +19,54 @@ None — next is 044 M2 (relay server and browser transport).
 
 **050 — Feature: 3D vehicle meshes with deterministic hull physics (umbrella, P1–P5).**
 Request (2026-10-07): "i want the vehicles in the game to be actual 3d meshes, so if they run over a tree, or a stone, the vehicle can actually roll realistically", low-poly from Blender, "they shall all be identifiable by looking"; gameplay physics (option B), all obstacle kinds (logs, trunks, rocks, craters/trenches/rubble/walls/slopes, wrecks); "large explosions can rock a vehicle, or even topple it"; "driving onto an anti-tank mine may easily topple a smaller vehicle". Spec: `docs/superpowers/specs/2026-10-07-3d-vehicle-physics-design.md`. Done when each sub-project meets its acceptance in the spec: P1 every vehicle identifiable from its 3D render (critic check); P2 the physics tests pass and cross-engine determinism holds; P3–P5 per their addenda.
-Blocked on: spec review by the user.
+**P1 done (2026-10-07, branch `vehicles-3d-p1`, plan `docs/superpowers/plans/2026-10-07-3d-vehicles-p1.md`):** every vehicle in battle is a real-time three.js mesh, drawn where its sprite was, with the sprite atlases as fallback (no WebGL, model still loading, unknown def, lost context, `?vehicles=sprites`).
+- Assets: `npm run models:vehicles` (`tools/blender/vehicles_lowpoly.py`) exports every atlas look (hull ok/ko/blown/trackL/trackR, turret ok/ko/blown) of all 36 vehicles from the same procedural Blender models, as built (≤ 4,400 triangles a node, nothing decimated), with one 1024 px baked albedo per node (WebP), plus whitewashed `_winter` looks; `public/models/vehicles.json` manifest; 43 MB, largest file 1.25 MB.
+- Renderer (`src/render/vehicle3d/`): the 2D map mapping as a 4×4 oblique projection (exactly `worldToScreen` on the ground, 12° tilt for height), a shared `vehicleLook` for sprite and 3D paths, pooled per-vehicle instances, matte Lambert paint (user: "still too glossy, way too glossy"), sun self-shadows (shadow map fitted to the view), a flat ground shadow at 42 %, a translucent dark rim round every hull and turret (the sprites' silhouette darkening), 2× supersampled into the 2D canvas at the vehicles' layer. The sim imports nothing of it (test).
+- Verified: tests (projection at zoom 0.5/1/2 against `worldToScreen`, look/pose, scene, material, model manifest and budgets, sim isolation); full suite 152 files, 1247 pass / 2 skip; build passes. `tools/vehicle3dPreview.html` against the sprites at 8 headings: silhouette IoU ≥ 0.849 for every vehicle; brightness (3D/sprite) summer 0.89–1.12, wrecks 0.83–1.04, winter 0.92–1.14. Blind critic: round 2 34/36, the T-26/T-70 swap fixed by the rims (pair re-check 2/2); Panther D/A/G and StuG III/IV are told apart only by camo or small details, exactly as in the sprites. Battle captures (summer zoom 1 and 2, wrecks, winter `moscow_1941`) match the sprite positions. Unit layer with 33 vehicles: +1.2 ms per frame at zoom 0.5, +2.3 ms at zoom 2. Bundle +160 kB gzip (three.js).
+- Deliberate deviation from the spec: gun and road-wheel nodes are split in P2, with the physics that moves them. Deferred minors: the T-28 antenna ring and the BM-13 rails cast thin separate ground shadows; 3D ground shadows are harder than the sprites' soft blobs; camo slightly softer on steep faces.
+
+Next: the P2 plan (deterministic hull physics core).
+
+**051 — Feature: Infantry riding in armoured personnel carriers, physically.**
+Request (2026-10-07): "ja itse pelissä sitten miehistönkuljetusvaunuihin voi tulla kyytiin myös jalkaväkeä. Ne kyykistyvät seinien taakse suojaan, tai ampuvat kyydistä, tai hyppäävät kyydistä maahan. He voivat myös kuolla ja kaatua vaunun kyydissä, jolloin mies jää ragdollina kyytiin. Huomioi fysiikka seinien ja penkkien suhteen." Infantry can board APCs (SdKfz 251 and the like); aboard they crouch behind the side walls for cover, fire over the sides, or jump off to the ground; a man killed aboard falls and stays as a ragdoll in the compartment, colliding with its walls and benches and moving with the tilting hull. Done when: a squad boards, rides, takes cover, fires and dismounts by jumping, each visible in 3D; a man killed aboard lies as a ragdoll held by the walls and benches through pitch and roll; deterministic (state hash) where it affects play.
+Blocked on: 050 P2 (hull physics: the compartment frame the men and ragdolls ride in); spec addendum to be written then (compartment colliders from the low-poly meshes, seat positions, firing positions over the walls).
+
+**052 — Feature: Dynamic track breakage (the track as a physical chain).**
+Request (2026-10-07): "pelissä pitää olla dynaaminen track rikkoutuminen vaunuissa. Eli track ihan oikeasti on dynaaminen elementti joka katkeaa jostain kohtaa ja liikkuu fysiikan mukaisesti. Jos vaunu yrittää jatkaa ajamista, niin se liikkuu vielä hetken irrallisen ketjun päällä ja voi repiä ketjua eri suuntiin. Lopulta vaunun vetopyörän päältä putoava ketju estää sen puoleisen telaketjuston ohjaamisen kokonaan." A track is a real dynamic element: it parts at a specific link (hit point, mine, overstrain), the free ends move under physics; a tank that keeps driving runs on over the loose run for a while and can drag and tear it in different directions; once the chain falls off the drive sprocket that side has no drive or steering at all. Replaces today's instant "trackL/trackR thrown" state and its static sprite/mesh look. Done when: a hit or mine parts a track at the struck link; the chain is simulated as linked segments (deterministic, in the state hash) lying and moving on the ground and wheels; driving on drags it visibly; when it leaves the sprocket that side's drive and steering are lost (the vehicle pivots/slews accordingly); rendered from per-link meshes in 3D.
+Blocked on: 050 P2 (hull physics and wheel contact) and the gun/wheel node split planned for P2; spec addendum then (link chain model, sprocket engagement, cost budget for chains per battle).
+
+**053 — Feature (future idea, not scheduled): Operational campaign layer — battalions on a front sector.**
+Request (2026-10-09, user's words): "kampanja, molemmat pelaajat voivat liikutella pataljoonia jollain rintamalohkolla, jokainen pataljoona sisältää n määrän joukkoja, joita komennetaan. Pataljoona voi jäädä paikalleen, jolloin se saa vähän hitaammin täydennyksiä, se voi vetäytyä, jolloin tulee enemmän täydennyksiä, tai se voi hyökätä ja jälleen täydennyksiä tulee vähän hitaammin. Painopistesuunnassa olevalle pataljoonalle voidaan myös määrätä lisätäydennyksiä, tai niitä voidaan ripotella eri pataljoonille, kuitenkin siten että käyttöliittymä on selkeä. Täydennykset ovat yleensä vihreitä joukkoja, mutta aikakauden mukaisesti varusteltu. Esimerkki: saksa on ollut hyökkäyskannalla, mutta heiltä alkaa voimat olla vähissä, he haluavat pysähtyä jotta saavat täydennettyä itseään -> vastustaja iskeekin omasta puolestaan hyökkäyksen, jolloin saksalainen pataljoona ei ehdikään odottamaan itselleen täydennyksiä (eli tavallaan täydennykset saapuvat vasta kierroksen päätyttyä?). Jos kartta olisi heksapohjainen, niin yhteen ruutuun voi hyökätä usealta suunnalta - kenties olisi parasta että liikuteltavat joukot olisivat aina komppanioita, jolloin yhteen taisteluun mahtuu max pataljoona / puoli."
+Gist:
+- Both players move battalions on a front sector; each battalion holds n commanded units.
+- Each turn a battalion holds (slower replacements), withdraws (more replacements) or attacks (slower replacements).
+- Extra replacements can go to the main-effort battalion or be spread over several; the UI must stay clear.
+- Replacements are usually green troops, equipped for the period.
+- Replacements arrive only when the turn ends, so a side that pauses to refit can be hit before they arrive. Example: an exhausted German attacker halts to refit, and the Soviets strike first.
+- Possibly a hex map, where one hex can be attacked from several directions. The moved pieces might then be companies, capping one battle at a battalion per side.
+Open questions: hexes vs. sectors; company vs. battalion pieces; how this relates to the existing operation/campaign code (`src/data/operation.ts`, `campaign.ts`); the turn order (simultaneous vs. alternating).
+Done when: this goes through brainstorming into a written spec the user approves. It is not scheduled until the user asks for it.
+
+**054 — Feature: Heavy vehicles flatten foxholes and craters.**
+Request (2026-10-09): "kun vaunut ajavat esim. foxholen tai räjähdysreiän kohdalta, niin maaston pitää tasoittua realistisesti raskaan painon alla."
+Today, foxholes (−1.2 m with a +0.4 m spoil mound) and craters (bowl plus rim) are fixed shapes in the height field's dig layer (`src/sim/heightField.ts`, around line 554).
+Done when:
+- A vehicle driving over a foxhole or crater deforms it in the sim (deterministic, included in the state hash), scaled by the vehicle's weight and the number of passes. Rims and mounds are pushed down, and holes are partly filled or caved in under the tracks.
+- Cover from a crushed foxhole drops accordingly.
+- The render follows the new height.
+- Tests: one pass by a heavy tank reduces the depth more than a light one does, and repeated passes keep flattening it; the effect is identical across engines.
+Relates to 050 P2 (hull physics over terrain): do it after P2, or define the deformation so P2 reads it.
+
+**055 — Feature: Idle infantry dig in, and the foxhole grows over time.**
+Request (2026-10-09): "Kun miehet pysähtyvät ja heillä ei ole aktiivista tehtävää, niin he voivat heti alkaa kaivautua lapioilla. Foxhole alkaa hiljalleen kasvaa ja miehet saavat paremman suojan."
+Done when:
+- A soldier who has stopped and has no active task (not firing, moving, healing or carrying) starts digging at once with his entrenching tool, shown with a dig animation.
+- A personal foxhole grows step by step at his spot: depth, spoil mound and cover rise with digging time, and a full hole takes on the order of minutes.
+- Digging stops immediately for any order or threat reaction and resumes from the reached depth.
+- The hole stays in the map's dig layer. It is deterministic and included in the state hash.
+- The cover and protection it gives grow with its depth, and the cover-seeking code (`coverSeek.ts`) prefers holes that already exist.
+- Tests: depth grows with time; an order interrupts digging; cover at half depth lies between none and full; behaviour is identical across engines.
+Open questions: the dig rate per period and terrain (frozen ground in winter, rock, urban rubble); whether a crew-served weapon team digs a weapon pit.
 
 **047b — Feature: Desync recovery in the real game (remaining part of 047).**
 
@@ -53,7 +100,7 @@ Completion: plan milestones M1–M5 are met.
 - A reloaded tab rejoins by fast-forwarding the command log.
 - A desync produces a downloadable log that reproduces offline.
 
-The next request receives ID 050.
+The next request receives ID 056.
 
 ## Completed
 

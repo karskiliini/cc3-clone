@@ -4,7 +4,8 @@
 //     lower edge of the figure, so a tank no longer seems to float on top of the field.
 //   * Vehicles leave a wake of flattened growth: two crushed ruts and a bent-over band between
 //     them, stamped into a half-resolution map-sized layer as they advance.
-// Trails are stamped only for vehicles the player can see, so a rut never betrays a hidden enemy.
+// Soldiers sometimes press a faint narrow trail, and crawling men always press one.
+// Trails are stamped only for units the player can see, so a trail never betrays a hidden enemy.
 // Nothing here feeds back into the simulation.
 // ============================================================================
 import type { BattleState, Camera, Season, Side, Terrain, Vec2 } from '@/shared/types';
@@ -13,6 +14,7 @@ import { VEHICLE_DEFS } from '@/data/units';
 import { worldToScreen } from '@/engine/camera';
 import { tileAt } from '@/sim/map';
 import { hash2 } from '@/shared/rng';
+import { crushMapFor } from './grassCrush';
 
 export type TallGrowth = 'tallgrass' | 'crops';
 export function tallGrowthAt(state: BattleState, p: Vec2): TallGrowth | null {
@@ -21,7 +23,8 @@ export function tallGrowthAt(state: BattleState, p: Vec2): TallGrowth | null {
 }
 
 /** Standing blades (dark to light) and the paler, straw-like tone of growth pressed flat. */
-const BLADES: Record<'summer' | 'autumn' | 'winter', Record<TallGrowth, { up: string[]; flat: string; rut: string }>> = {
+export type SeasonKey = 'summer' | 'autumn' | 'winter';
+export const BLADES: Record<SeasonKey, Record<TallGrowth, { up: string[]; flat: string; rut: string }>> = {
   summer: {
     tallgrass: { up: ['#4c5823', '#5c6829', '#6e7831', '#80883b'], flat: '#8f9450', rut: '#4a4a24' },
     crops: { up: ['#8f8438', '#9a8f3f', '#a39847', '#b8a850'], flat: '#c2b26a', rut: '#6a5a2c' },
@@ -35,7 +38,7 @@ const BLADES: Record<'summer' | 'autumn' | 'winter', Record<TallGrowth, { up: st
     crops: { up: ['#a09a7c', '#bcb8a2', '#d2d8e2', '#e4e8ee'], flat: '#e8ebf0', rut: '#94969e' },
   },
 };
-function seasonKey(season: Season | undefined): 'summer' | 'autumn' | 'winter' {
+export function seasonKey(season: Season | undefined): SeasonKey {
   return season === 'winter' ? 'winter' : season === 'autumn' ? 'autumn' : 'summer';
 }
 
@@ -50,32 +53,79 @@ export function needsStamp(last: Vec2 | undefined, pos: Vec2): boolean {
   return !last || Math.hypot(pos.x - last.x, pos.y - last.y) >= STAMP_STEP_TILES;
 }
 
+const NO_IDS: ReadonlySet<number> = new Set();
+
 const TRAIL_PX_PER_TILE = 10; // half the terrain resolution: crushed growth is soft anyway
 
 export class GrassFx {
   private trail: HTMLCanvasElement | null = null;
   private tctx: CanvasRenderingContext2D | null = null;
   private last = new Map<number, Vec2>();
+  private lastSoldier = new Map<number, Vec2>();
   private lastTime = -1;
   private mapRef: unknown = null;
 
-  private reset(): void { this.trail = null; this.tctx = null; this.last.clear(); }
+  private reset(): void { this.trail = null; this.tctx = null; this.last.clear(); this.lastSoldier.clear(); }
 
-  /** Lay wake stamps for visible vehicles moving through tall growth. Call once per frame. */
+  /** Lay wakes and faint soldier trails for visible units moving through tall growth. Call once per frame. */
   update(state: BattleState, playerSide: Side): void {
-    if (state.map !== this.mapRef || state.time < this.lastTime - 0.5) { this.reset(); this.mapRef = state.map; }
+    if (state.map !== this.mapRef || state.time < this.lastTime) {
+      this.reset(); this.mapRef = state.map;
+      crushMapFor(state.map).clear();
+    }
     this.lastTime = state.time;
     const season = seasonKey(state.map.def?.season);
     for (const v of state.vehicles.values()) {
-      if (v.side !== playerSide && !state.spottedVehicles[playerSide].has(v.id)) continue;
+      if (v.side !== playerSide && !state.spottedVehicles[playerSide].has(v.id)) {
+        this.last.delete(v.id);
+        continue;
+      }
       const growth = tallGrowthAt(state, v.pos);
       const prev = this.last.get(v.id);
       if (!growth) { if (prev) this.last.set(v.id, { ...v.pos }); continue; }
-      if (!needsStamp(prev, v.pos)) continue;
+      // Flush the last sub-step once a vehicle stops: its temporary 3D tail gap must stay flat.
+      const residual = prev && Math.hypot(v.pos.x - prev.x, v.pos.y - prev.y) > 1e-4;
+      if (!needsStamp(prev, v.pos) && !(residual && Math.abs(v.speed) < 1e-4)) continue;
       // a vehicle first seen standing still in the field has no wake yet: just remember it
       if (prev) this.stamp(state, { pos: v.pos, facing: v.hullFacing, lengthM: VEHICLE_DEFS[v.defId]?.lengthM ?? 6, widthM: VEHICLE_DEFS[v.defId]?.widthM ?? 3 }, growth, season, prev);
       this.last.set(v.id, { ...v.pos });
     }
+    for (const s of state.soldiers.values()) {
+      const growth = tallGrowthAt(state, s.pos);
+      if (s.vehicleId != null || s.health === 'dead' || !growth ||
+          (s.side !== playerSide && !state.spotted[playerSide].has(s.id))) {
+        this.lastSoldier.delete(s.id);
+        continue;
+      }
+      const prev = this.lastSoldier.get(s.id);
+      if (!prev) { this.lastSoldier.set(s.id, { ...s.pos }); continue; }
+      if (Math.hypot(s.pos.x - prev.x, s.pos.y - prev.y) < 0.75) continue;
+      if (s.stance === 'prone' || hash2(Math.floor(s.pos.x * 4), Math.floor(s.pos.y * 4), 31) < 0.35)
+        this.stampSoldier(state, prev, s.pos, s.stance === 'prone' ? 0.6 : 0.35, growth, season);
+      this.lastSoldier.set(s.id, { ...s.pos });
+    }
+  }
+
+  private stampSoldier(state: BattleState, from: Vec2, to: Vec2, widthM: number, growth: TallGrowth, season: SeasonKey): void {
+    // At least half a crush cell: a narrow visible streak must not fall between all cell centres.
+    crushMapFor(state.map).stampBand(from, to, Math.max(0.25, widthM / 2));
+    const g = this.ensure(state);
+    if (!g) return;
+    const k = TRAIL_PX_PER_TILE, dx = to.x - from.x, dy = to.y - from.y;
+    const length = Math.hypot(dx, dy) * k, width = widthM * k / TILE_M;
+    g.save();
+    g.translate(from.x * k, from.y * k);
+    g.rotate(Math.atan2(dx, -dy));
+    g.globalAlpha = 0.16;
+    g.fillStyle = BLADES[season][growth].flat;
+    g.fillRect(-width / 2, -length, width, length);
+    g.globalAlpha = 0.3;
+    g.strokeStyle = BLADES[season][growth].flat;
+    g.lineWidth = 0.4;
+    for (const x of [-width / 4, width / 4]) {
+      g.beginPath(); g.moveTo(x, 0); g.lineTo(x, -length); g.stroke();
+    }
+    g.restore();
   }
 
   private ensure(state: BattleState): CanvasRenderingContext2D | null {
@@ -89,15 +139,18 @@ export class GrassFx {
     return this.tctx;
   }
 
-  private stamp(state: BattleState, f: Footprint, growth: TallGrowth, season: 'summer' | 'autumn' | 'winter', from: Vec2): void {
-    const g = this.ensure(state);
-    if (!g) return;
-    const k = TRAIL_PX_PER_TILE, mPx = k / TILE_M;
-    const pal = BLADES[season][growth];
+  private stamp(state: BattleState, f: Footprint, growth: TallGrowth, season: SeasonKey, from: Vec2): void {
     // the wake runs from the previous stamp to the vehicle's tail, along the path actually driven
     const dx = f.pos.x - from.x, dy = f.pos.y - from.y;
     const len = Math.hypot(dx, dy);
     if (len < 1e-4) return;
+    // the 3D grass lies flat over the same stretch the painted wake covers: old tail -> new tail
+    const tailT = f.lengthM / 2 / TILE_M, ux = dx / len, uy = dy / len;
+    crushMapFor(state.map).stampBand({ x: from.x - ux * tailT, y: from.y - uy * tailT }, { x: f.pos.x - ux * tailT, y: f.pos.y - uy * tailT }, f.widthM / 2);
+    const g = this.ensure(state);
+    if (!g) return;
+    const k = TRAIL_PX_PER_TILE, mPx = k / TILE_M;
+    const pal = BLADES[season][growth];
     const ang = Math.atan2(dx, -dy); // 0 = north, clockwise
     const halfW = (f.widthM / 2) * mPx;
     const trackW = Math.max(1.2, 0.5 * mPx);
@@ -145,13 +198,15 @@ export class GrassFx {
     ctx.imageSmoothingEnabled = prev;
   }
 
-  /** Blades in front of everything standing in tall growth. Draw after the units. */
-  drawStanding(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side): void {
+  /** Blades in front of everything standing in tall growth (vehicles in `skip` stand in the 3D grass
+   * instead). Draw after the units. */
+  drawStanding(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side, skip: ReadonlySet<number> = NO_IDS): void {
     const season = seasonKey(state.map.def?.season);
     const z = cam.zoom, mPx = (TILE_PX * z) / TILE_M;
     ctx.save();
     ctx.lineCap = 'butt';
     for (const v of state.vehicles.values()) {
+      if (skip.has(v.id)) continue;   // the 3D grass stands round this one
       if (v.side !== playerSide && !state.spottedVehicles[playerSide].has(v.id)) continue;
       const growth = tallGrowthAt(state, v.pos);
       if (!growth) continue;

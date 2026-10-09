@@ -9,6 +9,7 @@ import { aimLineProfile, aimPointClass, type AimClass } from '@/sim/losProfile';
 import { ATTACK_PICK_VEHICLE_PAD_TILES, spottedEnemyTeamAt } from '@/sim/orders';
 import { penRating, teamPenetrationChance, type PenRating } from '@/sim/penChance';
 import { vehicleEyes } from '@/sim/vehicleVision';
+import { gunBlockText, mainGunBlock } from '@/sim/gunBlock';
 
 /** Where a team looks from when it aims: its leader (or first living man) at his eye height, or —
  * for a vehicle — the turret eye (gunner's sight, or the commander laying the gun himself in a
@@ -74,6 +75,9 @@ export interface TargetHover {
   lof: boolean;
   /** The spotted vehicle under the pointer is already out: knocked out, burning or abandoned. */
   dead?: DeadVehicleState;
+  /** Every selected team is a vehicle whose main gun cannot engage this target: why (the first's
+   * reason, sim/gunBlock.ts), so a gun that stays silent is never a mystery. */
+  block?: string;
 }
 
 /** The spotted enemy vehicle hull under `world` (any state, wrecks included), or null. */
@@ -129,9 +133,10 @@ export function targetableEnemyAt(state: BattleState, playerSide: Side, selected
     if (cls === 'blocked') continue;
     if (cls === 'clear' || best === 'blocked') best = cls;
   }
-  if (vehicle) return looked ? { team: enemy, cls: best, penChance, pen: penRating(penChance), lof: best !== 'blocked' } : null;
+  const block = selectedGunBlock(state, selected, vehicle ? vehicle.pos : pts[0]);
+  if (vehicle) return looked ? { team: enemy, cls: best, penChance, pen: penRating(penChance), lof: best !== 'blocked', ...(block ? { block } : {}) } : null;
   if (best === 'blocked') return null;
-  return { team: enemy, cls: best, lof: true };
+  return { team: enemy, cls: best, lof: true, ...(block ? { block } : {}) };
 }
 
 /** Which aiming cross the pointer shows over a Fire target: grey for a wreck; against armour
@@ -144,10 +149,27 @@ export function targetCursorKind(h: TargetHover): CursorKind {
   return h.lof ? base : `${base}Blocked`;
 }
 
+/** Why none of the selected teams can fire on `at`, when all of them are vehicles with a main gun
+ * that cannot (a man with a rifle can always try); null otherwise. */
+function selectedGunBlock(state: BattleState, selected: Team[], at: Vec2): string | null {
+  let reason: string | null = null;
+  for (const t of selected) {
+    if (t.outOfAction) continue;
+    const v = t.vehicleId != null ? state.vehicles.get(t.vehicleId) : undefined;
+    const def = v ? VEHICLE_DEFS[v.defId] : undefined;
+    if (!v || !def?.mainWeaponId || WEAPONS[def.mainWeaponId]?.indirect) return null;
+    const b = mainGunBlock(state, v, at);
+    if (!b) return null;
+    reason ??= gunBlockText(b);
+  }
+  return reason;
+}
+
 /** Short status word shown by the pointer with the cross: the wreck's state, or that the selected
  * teams cannot fire on it from where they are. Null when the cross says it all. */
 export function targetStatusText(h: TargetHover): string | null {
   if (h.dead) return h.dead === 'knockedOut' ? 'KO' : h.dead;
+  if (h.block) return h.block;
   if (!h.lof) return 'no line of fire';
   return null;
 }

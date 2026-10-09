@@ -1,4 +1,5 @@
 import { crewMayReturn, crewOutsideWord } from './vehicleCrew';
+import { orderedGunBlock } from './gunBlock';
 import { inCommand } from './command';
 import { transportWord } from './transport';
 import type {
@@ -284,6 +285,9 @@ function computeTeamStatus(state: BattleState, team: Team, track: MoraleTrack): 
   // a vehicle's main gun, like a crew-served one: the word follows what the gun is waiting for
   // (`Vehicle.gunState`, sim/combat.ts) — the loader ramming a round, or the gunner laying on a
   // target. Never while it drives: 'Moving' tells the player more.
+  if (vehicle && team.order?.type === 'fire' && (word === 'Waiting' || word === 'Firing') && orderedGunBlock(state, vehicle, team.order)) {
+    return { status: "Can't Fire", outOfAction, morale };
+  }
   if (vehicle && (word === 'Waiting' || word === 'Defending' || word === 'Ambushing' || word === 'Firing')) {
     const gunWord = vehicleGunWord(vehicle);
     if (gunWord) return { status: gunWord, outOfAction, morale };

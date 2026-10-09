@@ -11,7 +11,7 @@ import type { ReplayLog } from '@/sim/replay';
 import { hashHex, hashState } from '@/sim/stateHash';
 import { centerCamera, clampCamera, panCamera, screenToWorld, worldToScreen, zoomIn, zoomOut } from '@/engine/camera';
 import { TerrainRenderer } from '@/render/terrainRender';
-import { drawUnits } from '@/render/unitRender';
+import { drawUnits, vehiclesWithGrass3d } from '@/render/unitRender';
 import { drawEffects } from '@/render/effects';
 import { VisibilityOverlay } from '@/render/visibilityOverlay';
 import { DepthOverlay } from '@/render/depthOverlay';
@@ -844,7 +844,7 @@ export class BattleScreen implements Screen {
     drawUnits(ctx, cam, state, battle.playerSide(), this.selectedTeamIds, game.settings, this.showDead, this.hoveredOrderMarker, this.hoverTeamId, this.soldierMonitor.watchedSoldierId());
     // The original's drag feel: the dragged marker's ball follows the cursor while held.
     if (this.markerDrag) drawOrderBall(ctx, game.input.state.mouse, 3.2 * 1.4);
-    this.grassFx.drawStanding(ctx, cam, state, battle.playerSide());
+    this.grassFx.drawStanding(ctx, cam, state, battle.playerSide(), vehiclesWithGrass3d());
     drawEffects(ctx, cam, state);
     this.blastFx.draw(ctx, cam, state.time);
 

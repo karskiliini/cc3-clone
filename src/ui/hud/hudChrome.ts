@@ -157,6 +157,7 @@ export function teamStatusTextColor(word: TeamStatusWord): string {
     case 'Hesitating':
     case 'Abandoned': // a serviceable vehicle waiting for its crew (spec 2026-09-17 §10)
     case 'Bailing out':
+    case "Can't Fire": // a Fire order the main gun cannot carry out (sim/gunBlock.ts)
       return HUD.yellow;
     case 'Broken':
     case 'Panicked':
