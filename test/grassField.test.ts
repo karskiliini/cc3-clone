@@ -23,8 +23,8 @@ describe('blade field', () => {
       expect(g.kind).toBe('grass'); expect(w.kind).toBe('wheat');
       expect(g.heightM).toBeGreaterThanOrEqual(0.6); expect(g.heightM).toBeLessThanOrEqual(0.9);
       expect(w.heightM).toBeGreaterThanOrEqual(1.0); expect(w.heightM).toBeLessThanOrEqual(1.2);
-      expect(g.widthM).toBeGreaterThanOrEqual(0.04); expect(g.widthM).toBeLessThanOrEqual(0.06);
-      expect(tipOffset(g.restAngle)).toBeGreaterThanOrEqual(0.14); expect(tipOffset(g.restAngle)).toBeLessThanOrEqual(0.31);
+      expect(g.widthM).toBeGreaterThanOrEqual(0.08); expect(g.widthM).toBeLessThanOrEqual(0.12);
+      expect(tipOffset(g.restAngle)).toBeGreaterThanOrEqual(0.29); expect(tipOffset(g.restAngle)).toBeLessThanOrEqual(0.43);
       expect(tipOffset(w.restAngle)).toBeLessThanOrEqual(0.08);
     }
   });
@@ -41,10 +41,10 @@ const blade = (xM: number, zM: number): Blade => ({ kind: 'grass', xM, zM, heigh
 
 describe('patch fade', () => {
   it('is full near the hull, gone at the patch edge, and never rises outward', () => {
-    expect(patchFade(0)).toBe(1); expect(patchFade(2.5)).toBe(1);
+    expect(patchFade(0)).toBe(1); expect(patchFade(0.5)).toBe(1); expect(patchFade(2.5)).toBeLessThan(0.6);
     expect(patchFade(5)).toBe(0); expect(patchFade(7)).toBe(0);
     let last = 1;
-    for (let d = 2.5; d <= 5; d += 0.1) { const f = patchFade(d); expect(f).toBeLessThanOrEqual(last); last = f; }
+    for (let d = 0.5; d <= 5; d += 0.1) { const f = patchFade(d); expect(f).toBeLessThanOrEqual(last); last = f; }
   });
 });
 
@@ -100,10 +100,10 @@ describe('patches', () => {
     const half: GrowthAt = (x) => (x > 100 ? 'crops' : 'tallgrass');
     for (const b of bladesFor([H], half, null, 'summer', 100, 100).blades) expect(b.kind).toBe(b.xM > 100 ? 'wheat' : 'grass');
   });
-  it('fade full within 2.5 m of the hull and never reach 5 m', () => {
+  it('fade full within 0.5 m of the hull and never reach 5 m', () => {
     for (const b of bladesFor([H], grass, null, 'summer', 100, 100).blades) {
       const d = hullLocal(H, b.xM, b.zM).d;
-      if (d <= 2.5) expect(b.fade).toBe(1);
+      if (d <= 0.5) expect(b.fade).toBe(1);
       expect(d).toBeLessThan(5);
       expect(b.fade).toBeGreaterThan(0);
     }

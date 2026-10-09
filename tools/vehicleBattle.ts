@@ -34,11 +34,11 @@ const cfg: BattleConfig = {
 };
 const battle = new Battle(cfg);
 battle.start();
-// fill=tallgrass|crops: every open/grass tile becomes that growth (3D grass check)
+// fill=tallgrass|crops: every open/grass/snow tile becomes that growth (3D grass check)
 const fill = q.get('fill');
 if (fill === 'tallgrass' || fill === 'crops') {
   const tiles = battle.state.map.tiles;
-  for (let i = 0; i < tiles.length; i++) if (tiles[i] === 'open' || tiles[i] === 'grass') tiles[i] = fill;
+  for (let i = 0; i < tiles.length; i++) if (tiles[i] === 'open' || tiles[i] === 'grass' || tiles[i] === 'snow') tiles[i] = fill;
 }
 const grassFx = new GrassFx();
 const steps = Math.round(Number(q.get('t') ?? 30) / SIM_DT);
@@ -86,5 +86,14 @@ void Promise.all([
     ctx.getImageData(0, 0, 1, 1);            // wait for the GPU work the draws queued
     return (performance.now() - t0) / n;
   };
+  // DOM timing output allows restricted browser automation to read the existing benchmark.
+  if (q.has('perf')) setTimeout(() => {
+    const samples = Array.from({ length: 3 }, () => window.__vbUnitsMs!(30));
+    const report = document.createElement('output');
+    report.id = 'units-ms';
+    report.textContent = JSON.stringify(samples);
+    document.body.append(report);
+    frame();
+  }, 3500);
   window.__vbReady = true;
 });

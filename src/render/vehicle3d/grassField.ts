@@ -13,7 +13,7 @@ import type { Crush } from '@/render/grassCrush';
 export const CELL_M = 0.2;
 /** a patch reaches this far (m) outside the hull; its outer FADE_M thins into the painted field */
 export const PATCH_PAD_M = 5;
-export const FADE_M = 2.5;
+export const FADE_M = 4.5;
 /** a standing hull pushes blades over within this distance (m) of its sides */
 export const PUSH_M = 1.0;
 /** ...and a moving bow this far ahead of it */
@@ -21,7 +21,6 @@ export const BOW_PUSH_M = 2.0;
 /** behind a moving tail, flat this far (m): the wake stamps come every 0.7 m */
 export const WAKE_GAP_M = 0.9;
 export const MAX_BLADES = 40000;
-const TAU = Math.PI * 2;
 
 export type BladeKind = 'grass' | 'wheat';
 export type GrowthAt = (xM: number, zM: number) => TallGrowth | null;
@@ -50,10 +49,10 @@ export function bladeAt(cx: number, cz: number, growthAt: GrowthAt, season: Seas
   return {
     kind: wheat ? 'wheat' : 'grass', xM, zM,
     heightM: wheat ? 1.0 + 0.2 * h : 0.6 + 0.3 * h,
-    widthM: wheat ? 0.025 : 0.04 + 0.02 * w,
-    // tip offset (1 - cos a) / a: 0.15..0.30 for grass, <= 0.08 for wheat
-    restAngle: wheat ? 0.16 * w : 0.3 + 0.32 * w,
-    restDir: hash2(cx, cz, 706) * TAU,
+    widthM: wheat ? 0.025 : 0.08 + 0.04 * w,
+    // tip offset (1 - cos a) / a: 0.29..0.43 for grass, <= 0.08 for wheat
+    restAngle: wheat ? 0.16 * w : 0.6 + 0.3 * w,
+    restDir: Math.PI / 4 + (hash2(cx, cz, 706) - 0.5) * 0.6,
     // mostly the darker tones, as the 2D fringe: the light ones are the rare sunlit tips
     colour: parseInt(tones[Math.min(tones.length - 1, Math.floor(c * c * tones.length))].slice(1), 16),
   };
