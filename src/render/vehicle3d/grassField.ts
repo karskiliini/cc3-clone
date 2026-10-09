@@ -7,6 +7,7 @@
 // ============================================================================
 import { hash2 } from '@/shared/rng';
 import { BLADES, type SeasonKey, type TallGrowth } from '@/render/grassFx';
+import type { Crush } from '@/render/grassCrush';
 
 /** one blade per cell: 25 per m² */
 export const CELL_M = 0.2;
@@ -56,4 +57,74 @@ export function bladeAt(cx: number, cz: number, growthAt: GrowthAt, season: Seas
     // mostly the darker tones, as the 2D fringe: the light ones are the rare sunlit tips
     colour: parseInt(tones[Math.min(tones.length - 1, Math.floor(c * c * tones.length))].slice(1), 16),
   };
+}
+
+/** A vehicle the field grows round: its centre, compass facing, half extents and signed speed (m/s, < 0 reversing). */
+export interface HullPatch { id: number; xM: number; zM: number; facing: number; halfLenM: number; halfWidM: number; speedMs: number }
+
+/** A point in the hull's frame: lx right, ly forward, d its distance outside the hull rectangle
+ * (0 inside), away the unit vector pointing from the nearest hull edge to it (0 inside). */
+export function hullLocal(h: HullPatch, xM: number, zM: number): { lx: number; ly: number; d: number; awayX: number; awayZ: number } {
+  const fx = Math.sin(h.facing), fz = -Math.cos(h.facing), rx = Math.cos(h.facing), rz = Math.sin(h.facing);
+  const px = xM - h.xM, pz = zM - h.zM;
+  const lx = px * rx + pz * rz, ly = px * fx + pz * fz;
+  const ex = Math.max(Math.abs(lx) - h.halfWidM, 0), ey = Math.max(Math.abs(ly) - h.halfLenM, 0);
+  const d = Math.hypot(ex, ey);
+  if (d === 0) return { lx, ly, d, awayX: 0, awayZ: 0 };
+  const sx = (Math.sign(lx) * ex) / d, sy = (Math.sign(ly) * ey) / d;
+  return { lx, ly, d, awayX: sx * rx + sy * fx, awayZ: sx * rz + sy * fz };
+}
+
+/** How much of a blade at d metres outside the hull survives: 1 out to PATCH_PAD_M - FADE_M, then smoothly to 0. */
+export function patchFade(d: number): number {
+  if (d <= PATCH_PAD_M - FADE_M) return 1;
+  if (d >= PATCH_PAD_M) return 0;
+  const t = (PATCH_PAD_M - d) / FADE_M;
+  return t * t * (3 - 2 * t);
+}
+
+export type CrushAt = (xM: number, zM: number) => Crush | null;
+
+/** A blade's pose: it bends toward (dirX, dirZ) into an arc of `angle` rad; heightScale squashes it toward the ground. */
+export interface Bend { dirX: number; dirZ: number; angle: number; heightScale: number }
+
+/** lying down: the arc's tip runs along the ground */
+export const FLAT = Math.PI / 2;
+const UNDER_PAD_M = 0.15;
+const PUSH_MAX_RAD = (70 * Math.PI) / 180;
+const BOW_SPEED_MS = 0.3;
+
+/** How the hulls and the wakes bend a blade (strongest wins): under a hull flat; in a moving hull's
+ * wake gap or on crushed ground flat along the travel; beside a hull pushed away from it (ahead of
+ * a moving bow, forward); otherwise its own curve. */
+export function bendBlade(b: Blade, hulls: readonly HullPatch[], crush: CrushAt | null): Bend {
+  const local = hulls.map((h) => hullLocal(h, b.xM, b.zM));
+  for (let i = 0; i < hulls.length; i++) {
+    const h = hulls[i], l = local[i];
+    const s = Math.sign(h.speedMs), fx = Math.sin(h.facing), fz = -Math.cos(h.facing);
+    if (Math.abs(l.lx) <= h.halfWidM + UNDER_PAD_M && Math.abs(l.ly) <= h.halfLenM + UNDER_PAD_M) {
+      return { dirX: fx, dirZ: fz, angle: FLAT, heightScale: 0.08 };
+    }
+    // the stretch the tail has just left and the next wake stamp has not yet reached
+    if (Math.abs(h.speedMs) > BOW_SPEED_MS && Math.abs(l.lx) <= h.halfWidM) {
+      const behind = -s * l.ly - h.halfLenM;
+      if (behind > 0 && behind <= WAKE_GAP_M) return { dirX: s * fx, dirZ: s * fz, angle: FLAT, heightScale: 0.12 };
+    }
+  }
+  const c = crush?.(b.xM, b.zM);
+  if (c && c.level >= 0.5) return { dirX: Math.sin(c.dirRad), dirZ: -Math.cos(c.dirRad), angle: FLAT, heightScale: 0.12 };
+  let best: Bend = { dirX: Math.sin(b.restDir), dirZ: -Math.cos(b.restDir), angle: b.restAngle, heightScale: 1 };
+  for (let i = 0; i < hulls.length; i++) {
+    const h = hulls[i], l = local[i];
+    const s = Math.sign(h.speedMs);
+    const ahead = Math.abs(h.speedMs) > BOW_SPEED_MS && s * l.ly > h.halfLenM && Math.abs(l.lx) <= h.halfWidM + 0.3;
+    const reach = ahead ? BOW_PUSH_M : PUSH_M;
+    if (l.d <= 0 || l.d >= reach) continue;
+    const angle = PUSH_MAX_RAD * (1 - l.d / reach) ** 2;
+    if (angle <= best.angle) continue;
+    best = ahead
+      ? { dirX: s * Math.sin(h.facing), dirZ: -s * Math.cos(h.facing), angle, heightScale: 1 }
+      : { dirX: l.awayX, dirZ: l.awayZ, angle, heightScale: 1 };
+  }
+  return best;
 }
