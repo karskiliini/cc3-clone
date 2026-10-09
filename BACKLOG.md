@@ -35,6 +35,18 @@ Blocked on: 050 P2 (hull physics: the compartment frame the men and ragdolls rid
 Request (2026-10-07): "pelissä pitää olla dynaaminen track rikkoutuminen vaunuissa. Eli track ihan oikeasti on dynaaminen elementti joka katkeaa jostain kohtaa ja liikkuu fysiikan mukaisesti. Jos vaunu yrittää jatkaa ajamista, niin se liikkuu vielä hetken irrallisen ketjun päällä ja voi repiä ketjua eri suuntiin. Lopulta vaunun vetopyörän päältä putoava ketju estää sen puoleisen telaketjuston ohjaamisen kokonaan." A track is a real dynamic element: it parts at a specific link (hit point, mine, overstrain), the free ends move under physics; a tank that keeps driving runs on over the loose run for a while and can drag and tear it in different directions; once the chain falls off the drive sprocket that side has no drive or steering at all. Replaces today's instant "trackL/trackR thrown" state and its static sprite/mesh look. Done when: a hit or mine parts a track at the struck link; the chain is simulated as linked segments (deterministic, in the state hash) lying and moving on the ground and wheels; driving on drags it visibly; when it leaves the sprocket that side's drive and steering are lost (the vehicle pivots/slews accordingly); rendered from per-link meshes in 3D.
 Blocked on: 050 P2 (hull physics and wheel contact) and the gun/wheel node split planned for P2; spec addendum then (link chain model, sprocket engagement, cost budget for chains per battle).
 
+**053 — Feature (future idea, not scheduled): Operational campaign layer — battalions on a front sector.**
+Request (2026-10-09, user's words): "kampanja, molemmat pelaajat voivat liikutella pataljoonia jollain rintamalohkolla, jokainen pataljoona sisältää n määrän joukkoja, joita komennetaan. Pataljoona voi jäädä paikalleen, jolloin se saa vähän hitaammin täydennyksiä, se voi vetäytyä, jolloin tulee enemmän täydennyksiä, tai se voi hyökätä ja jälleen täydennyksiä tulee vähän hitaammin. Painopistesuunnassa olevalle pataljoonalle voidaan myös määrätä lisätäydennyksiä, tai niitä voidaan ripotella eri pataljoonille, kuitenkin siten että käyttöliittymä on selkeä. Täydennykset ovat yleensä vihreitä joukkoja, mutta aikakauden mukaisesti varusteltu. Esimerkki: saksa on ollut hyökkäyskannalla, mutta heiltä alkaa voimat olla vähissä, he haluavat pysähtyä jotta saavat täydennettyä itseään -> vastustaja iskeekin omasta puolestaan hyökkäyksen, jolloin saksalainen pataljoona ei ehdikään odottamaan itselleen täydennyksiä (eli tavallaan täydennykset saapuvat vasta kierroksen päätyttyä?). Jos kartta olisi heksapohjainen, niin yhteen ruutuun voi hyökätä usealta suunnalta - kenties olisi parasta että liikuteltavat joukot olisivat aina komppanioita, jolloin yhteen taisteluun mahtuu max pataljoona / puoli."
+Gist:
+- Both players move battalions on a front sector; each battalion holds n commanded units.
+- Each turn a battalion holds (slower replacements), withdraws (more replacements) or attacks (slower replacements).
+- Extra replacements can go to the main-effort battalion or be spread over several; the UI must stay clear.
+- Replacements are usually green troops, equipped for the period.
+- Replacements arrive only when the turn ends, so a side that pauses to refit can be hit before they arrive. Example: an exhausted German attacker halts to refit, and the Soviets strike first.
+- Possibly a hex map, where one hex can be attacked from several directions. The moved pieces might then be companies, capping one battle at a battalion per side.
+Open questions: hexes vs. sectors; company vs. battalion pieces; how this relates to the existing operation/campaign code (`src/data/operation.ts`, `campaign.ts`); the turn order (simultaneous vs. alternating).
+Done when: this goes through brainstorming into a written spec the user approves. It is not scheduled until the user asks for it.
+
 **047b — Feature: Desync recovery in the real game (remaining part of 047).**
 
 The session-level recovery is done (047 below). Remaining, after M2/M3 exist:
@@ -67,7 +79,7 @@ Completion: plan milestones M1–M5 are met.
 - A reloaded tab rejoins by fast-forwarding the command log.
 - A desync produces a downloadable log that reproduces offline.
 
-The next request receives ID 050.
+The next request receives ID 054.
 
 ## Completed
 
