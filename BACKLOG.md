@@ -47,6 +47,27 @@ Gist:
 Open questions: hexes vs. sectors; company vs. battalion pieces; how this relates to the existing operation/campaign code (`src/data/operation.ts`, `campaign.ts`); the turn order (simultaneous vs. alternating).
 Done when: this goes through brainstorming into a written spec the user approves. It is not scheduled until the user asks for it.
 
+**054 — Feature: Heavy vehicles flatten foxholes and craters.**
+Request (2026-10-09): "kun vaunut ajavat esim. foxholen tai räjähdysreiän kohdalta, niin maaston pitää tasoittua realistisesti raskaan painon alla."
+Today, foxholes (−1.2 m with a +0.4 m spoil mound) and craters (bowl plus rim) are fixed shapes in the height field's dig layer (`src/sim/heightField.ts`, around line 554).
+Done when:
+- A vehicle driving over a foxhole or crater deforms it in the sim (deterministic, included in the state hash), scaled by the vehicle's weight and the number of passes. Rims and mounds are pushed down, and holes are partly filled or caved in under the tracks.
+- Cover from a crushed foxhole drops accordingly.
+- The render follows the new height.
+- Tests: one pass by a heavy tank reduces the depth more than a light one does, and repeated passes keep flattening it; the effect is identical across engines.
+Relates to 050 P2 (hull physics over terrain): do it after P2, or define the deformation so P2 reads it.
+
+**055 — Feature: Idle infantry dig in, and the foxhole grows over time.**
+Request (2026-10-09): "Kun miehet pysähtyvät ja heillä ei ole aktiivista tehtävää, niin he voivat heti alkaa kaivautua lapioilla. Foxhole alkaa hiljalleen kasvaa ja miehet saavat paremman suojan."
+Done when:
+- A soldier who has stopped and has no active task (not firing, moving, healing or carrying) starts digging at once with his entrenching tool, shown with a dig animation.
+- A personal foxhole grows step by step at his spot: depth, spoil mound and cover rise with digging time, and a full hole takes on the order of minutes.
+- Digging stops immediately for any order or threat reaction and resumes from the reached depth.
+- The hole stays in the map's dig layer. It is deterministic and included in the state hash.
+- The cover and protection it gives grow with its depth, and the cover-seeking code (`coverSeek.ts`) prefers holes that already exist.
+- Tests: depth grows with time; an order interrupts digging; cover at half depth lies between none and full; behaviour is identical across engines.
+Open questions: the dig rate per period and terrain (frozen ground in winter, rock, urban rubble); whether a crew-served weapon team digs a weapon pit.
+
 **047b — Feature: Desync recovery in the real game (remaining part of 047).**
 
 The session-level recovery is done (047 below). Remaining, after M2/M3 exist:
@@ -79,7 +100,7 @@ Completion: plan milestones M1–M5 are met.
 - A reloaded tab rejoins by fast-forwarding the command log.
 - A desync produces a downloadable log that reproduces offline.
 
-The next request receives ID 054.
+The next request receives ID 056.
 
 ## Completed
 
