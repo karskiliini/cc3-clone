@@ -1116,3 +1116,44 @@ git commit -m "vehicleBattle preview: fill= tall growth, grass wakes and fringe 
 ```
 
   Then show the user the zoom-2 before/after captures (grass parked, grass driving, wheat driving, winter) and the frame-cost numbers.
+
+---
+
+### Task 9: Soldier mini-trails in tall growth (added 2026-10-09 at the user's request)
+
+User: "men within the fields should sometimes cause some grass to fall, so basically they leave a minitrail as well if you look closely."
+
+Design (posted in chat; the user did not object):
+- In `GrassFx.update`, every soldier who is visible to the player (own, or in `state.spotted[playerSide]`), not in a vehicle (`vehicleId == null`), and not dead, standing in `tallGrowthAt`: keep `lastSoldier: Map<id, Vec2>`. After each 0.75 tiles (1.5 m) moved, decide with `hash2(floor(x*4), floor(y*4), 31) < 0.35` whether that stretch gets pressed down. Crawling (`stance === 'prone'`) always presses.
+- Painting: a faint streak in the trail canvas along the stretch, with no ruts. Width 0.35 m (prone 0.6 m), `globalAlpha` 0.16, `fillStyle = BLADES[season][growth].flat`, plus 2 thin stalk lines at alpha 0.3.
+- Crush map: `crushMapFor(state.map).stampBand(prev, pos, width / 2)`, so where soldier paths come close to a tank, the 3D blades lie flat too.
+- Reset with the trail (same branch as vehicles).
+- Tests (`test/grassFx.test.ts`):
+  - A spotted rifleman walking 20 m through tall grass crushes some cells along his path but not all of them (the share is between 15 % and 60 % of 0.5 m cells on the line).
+  - A prone man crushes the whole path.
+  - An unspotted enemy crushes nothing.
+  - The same walk run twice gives the identical crushed set.
+- Commit: "Soldiers leave faint pressed trails through tall grass and crops".
+
+## Handoff status (2026-10-09, executor stopped: the user is out of tokens and continues with Codex)
+
+Ledger: `.superpowers/sdd/2026-10-08-3d-tall-grass/progress.md` (git-ignored; also summarised here).
+- Tasks 1–7: done and committed (`43108c7` … `3d65c54`).
+  - Full suite at Task 7: 158 files, 1303 pass / 2 skip; tsc clean.
+  - Rulings:
+    - In `stamp`, the variable is named `tailT`.
+    - The rewind test was proven by removing the `clear()` call.
+    - Grass meshes hide while empty, and the VehicleScene reset test counts vehicle meshes only.
+- Task 8: Step 1 (`tools/vehicleBattle.ts` `fill=` param plus grass layers) is done and committed with this note.
+  - **Finding from the first capture** (`/tools/vehicleBattle.html?map=steppe_1943&fill=tallgrass&t=25&zoom=2`): the 3D layer was active, vehiclesWithGrass3d = [the Pz IV], and 3292 grass instances were drawn.
+    - Painting them red showed ~1500 red pixels round the hull, so they DO render.
+    - In their natural colours they are practically invisible against the painted field. The camera looks almost straight down (12° tilt), and a 4–6 cm wide strip with a 0.1–0.2 m horizontal tip offset covers only ~1–2 px at zoom 2.
+  - **Next:** tune for readability before the remaining capture steps. Options:
+    - Wider blades (≈0.08–0.12 m, or a widening factor that grows as the blade bends).
+    - Stronger rest curve.
+    - More contrast at the base (darker) and the tip (lighter).
+    - Lay the strip's face so it tilts toward the camera.
+    - Check that the hull-parting and wake read, against the `?vehicles=sprites` 2D fringe.
+  - Then Steps 2–5 (captures, frame-cost check ≤ 6 ms, commit).
+- Task 9: not started.
+- After Task 9: a final whole-branch review (most capable model), then finishing-a-development-branch (PR #2 on `vehicles-3d-p1` is still open against `play-feedback`; the user merges).

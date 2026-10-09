@@ -10,7 +10,8 @@ import type { BattleConfig, Camera, GameSettings } from '@/shared/types';
 import { SIM_DT, VIEW_W, VIEW_H, TILE_PX } from '@/shared/types';
 import { Battle } from '@/sim/battle';
 import { TerrainRenderer } from '@/render/terrainRender';
-import { drawUnits } from '@/render/unitRender';
+import { drawUnits, vehiclesWithGrass3d } from '@/render/unitRender';
+import { GrassFx } from '@/render/grassFx';
 import { drawEffects } from '@/render/effects';
 import { requestBattleAtlases, loadAtlas, vehicleDefAtlasName } from '@/render/spriteAtlas';
 
@@ -33,8 +34,15 @@ const cfg: BattleConfig = {
 };
 const battle = new Battle(cfg);
 battle.start();
+// fill=tallgrass|crops: every open/grass tile becomes that growth (3D grass check)
+const fill = q.get('fill');
+if (fill === 'tallgrass' || fill === 'crops') {
+  const tiles = battle.state.map.tiles;
+  for (let i = 0; i < tiles.length; i++) if (tiles[i] === 'open' || tiles[i] === 'grass') tiles[i] = fill;
+}
+const grassFx = new GrassFx();
 const steps = Math.round(Number(q.get('t') ?? 30) / SIM_DT);
-for (let i = 0; i < steps && battle.state.phase === 'running'; i++) battle.step(SIM_DT);
+for (let i = 0; i < steps && battle.state.phase === 'running'; i++) { battle.step(SIM_DT); grassFx.update(battle.state, 'german'); }
 
 const state = battle.state;
 const zoom = Number(q.get('zoom') ?? 1);
@@ -62,7 +70,9 @@ void Promise.all([
   const frame = (): void => {
     terrain.draw(ctx, cam);
     terrain.drawOverlays(ctx, cam, state);
+    grassFx.drawTrails(ctx, cam);
     drawUnits(ctx, cam, state, focus?.side ?? 'german', [], settings);
+    grassFx.drawStanding(ctx, cam, state, focus?.side ?? 'german', vehiclesWithGrass3d());
     drawEffects(ctx, cam, state);
   };
   // the terrain bakes its chunks lazily over a few frames: keep drawing
