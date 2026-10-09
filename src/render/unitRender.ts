@@ -37,6 +37,9 @@ import { drawRagdollFlight, drawRagdollLanded, ragdollBeginFrame, ragdollPhase }
 import { snapToMuzzle } from '@/render/muzzleSnap';
 import { RECOIL_M, vehicleLook, type VehicleLook } from '@/render/vehicle3d/look';
 import { vehicles3d, loadVehicleModels } from '@/render/vehicle3d';
+import { bladesFor, grassHandOver, type HullPatch } from '@/render/vehicle3d/grassField';
+import { crushMapFor } from '@/render/grassCrush';
+import { seasonKey, tallGrowthAt } from '@/render/grassFx';
 
 // ------------------------------------------------------------ pre-rendered atlases (spec §5) ---
 /** Battles whose atlases have been requested (loading is async; until an atlas is ready — or when
@@ -604,23 +607,47 @@ function drawVehicleLookSprite(ctx: CanvasRenderingContext2D, cam: Camera, look:
 
 /** Vehicle bodies first (the 3D layer, or a vehicle's sprite while it has no model, without
  * WebGL, or with ?vehicles=sprites), then each vehicle's overlays on top. */
+let grass3d: ReadonlySet<number> = new Set();
+/** Vehicles that stood in 3D grass in the last drawn frame: GrassFx.drawStanding skips their 2D fringe. */
+export function vehiclesWithGrass3d(): ReadonlySet<number> { return grass3d; }
+
+function hullPatch(veh: Vehicle, look: VehicleLook): HullPatch {
+  const def = VEHICLE_DEFS[veh.defId];
+  return { id: veh.id, xM: veh.pos.x * TILE_M, zM: veh.pos.y * TILE_M, facing: veh.hullFacing,
+    halfLenM: (def?.lengthM ?? 6) / 2, halfWidM: (def?.widthM ?? 3) / 2, speedMs: look.ko ? 0 : veh.speed };
+}
+
 function drawVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side): void {
   const gl = vehicles3d();
   const shown: { veh: Vehicle; look: VehicleLook }[] = [];
   const in3d: VehicleLook[] = [];
+  const patches: HullPatch[] = [];
+  grass3d = new Set();
   gl?.scene.begin();
   for (const veh of state.vehicles.values()) {
     if (!isEnemyVisible(state, playerSide, veh.side, veh.id, true)) continue;
     if (!visible(veh.pos, cam)) continue;
     const look = vehicleLook(veh, state);
-    if (gl && gl.scene.add(look)) in3d.push(look);
-    else drawVehicleLookSprite(ctx, cam, look);
+    if (gl && gl.scene.add(look)) {
+      in3d.push(look);
+      if (tallGrowthAt(state, veh.pos)) patches.push(hullPatch(veh, look));
+    } else drawVehicleLookSprite(ctx, cam, look);
     shown.push({ veh, look });
   }
   if (gl) {
     gl.scene.end();
+    // the 3D grass round the hulls standing in tall growth, nearest the view centre first
+    const ppt = TILE_PX * cam.zoom, crush = crushMapFor(state.map);
+    const field = bladesFor(patches,
+      (x, z) => tallGrowthAt(state, { x: x / TILE_M, y: z / TILE_M }),
+      (x, z) => crush.at({ x: x / TILE_M, y: z / TILE_M }),
+      seasonKey(state.map.def.season),
+      (cam.x + VIEW_W / (2 * ppt)) * TILE_M, (cam.y + VIEW_H / (2 * ppt)) * TILE_M);
+    gl.scene.grass.update(field.blades);
     // a lost context or a renderer failure mid-frame: this frame's 3D vehicles are drawn as sprites
-    if (!gl.out.draw(ctx, gl.scene, cam)) for (const look of in3d) drawVehicleLookSprite(ctx, cam, look);
+    const ok = gl.out.draw(ctx, gl.scene, cam);
+    if (!ok) for (const look of in3d) drawVehicleLookSprite(ctx, cam, look);
+    grass3d = grassHandOver(patches.map((p) => p.id), field.dropped, ok);
   }
   for (const { veh, look } of shown) {
     const p = worldToScreen(cam, veh.pos);

@@ -52,6 +52,8 @@ export function needsStamp(last: Vec2 | undefined, pos: Vec2): boolean {
   return !last || Math.hypot(pos.x - last.x, pos.y - last.y) >= STAMP_STEP_TILES;
 }
 
+const NO_IDS: ReadonlySet<number> = new Set();
+
 const TRAIL_PX_PER_TILE = 10; // half the terrain resolution: crushed growth is soft anyway
 
 export class GrassFx {
@@ -153,13 +155,15 @@ export class GrassFx {
     ctx.imageSmoothingEnabled = prev;
   }
 
-  /** Blades in front of everything standing in tall growth. Draw after the units. */
-  drawStanding(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side): void {
+  /** Blades in front of everything standing in tall growth (vehicles in `skip` stand in the 3D grass
+   * instead). Draw after the units. */
+  drawStanding(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side, skip: ReadonlySet<number> = NO_IDS): void {
     const season = seasonKey(state.map.def?.season);
     const z = cam.zoom, mPx = (TILE_PX * z) / TILE_M;
     ctx.save();
     ctx.lineCap = 'butt';
     for (const v of state.vehicles.values()) {
+      if (skip.has(v.id)) continue;   // the 3D grass stands round this one
       if (v.side !== playerSide && !state.spottedVehicles[playerSide].has(v.id)) continue;
       const growth = tallGrowthAt(state, v.pos);
       if (!growth) continue;
