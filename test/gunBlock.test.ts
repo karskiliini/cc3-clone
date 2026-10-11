@@ -148,3 +148,60 @@ describe('ordered infantry target agreement', () => {
     expect(targetableEnemyAt(state, 'german', [tank.team], standing.pos)?.block).toBeUndefined();
   });
 });
+
+
+describe('impossible ordered fire diagnostics', () => {
+  function ranged() {
+    const state = makeState(1943);
+    const shooter = addTank(state, 't26', { x: 10, y: 390 }, Math.PI / 4, 60, 'german');
+    const enemy = addTank(state, 'pz4gh', { x: 390, y: 10 }, 0, 60, 'soviet');
+    state.spottedVehicles.german.add(enemy.v.id);
+    shooter.team.order = { type: 'fire', target: { ...enemy.v.pos }, targetTeamId: enemy.team.id, targetVehicleId: enemy.v.id, issuedAt: 0 };
+    return { state, shooter, enemy, order: shooter.team.order };
+  }
+  it('reports out of range for a spotted attack-unit order, status and each selected vehicle cursor', () => {
+    const { state, shooter, enemy, order } = ranged();
+    expect(orderedVehicleGunTarget(state, shooter.v, order)).toBeNull();
+    expect(pickVehicleTarget(state, shooter.v)).toBeNull();
+    expect(orderedGunBlock(state, shooter.v, order)).toBe('outOfRange');
+    expect(targetStatusText(targetableEnemyAt(state, 'german', [shooter.team], enemy.v.pos)!)).toBe('out of range');
+    const rng = new Rng(7);
+    state.time += SIM_DT;
+    stepCombat(state, rng, SIM_DT); stepMorale(state, rng, SIM_DT);
+    expect(shooter.team.status).toBe("Can't Fire");
+    expect(state.messages.some(m => m.side === 'german' && m.text.includes("Can't fire: out of range"))).toBe(true);
+    const nearer = addTank(state, 't26', { x: 360, y: 40 }, Math.PI / 4, 60, 'german');
+    expect(targetableEnemyAt(state, 'german', [shooter.team, nearer.team], enemy.v.pos)!.block).toBeUndefined();
+    expect(targetStatusText(targetableEnemyAt(state, 'german', [shooter.team], enemy.v.pos)!)).toBe('out of range');
+  });
+  it('reports infantry range failure and preserves free-selection absence of a warning', () => {
+    const { state, shooter, enemy } = ranged();
+    state.spottedVehicles.german.delete(enemy.v.id);
+    const man = soldier(900, 900, 'soviet', { x: 390, y: 10 }, 'mosin');
+    state.soldiers.set(man.id, man); state.spotted.german.add(man.id);
+    const team = mkTeam(900, 'rifle', [man.id], 'soviet', man.pos);
+    state.teams.set(team.id, team);
+    const order = { type: 'fire' as const, target: { ...man.pos }, targetTeamId: team.id, issuedAt: 0 };
+    expect(orderedVehicleGunTarget(state, shooter.v, order)).toBeNull();
+    expect(orderedGunBlock(state, shooter.v, order)).toBe('outOfRange');
+    const hover = targetableEnemyAt(state, 'german', [shooter.team], man.pos)!;
+    expect(hover.team).toBe(team);
+    expect(targetStatusText(hover)).toBe('out of range');
+    expect(orderedGunBlock(state, shooter.v, { ...order, targetTeamId: 99999 })).toBeNull();
+  });
+  it.each(['noAmmo', 'gunDestroyed'] as const)('retains %s priority when the attack target is also out of range', reason => {
+    const { state, shooter, enemy, order } = ranged();
+    if (reason === 'noAmmo') { shooter.v.mainAmmo = 0; shooter.v.loadedRound = undefined; }
+    else ensureDamage(shooter.v).mainGun = 'destroyed';
+    expect(orderedGunBlock(state, shooter.v, order)).toBe(reason);
+    expect(targetStatusText(targetableEnemyAt(state, 'german', [shooter.team], enemy.v.pos)!)).toBe(gunBlockText(reason));
+  });
+  it('diagnoses an unseen target against only the known order point without making it eligible', () => {
+    const { state, shooter, enemy, order } = ranged();
+    state.spottedVehicles.german.delete(enemy.v.id);
+    enemy.v.pos = { x: 10, y: 389 }; // Its hidden live position would give a different range/height reason.
+    expect(orderedVehicleGunTarget(state, shooter.v, order)).toBeNull();
+    expect(pickVehicleTarget(state, shooter.v)).toBeNull();
+    expect(orderedGunBlock(state, shooter.v, order)).toBe('outOfRange');
+  });
+});

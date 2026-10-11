@@ -11,7 +11,7 @@ import { penRating, teamPenetrationChance, type PenRating } from '@/sim/penChanc
 import { vehicleEyes } from '@/sim/vehicleVision';
 import { gunBlockText, mainGunBlock } from '@/sim/gunBlock';
 import { vehicleGunRay } from '@/sim/hullAim';
-import { orderedVehicleGunTarget, resolvedGunTarget } from '@/sim/vehicleGunTarget';
+import { orderedGunDiagnosticTarget, orderedVehicleGunTarget, resolvedGunTarget } from '@/sim/vehicleGunTarget';
 
 /** Where a team looks from when it aims: its leader (or first living man) at his eye height, or —
  * for a vehicle — the turret eye (gunner's sight, or the commander laying the gun himself in a
@@ -178,9 +178,8 @@ function selectedGunBlock(state: BattleState, selected: Team[], order: Order): s
     const v = t.vehicleId != null ? state.vehicles.get(t.vehicleId) : undefined;
     const def = v ? VEHICLE_DEFS[v.defId] : undefined;
     if (!v || !def?.mainWeaponId || WEAPONS[def.mainWeaponId]?.indirect) return null;
-    const eligible = orderedVehicleGunTarget(state, v, order);
-    if (!eligible) return null;
-    const target = resolvedGunTarget(state, eligible);
+    const target = orderedGunDiagnosticTarget(state, v, order);
+    if (!target) return null;
     const b = mainGunBlock(state, v, target.posTiles, target.heightM);
     if (!b) return null;
     reason ??= gunBlockText(b);

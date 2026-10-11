@@ -152,6 +152,21 @@ export function orderedVehicleGunTarget(state: BattleState, vehicle: Vehicle, or
   return { kind: 'point', pos: order.target };
 }
 
+/** Diagnostic geometry for this order. A null picker result means impossible ordered fire,
+ * so report against its known point; it does not make that point a combat target. Hold/free
+ * and MG-only outcomes deliberately have no main-gun diagnostic. */
+export function orderedGunDiagnosticTarget(state: BattleState, vehicle: Vehicle, order: Order): GunTarget | null {
+  if (order.targetTeamId != null) {
+    const def = VEHICLE_DEFS[vehicle.defId];
+    const weapon = def?.mainWeaponId ? WEAPONS[def.mainWeaponId] : null;
+    const target = pickVehicleAttackTarget(state, vehicle, weapon, order);
+    if (target === 'free' || target === 'mg') return null;
+    return resolvedGunTarget(state, target ?? { kind: 'point', pos: order.target });
+  }
+  const target = orderedVehicleGunTarget(state, vehicle, order);
+  return target ? resolvedGunTarget(state, target) : null;
+}
+
 export function resolvedGunTarget(state: BattleState, target: VehicleGunTarget): GunTarget {
   switch (target.kind) {
     case 'vehicle': return gunTarget(state, target.vehicle.pos, target.vehicle);

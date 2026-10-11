@@ -12,7 +12,7 @@ import { angleTo, dist, wrapAngle } from '@/shared/math';
 import { crewEffects, isImmobile, mainGunUsable, SIGHT_DESTROYED_MAX_M, systemState, turretFrozen } from './vehicleDamage';
 import { gunArcRad } from './gunTiming';
 import { gunTarget, vehicleGunRay } from './hullAim';
-import { orderedVehicleGunTarget, resolvedGunTarget } from './vehicleGunTarget';
+import { orderedGunDiagnosticTarget } from './vehicleGunTarget';
 
 export type GunBlock = 'gunDestroyed' | 'noGunner' | 'sightOut' | 'noAmmo' | 'outOfRange' | 'cantBear' | 'elevation';
 
@@ -42,9 +42,8 @@ export function mainGunBlock(state: BattleState, v: Vehicle, target: Vec2, targe
 /** Why a vehicle cannot fire on the target of its Fire order (the hull it was set on, else the
  * ordered point), or null. */
 export function orderedGunBlock(state: BattleState, vehicle: Vehicle, order: Order): GunBlock | null {
-  const eligible = orderedVehicleGunTarget(state, vehicle, order);
-  if (!eligible) return null;
-  const target = resolvedGunTarget(state, eligible);
+  const target = orderedGunDiagnosticTarget(state, vehicle, order);
+  if (!target) return null;
   return mainGunBlock(state, vehicle, target.posTiles, target.heightM);
 }
 
