@@ -11,7 +11,7 @@ Process requests in the order received. New requests are appended to the queue w
 Pushing to GitHub works again (since 2026-09-25); the earlier Zscaler push blocker no longer applies.
 ## Active
 
-None — next is 044 M2 (relay server and browser transport).
+**050 P2 — deterministic vehicle hull physics.** Implementation and task reviews are in progress on `codex/vehicles-3d-p2`; final routing, determinism, performance and balance acceptance remain open. The existing 044 M2 request stays queued. No new request changes this priority unless the user explicitly reprioritizes it.
 
 
 
@@ -100,7 +100,20 @@ Completion: plan milestones M1–M5 are met.
 - A reloaded tab rejoins by fast-forwarding the command log.
 - A desync produces a downloadable log that reproduces offline.
 
-The next request receives ID 056.
+**056 — Feature: Individual perception, communication and human condition.**
+Request (2026-10-11): every person must act from what they themselves see/hear, their mental disposition, orders and actual abilities, rather than the whole battlefield or the player's view. Pain, breathlessness, shell shock, exhaustion, sweating and tremor must affect action, movement speed, aim and decision-making.
+Audit: `docs/superpowers/specs/2026-10-11-individual-perception-physiology-audit.md`. Existing personal psychology, pain bouts, fatigue and daze are foundations. The focused audit found side/team knowledge leaks in targeting, fear, fleeing and casualty awareness, hidden-neighbor counts and hidden-destruction memory clearing; it did not prove a direct camera-dependent simulation bug or exhaustively audit all consumers.
+Scope: first personal visual/acoustic contacts and explicit communication, then one integrated condition/capability model reusing existing state. All people, including vehicle and weapon crews, participate. Physical collision/damage may use world truth; decisions receive only perceived evidence and delivered reports. Acoustic contacts carry uncertain bearing/location and confidence, and reports retain original age rather than tracking hidden live targets. New future-affecting state and applicable legacy human-state omissions need deterministic hashing and replay coverage.
+Done when:
+- Two isolated people can know different things about the same enemy. Another observer's sighting does not grant exact personal targeting, fear or a flee direction without a delivered report; a report does not substitute for direct visual acquisition.
+- Changes to hidden enemy position/count/status outside legitimate sensory and physical influence leave the observer's decisions and beliefs unchanged. Seeing one enemy does not reveal unseen neighbors; hidden destruction does not clear memory remotely.
+- Occluded audible activity produces an uncertain cue without a confirmed hidden ID/exact position. Masking, hearing capability and communication eligibility affect receipt; stale reports never refresh through sharing loops.
+- Pain, breathlessness, acute shock, exhaustion, sweat and tremor have documented observable effects on sensing, movement, weapon settling/dispersion, crew work and decision/obedience latency. Controlled same-order fixtures distinguish individual condition/personality and show bounded recovery without double-counting causes.
+- With controllers/commands fixed, viewer side, selection, camera and display modes leave every simulation hash and individual decision unchanged. Read-only decision explanations consume no RNG or state.
+- Exact future-state mutation, replay/resync and cross-engine checks cover perception, reports, condition and timers. Legitimate unseen physical hits, area fire and communicated indirect fire still function.
+No implementation or passing acceptance is claimed by this audit. Queue after the active request; numeric physiological calibration is a documented gameplay assumption, not a clinical claim.
+
+The next request receives ID 057.
 
 ## Completed
 
