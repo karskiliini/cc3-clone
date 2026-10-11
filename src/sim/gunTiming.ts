@@ -11,6 +11,7 @@ import { TILE_M } from '@/shared/types';
 import { angleTo, clamp, dist, wrapAngle } from '@/shared/math';
 import { VEHICLE_DEFS } from '@/data/units';
 import { WEAPONS } from '@/data/weapons';
+import { hullSettled } from './hullAim';
 import { crewEffects, isImmobile, seatOccupant, systemState, traverseMul, turretFrozen, vehicleLayout } from './vehicleDamage';
 
 const DEG = Math.PI / 180;
@@ -236,7 +237,7 @@ export function timeToFirstShotS(state: BattleState, v: Vehicle, targetPos: Vec2
   const sightDamaged = systemState(v, 'sight') === 'damaged';
   const cmd = vehicleCommander(state, v);
   const layS = sameTarget
-    ? lay!.designateLeftS + lay!.fineLeftS
+    ? lay!.designateLeftS + (!hullSettled(v) ? Math.max(lay!.fineLeftS, followUpLayS(exp)) : lay!.fineLeftS)
     : designateS(cmd?.experience ?? EXP_REGULAR, vehicleLayout(def).twoManTurret) + fineLayS({ distM, experience: exp, targetMoving, aimMul: 1, shaken, sightDamaged });
   const canTurnHull = !isImmobile(v) && def.turnRadiusM == null;
   const hullRate = canTurnHull ? hullTurnRad(def) : 0;

@@ -33,7 +33,11 @@ export function eyeHeightM(stance: Stance): number {
 /** Observer eye height / target silhouette height above their own ground, in metres. Omitted
  * values default to a standing man (1.7 m) at both ends — the pre-elevation behaviour on a flat
  * map, and the neutral choice for callers that don't track stance. */
-export interface LosHeights { eyeM?: number; targetM?: number }
+export interface LosHeights {
+  eyeM?: number; targetM?: number;
+  /** Absolute endpoint overrides for rotated vehicle rays. Relative callers retain their basis. */
+  eyeZ?: number; targetZ?: number;
+}
 
 /** Tolerance (m) on the terrain-masking test. A soldier's own tile is sampled at its centre, so
  * on a uniform slope the intervening tile heights sit exactly on the sight line; without a small
@@ -97,11 +101,11 @@ export function losTrace(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeight
   const ground = map.ground;
   const W = map.width, H = map.height;
   let eyeZ = 0, dz = 0, ax = 0, ay = 0, invLen2 = 0;
-  if (ground) {
+  if (ground || heights?.eyeZ != null || heights?.targetZ != null) {
     const cfx = fx < 0 ? 0 : fx >= W ? W - 1 : fx, cfy = fy < 0 ? 0 : fy >= H ? H - 1 : fy;
     const ctx2 = tx < 0 ? 0 : tx >= W ? W - 1 : tx, cty = ty < 0 ? 0 : ty >= H ? H - 1 : ty;
-    eyeZ = ground[cfy * W + cfx] + (heights?.eyeM ?? EYE_STANDING_M);
-    const tgtZ = ground[cty * W + ctx2] + (heights?.targetM ?? EYE_STANDING_M);
+    eyeZ = heights?.eyeZ ?? ((ground?.[cfy * W + cfx] ?? 0) + (heights?.eyeM ?? EYE_STANDING_M));
+    const tgtZ = heights?.targetZ ?? ((ground?.[cty * W + ctx2] ?? 0) + (heights?.targetM ?? EYE_STANDING_M));
     dz = tgtZ - eyeZ;
     ax = tx - fx; ay = ty - fy;
     const len2 = ax * ax + ay * ay;
@@ -140,9 +144,9 @@ export function losTrace(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeight
 
     // ---- terrain masking: the ground between rises above the straight line from the observer's
     // eye to the target's silhouette top. This is what puts a unit in dead ground behind a crest.
-    if (ground && invLen2 > 0) {
+    if ((ground || heights?.eyeZ != null || heights?.targetZ != null) && invLen2 > 0) {
       const f = ((t.x - fx) * ax + (t.y - fy) * ay) * invLen2;
-      if (ground[i2] > eyeZ + dz * f + GROUND_MASK_SLACK_M) {
+      if ((ground?.[i2] ?? 0) > eyeZ + dz * f + GROUND_MASK_SLACK_M) {
         return { clear: false, blockedAt: { x: t.x + 0.5, y: t.y + 0.5 }, visibility: 0 };
       }
     }
@@ -187,9 +191,9 @@ export function losTrace(map: GameMap, from: Vec2, to: Vec2, heights?: LosHeight
         const eyeM = heights?.eyeM ?? EYE_STANDING_M;
         const tgtM = heights?.targetM ?? EYE_STANDING_M;
         let lineAboveGroundM: number;
-        if (ground && invLen2 > 0) {
+        if ((ground || heights?.eyeZ != null || heights?.targetZ != null) && invLen2 > 0) {
           const f = ((t.x - fx) * ax + (t.y - fy) * ay) * invLen2;
-          lineAboveGroundM = eyeZ + dz * f - ground[i2];
+          lineAboveGroundM = eyeZ + dz * f - (ground?.[i2] ?? 0);
         } else {
           const n = tiles.length - 1;
           lineAboveGroundM = eyeM + (tgtM - eyeM) * (n > 0 ? i / n : 0);

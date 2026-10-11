@@ -5,6 +5,8 @@
 // is for the selected team's weapons (green/yellow/red).
 // ============================================================================
 import type { BattleState, Camera, GameMap, Team, Vec2 } from '@/shared/types';
+import { mainGunBlock } from '@/sim/gunBlock';
+import { gunTarget, vehicleGunRay } from '@/sim/hullAim';
 import { TILE_M } from '@/shared/types';
 import { dist } from '@/shared/math';
 import { worldToScreen } from '@/engine/camera';
@@ -78,7 +80,7 @@ function teamCanEstimateFire(state: BattleState, team: Team, to: Vec2): boolean 
     const crew = crewEffects(state, v);
     const main = def.mainWeaponId ? WEAPONS[def.mainWeaponId] : undefined;
     if (main && crew.gunner && mainGunUsable(v) && (v.mainAmmo > 0 || v.loadedRound)
-      && rangeM <= main.rangeM && sightAccuracyMul(v, rangeM) > 0) return true;
+      && rangeM <= main.rangeM && sightAccuracyMul(v, rangeM) > 0 && !mainGunBlock(state, v, to)) return true;
     if (def.coaxWeaponId && v.coaxAmmo > 0 && coaxUsable(v) && (crew.gunner || crew.commanderUp)
       && rangeM <= Math.min(BOW_MG_RANGE_M, WEAPONS[def.coaxWeaponId].rangeM)) return true;
     return !!def.bowWeaponId && (v.bowAmmo ?? 250) > 0 && bowMgUsable(v) && !!bowGunner(state, v)
@@ -116,6 +118,12 @@ export function drawLOSLine(
   heights?: LosHeights,
   opts?: { label?: boolean; alpha?: number; fireOrder?: boolean; minRangeM?: number | null; bigCursor?: boolean },
 ): void {
+  const vehicle = context?.team.vehicleId != null ? context.state.vehicles.get(context.team.vehicleId) : undefined;
+  const def = vehicle ? VEHICLE_DEFS[vehicle.defId] : undefined;
+  if (opts?.fireOrder && vehicle && def?.mainWeaponId && !WEAPONS[def.mainWeaponId]?.indirect) {
+    const ray = vehicleGunRay(context!.state, vehicle, def, gunTarget(context!.state, to));
+    from = ray.from; heights = ray.heights;
+  }
   let segs = aimLineProfile(map, from, to, heights);
   const estimated = !!opts?.fireOrder && !!context && aimPointClass(segs) === 'blocked'
     && hasLineOfFire(map, from, to, heights) && teamCanEstimateFire(context.state, context.team, to);

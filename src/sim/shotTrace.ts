@@ -37,8 +37,8 @@ export function traceRound(
   }
   const map = state.map;
   let start = { ...from }, end = { ...to }, deflected = false, contacts = 0;
-  let startZ = groundAtTile(map, Math.floor(from.x), Math.floor(from.y)) + (heights.eyeM ?? 1.7);
-  let endZ = groundAtTile(map, Math.floor(to.x), Math.floor(to.y)) + (heights.targetM ?? 1.7);
+  let startZ = heights.eyeZ ?? (groundAtTile(map, Math.floor(from.x), Math.floor(from.y)) + (heights.eyeM ?? 1.7));
+  let endZ = heights.targetZ ?? (groundAtTile(map, Math.floor(to.x), Math.floor(to.y)) + (heights.targetM ?? 1.7));
   const visited = new Set<number>();
   const shell = weapon.cls === 'tankgun' || weapon.cls === 'atgun' || weapon.cls === 'atrocket';
   const finish = (impact: Vec2, blocked: boolean): RoundTrace => {
@@ -90,7 +90,7 @@ export function traceRound(
       const remaining = length * (1 - f) * 0.75;
       start = p; startZ = z;
       end = { x: p.x + dm.cos(angle) * remaining, y: p.y + dm.sin(angle) * remaining };
-      endZ = groundAtTile(map, Math.floor(end.x), Math.floor(end.y)) + (heights.targetM ?? 1.7);
+      endZ = heights.targetZ ?? (groundAtTile(map, Math.floor(end.x), Math.floor(end.y)) + (heights.targetM ?? 1.7));
       turned = true;
       break;
     }

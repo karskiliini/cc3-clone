@@ -42,7 +42,10 @@ export function aimLineProfile(map: GameMap, from: Vec2, to: Vec2, heights?: Los
   for (let i = 1; i <= n; i++) {
     const t = i / n;
     const p = { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
-    const cls = classifyPoint(map, from, p, heights);
+    // Absolute vehicle endpoints describe one fixed ray, including intermediate samples.
+    const sampleHeights = heights?.eyeZ != null && heights.targetZ != null
+      ? { ...heights, targetZ: heights.eyeZ + (heights.targetZ - heights.eyeZ) * t } : heights;
+    const cls = classifyPoint(map, from, p, sampleHeights);
     if (cls !== curCls) {
       if (curCls !== null) segs.push({ t0: curStart, t1: (i - 1) / n, cls: curCls });
       curCls = cls;

@@ -7,6 +7,7 @@ import { roundPenetrationMm } from '@/sim/ballistics';
 import { SKILL_ACE, chooseAimPoint, gunnerSkill, soldierRounds, vehicleRounds } from '@/sim/aimPoint';
 import { crewEffects, expectedArmorMm, mainGunUsable } from '@/sim/vehicleDamage';
 import * as dm from '@/shared/dmath';
+import { gunTarget, vehicleGunRay } from './hullAim';
 
 /** Standard normal CDF (Abramowitz-Stegun 7.1.26 via erf), accurate to ~1e-7. */
 function phi(z: number): number {
@@ -89,13 +90,17 @@ function teamArmourShooters(state: BattleState, team: Team): ArmedMan[] {
 export function teamPenetrationChance(state: BattleState, team: Team, from: Vec2, target: Vehicle): number {
   const def = VEHICLE_DEFS[target.defId];
   if (!def) return 0;
-  const distM = dist(from, target.pos) * TILE_M;
+  const shooter = team.vehicleId != null ? state.vehicles.get(team.vehicleId) : undefined;
+  const shooterDef = shooter ? VEHICLE_DEFS[shooter.defId] : undefined;
+  const ray = shooter && shooterDef ? vehicleGunRay(state, shooter, shooterDef, gunTarget(state, target.pos, target)) : undefined;
+  const source = ray?.from ?? from;
+  const distM = dist(source, target.pos) * TILE_M;
   const year = state.config?.year;
   let best = 0;
   for (const m of teamArmourShooters(state, team)) {
     if (distM > m.weapon.rangeM) continue;
-    const choice = chooseAimPoint(m.weapon, m.counts, m.skill, from, target, year);
-    const armorMm = expectedArmorMm(target, def, from, choice.aimPoint, m.skill > SKILL_ACE);
+    const choice = chooseAimPoint(m.weapon, m.counts, m.skill, source, target, year);
+    const armorMm = expectedArmorMm(target, def, source, choice.aimPoint, m.skill > SKILL_ACE);
     const rounds: RoundType[] = ['ap', 'apcr'];
     for (const r of rounds) {
       if (m.counts && m.counts[r] <= 0) continue;

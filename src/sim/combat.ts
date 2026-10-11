@@ -9,7 +9,7 @@ import { clamp, dist, facingAngle, facingFromAngle, facingTo, angleTo, turnTowar
 import { hitChance, penetrates, damageRoll } from './ballistics';
 import { tileAt, coverAt, setTile, idx, inBounds } from './map';
 import { isPassable } from './path';
-import { hasLOS, hasLineOfFire, roundCanReach, eyeHeightM, EYE_VEHICLE_M, VEHICLE_GUN_M } from './los';
+import { hasLOS, hasLineOfFire, roundCanReach, eyeHeightM, EYE_VEHICLE_M } from './los';
 import type { LosHeights } from './los';
 import { armourRicochet, groundStrike, missPoint } from './shellFx';
 import { estimateAim, traceRound, traceTracers } from './shotTrace';
@@ -27,7 +27,7 @@ import { onIncomingFire, onExplosionNear, onOwnWound, onCasualtySeen, onGunnerHi
 import { isVehicleReversing, onVehicleHit, onVehicleNearMiss } from './vehicle';
 import {
   COARSE_LAY_RAD, FIRE_HALT_GAP_S, FIRE_HALT_MAX_S, FIRE_ON_MOVE_MUL, LAY_TOLERANCE_RAD, READY_RACK_RESTOCK_S, SNAP_SHOT_MIN,
-  SNAP_SHOT_MIN_EXPERIENCE, bracketLost, bracketMul, crewShaken, designateS, fineLayS, followUpS, gunArcRad, loadPaceMul, recoilSettleS, recoilAimFloor, CORRECTION_AIM_FLOOR, MOVING_AIM_CAP,
+  SNAP_SHOT_MIN_EXPERIENCE, bracketLost, bracketMul, crewShaken, designateS, fineLayS, followUpS, followUpLayS, gunArcRad, loadPaceMul, recoilSettleS, recoilAimFloor, CORRECTION_AIM_FLOOR, MOVING_AIM_CAP,
   timeToFirstShotS, turretTraverseRad, vehicleCommander, vehicleLoadS,
 } from './gunTiming';
 import { isButtonedUp } from './vehicleVision';
@@ -56,6 +56,7 @@ import { dropKit, shedGearInBlast, throwItems } from './items';
 import type { Order } from '@/shared/types';
 import * as dm from '@/shared/dmath';
 import { gunBlockText, mainGunBlock, orderedGunBlock } from './gunBlock';
+import { gunTarget, hullSettled, vehicleGunRay } from './hullAim';
 
 export { hitChance, penetrates };
 
@@ -787,6 +788,7 @@ interface VehicleShot {
   /** gunner skill 0..1 (aimed shots) */
   skill?: number;
   shooterTeamId?: number;
+  heights?: LosHeights;
 }
 
 /** Gun shells and AT rockets are real objects in the arena: anything between firer and target
@@ -893,7 +895,7 @@ function fireAtVehicle(
   const pAny = aim === 'mass' ? p : pSpot + (p - pSpot) * SPOT_MISS_STILL_HITS;
   const r = rng.next();
   const rw = roundWeapon(weapon, round);
-  const shotPath = traceRound(state, rng, shooterPos, vehicle.pos, rw, { eyeM: EYE_VEHICLE_M, targetM: EYE_VEHICLE_M });
+  const shotPath = traceRound(state, rng, shooterPos, vehicle.pos, rw, shot.heights ?? { eyeM: EYE_VEHICLE_M, targetM: EYE_VEHICLE_M });
   const intercepted = shotPath.blocked || shotPath.deflected;
   // a clean miss is seen to fly past the hull and strike the ground beyond it (visual only: the
   // physics above traced the line to the hull)
@@ -2260,6 +2262,17 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
   const crew = crewEffects(state, vehicle);
   const mainWeapon = def.mainWeaponId ? WEAPONS[def.mainWeaponId] : undefined;
   const gunWorks = !!mainWeapon && mainGunUsable(vehicle) && !!crew.gunner;
+  const settled = hullSettled(vehicle);
+  // Any angular motion spoils a completed fine lay, even when its target is temporarily lost.
+  // Reuse authoritative lay timers; the correction cannot count down until the hull settles.
+  const oldLay = vehicle.gunLay;
+  const spoiledFineLay = !settled && !!oldLay && oldLay.fineLeftS <= 0;
+  if (spoiledFineLay) {
+    oldLay!.fineLeftS = followUpLayS(crew.gunner?.experience ?? 50);
+    oldLay!.totalS = oldLay!.fineLeftS + (oldLay!.swayLeftS ?? 0);
+    oldLay!.followUp = true; oldLay!.floor = CORRECTION_AIM_FLOOR;
+    vehicle.layProgress = CORRECTION_AIM_FLOOR;
+  }
 
   // smoke order for vehicles: smoke rounds if the gun carries them, else HE on the spot; vehicles
   // without a gun (or whose weapon has no round types) use their smoke dischargers as before
@@ -2268,6 +2281,9 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
     if (state.time - rec.lastAt >= 4 && rec.count < 3) {
       let round: RoundType = 'smoke';
       if (mainWeapon?.rounds && gunWorks) {
+        const ray = vehicleGunRay(state, vehicle, def, gunTarget(state, team.order.target));
+        vehicle.gunElevationRad = ray.elevationRad;
+        if (!settled || !ray.canBear) return;
         const counts = vehicleRounds(state, vehicle);
         if (vehicle.loadedRound) { counts[vehicle.loadedRound]++; vehicle.mainAmmo++; vehicle.loadedRound = undefined; }
         const pick = chooseRound(mainWeapon, counts, { kind: 'smoke' });
@@ -2301,22 +2317,27 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
   }
 
   const target = mainWeapon?.indirect ? null : pickVehicleTarget(state, vehicle);
+  const resolvedTarget = target ? gunTarget(state, targetPosOf(target),
+    target.kind === 'vehicle' ? target.vehicle : undefined, target.kind === 'soldier' ? target.soldier : undefined) : null;
+  const targetRay = resolvedTarget ? vehicleGunRay(state, vehicle, def, resolvedTarget) : null;
+  if (targetRay) vehicle.gunElevationRad = targetRay.elevationRad;
 
   if (mainWeapon?.indirect && gunWorks) {
     // item 020: rocket launchers never fire direct main-gun shots — indirect salvos only
     stepVehicleRockets(state, rng, dt, vehicle, def, mainWeapon, crew, track);
-  } else if (target && mainWeapon && gunWorks && (vehicle.mainAmmo > 0 || vehicle.loadedRound) && !mainGunBlock(state, vehicle, targetPosOf(target))) {
+  } else if (target && mainWeapon && gunWorks && (vehicle.mainAmmo > 0 || vehicle.loadedRound) && !mainGunBlock(state, vehicle, resolvedTarget!.posTiles, resolvedTarget!.heightM)) {
     const weapon = mainWeapon;
     const gunner = crew.gunner!;
     const tPos = targetPosOf(target);
     const desired = angleTo(vehicle.pos, tPos);
     const distM = dist(vehicle.pos, tPos) * TILE_M;
     const estimated = target.kind === 'point' && target.guesstimate;
-    // item 038: the commander's eye (2.2 m) and the main gun's muzzle (1.5 m) sit at different
+    // item 038: the commander's eye and the rotated main-gun muzzle sit at different
     // heights, so a tank in defilade behind a crest can SEE a target it cannot shoot from. The
     // eye's line gates the lay/designate; the muzzle's gates the fire and the hull-down creep.
     const los = estimated ? hasLineOfFire(state.map, vehicle.pos, tPos, { eyeM: EYE_VEHICLE_M }) : gunLos(state, vehicle, tPos);
-    const gunLine = hasLineOfFire(state.map, vehicle.pos, tPos, { eyeM: VEHICLE_GUN_M });
+    let gunRay = targetRay!;
+    let gunLine = hasLineOfFire(state.map, gunRay.from, tPos, gunRay.heights);
     const reversing = isVehicleReversing(state, vehicle);
     const ownMoving = Math.abs(vehicle.speed) > 0.1;
 
@@ -2390,6 +2411,10 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
       lay.key = layKey;
       lay.aim = { ...tPos };
     }
+    if (spoiledFineLay && lay === oldLay) {
+      lay.fineLeftS = Math.max(lay.fineLeftS, followUpS(layIn));
+      lay.totalS = lay.fineLeftS + (lay.swayLeftS ?? 0);
+    }
     lay.lostAt = undefined;
     if (bracketLost(lay, vehicle.pos, tPos)) { lay.misses = 0; lay.bracketFrom = undefined; lay.bracketAt = undefined; }
 
@@ -2407,6 +2432,10 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
         vehicle.turretFacing = wrapAngle(vehicle.hullFacing + cur + clamp(rel - cur, -rate * dt, rate * dt));
       }
     }
+    // Traverse changes the muzzle; solve again and commit the matching elevation before firing.
+    gunRay = vehicleGunRay(state, vehicle, def, resolvedTarget!);
+    vehicle.gunElevationRad = gunRay.elevationRad;
+    gunLine = hasLineOfFire(state.map, gunRay.from, tPos, gunRay.heights);
     const facingRef = vehicle.turretFacing;
     const facingDiff = Math.abs(wrapAngle(desired - facingRef));
     // only a halted vehicle is laid properly; one backing out of trouble shoots on the move, and
@@ -2422,7 +2451,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
     }
     if (lay.swayLeftS! > 0) {
       lay.swayLeftS = Math.max(0, lay.swayLeftS! - dt); // the recoil settles whatever else happens
-    } else if (designated && los && facingDiff <= COARSE_LAY_RAD && lay.fineLeftS > 0 && (!ownMoving || fireOnMove)) {
+    } else if (settled && designated && los && facingDiff <= COARSE_LAY_RAD && lay.fineLeftS > 0 && (!ownMoving || fireOnMove)) {
       lay.fineLeftS = Math.max(0, lay.fineLeftS - dt);
     }
     const left = clamp(1 - (lay.designateLeftS + lay.fineLeftS + (lay.swayLeftS ?? 0)) / Math.max(1e-6, lay.totalS), 0, 1);
@@ -2458,8 +2487,8 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
     const sightMul = sightAccuracyMul(vehicle, distM);
     // snap shot: a veteran about to be fired at does not finish his lay
     let layMul = 1;
-    let laid = lay.fineLeftS <= 0 && !(lay.swayLeftS! > 0);
-    if (!laid && designated && loaded && target.kind === 'vehicle' && gunner.experience >= SNAP_SHOT_MIN_EXPERIENCE
+    let laid = settled && lay.fineLeftS <= 0 && !(lay.swayLeftS! > 0);
+    if (settled && !laid && designated && loaded && target.kind === 'vehicle' && gunner.experience >= SNAP_SHOT_MIN_EXPERIENCE
       && aboutToFireAt(target.vehicle, vehicle, lay.fineLeftS)) {
       const fineTotal = Math.max(1e-6, lay.followUp ? lay.totalS : fineLayS(layIn));
       layMul = Math.max(SNAP_SHOT_MIN, clamp(1 - lay.fineLeftS / fineTotal, 0, 1));
@@ -2467,7 +2496,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
     }
     vehicle.gunState = !loaded ? 'loading' : laid && facingDiff <= LAY_TOLERANCE_RAD ? 'ready' : 'laying';
 
-    if (loaded && laid && designated && !hold && sightMul > 0 && facingDiff <= LAY_TOLERANCE_RAD && los && gunLine && (!ownMoving || fireOnMove)) {
+    if (settled && gunRay.canBear && loaded && laid && designated && !hold && sightMul > 0 && facingDiff <= LAY_TOLERANCE_RAD && los && gunLine && (!ownMoving || fireOnMove)) {
       const round = vehicle.loadedRound!;
       const fired = roundWeapon(weapon, round);
       const moveMul = ownMoving ? FIRE_ON_MOVE_MUL : 1;
@@ -2481,7 +2510,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
       if (target.kind === 'vehicle') {
         const speedMs = Math.abs(target.vehicle.speed);
         const p = Math.min(0.97, vehicleHitChance(weapon, distM, 0, 'standing', speedMs > 0.1, speedMs) * crew.gunnerMul * sightMul * bracketMul(lay.misses) * layMul * moveMul);
-        const hit = fireAtVehicle(state, rng, weapon, vehicle.pos, vehicle.side, target.vehicle, p, true, { round, aimPoint: aim, skill, shooterTeamId: vehicle.teamId });
+        const hit = fireAtVehicle(state, rng, weapon, gunRay.from, vehicle.side, target.vehicle, p, true, { round, aimPoint: aim, skill, shooterTeamId: vehicle.teamId, heights: gunRay.heights });
         // bracketing: the fall of a missed round is observed and corrected for
         if (!hit) { lay.misses = Math.min(2, (lay.misses ?? 0) + 1); lay.bracketFrom ??= { ...vehicle.pos }; lay.bracketAt ??= { ...tPos }; }
         missed = !hit;
@@ -2489,7 +2518,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
         // a round fired on the move lands wide of a point target
         const at = estimated ? estimateAim(state, rng, vehicle.pos, tPos) : { ...tPos };
         if (ownMoving) { const r = (4 + rng.next() * 10) / TILE_M, a = rng.next() * Math.PI * 2; at.x += dm.sin(a) * r; at.y -= dm.cos(a) * r; }
-        const shot = traceRound(state, rng, vehicle.pos, at, fired, { eyeM: VEHICLE_GUN_M, targetM: estimated ? 0.5 : 1.7 });
+        const shot = traceRound(state, rng, gunRay.from, at, fired, gunRay.heights);
         traceTracers(state, shot, tracerKindFor(fired), !shot.blocked && !shot.deflected);
         areaImpact(state, rng, vehicle.pos, vehicle.side, fired, shot.impact, gunner);
         // solid shot at men or a spot: the dirt it throws up, and its skip on off the ground

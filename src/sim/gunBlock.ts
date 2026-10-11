@@ -11,13 +11,14 @@ import { WEAPONS } from '@/data/weapons';
 import { angleTo, dist, wrapAngle } from '@/shared/math';
 import { crewEffects, isImmobile, mainGunUsable, SIGHT_DESTROYED_MAX_M, systemState, turretFrozen } from './vehicleDamage';
 import { gunArcRad } from './gunTiming';
+import { gunTarget, vehicleGunRay } from './hullAim';
 
-export type GunBlock = 'gunDestroyed' | 'noGunner' | 'sightOut' | 'noAmmo' | 'outOfRange' | 'cantBear';
+export type GunBlock = 'gunDestroyed' | 'noGunner' | 'sightOut' | 'noAmmo' | 'outOfRange' | 'cantBear' | 'elevation';
 
 /** A gun fixed in a jammed turret still bears this far either side of where it points. */
 const FROZEN_ARC_RAD = (3 * Math.PI) / 180;
 
-export function mainGunBlock(state: BattleState, v: Vehicle, target: Vec2): GunBlock | null {
+export function mainGunBlock(state: BattleState, v: Vehicle, target: Vec2, targetHeightM?: number): GunBlock | null {
   const def = VEHICLE_DEFS[v.defId];
   const weapon = def?.mainWeaponId ? WEAPONS[def.mainWeaponId] : undefined;
   if (!def || !weapon || !mainGunUsable(v)) return 'gunDestroyed';
@@ -32,6 +33,8 @@ export function mainGunBlock(state: BattleState, v: Vehicle, target: Vec2): GunB
     const off = Math.abs(wrapAngle(bearing - (frozen ? v.turretFacing : v.hullFacing)));
     if (frozen ? off > FROZEN_ARC_RAD : !def.hasTurret && off > gunArcRad(def)) return 'cantBear';
   }
+  const resolved = targetHeightM == null ? gunTarget(state, target) : { posTiles: target, heightM: targetHeightM };
+  if (!vehicleGunRay(state, v, def, resolved).canBear) return 'elevation';
   return null;
 }
 
@@ -39,7 +42,11 @@ export function mainGunBlock(state: BattleState, v: Vehicle, target: Vec2): GunB
  * ordered point), or null. */
 export function orderedGunBlock(state: BattleState, vehicle: Vehicle, order: Order): GunBlock | null {
   const hull = order.targetVehicleId != null ? state.vehicles.get(order.targetVehicleId) : undefined;
-  return mainGunBlock(state, vehicle, hull ? hull.pos : order.target);
+  const soldier = !hull && order.targetTeamId != null
+    ? state.teams.get(order.targetTeamId)?.soldierIds.map(id => state.soldiers.get(id))
+      .find(s => s && s.health !== 'dead' && s.health !== 'incapacitated' && s.vehicleId == null) : undefined;
+  const target = gunTarget(state, hull?.pos ?? soldier?.pos ?? order.target, hull, soldier);
+  return mainGunBlock(state, vehicle, target.posTiles, target.heightM);
 }
 
 const TEXT: Record<GunBlock, string> = {
@@ -48,6 +55,7 @@ const TEXT: Record<GunBlock, string> = {
   sightOut: `sight destroyed: ${SIGHT_DESTROYED_MAX_M} m max`,
   noAmmo: 'out of ammunition',
   outOfRange: 'out of range',
+  elevation: 'gun elevation limit',
   cantBear: "immobilised: gun can't bear",
 };
 export function gunBlockText(b: GunBlock): string { return TEXT[b]; }
