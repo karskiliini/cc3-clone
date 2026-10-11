@@ -240,6 +240,7 @@ it('bounds the muzzle solve immediately outside its conservative close-target re
 });
 it('shows the same stance-aware elevation reason for a spotted infantry target and its Fire order', () => {
   const state = makeState(), a = addTank(state, 't34_76', { x: 100, y: 100 }, 0, 60, 'german');
+  a.v.coaxAmmo = 0; a.v.bowAmmo = 0; // A lone target is eligible only once both MGs are out.
   a.v.body = createHullBody(VEHICLE_DEFS[a.v.defId], a.v.pos, 0, flat); a.v.body.orientation = noseUp;
   const man = soldier(7, 8, 'soviet', { x: 100, y: 90 }, 'mosin', { stance: 'prone' });
   const enemy = mkTeam(8, 'rifle', [7], 'soviet', man.pos);

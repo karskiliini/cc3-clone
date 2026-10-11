@@ -1,4 +1,4 @@
-import type { BattleState, Camera, CursorKind, Side, Team, Vec2, Vehicle } from '@/shared/types';
+import type { BattleState, Camera, CursorKind, Order, Side, Team, Vec2, Vehicle } from '@/shared/types';
 import { TILE_M, TILE_PX, otherSide } from '@/shared/types';
 import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';
@@ -6,11 +6,12 @@ import { worldToScreen } from '@/engine/camera';
 import { dist } from '@/shared/math';
 import { eyeHeightM, EYE_VEHICLE_M } from '@/sim/los';
 import { aimLineProfile, aimPointClass, type AimClass } from '@/sim/losProfile';
-import { ATTACK_PICK_VEHICLE_PAD_TILES, spottedEnemyTeamAt } from '@/sim/orders';
+import { ATTACK_PICK_VEHICLE_PAD_TILES, spottedEnemyTeamAt, spottedTargetCentre } from '@/sim/orders';
 import { penRating, teamPenetrationChance, type PenRating } from '@/sim/penChance';
 import { vehicleEyes } from '@/sim/vehicleVision';
 import { gunBlockText, mainGunBlock } from '@/sim/gunBlock';
-import { gunTarget, vehicleGunRay, type GunTarget } from '@/sim/hullAim';
+import { vehicleGunRay } from '@/sim/hullAim';
+import { orderedVehicleGunTarget, resolvedGunTarget } from '@/sim/vehicleGunTarget';
 
 /** Where a team looks from when it aims: its leader (or first living man) at his eye height, or —
  * for a vehicle — the turret eye (gunner's sight, or the commander laying the gun himself in a
@@ -126,23 +127,26 @@ export function targetableEnemyAt(state: BattleState, playerSide: Side, selected
     if (vehicle) penChance = Math.max(penChance, teamPenetrationChance(state, t, obs.from, vehicle));
     let cls: AimClass = 'blocked';
     if (teamFiresIndirect(state, t)) cls = 'clear';
-    else for (const p of pts) {
-      const man = !vehicle ? enemy.soldierIds.map(id => state.soldiers.get(id)).find(s => s?.pos === p) : undefined;
-      const target = gunTarget(state, p, vehicle, man);
+    else {
       const shooter = t.vehicleId != null ? state.vehicles.get(t.vehicleId) : undefined;
       const shooterDef = shooter ? VEHICLE_DEFS[shooter.defId] : undefined;
-      const ray = shooter && shooterDef?.mainWeaponId && !WEAPONS[shooterDef.mainWeaponId]?.indirect
-        ? vehicleGunRay(state, shooter, shooterDef, target) : undefined;
-      const c = ray && !ray.canBear ? 'blocked' : aimPointClass(aimLineProfile(state.map,
-        ray?.from ?? obs.from, p, ray?.heights ?? { eyeM: obs.eyeM }));
-      if (c === 'clear') { cls = c; break; }
-      if (c === 'obscured') cls = c;
+      const eligible = shooter && shooterDef?.mainWeaponId && !WEAPONS[shooterDef.mainWeaponId]?.indirect
+        ? orderedVehicleGunTarget(state, shooter, hoverOrder(state, playerSide, enemy, world)) : null;
+      const target = eligible ? resolvedGunTarget(state, eligible) : undefined;
+      const ray = shooter && shooterDef && target ? vehicleGunRay(state, shooter, shooterDef, target) : undefined;
+      // A vehicle main gun profiles its actual chosen member/last-known point. MG-only and
+      // nonvehicle observers retain the existing visible-member policy.
+      for (const p of target ? [target.posTiles] : pts) {
+        const c = ray && !ray.canBear ? 'blocked' : aimPointClass(aimLineProfile(state.map,
+          ray?.from ?? obs.from, p, ray?.heights ?? { eyeM: obs.eyeM }));
+        if (c === 'clear') { cls = c; break; }
+        if (c === 'obscured') cls = c;
+      }
     }
     if (cls === 'blocked') continue;
     if (cls === 'clear' || best === 'blocked') best = cls;
   }
-  const man = !vehicle ? enemy.soldierIds.map(id => state.soldiers.get(id)).find(s => s?.pos === pts[0]) : undefined;
-  const block = selectedGunBlock(state, selected, gunTarget(state, vehicle ? vehicle.pos : pts[0], vehicle, man));
+  const block = selectedGunBlock(state, selected, hoverOrder(state, playerSide, enemy, world));
   if (vehicle) return looked ? { team: enemy, cls: best, penChance, pen: penRating(penChance), lof: best !== 'blocked', ...(block ? { block } : {}) } : null;
   if (best === 'blocked') return block && looked ? { team: enemy, cls: best, lof: false, block } : null;
   return { team: enemy, cls: best, lof: true, ...(block ? { block } : {}) };
@@ -158,15 +162,25 @@ export function targetCursorKind(h: TargetHover): CursorKind {
   return h.lof ? base : `${base}Blocked`;
 }
 
-/** Why none of the selected teams can fire on `at`, when all of them are vehicles with a main gun
+/** Preview the same tracked centre that issuing an attack order records; no unseen member
+ * coordinates enter the cursor's fallback point. Selection remains per firing vehicle. */
+function hoverOrder(state: BattleState, viewer: Side, enemy: Team, world: Vec2): Order {
+  return { type: 'fire', target: spottedTargetCentre(state, viewer, enemy) ?? world,
+    targetTeamId: enemy.id, issuedAt: state.time, lastSeenAt: state.time };
+}
+
+/** Why none of the selected teams can carry out this main-gun attack order, when all of them are vehicles with a main gun
  * that cannot (a man with a rifle can always try); null otherwise. */
-function selectedGunBlock(state: BattleState, selected: Team[], target: GunTarget): string | null {
+function selectedGunBlock(state: BattleState, selected: Team[], order: Order): string | null {
   let reason: string | null = null;
   for (const t of selected) {
     if (t.outOfAction) continue;
     const v = t.vehicleId != null ? state.vehicles.get(t.vehicleId) : undefined;
     const def = v ? VEHICLE_DEFS[v.defId] : undefined;
     if (!v || !def?.mainWeaponId || WEAPONS[def.mainWeaponId]?.indirect) return null;
+    const eligible = orderedVehicleGunTarget(state, v, order);
+    if (!eligible) return null;
+    const target = resolvedGunTarget(state, eligible);
     const b = mainGunBlock(state, v, target.posTiles, target.heightM);
     if (!b) return null;
     reason ??= gunBlockText(b);

@@ -3,6 +3,9 @@ import { makeState, addTank, soldier, mkTeam } from './vehicleDamageHelpers';
 import { stepCombat, stepPendingBursts } from '@/sim/combat';
 import { stepCrewWeapons } from '@/sim/crewWeapon';
 import { Rng } from '@/shared/rng';
+import { createHullBody } from '@/sim/hullPhysics';
+import { VEHICLE_DEFS } from '@/data/units';
+import { flat } from './hullPhysicsHelpers';
 import { SIM_DT } from '@/shared/types';
 import type { BattleState, Vec2 } from '@/shared/types';
 
@@ -73,6 +76,32 @@ describe('item 020 — vehicle-mounted rocket salvos', () => {
     expect(state.explosions.some((e) => e.kind === 'he' && Math.hypot(e.pos.x - target.x, e.pos.y - target.y) < 12)).toBe(true);
     run(state, 2, rng);
     expect(state.tracers.filter((t) => t.kind === 'rocket').length).toBe(8);
+  });
+
+  it.each(['bm13', 'sdkfz251_rocket'])('%s pauses stationary rail emission while rocking, including mid-salvo, then resumes', (defId) => {
+    const state = makeState(1943);
+    const v = addTank(state, defId, { x: 200.5, y: 300.5 }, 0, 50, 'german').v;
+    addCluster(state, 4, { x: 200.5, y: 60.5 });
+    v.body = createHullBody(VEHICLE_DEFS[defId], v.pos, 0, flat);
+    v.body.angularVelocity.x = 0.1;
+    v.mainFireTimer = 0.2;
+    const ammo = v.mainAmmo, rng = new Rng(7);
+    run(state, 1, rng);
+    expect(v.mainFireTimer).toBe(0); // Loading still progresses.
+    expect(v.mainAmmo).toBe(ammo);
+    expect(state.tracers.filter(t => t.kind === 'rocket')).toHaveLength(0);
+    expect(v.gunState).toBe('laying');
+    v.body.angularVelocity.x = 0;
+    run(state, 0.1, rng);
+    expect(v.mainAmmo).toBe(ammo - 1);
+    const salvo = v.rocketSalvoLeft;
+    v.body.angularVelocity.y = 0.1;
+    run(state, 1, rng);
+    expect(v.mainAmmo).toBe(ammo - 1);
+    expect(v.rocketSalvoLeft).toBe(salvo);
+    v.body.angularVelocity.y = 0;
+    run(state, 0.6, rng);
+    expect(v.mainAmmo).toBeLessThan(ammo - 1);
   });
 
   it('rails cannot reach a target behind the launcher: nothing fires and the crew says so', () => {

@@ -12,6 +12,7 @@ import { angleTo, dist, wrapAngle } from '@/shared/math';
 import { crewEffects, isImmobile, mainGunUsable, SIGHT_DESTROYED_MAX_M, systemState, turretFrozen } from './vehicleDamage';
 import { gunArcRad } from './gunTiming';
 import { gunTarget, vehicleGunRay } from './hullAim';
+import { orderedVehicleGunTarget, resolvedGunTarget } from './vehicleGunTarget';
 
 export type GunBlock = 'gunDestroyed' | 'noGunner' | 'sightOut' | 'noAmmo' | 'outOfRange' | 'cantBear' | 'elevation';
 
@@ -41,11 +42,9 @@ export function mainGunBlock(state: BattleState, v: Vehicle, target: Vec2, targe
 /** Why a vehicle cannot fire on the target of its Fire order (the hull it was set on, else the
  * ordered point), or null. */
 export function orderedGunBlock(state: BattleState, vehicle: Vehicle, order: Order): GunBlock | null {
-  const hull = order.targetVehicleId != null ? state.vehicles.get(order.targetVehicleId) : undefined;
-  const soldier = !hull && order.targetTeamId != null
-    ? state.teams.get(order.targetTeamId)?.soldierIds.map(id => state.soldiers.get(id))
-      .find(s => s && s.health !== 'dead' && s.health !== 'incapacitated' && s.vehicleId == null) : undefined;
-  const target = gunTarget(state, hull?.pos ?? soldier?.pos ?? order.target, hull, soldier);
+  const eligible = orderedVehicleGunTarget(state, vehicle, order);
+  if (!eligible) return null;
+  const target = resolvedGunTarget(state, eligible);
   return mainGunBlock(state, vehicle, target.posTiles, target.heightM);
 }
 
