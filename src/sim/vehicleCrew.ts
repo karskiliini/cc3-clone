@@ -310,7 +310,7 @@ function runSpot(state: BattleState, v: Vehicle, s: Soldier): Vec2 {
 // ------------------------------------------------------------------ is it worth going back to
 /** Something useful still works: it can move, or fire its gun, or fire an MG. */
 export function isServiceable(v: Vehicle): boolean {
-  if (v.state === 'burning' || v.state === 'knockedOut' || v.turretBlown) return false;
+  if (v.body?.overturned || v.state === 'burning' || v.state === 'knockedOut' || v.turretBlown) return false;
   const def = VEHICLE_DEFS[v.defId];
   if (!def) return false;
   if (!v.wasImmobile && !isImmobile(v)) return true;

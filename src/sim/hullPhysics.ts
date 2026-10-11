@@ -77,6 +77,8 @@ export function stepHullBody(body: HullBody, def: VehicleDef, drive: HullDrive, 
   if (body.asleep) return;
   const p = hullParams(def), { massKg, inertia, suspension } = p;
   const loadedContactCount = p.contacts.filter(c => !c.horn).length, solidLocals = solidPoints(p);
+  const drivenContactCount = p.contacts.filter(c => !c.horn && c.driven).length;
+  let bottomSupported = false;
   const speed = drive.brake ? 0 : drive.speedMs, yawRate = drive.brake ? 0 : drive.yawRateRadS;
   const mu = 0.8 * Math.max(0, going), controllerMass = massKg / loadedContactCount;
   const frontY = Math.min(...p.contacts.filter(contact => !contact.horn).map(contact => contact.local.y));
@@ -140,13 +142,14 @@ export function stepHullBody(body: HullBody, def: VehicleDef, drive: HullDrive, 
       const n = sample.normal, a = cross(r, n), localA = inverseRotate(body.orientation, a);
       const u = rotate(body.orientation, { x: localA.x / inertia.x, y: localA.y / inertia.y, z: localA.z / inertia.z });
       const gap = (point.z - sample.heightM) * n.z;
-      return { r, n, u, inverseMass: 1 / massKg + dot(a, u), target: -Math.max(gap - SOLID_SKIN_M * n.z, 0) / H };
+      return { local, supported: false, r, n, u, inverseMass: 1 / massKg + dot(a, u), target: -Math.max(gap - SOLID_SKIN_M * n.z, 0) / H };
     });
     // Frictionless, zero-restitution support. Allow only the closing speed that
     // reaches contact this substep; never add separating bias or stored impulses.
     for (let pass = 0; pass < 4; pass++) for (const contact of solids) {
       const vn = dot(add(body.velocity, cross(body.angularVelocity, contact.r)), contact.n);
       const impulse = Math.max(0, (contact.target - vn) / contact.inverseMass);
+      if (impulse > 0) contact.supported = true;
       body.velocity = add(body.velocity, scale(contact.n, impulse / massKg));
       body.angularVelocity = add(body.angularVelocity, scale(contact.u, impulse));
     }
@@ -163,12 +166,31 @@ export function stepHullBody(body: HullBody, def: VehicleDef, drive: HullDrive, 
       z: q.z + 0.5 * H * qdot.z, w: q.w + 0.5 * H * qdot.w });
     // Height-field nonpenetration at final XY. Translation only: a lift must not
     // bypass later movement blockers, impart a bounce, or alter kinetic energy.
-    let lift = 0;
+    let lift = 0, bottomLift = 0;
     for (const local of solidLocals) {
       const point = add(body.position, rotate(body.orientation, local));
-      lift = Math.max(lift, probe(point.x, point.y).heightM + SOLID_SKIN_M - point.z);
+      const penetration = probe(point.x, point.y).heightM + SOLID_SKIN_M - point.z;
+      lift = Math.max(lift, penetration);
+      if (local.z === p.solidBox.min.z) bottomLift = Math.max(bottomLift, penetration);
     }
     body.position.z += lift;
+    // Only support still touching at the accepted final XY/rotation counts. Roof
+    // impulses cannot masquerade as belly support, including after blocker rejection.
+    bottomSupported = solids.some(contact => {
+      if (contact.local.z !== p.solidBox.min.z || (!contact.supported && bottomLift <= 0)) return false;
+      const offset = rotate(body.orientation, contact.local), point = add(body.position, offset);
+      // Quaternion integration rotates a point slightly differently from the
+      // linear contact velocity used by the impulse. Admit only that measured
+      // truncation residual for an impulse-supported point, not a tuned gap.
+      const sample = probe(point.x, point.y);
+      if (sample.normal.z <= 0) return false;
+      const rotationStep = scale(cross(body.angularVelocity, contact.r), H);
+      const delta = add(offset, scale(add(contact.r, rotationStep), -1));
+      const rotationResidual = contact.supported ? Math.max(0, dot(delta, sample.normal) / sample.normal.z) : 0;
+      // Projection keeps its 1 nm skin; classification adds a 1 nm
+      // comparison margin, without moving the hull or widening projection.
+      return point.z <= sample.heightM + 2 * SOLID_SKIN_M + rotationResidual;
+    });
     const angles = hullAngles(body.orientation), levelLimit = 2 * Math.PI / 180;
     const quiet = !hasInput && loaded && stableSuspension
       && dot(body.velocity, body.velocity) < 0.005 * 0.005
@@ -176,6 +198,22 @@ export function stepHullBody(body: HullBody, def: VehicleDef, drive: HullDrive, 
       && Math.abs(angles.pitch) < levelLimit && Math.abs(angles.roll) < levelLimit;
     body.quietS = quiet ? body.quietS + H : 0;
   }
+  // Recompute current driven loads at the final accepted pose, rather than using
+  // compression alone or a force from an earlier speculative/substep position.
+  let drivenLoaded = 0;
+  if (bottomSupported) for (const contact of p.contacts) {
+    if (contact.horn || !contact.driven) continue;
+    const offset = rotate(body.orientation, contact.local), point = add(body.position, offset);
+    const sample = probe(point.x, point.y), separation = (sample.heightM - point.z) * sample.normal.z;
+    if (separation <= 0) continue;
+    const vn = dot(add(body.velocity, cross(body.angularVelocity, offset)), sample.normal);
+    const magnitude = Math.max(0, k * clamp(separation, 0, suspension.travelM)
+      + 10 * k * Math.max(0, separation - suspension.travelM) - c * vn);
+    if (magnitude > 0) drivenLoaded++;
+  }
+  const hung = bottomSupported && drivenContactCount > 0 && drivenLoaded / drivenContactCount < 0.25;
+  body.hungS = hung ? body.hungS + dt : 0;
+  body.hungUp = body.hungS >= 0.5 - 1e-9;
   if (body.quietS >= 0.5) {
     body.asleep = true;
     body.velocity = zero(); body.angularVelocity = zero();

@@ -32,6 +32,7 @@ import { isDazed } from './daze';
 import * as dm from '@/shared/dmath';
 import { beginHullDrive, requestHullDrive, takeHullDrive } from './hullDrive';
 import { createHullBody, stepHullBody, syncHullGroundVersion, wakeHull } from './hullPhysics';
+import { hullRecoveryDrive, stepHullGameplay } from './hullGameplay';
 import { groundProbe, groundVersion } from './hullGround';
 import { hullAngles, rotate } from './hullMath';
 import { hullParams } from '@/data/vehiclePhysics';
@@ -168,7 +169,7 @@ function syncVehicleOccupants(state: BattleState, v: Vehicle): void {
 
 /** Complete each hull sequentially: later hulls see earlier accepted final positions. */
 function completeVehicleMovement(state: BattleState, rng: Rng, dt: number, v: Vehicle, def: VehicleDef,
-  movement: AcceptedVehicleMovement | undefined): void {
+  movement: AcceptedVehicleMovement | undefined, recoveryApplied = false): void {
   const body = v.body!, heading = v.hullFacing, relativeTurret = wrapAngle(v.turretFacing - heading);
   const sweep: AcceptedHullPoint[] = [{ pos: { ...v.pos }, heading, speedMs: 0 }];
   const poses: AcceptedHullPose[] = [];
@@ -235,6 +236,7 @@ function completeVehicleMovement(state: BattleState, rng: Rng, dt: number, v: Ve
   } : undefined);
   processAcceptedVehicleMovement(state, rng, v, def, live ? profile : undefined, sweep, poses);
   syncVehicleOccupants(state, v);
+  stepHullGameplay(state, rng, v, dt, recoveryApplied);
   driverTicks.delete(v);
 }
 
@@ -1051,8 +1053,11 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     if (dead) v.path = [];
     else movement = stepVehicleDriver(state, rng, dt, v, def) ?? movement;
     // Minds run before crew/damage. A request from a now-disabled driver cannot survive.
-    if (dead || isImmobile(v) || !crewEffects(state, v).canDrive) beginHullDrive(v);
-    completeVehicleMovement(state, rng, dt, v, def, movement);
+    const disabled = dead || isImmobile(v) || !crewEffects(state, v).canDrive;
+    const recovery = disabled ? null : hullRecoveryDrive(v, state.teams.get(v.teamId)?.experience ?? 0);
+    if (disabled) beginHullDrive(v);
+    else if (recovery) requestHullDrive(v, recovery);
+    completeVehicleMovement(state, rng, dt, v, def, movement, recovery != null && !recovery.brake);
   }
 }
 
