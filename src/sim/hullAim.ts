@@ -160,7 +160,10 @@ export function vehicleAimPoint(v: Vehicle, def: VehicleDef, aim: AimPoint, orig
   if (aim === 'gunMantlet' || aim === 'driverPlate') at.y = box.min.y;
   if (aim === 'lowerHull' || aim === 'runningGear') at.z = box.min.z + (box.max.z - box.min.z) * 0.2;
   if (aim === 'driverPlate') at.z = box.min.z + (box.max.z - box.min.z) * 0.75;
-  if (aim === 'sideHull' || aim === 'runningGear') at.x = source.x >= 0 ? box.max.x : box.min.x;
+  if (aim === 'sideHull') at.x = source.x >= 0 ? box.max.x : box.min.x;
+  // Aim within the low hull band at the regular track-contact lateral position;
+  // the exact side-box edge makes a frontal offset source graze that side at the endpoint.
+  if (aim === 'runningGear') at.x = Math.max(box.min.x, Math.min(box.max.x, (source.x >= 0 ? 1 : -1) * p.widthM * 0.42));
   if (aim === 'rear' || aim === 'engineDeck') at.y = box.max.y;
   if (aim === 'engineDeck') at.z = box.max.z;
   return add(position, rotate(q, at));

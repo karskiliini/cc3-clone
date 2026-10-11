@@ -265,3 +265,34 @@ it.each(['grenade', 'mortar', 'vehicleRocket'] as const)('%s producer snapshots 
   expect(trajectory.sourcePos).toEqual(expected.sourcePos);
   for (const axis of ['x', 'y', 'z'] as const) expect(trajectory.direction[axis]).toBeCloseTo(expected.direction[axis], 12);
 });
+
+import { expectedArmorFrom } from '@/sim/vehicleDamage';
+import { chooseAimPointAt } from '@/sim/aimPoint';
+it('uses independent source terrain for tactical armor and bounds offset running-gear points in the rotated hull', () => {
+  for (const height of [0, 100]) {
+    const state = makeState(); state.map.ground = new Float32Array(state.map.width * state.map.height).fill(height);
+    const { v } = addTank(state, 't34_76', { x: 20.5, y: 20.5 }); const def = VEHICLE_DEFS[v.defId];
+    v.body = createHullBody(def, v.pos, 0, () => ({ heightM: height, normal: { x: 0, y: 0, z: 1 } }));
+    const from = { x: 19.5, y: 0.5 }, origin = { x: from.x * TILE_M, y: from.y * TILE_M, z: gunTarget(state, from).heightM + 1 };
+    const target = vehicleAimTarget(state, v, def, 'driverPlate', origin), ray = hullRayTo(origin, target);
+    const actual = locateHit(new Rng(1), v, def, from, { ray, aimPoint: 'driverPlate' })!;
+    expect(actual.face).toBe('front');
+    expect(expectedArmorFrom(state, v, def, origin, 'driverPlate', true)).toBe(locationArmorMm(def, actual));
+    const gearPoint = vehicleAimPoint(v, def, 'runningGear', origin);
+    expect(Math.abs(gearPoint.x - v.body.position.x)).toBeCloseTo(hullParams(def).widthM * 0.42, 10);
+    expect(chooseAimPointAt(state, WEAPONS.pak38, { ap: 10, apcr: 0, he: 0, smoke: 0 }, 0.5, from, v, origin).aimPoint).toBeDefined();
+    // Source ground differs from target ground: never infer the source datum from the hull.
+    state.map.ground[Math.floor(from.y) * state.map.width + Math.floor(from.x)] = height + 4;
+    state.map.heightField = undefined; // rebuild this deliberately edited fixture's sampled relief
+    const highOrigin = { ...origin, z: gunTarget(state, from).heightM + 1 };
+    expect(highOrigin.z).toBeGreaterThan(origin.z);
+    const highRay = hullRayTo(highOrigin, vehicleAimTarget(state, v, def, 'driverPlate', highOrigin));
+    const highActual = locateHit(new Rng(1), v, def, from, { ray: highRay, aimPoint: 'driverPlate' })!;
+    expect(expectedArmorFrom(state, v, def, highOrigin, 'driverPlate', true)).toBe(locationArmorMm(def, highActual));
+    v.body.orientation = yawQuat(Math.PI / 2); v.hullFacing = Math.PI / 2; v.turretFacing = v.hullFacing;
+    const sideOrigin = add(v.body.position, rotate(v.body.orientation, { x: 10, y: 0, z: 0 }));
+    const sideRay = hullRayTo(sideOrigin, vehicleAimTarget(state, v, def, 'runningGear', sideOrigin));
+    const side = locateHit(new Rng(1), v, def, null, { ray: sideRay, aimPoint: 'runningGear' })!;
+    expect(side.face).toBe('side'); expect(side.zone).toBe('runningGearR');
+  }
+});

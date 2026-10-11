@@ -10,7 +10,7 @@ import { angleTo, clamp, dist, wrapAngle } from '@/shared/math';
 import { VEHICLE_DEFS } from '@/data/units';
 import { WEAPONS } from '@/data/weapons';
 import { apcrIssued, bestRoundAgainst, expectedPenetrationChance } from './ballistics';
-import { legacyHullRay } from './hullAim';
+import { gunTarget, legacyHullRay } from './hullAim';
 import { expectedArmorMm } from './vehicleDamage';
 import { addMessage } from './messages';
 import { bresenhamTiles } from './los';
@@ -278,4 +278,9 @@ export function shotBlocker(map: { tiles: Terrain[]; width: number }, from: Vec2
     }
   }
   return null;
+}
+
+/** Terrain-aware owner wrapper; source origin is supplied independently of the target datum. */
+export function chooseAimPointAt(state: BattleState, weapon: WeaponDef, counts: RoundCounts | null, skill: number, from: Vec2, target: Vehicle, origin: Vec3): AimChoice {
+  return chooseAimPoint(weapon, counts, skill, from, target, state.config.year, origin, target.body ? 0 : gunTarget(state, target.pos).heightM - 0.5);
 }

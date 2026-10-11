@@ -4,7 +4,7 @@
 // threat that drove them out is believed gone (the belief model decides, not the truth) or has no
 // line of fire, and something useful still works. Re-manned, the seats are filled for what still
 // works. Deterministic: the seeded Rng only.
-import type { BattleState, CrewRole, HatchClimb, Order, Soldier, Team, Vec2, Vehicle, VehicleDef, VehicleHatchDef } from '@/shared/types';
+import type { BattleState, CrewRole, HatchClimb, Order, Soldier, Team, Vec2, Vec3, Vehicle, VehicleDef, VehicleHatchDef } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { angleTo, clamp, dist } from '@/shared/math';
@@ -18,9 +18,10 @@ import { addMessage } from './messages';
 import { onPassengerBoarded, onPassengerOut } from './transport';
 import { applyDaze, isDazed } from './daze';
 import {
-  coaxUsable, crewRoleOf, ensureSeats, expectedArmorMm, hasSystem, hurtCrewman, isImmobile, mainGunUsable, seatRoles, systemState, vehicleLayout,
+  coaxUsable, crewRoleOf, ensureSeats, expectedArmorFrom, hasSystem, hurtCrewman, isImmobile, mainGunUsable, seatRoles, systemState, vehicleLayout,
 } from './vehicleDamage';
 import * as dm from '@/shared/dmath';
+import { gunTarget, vehicleGunRay } from './hullAim';
 
 /** Seconds a calm, unhurt man of average experience needs through a hatch (spec: 1.5 to 2.5 s). */
 export const CLIMB_MIN_S = 1.5;
@@ -343,26 +344,27 @@ function calmEnough(s: Soldier, allowWary: boolean): boolean {
  * out) with a line of fire to the hull. Veterans shrug at guns that cannot hurt the vehicle. */
 function knownThreatCovers(state: BattleState, v: Vehicle, def: VehicleDef, men: Soldier[], veteran: boolean): boolean {
   const year = state.config.year;
-  const dangerous = (weaponId: string | null | undefined, from: Vec2): boolean => {
+  const dangerous = (weaponId: string | null | undefined, from: Vec2, origin: Vec3): boolean => {
     const w = weaponId ? WEAPONS[weaponId] : undefined;
     if (!w) return false;
     const distM = dist(from, v.pos) * TILE_M;
     if (distM > THREAT_RANGE_M) return false;
-    const danger = bestRoundAgainst(w, distM, expectedArmorMm(v, def, from, 'mass'), year).chance;
+    const danger = bestRoundAgainst(w, distM, expectedArmorFrom(state, v, def, origin, 'mass'), year).chance;
     if (danger <= 0.01 || (veteran && danger < VETERAN_DANGER_OK)) return false;
     return hasLOS(state.map, from, v.pos);
   };
   for (const id of state.spottedVehicles[v.side]) {
     const ev = state.vehicles.get(id);
     if (!ev || ev.side === v.side || (ev.state !== 'ok' && ev.state !== 'immobilized')) continue;
-    if (dangerous(VEHICLE_DEFS[ev.defId]?.mainWeaponId, ev.pos)) return true;
+    const edef = VEHICLE_DEFS[ev.defId];
+    if (edef && dangerous(edef.mainWeaponId, ev.pos, vehicleGunRay(state, ev, edef, gunTarget(state, v.pos, v)).origin)) return true;
   }
   for (const id of state.spotted[v.side]) {
     const e = state.soldiers.get(id);
     if (!isAble(e) || e.side === v.side || e.vehicleId != null) continue;
     const cls = WEAPONS[e.weaponId]?.cls;
     if (cls !== 'atgun' && cls !== 'atrocket' && cls !== 'atrifle') continue;
-    if (dangerous(e.weaponId, e.pos)) return true;
+    if (dangerous(e.weaponId, e.pos, { x: e.pos.x * TILE_M, y: e.pos.y * TILE_M, z: gunTarget(state, e.pos, undefined, e).heightM })) return true;
   }
   // what drove them out: still believed to be there, and able to see the hull from where they think it is
   const bt = v.bailThreat;

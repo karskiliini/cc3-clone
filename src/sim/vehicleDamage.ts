@@ -5,7 +5,7 @@
 // open-topped vehicles. Deterministic: the seeded Rng only.
 import type {
   AimPoint, BattleState, CrewRole, EquipState, RoundType, Side, Soldier, Team, Vec2, Vehicle, VehicleDamage,
-  VehicleDef, VehicleHatchDef, VehicleLayoutDef, VehicleSystem, VehicleZone, WeaponDef,
+  Vec3, VehicleDef, VehicleHatchDef, VehicleLayoutDef, VehicleSystem, VehicleZone, WeaponDef,
 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
@@ -418,11 +418,17 @@ export function locationArmorMm(def: VehicleDef, loc: HitLocation): number {
 }
 /** Same geometric cast as actual hits, aimed at the requested point, without dice. */
 export function expectedArmorMm(v: Vehicle, def: VehicleDef, shooterPos: Vec2, aim: AimPoint, ace = false, ray?: HullRay, groundZ = 0): number {
-  const fallback = legacyHullRay(v, def, shooterPos, aim);
+  const fallback = legacyHullRay(v, def, shooterPos, aim, 1.5 - (v.body ? 0 : groundZ));
   if (!v.body) fallback.origin.z += groundZ;
   const hit = intersectVehicle(v, def, ray ?? fallback, false, groundZ);
   if (!hit) return Infinity;
   return locationArmorMm(ace ? def : { ...def, weakSpots: undefined }, plateLocation(hit, aim));
+}
+
+/** State-aware armor estimate from an explicit absolute source, never target terrain as source datum. */
+export function expectedArmorFrom(state: BattleState, v: Vehicle, def: VehicleDef, origin: Vec3, aim: AimPoint, ace = false): number {
+  const from = { x: origin.x / TILE_M, y: origin.y / TILE_M };
+  return expectedArmorMm(v, def, from, aim, ace, hullRayTo(origin, vehicleAimTarget(state, v, def, aim, origin)), v.body ? 0 : gunTarget(state, v.pos).heightM - 0.5);
 }
 
 // ------------------------------------------------------------------ what is behind a zone

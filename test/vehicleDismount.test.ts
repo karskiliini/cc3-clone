@@ -385,3 +385,17 @@ describe('daze and remounting', () => {
     expect(crewReturnRefusal(state, v, true) === null || v.remount != null).toBe(true);
   });
 });
+
+import { createHullBody } from '@/sim/hullPhysics';
+it('veteran remount threat assessment uses the actual known source height on a raised plateau', () => {
+  for (const height of [0, 100]) {
+    const { state, v, crew } = tank('t34_76', 85);
+    state.map.ground = new Float32Array(state.map.width * state.map.height).fill(height);
+    v.body = createHullBody(VEHICLE_DEFS[v.defId], v.pos, 0, () => ({ heightM: height, normal: { x: 0, y: 0, z: 1 } }));
+    v.state = 'abandoned';
+    for (const s of crew) { s.vehicleId = null; s.mind.state = 'calm'; s.hatch = undefined; }
+    const enemy = soldier(99, 99, 'german', { x: 100, y: 60 }, 'ptrd'); state.soldiers.set(enemy.id, enemy); state.spotted.soviet.add(enemy.id);
+    // PTRD cannot defeat this front plate; raising both ground datums never makes the belly exposed.
+    expect(crewReturnRefusal(state, v, false)).toBeNull();
+  }
+});

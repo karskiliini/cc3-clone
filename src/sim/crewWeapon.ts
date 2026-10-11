@@ -40,12 +40,13 @@ import { TERRAIN_PROPS } from './terrain';
 import { addMessage } from './messages';
 import { VEHICLE_DEFS } from '@/data/units';
 import { LOAD_ATGUN_MUL, LAY_MOVING_TARGET_MUL, bracketLost, bracketMul, fineLayBaseS, followUpLayS, laySkillMul, loadSkillMul, weaponLoadS } from './gunTiming';
-import { AIM_HOLD_MAX_S, SKILL_ACE, aimLayMul, chooseAimPoint, chooseRound, gunnerSkill, noteOutOf, soldierRounds } from './aimPoint';
-import { expectedArmorMm } from './vehicleDamage';
+import { AIM_HOLD_MAX_S, SKILL_ACE, aimLayMul, chooseAimPointAt, chooseRound, gunnerSkill, noteOutOf, soldierRounds } from './aimPoint';
+import { expectedArmorFrom } from './vehicleDamage';
 import { formationBaseHeading, rotateOffset } from './spawn';
 import { isDazed, recoveryFactor } from './daze';
 import { INFANTRY_PACE, infantrySpeedMs } from './infantryPace';
 import * as dm from '@/shared/dmath';
+import { gunTarget } from './hullAim';
 
 export type CrewServedClass = 'mortar' | 'hmg' | 'atgun' | 'rocket';
 const CREW_SERVED = new Set<WeaponClass>(['mortar', 'hmg', 'atgun', 'rocket']);
@@ -1458,9 +1459,10 @@ function layOnTarget(state: BattleState, cw: CrewWeaponState, gunner: Soldier, r
     m.wantRound = chooseRound(w, have, { kind: req.smoke ? 'smoke' : 'soft' }) ?? undefined;
     return false;
   }
+  const origin = { x: gunner.pos.x * TILE_M, y: gunner.pos.y * TILE_M, z: gunTarget(state, gunner.pos, undefined, gunner).heightM };
   let hold = false;
   if (newMission || m.aimVehicleId !== tv.id || m.aimPoint == null) {
-    const choice = chooseAimPoint(w, have, gunnerSkill(gunner), cw.pos, tv, state.config.year);
+    const choice = chooseAimPointAt(state, w, have, gunnerSkill(gunner), cw.pos, tv, origin);
     const before = aimLayMul(m.aimPoint ?? 'mass');
     m.aimPoint = choice.aimPoint;
     if (m.aimVehicleId !== tv.id) { m.misses = 0; m.bracketFrom = undefined; m.bracketAt = undefined; }
@@ -1471,7 +1473,7 @@ function layOnTarget(state: BattleState, cw: CrewWeaponState, gunner: Soldier, r
   }
   if (hold && state.time - m.startedAt > AIM_HOLD_MAX_S) hold = false;
   const def = VEHICLE_DEFS[tv.defId];
-  const armorMm = def ? expectedArmorMm(tv, def, cw.pos, m.aimPoint ?? 'mass', gunnerSkill(gunner) > SKILL_ACE) : 9999;
+  const armorMm = def ? expectedArmorFrom(state, tv, def, origin, m.aimPoint ?? 'mass', gunnerSkill(gunner) > SKILL_ACE) : 9999;
   m.wantRound = chooseRound(w, have, { kind: 'vehicle', armorMm, distM: dist(cw.pos, tv.pos) * TILE_M }) ?? undefined;
   return hold;
 }

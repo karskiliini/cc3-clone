@@ -8,8 +8,9 @@ import { VEHICLE_DEFS } from '@/data/units';
 import {
   chooseAimPoint, gunnerSkill, spotHitMul, aimLayMul, SPOT_MISS_STILL_HITS, AIM_WORDS,
 } from '@/sim/aimPoint';
-import { expectedArmorMm, locateHit, locationArmorMm, LUCKY_SPOT_CHANCE } from '@/sim/vehicleDamage';
-import { intersectVehicle, legacyHullRay } from '@/sim/hullAim';
+import { expectedArmorFrom, expectedArmorMm, resolveVehicleHit, locateHit, locationArmorMm, LUCKY_SPOT_CHANCE } from '@/sim/vehicleDamage';
+import { gunTarget, hullRayTo, vehicleAimTarget, intersectVehicle, legacyHullRay } from '@/sim/hullAim';
+import { createHullBody } from '@/sim/hullPhysics';
 import { stepCombat } from '@/sim/combat';
 import { stepCrewWeapons, fireMissionWait } from '@/sim/crewWeapon';
 import { makeState, addTank, addGun, soldier } from './vehicleDamageHelpers';
@@ -232,4 +233,29 @@ describe('centre-of-mass luck', () => {
   it('every "Aiming: ..." word exists for the monitor', () => {
     expect(AIM_WORDS).toContain('Aiming: tracks');
   });
+});
+
+it('keeps crew-served tactical aim and ammo consistent with the actual plate on a raised plateau and crater', () => {
+  const selection = (height: number, crater: boolean) => {
+    const state = makeState(1942);
+    state.map.ground = new Float32Array(state.map.width * state.map.height).fill(height);
+    if (crater) state.map.craterMarks = [{ x: FROM.x, y: FROM.y + 2.2, sizeM: 3, kind: 'shell' }];
+    const g = addGun(state, 'pak38', FROM, 3, { experience: 75, rounds: { ...NO_APCR } });
+    const t = kvAt(state, 300);
+    t.v.body = createHullBody(VEHICLE_DEFS.kv1, t.v.pos, t.v.hullFacing, () => ({ heightM: height, normal: { x: 0, y: 0, z: 1 } }));
+    stepCrewWeapons(state, SIM_DT);
+    fireMissionWait(state, g.team, g.gunner, { aim: t.v.pos, targetTeamId: t.team.id, targetVehicle: t.v });
+    const aim = g.team.crewWeapon!.mission!.aimPoint!;
+    const origin = { x: g.gunner.pos.x * 2, y: g.gunner.pos.y * 2, z: gunTarget(state, g.gunner.pos, undefined, g.gunner).heightM };
+    const ray = hullRayTo(origin, vehicleAimTarget(state, t.v, VEHICLE_DEFS.kv1, aim, origin));
+    const hit = resolveVehicleHit(state, new Rng(1), t.v, { weapon: WEAPONS.pak38, shooterPos: g.gunner.pos, shooterSide: 'german', distM: 300, aimPoint: aim, ray });
+    expect(hit.location?.face).toBe('front');
+    expect(expectedArmorFrom(state, t.v, VEHICLE_DEFS.kv1, origin, aim, true)).toBe(hit.armorMm);
+    const plate = aim === 'runningGear' ? 20 : aim === 'gunMantlet' ? VEHICLE_DEFS.kv1.armor.front * 1.1 : locationArmorMm(VEHICLE_DEFS.kv1, { ...hit.location!, incidenceCos: 1 });
+    expect(hit.armorMm).toBeCloseTo(plate * Math.sqrt(ray.direction.x ** 2 + ray.direction.y ** 2 + ray.direction.z ** 2) / Math.abs(ray.direction.y), 10);
+    return { aim, round: g.team.crewWeapon!.mission!.wantRound };
+  };
+  expect(selection(100, false)).toEqual(selection(0, false));
+  expect(selection(100, true)).toEqual(selection(0, true));
+  expect(selection(100, false).aim).toBe('runningGear');
 });

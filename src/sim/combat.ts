@@ -12,7 +12,7 @@ import { isPassable } from './path';
 import { hasLOS, hasLineOfFire, roundCanReach, eyeHeightM, EYE_VEHICLE_M } from './los';
 import type { LosHeights } from './los';
 import { armourRicochet, groundStrike, missPoint } from './shellFx';
-import { estimateAim, traceRound, traceTracers } from './shotTrace';
+import { estimateAim, traceRound, traceTracers, type RoundTrace, type RoundTraceOptions } from './shotTrace';
 import { clearInfantryAim, infantryAimReady, infantryCanAim, infantryDidFire, observeInfantryMotion } from './infantryAim';
 import { createSmgBurst, smgBodyFacing, smgMuzzle, smgMuzzleHeight, smgRoundAim } from './smgFire';
 import { hastyFireKind, isPanicking, panicFireOpportunity } from './hastyFire';
@@ -34,11 +34,11 @@ import { isButtonedUp } from './vehicleVision';
 import type { CrewEffects } from './vehicleDamage';
 import type { VehicleDef } from '@/shared/types';
 import {
-  AIM_HOLD_MAX_S, AIMED_MAX_M, SKILL_ACE, SKILL_REGULAR, SPOT_MISS_STILL_HITS, aimLayMul, bestChance, chooseAimPoint, chooseRound,
+  AIM_HOLD_MAX_S, AIMED_MAX_M, SKILL_ACE, SKILL_REGULAR, SPOT_MISS_STILL_HITS, aimLayMul, bestChance, chooseAimPointAt, chooseRound,
   gunnerSkill, noteOutOf, shotBlocker, soldierRounds, spotHitMul, vehicleRounds,
 } from './aimPoint';
 import {
-  bowGunner, bowMgUsable, coaxUsable, crewEffects, systemState, expectedArmorMm, isHullDown, isImmobile, mainGunUsable, onBlastNearVehicle, resolveVehicleHit, sightAccuracyMul,
+  bowGunner, bowMgUsable, coaxUsable, crewEffects, systemState, expectedArmorFrom, isHullDown, isImmobile, mainGunUsable, onBlastNearVehicle, resolveVehicleHit, sightAccuracyMul,
   turretFrozen, vehicleLayout,
 } from './vehicleDamage';
 import { attackPhase } from './orders';
@@ -770,7 +770,8 @@ function isHopelessTarget(state: BattleState, soldier: Soldier, weapon: WeaponDe
   if (!def || weapon.penetrationMm <= 0) return false;
   const distM = dist(soldier.pos, v.pos) * TILE_M;
   const counts = weapon.rounds ? soldierRounds(state, soldier) : null;
-  if (bestChance(weapon, counts, distM, expectedArmorMm(v, def, soldier.pos, 'mass'), state.config.year).chance >= 0.05) return false;
+  const origin = { x: soldier.pos.x * TILE_M, y: soldier.pos.y * TILE_M, z: gunTarget(state, soldier.pos, undefined, soldier).heightM };
+  if (bestChance(weapon, counts, distM, expectedArmorFrom(state, v, def, origin, 'mass'), state.config.year).chance >= 0.05) return false;
   return gunnerSkill(soldier) < SKILL_REGULAR || distM > AIMED_MAX_M || isImmobile(v);
 }
 
@@ -792,6 +793,7 @@ interface VehicleShot {
   shooterTeamId?: number;
   heights?: LosHeights;
   origin?: Vec3;
+  shooterVehicleId?: number;
 }
 
 /** Gun shells and AT rockets are real objects in the arena: anything between firer and target
@@ -801,63 +803,57 @@ interface VehicleShot {
  * rocket deflects or bursts in it — a careful (experienced) gunner refuses the shot unless the
  * situation is desperate; a green one fires anyway and takes the risk. */
 /** Test hook + internal: resolves what blocks a straight AT shot (wrecks, walls, vegetation). */
-export function shotInterdiction(state: BattleState, rng: Rng, from: Vec2, to: Vec2, weapon: WeaponDef, _skill: number, shooterSide: Side): boolean {
-  const atRocket = weapon.cls === 'atrocket';
-  const heShell = weapon.cls === 'tankgun' || weapon.cls === 'atgun';
-  if (!atRocket && !heShell) return false;
-
-  // 1. Wrecks / hulls in the way: any vehicle (dead or alive) whose hull the straight path
-  //    crosses short of the target. Thick armour stops AP shells; everything bursts a rocket.
-  for (const v of state.vehicles.values()) {
-    if (dist(from, v.pos) <= 1.5 || dist(to, v.pos) <= 1.5) continue; // firer's own / target's hull
-    if (segmentPassesHull(from, to, v.pos, VEHICLE_DEFS[v.defId]?.widthM ?? 3)) {
-      const impact = { x: v.pos.x, y: v.pos.y };
-      state.projectiles.push({
-        kind: atRocket ? 'atrocket' : 'shell', weaponId: weapon.id, from: { ...from }, to: impact,
-        t0: state.time, flightS: Math.max(0.08, dist(from, impact) * TILE_M / (atRocket ? 80 : 600)),
-        dirRad: angleTo(from, impact), arcM: 0, hitKind: 'impact', preResolved: true,
-      });
-      state.explosions.push({ pos: impact, radiusM: 0, t: 0, kind: 'small' });
-      state.sparks.push({ pos: impact, t: 0, kind: 'dust' });
-      state.events.push({ kind: 'shot', pos: { ...from }, weaponId: weapon.id, side: shooterSide });
-      if (weapon.heRadiusM > 0) applyHESplash(state, rng, impact, weapon, shooterSide, from);
-      return true;
+/** Capture candidate datums before the pure per-leg intersection query. */
+function atTraceOptions(state: BattleState, weapon: WeaponDef, excludeVehicleId?: number): RoundTraceOptions {
+  const candidates = [...state.vehicles.values()].filter(v => v.id !== excludeVehicleId).map(vehicle => ({ vehicle,
+    def: VEHICLE_DEFS[vehicle.defId], groundZ: vehicle.body ? 0 : gunTarget(state, vehicle.pos).heightM - 0.5 }));
+  const specialized = weapon.cls === 'atrocket' || weapon.cls === 'tankgun' || weapon.cls === 'atgun';
+  return { atPolicy: specialized ? (weapon.cls === 'atrocket' ? 'rocket' : weapon.heRadiusM > 0 ? 'he' : 'ap') : undefined,
+    vehicleContact: (ray, maxDistance) => {
+      let nearest: NonNullable<RoundTrace['vehicleContact']> | null = null;
+      for (const { vehicle, def, groundZ } of candidates) {
+        const hit = def ? intersectVehicle(vehicle, def, ray, false, groundZ) : null;
+        if (!hit || hit.distance > maxDistance) continue;
+        if (!nearest || hit.distance < nearest.hit.distance || (hit.distance === nearest.hit.distance && vehicle.id < nearest.vehicle.id)) nearest = { vehicle, hit, ray };
+      }
+      return nearest;
+    } };
+}
+/** Contact effects follow the trace, never a speculative launch-line hull overlap. */
+function interdictImpact(state: BattleState, rng: Rng, from: Vec2, weapon: WeaponDef, shooterSide: Side, shot: RoundTrace): void {
+  const impact = { ...shot.impact }, atRocket = weapon.cls === 'atrocket';
+  state.projectiles.push({ kind: atRocket ? 'atrocket' : 'shell', weaponId: weapon.id, from: { ...from }, to: impact,
+    t0: state.time, flightS: Math.max(0.08, dist(from, impact) * TILE_M / (atRocket ? 80 : 600)), dirRad: angleTo(from, impact), arcM: 0, hitKind: 'impact', preResolved: true });
+  state.explosions.push({ pos: impact, radiusM: 0, t: 0, kind: 'small' });
+  if (shot.vehicleContact) {
+    const { vehicle, ray } = shot.vehicleContact;
+    const result = resolveVehicleHit(state, rng, vehicle, { weapon, shooterPos: from, shooterSide, distM: dist(from, impact) * TILE_M, ray });
+    if (result.outcome !== 'miss') {
+      state.sparks.push({ pos: impact, t: state.time, kind: 'armor' });
+      if (vehicle.state !== 'knockedOut' && vehicle.state !== 'burning') onVehicleHit(state, vehicle, weapon, result.penetrated, from);
     }
   }
-
-  // 2. Terrain on the path: shells pass wood, stop on stone; rockets burst on wood, hedge, fence.
-  const block = shotBlocker(state.map, from, to, atRocket);
-  if (!block) return false;
-  if (block.kind === 'hard' || atRocket) {
-    const impact = { x: block.tile.x + 0.5, y: block.tile.y + 0.5 };
-    state.projectiles.push({
-      kind: atRocket ? 'atrocket' : 'shell', weaponId: weapon.id, from: { ...from }, to: impact,
-      t0: state.time, flightS: Math.max(0.08, dist(from, impact) * TILE_M / (atRocket ? 80 : 600)),
-      dirRad: angleTo(from, impact), arcM: 0, hitKind: 'impact', preResolved: true,
-    });
-    state.explosions.push({ pos: impact, radiusM: 0, t: 0, kind: 'small' });
-    state.sparks.push({ pos: impact, t: 0, kind: 'dust' });
-    if (atRocket && weapon.heRadiusM > 0) applyHESplash(state, rng, impact, weapon, shooterSide, from);
-    return true;
-  }
-
-  // 3. A shell through a wooden wall punches through without a problem (per the original game);
-  //    only wrecks/stone stop it.
-  return false;
+  if (weapon.heRadiusM > 0) applyHESplash(state, rng, impact, weapon, shooterSide, from, shot.vehicleContact?.vehicle.id);
 }
-
-/** Does the segment a->b cross a hull of half-width `hw` (tiles) centred at c, excluding the
- * endpoints' immediate neighbourhood (handled by the caller)? */
-function segmentPassesHull(a: Vec2, b: Vec2, c: Vec2, widthM: number): boolean {
-  const hw = Math.max(1, widthM / TILE_M / 2) + 0.3;
-  const abx = b.x - a.x, aby = b.y - a.y;
-  const len2 = abx * abx + aby * aby;
-  if (len2 <= 0) return false;
-  let t = ((c.x - a.x) * abx + (c.y - a.y) * aby) / len2;
-  t = clamp(t, 0.05, 0.95); // keep clear of firer and target
-  const px = a.x + abx * t, py = a.y + aby * t;
-  const dx = px - c.x, dy = py - c.y;
-  return dx * dx + dy * dy <= hw * hw;
+/** Compatibility test hook: same AT trace, with terrain-aware default endpoints. */
+export function shotInterdiction(state: BattleState, rng: Rng, from: Vec2, to: Vec2, weapon: WeaponDef, _skill: number, shooterSide: Side, heights: LosHeights = {}, round: RoundType = 'ap'): boolean {
+  if (weapon.cls !== 'atrocket' && weapon.cls !== 'tankgun' && weapon.cls !== 'atgun') return false;
+  const target = [...state.vehicles.values()].find(v => dist(to, v.pos) <= 1.5);
+  const own = [...state.vehicles.values()].find(v => dist(from, v.pos) <= 1.5);
+  const rw = roundWeapon(weapon, round);
+  const options = atTraceOptions(state, rw, own?.id);
+  const contact = options.vehicleContact!;
+  options.vehicleContact = (leg, maxDistance) => {
+    // Legacy adapter endpoints name the intended target; direct fire uses explicit identity.
+    const result = contact(leg, maxDistance);
+    return result?.vehicle.id === target?.id ? null : result;
+  };
+  const originZ = heights.eyeZ ?? gunTarget(state, from).heightM - 0.5 + (heights.eyeM ?? 1.5);
+  const endZ = heights.targetZ ?? gunTarget(state, to).heightM - 0.5 + (heights.targetM ?? 1.5);
+  const shot = traceRound(state, rng, from, to, rw, { eyeZ: originZ, targetZ: endZ }, options);
+  if (!shot.blocked && !shot.deflected) return false;
+  interdictImpact(state, rng, from, rw, shooterSide, shot);
+  return true;
 }
 
 /** Half the width (m) of the silhouette a vehicle shows a shooter at `from`: its width head-on,
@@ -897,17 +893,17 @@ function fireAtVehicle(
   const origin = shot.origin ?? { x: shooterPos.x * TILE_M, y: shooterPos.y * TILE_M, z: sourceZ };
   const target = vehicleAimTarget(state, vehicle, targetDef, aim, origin);
   const heights = { ...shot.heights, eyeZ: origin.z, targetZ: target.heightM };
-  const blocked = shotInterdiction(state, rng, shooterPos, target.posTiles, weapon, shot.skill ?? 0.7, shooterSide);
-  if (blocked) return false;
   const pSpot = aim === 'mass' ? p : p * spotHitMul(aim, distM, Math.abs(vehicle.speed) > 0.1, shot.skill ?? 0.7);
   const pAny = aim === 'mass' ? p : pSpot + (p - pSpot) * SPOT_MISS_STILL_HITS;
-  const r = rng.next();
   const rw = roundWeapon(weapon, round);
-  const shotPath = traceRound(state, rng, shooterPos, target.posTiles, rw, heights);
-  const intercepted = shotPath.blocked || shotPath.deflected;
+  const shotPath = traceRound(state, rng, shooterPos, target.posTiles, rw, heights, atTraceOptions(state, rw, shot.shooterVehicleId));
+  const contact = shotPath.vehicleContact;
+  if (contact && contact.vehicle.id !== vehicle.id) { interdictImpact(state, rng, shooterPos, rw, shooterSide, shotPath); return false; }
+  const intercepted = !contact && (shotPath.blocked || shotPath.deflected);
+  const r = intercepted ? Infinity : rng.next();
   // a clean miss is seen to fly past the hull and strike the ground beyond it (visual only: the
   // physics above traced the line to the hull)
-  const hitRay = hullRayTo(origin, { posTiles: shotPath.impact, heightM: shotPath.impactZ });
+  const hitRay = contact?.ray ?? hullRayTo(origin, { posTiles: shotPath.impact, heightM: shotPath.impactZ });
   const actualEntry = !intercepted && r < pAny ? intersectVehicle(vehicle, targetDef, hitRay,
     isHullDown(state, vehicle, shooterPos), vehicle.body ? 0 : gunTarget(state, vehicle.pos).heightM - 0.5) : null;
   const missedClean = !intercepted && (r >= pAny || !actualEntry);
@@ -926,7 +922,7 @@ function fireAtVehicle(
   state.projectiles.push({
     kind: projKind, weaponId: weapon.id, from: { ...shooterPos }, to: { ...seenAt },
     t0: state.time, flightS, dirRad: lineOfFire,
-    arcM: 0, hitKind: missedClean || r >= pAny ? 'ricochet' : 'impact', preResolved: true,
+    arcM: 0, hitKind: !intercepted && (missedClean || r >= pAny) ? 'ricochet' : 'impact', preResolved: true,
   });
   if (intercepted) {
     areaImpact(state, rng, shooterPos, shooterSide, rw, shotPath.impact);
@@ -1026,15 +1022,16 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
     const team = state.teams.get(shooter.teamId);
     const crewServed = !!team?.crewWeapon && team.crewWeapon.gunnerId === shooter.id;
     const skill = gunnerSkill(shooter);
+    const origin = { x: shooter.pos.x * TILE_M, y: shooter.pos.y * TILE_M, z: gunTarget(state, shooter.pos, undefined, shooter).heightM };
     // a gun's layer chose his aim point when he laid (crewWeapon.ts); an AT rifleman / rocket man as he fires
     const aimPoint = weapon.penetrationMm <= 0 ? 'mass'
       : crewServed ? missionAimPoint(team, vehicle.id)
-        : chooseAimPoint(weapon, null, skill, shooter.pos, vehicle, state.config.year).aimPoint;
+        : chooseAimPointAt(state, weapon, null, skill, shooter.pos, vehicle, origin).aimPoint;
     // a gun crew that watched its last round fall corrects the next one (bracketing)
     const bracket = crewServed ? missionBracketMul(team, shooter.pos, vehicle) : 1;
     const hit = fireAtVehicle(state, rng, weapon, shooter.pos, shooter.side, vehicle, Math.min(0.97, p * bracket), wantTracer, {
       round: crewServed ? chamberedRoundType(team, shooter) : 'ap', aimPoint, skill, shooterTeamId: shooter.teamId,
-      heights: { eyeM: eyeHeightM(shooter.stance) },
+      heights: { eyeM: eyeHeightM(shooter.stance) }, shooterVehicleId: shooter.vehicleId ?? undefined,
     });
     if (crewServed) onMissionShotAtVehicle(team, hit, shooter.pos, vehicle);
     return;
@@ -2285,7 +2282,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
     let hold = false;
     if (target.kind === 'vehicle') {
       const have = vehicle.loadedRound ? { ...counts, [vehicle.loadedRound]: counts[vehicle.loadedRound] + 1 } : counts;
-      const choice = chooseAimPoint(weapon, weapon.rounds ? have : null, skill, gunRay.from, target.vehicle, state.config.year, gunRay.origin, gunTarget(state, target.vehicle.pos).heightM - 0.5);
+      const choice = chooseAimPointAt(state, weapon, weapon.rounds ? have : null, skill, gunRay.from, target.vehicle, gunRay.origin);
       aim = choice.aimPoint;
       resolvedTarget = vehicleAimTarget(state, target.vehicle, VEHICLE_DEFS[target.vehicle.defId], aim, gunRay.origin);
       gunRay = vehicleGunRay(state, vehicle, def, resolvedTarget);
@@ -2296,7 +2293,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
     } else { vehicle.aimPoint = undefined; vehicle.aimVehicleId = undefined; vehicle.aimHoldUntil = undefined; }
     const tdef = target.kind === 'vehicle' ? VEHICLE_DEFS[target.vehicle.defId] : undefined;
     const roundTarget = target.kind === 'vehicle'
-      ? { kind: 'vehicle' as const, distM, armorMm: tdef ? expectedArmorMm(target.vehicle, tdef, gunRay.from, aim, skill > SKILL_ACE, hullRayTo(gunRay.origin, resolvedTarget!), gunTarget(state, target.vehicle.pos).heightM - 0.5) : 9999 }
+      ? { kind: 'vehicle' as const, distM, armorMm: tdef ? expectedArmorFrom(state, target.vehicle, tdef, gunRay.origin, aim, skill > SKILL_ACE) : 9999 }
       : { kind: 'soft' as const };
     let unloadS = 0;
     if (vehicle.loadedRound && weapon.rounds) {
@@ -2448,7 +2445,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
       if (target.kind === 'vehicle') {
         const speedMs = Math.abs(target.vehicle.speed);
         const p = Math.min(0.97, vehicleHitChance(weapon, distM, 0, 'standing', speedMs > 0.1, speedMs) * crew.gunnerMul * sightMul * bracketMul(lay.misses) * layMul * moveMul);
-        const hit = fireAtVehicle(state, rng, weapon, gunRay.from, vehicle.side, target.vehicle, p, true, { round, aimPoint: aim, skill, shooterTeamId: vehicle.teamId, heights: gunRay.heights, origin: gunRay.origin });
+        const hit = fireAtVehicle(state, rng, weapon, gunRay.from, vehicle.side, target.vehicle, p, true, { round, aimPoint: aim, skill, shooterTeamId: vehicle.teamId, heights: gunRay.heights, origin: gunRay.origin, shooterVehicleId: vehicle.id });
         // bracketing: the fall of a missed round is observed and corrected for
         if (!hit) { lay.misses = Math.min(2, (lay.misses ?? 0) + 1); lay.bracketFrom ??= { ...vehicle.pos }; lay.bracketAt ??= { ...tPos }; }
         missed = !hit;

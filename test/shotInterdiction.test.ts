@@ -8,6 +8,7 @@ import type { BattleConfig, BattleState, GameMap, MapDef, Soldier, Terrain, Vehi
 import { Rng } from '@/shared/rng';
 import { createMind } from '@/sim/mind';
 import { shotInterdiction, pickSoldierTargetForTest, stepCombat } from '@/sim/combat';
+import { WEAPONS } from '@/data/weapons';
 import { leadFactor } from '@/sim/aimPoint';
 
 // a real registry id: canSoldierFire requires WEAPONS[weaponId]
@@ -21,7 +22,7 @@ const PSCHRECK = 'panzerschreck';
 const kwk40: WeaponDef = {
   id: 'kwk40', name: '7.5cm KwK 40', cls: 'tankgun', rangeM: 1400, rate: 0.4, burst: 1,
   accuracy: 0.55, lethality: 0.75, suppression: 0.35, penetrationMm: 110, heRadiusM: 4,
-  ammo: 87, reloadS: 3,
+  ammo: 87, reloadS: 3, rounds: WEAPONS.kwk40_75.rounds,
 };
 
 export function makeSoldier(o: Partial<Soldier> = {}): Soldier {
@@ -125,7 +126,7 @@ describe('shotInterdiction: rounds are real objects in the arena', () => {
       const clean = makeState((t, W) => setLane(t, W, 'buildingWood', [10, 11]));
       clean.soldiers.set(shooter.id, shooter);
       clean.vehicles.set(target.id, target);
-      expect(shotInterdiction(clean, new Rng(seed), shooter.pos, target.pos, kwk40, 0.7, 'german')).toBe(false);
+      expect(shotInterdiction(clean, new Rng(seed), shooter.pos, target.pos, kwk40, 0.7, 'german', { eyeZ: 1, targetZ: 1 })).toBe(false);
       void state;
     }
   });
@@ -157,11 +158,11 @@ describe('shotInterdiction: rounds are real objects in the arena', () => {
       state.vehicles.set(wreck.id, wreck);
       state.vehicles.set(target.id, target);
       const before = state.projectiles.length;
-      const blocked = shotInterdiction(state, new Rng(seed), shooter.pos, target.pos, bazooka, 0.7, 'german');
+      const blocked = shotInterdiction(state, new Rng(seed), shooter.pos, target.pos, bazooka, 0.7, 'german', { eyeZ: 1, targetZ: 1 });
       expect(blocked).toBe(true);
       expect(state.projectiles.length).toBe(before + 1);
       const proj = state.projectiles[state.projectiles.length - 1];
-      expect(proj.to.x).toBeCloseTo(10.5, 1); // died at the wreck, not the target
+      expect(proj.to.x).toBeCloseTo(wreck.pos.x - hullParams(VEHICLE_DEFS[wreck.defId]).solidBox.max.x / 2, 10); // actual entry, not the centre
     }
   });
 
@@ -174,9 +175,9 @@ describe('shotInterdiction: rounds are real objects in the arena', () => {
       const wreck = makeVehicle({ id: 100, side: 'german', state: 'burning', pos: { x: 10.5, y: 10.5 } });
       state.vehicles.set(wreck.id, wreck);
       state.vehicles.set(target.id, target);
-      expect(shotInterdiction(state, new Rng(seed), shooter.pos, target.pos, kwk40, 0.7, 'german')).toBe(true);
+      expect(shotInterdiction(state, new Rng(seed), shooter.pos, target.pos, kwk40, 0.7, 'german', { eyeZ: 1, targetZ: 1 })).toBe(true);
       const proj = state.projectiles[state.projectiles.length - 1];
-      expect(proj.to.x).toBeCloseTo(10.5, 1);
+      expect(proj.to.x).toBeCloseTo(wreck.pos.x - hullParams(VEHICLE_DEFS[wreck.defId]).solidBox.max.x / 2, 10);
     }
   });
 
@@ -188,7 +189,7 @@ describe('shotInterdiction: rounds are real objects in the arena', () => {
       const target = makeVehicle();
       state.vehicles.set(target.id, target);
       expect(shotInterdiction(state, new Rng(seed), shooter.pos, target.pos, bazooka, 0.7, 'german')).toBe(false);
-      expect(shotInterdiction(state, new Rng(seed), shooter.pos, target.pos, kwk40, 0.7, 'german')).toBe(false);
+      expect(shotInterdiction(state, new Rng(seed), shooter.pos, target.pos, kwk40, 0.7, 'german', { eyeZ: 1, targetZ: 1 })).toBe(false);
     }
   });
 });
@@ -271,9 +272,88 @@ describe('stepCombat with interdiction: a hedge-blocked rocket never reaches its
     // every rocket launched died short of the target
     expect(rounds.length).toBeGreaterThan(0);
     // the FIRST rocket bursts in the hedge (tile 10.5), never reaching the target at 18.5
-    expect(rounds[0]).toBeCloseTo(10.5, 1);
+    expect(Math.floor(rounds[0])).toBe(10);
     // the rocket's blast clears the hedge (structureBlast 90 vs hedge HP 40): later rockets
     // fly the now-open lane and reach the target — emergent, correct behaviour
     expect(state.map.tiles[10 * 20 + 10]).not.toBe('hedge');
   });
+});
+
+import { hullParams } from '@/data/vehiclePhysics';
+import { createHullBody } from '@/sim/hullPhysics';
+import { VEHICLE_DEFS } from '@/data/units';
+import { flat } from './hullPhysicsHelpers';
+
+it('does not interdict a horizontal AT ray beneath an airborne intermediate vehicle or beyond its endpoint', () => {
+  const state = makeState(), from = { x: 2.5, y: 10.5 }, to = { x: 18.5, y: 10.5 };
+  const v = makeVehicle({ pos: { x: 10.5, y: 10.5 } });
+  v.body = createHullBody(VEHICLE_DEFS[v.defId], v.pos, 0, flat); v.body.position.z += 20;
+  state.vehicles.set(v.id, v);
+  const rng = new Rng(7), before = rng.state();
+  expect(shotInterdiction(state, rng, from, to, bazooka, 0.7, 'german')).toBe(false);
+  expect(state.projectiles).toEqual([]); expect(state.explosions).toEqual([]); expect(state.events).toEqual([]); expect(state.sparks).toEqual([]);
+  expect(v.hits).toBe(0); expect(v.damage).toBeUndefined(); expect(rng.state()).toBe(before);
+  v.body.position.z -= 20; v.body.position.x += 40;
+  expect(shotInterdiction(state, rng, from, to, bazooka, 0.7, 'german')).toBe(false);
+});
+
+it('chooses the nearest real intermediate solid regardless of insertion order and does not inherit AP HE', () => {
+  const state = makeState(), from = { x: 2.5, y: 10.5 }, to = { x: 18.5, y: 10.5 };
+  const far = makeVehicle({ id: 101, pos: { x: 14.5, y: 10.5 }, state: 'burning' });
+  const near = makeVehicle({ id: 102, pos: { x: 9.5, y: 10.5 }, state: 'burning' });
+  state.vehicles.set(far.id, far); state.vehicles.set(near.id, near);
+  const rng = new Rng(7), before = rng.state();
+  expect(shotInterdiction(state, rng, from, to, kwk40, 0.7, 'german', { eyeZ: 1, targetZ: 1 })).toBe(true);
+  expect(state.projectiles[0].to.x).toBeCloseTo(near.pos.x - VEHICLE_DEFS.t70.widthM / 4, 10);
+  expect(state.explosions.every(e => e.radiusM === 0)).toBe(true); expect(state.map.craterMarks ?? []).toEqual([]);
+  expect(rng.state()).not.toBe(before); // real plate details own RNG; AP has no blast pass
+});
+it('stops at terrain before armor, and armor before growth without effects or RNG beyond either', () => {
+  const from = { x: 2.5, y: 10.5 }, to = { x: 18.5, y: 10.5 };
+  const blocked = makeState((tiles, width) => setLane(tiles, width, 'buildingStone', [7]));
+  const behind = makeVehicle({ pos: { x: 10.5, y: 10.5 } }); blocked.vehicles.set(behind.id, behind);
+  const stoneRng = new Rng(7), stoneBefore = stoneRng.state();
+  expect(shotInterdiction(blocked, stoneRng, from, to, kwk40, 0.7, 'german', { eyeZ: 1, targetZ: 1 })).toBe(true);
+  expect(Math.floor(blocked.projectiles[0].to.x)).toBe(7); expect(behind.hits).toBe(0); expect(behind.damage).toBeUndefined();
+  expect(blocked.sparks.some(s => s.kind === 'armor')).toBe(false); expect(stoneRng.state()).toBe(stoneBefore);
+  const hullFirst = makeState((tiles, width) => setLane(tiles, width, 'woods', [14]));
+  const near = makeVehicle({ pos: { x: 9.5, y: 10.5 }, state: 'burning' }); hullFirst.vehicles.set(near.id, near);
+  const rng = new Rng(7), before = rng.state();
+  expect(shotInterdiction(hullFirst, rng, from, to, kwk40, 0.7, 'german', { eyeZ: 1, targetZ: 1 })).toBe(true);
+  expect(hullFirst.map.tiles[10 * hullFirst.map.width + 14]).toBe('woods');
+  expect(hullFirst.sparks.every(s => s.pos.x < 10)).toBe(true);
+  const control = makeState(), controlHull = makeVehicle({ pos: { x: 9.5, y: 10.5 }, state: 'burning' }); control.vehicles.set(controlHull.id, controlHull);
+  const controlRng = new Rng(7); shotInterdiction(control, controlRng, from, to, kwk40, 0.7, 'german', { eyeZ: 1, targetZ: 1 });
+  expect(rng.state()).toBe(controlRng.state()); expect(rng.state()).not.toBe(before);
+});
+it('lets AP pass wood toward later stone or armor while rockets and HE stop on the encountered wood', () => {
+  const from = { x: 2.5, y: 10.5 }, to = { x: 18.5, y: 10.5 };
+  for (const later of ['stone', 'hull'] as const) {
+    const state = makeState((tiles, width) => { setLane(tiles, width, 'buildingWood', [7]); if (later === 'stone') setLane(tiles, width, 'buildingStone', [12]); });
+    if (later === 'hull') { const v = makeVehicle({ pos: { x: 12.5, y: 10.5 }, state: 'burning' }); state.vehicles.set(v.id, v); }
+    expect(shotInterdiction(state, new Rng(7), from, to, kwk40, 0.7, 'german', { eyeZ: 1, targetZ: 1 })).toBe(true);
+    if (later === 'stone') expect(Math.floor(state.projectiles[0].to.x)).toBe(12);
+    else expect(state.projectiles[0].to.x).toBeCloseTo(12.5 - VEHICLE_DEFS.t70.widthM / 4, 10);
+    expect(state.explosions.every(e => e.radiusM === 0)).toBe(true);
+  }
+  for (const weapon of [bazooka, kwk40]) {
+    const state = makeState((tiles, width) => setLane(tiles, width, 'buildingWood', [7]));
+    expect(shotInterdiction(state, new Rng(7), from, to, weapon, 0.7, 'german', {}, 'he')).toBe(true);
+    expect(Math.floor(state.projectiles[0].to.x)).toBe(7);
+  }
+});
+
+import { mkTeam } from './vehicleDamageHelpers';
+it('direct rocket fire reaches its target beneath a raised intermediate hull without hurting that hull', () => {
+  const state = makeState(), shooter = makeSoldier({ experience: 30 }); state.soldiers.set(shooter.id, shooter);
+  const team = mkTeam(1, 'rifle', [shooter.id], 'german', shooter.pos); state.teams.set(team.id, team);
+  const target = makeVehicle({ id: 101 }); state.vehicles.set(target.id, target); state.spottedVehicles.german.add(target.id);
+  const raised = makeVehicle({ id: 102, side: 'german', pos: { x: 10.5, y: 10.5 }, mainAmmo: 0, coaxAmmo: 0 });
+  raised.body = createHullBody(VEHICLE_DEFS[raised.defId], raised.pos, 0, flat); raised.body.position.z += 20;
+  state.vehicles.set(raised.id, raised); const rng = new Rng(7);
+  for (let tick = 0; tick < 60 && !state.projectiles.length; tick++) { state.time += 0.1; stepCombat(state, rng, 0.1); }
+  expect(state.projectiles.length).toBeGreaterThan(0); expect(state.projectiles[0].to.x).toBeGreaterThan(15);
+  expect(raised.hits).toBe(0); expect(raised.damage).toBeUndefined();
+  expect(state.explosions.every(e => Math.abs(e.pos.x - raised.pos.x) > 2)).toBe(true);
+  expect(state.sparks.filter(s => s.kind === 'armor').every(s => Math.abs(s.pos.x - raised.pos.x) > 2)).toBe(true);
 });

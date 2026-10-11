@@ -1,5 +1,5 @@
 import { crewEffects } from './vehicleDamage';
-import { chooseAimPoint, gunnerSkill, splitRounds } from './aimPoint';
+import { chooseAimPointAt, gunnerSkill, splitRounds } from './aimPoint';
 import type { BattleState, Order, Soldier, Vec2, Vehicle, WeaponDef } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import { VEHICLE_DEFS } from '@/data/units';
@@ -180,8 +180,7 @@ export function resolvedGunTarget(state: BattleState, target: VehicleGunTarget, 
       const ray = vehicleGunRay(state, shooter, def, mass);
       const counts = shooter.rounds ? { ...shooter.rounds } : splitRounds(weapon, shooter.mainAmmo, state.config.year);
       if (shooter.loadedRound) counts[shooter.loadedRound]++;
-      const choice = chooseAimPoint(weapon, weapon.rounds ? counts : null, gunnerSkill(gunner), ray.from, target.vehicle, state.config.year,
-        ray.origin, gunTarget(state, target.vehicle.pos).heightM - 0.5);
+      const choice = chooseAimPointAt(state, weapon, weapon.rounds ? counts : null, gunnerSkill(gunner), ray.from, target.vehicle, ray.origin);
       return vehicleAimTarget(state, target.vehicle, VEHICLE_DEFS[target.vehicle.defId], choice.aimPoint, ray.origin);
     }
     case 'soldier': return gunTarget(state, target.soldier.pos, undefined, target.soldier);
