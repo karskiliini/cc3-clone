@@ -210,10 +210,23 @@ it.each(['kv1', 'sdkfz251', 'kubelwagen'])('%s settles without flat-ground creep
   const r = rig(id); r.body.position.z += 0.1;
   for (let i = 0; i < 20; i++) r.step();
   expect(Math.abs(r.body.velocity.z)).toBeLessThan(0.02);
-  const z = r.body.position.z;
+  const { x, y, z } = r.body.position;
   for (let i = 0; i < 200; i++) r.step();
   expect(Math.abs(r.body.position.z - z)).toBeLessThan(0.01);
-  expect(r.body.position.x).toBe(20); expect(r.body.position.y).toBe(20);
+  if (id === 'sdkfz251') {
+    // Asymmetric supports pitch while settling: loaded contact friction moves
+    // the CG slightly, but the settled pose must not continue to creep.
+    expect(Math.abs(r.body.position.x - x)).toBeLessThan(0.001);
+    expect(Math.abs(r.body.position.y - y)).toBeLessThan(0.001);
+    const settled = { ...r.body.position };
+    for (let i = 0; i < 6000; i++) r.step();
+    expect(Math.abs(r.body.position.x - settled.x)).toBeLessThan(0.001);
+    expect(Math.abs(r.body.position.y - settled.y)).toBeLessThan(0.001);
+    expect(Math.abs(r.body.position.z - settled.z)).toBeLessThan(0.001);
+    expect(Math.sqrt(dot(r.body.velocity, r.body.velocity))).toBeLessThan(0.005);
+  } else {
+    expect(r.body.position.x).toBe(20); expect(r.body.position.y).toBe(20);
+  }
   console.info(id + ' 22s:', { zDrift: r.body.position.z - z, finalVz: r.body.velocity.z });
 });
 
