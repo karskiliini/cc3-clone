@@ -91,13 +91,20 @@ it('model hull roof is independent of CG and excludes turret geometry', () => {
   expect(p.hullHeightM).toBeCloseTo(1.17, 12);
 });
 
-it('hull bounds include integral raised engine covers and driver hoods', () => {
-  // Hand-read from vehicles.py: T-34 raised engine cover, T-28 cab, Sherman driver hoods.
-  for (const [id, roof] of [['t34_76', 1.52], ['t34_85', 1.52], ['ot34', 1.52],
-    ['t28', 1.97], ['sherman76', 1.97]] as const) {
-    const p = hullParams(VEHICLE_DEFS[id]);
-    expect(p.solidBox.max.z - p.modelOriginLocal.z, id).toBeCloseTo(roof, 12);
-  }
+// Independent source-derived roof fixtures from vehicles.py; each model fails separately.
+// SU-76 rotated front-plate top: 1.695 + 0.525*cos(22°) + 0.02*sin(22°)
+// = 2.189263655515882 m, rounded upward to a conservative 2.19 m hull envelope.
+it.each([
+  ['t34_76', 1.52], ['t34_85', 1.52], ['ot34', 1.52], // raised engine cover
+  ['t28', 1.97], ['sherman76', 1.97], // driver cab / hoods
+  ['su76', 2.19], // rotated fixed front armor plate
+  ['is3', 1.52], // integral armor ridge: zr + 0.02
+  ['is1', 1.58], ['is2', 1.58], // armored visor plug: zr - 0.05 + 0.16/2
+] as const)('hull bounds include integral raised structural armor on %s', (id, roof) => {
+  const p = hullParams(VEHICLE_DEFS[id]);
+  const actualRoof = p.solidBox.max.z - p.modelOriginLocal.z;
+  expect(actualRoof).toBeCloseTo(roof, 12);
+  if (id === 'su76') expect(actualRoof).toBeGreaterThanOrEqual(2.189263655515882);
 });
 
 it('legacy literals resolve explicit overrides, fallback mass, box inertia and belly armor', () => {

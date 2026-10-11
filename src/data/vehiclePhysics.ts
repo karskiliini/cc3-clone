@@ -50,7 +50,7 @@ export const VEHICLE_PHYSICS_PROVENANCE: Readonly<Record<string, ModelPhysics>> 
   pz4gh: model('german_medium(pz4gh)', 0.42, 1.62), stug3g: model('stug3g', 0.42, 1.81),
   panther: model('panther(G)', 0.5, 1.85), tiger: model('tiger', 0.47, 1.78),
   sdkfz251: model('sdkfz251', 0.5, 1.74, 'halftrack', 8, 1.45), marder3: model('marder3', 0.4, 2.5),
-  is3: model('is3', 0.45, 1.5), is1: model('is1/is2', 0.45, 1.55),
+  is3: model('is3 integral pike ridge', 0.45, 1.52), is1: model('is1/is2 armored driver visor plug', 0.45, 1.58),
   su152: model('su152', 0.45, 2.3), su100: model('su85(su100)', 0.42, 1.95),
   su122: model('su85(su122)', 0.42, 1.95), t28: model('t28 driver cab', 0.45, 1.97),
   ot34: model('ot34/t34_hull raised engine cover', 0.42, 1.52), sherman76: model('sherman76 driver hoods', 0.45, 1.97),
@@ -58,7 +58,11 @@ export const VEHICLE_PHYSICS_PROVENANCE: Readonly<Record<string, ModelPhysics>> 
   t26: model('t26', 0.38, 1.5), bt7: model('bt7', 0.4, 1.32),
   t34_76: model('t34_hull raised engine cover', 0.42, 1.52, 'tracked', 26), kv1: model('kv1', 0.45, 1.62, 'tracked', 45, 1.1),
   t70: model('t70_hull', 0.36, 1.2), t34_85: model('t34_hull raised engine cover', 0.42, 1.52),
-  is2: model('is2', 0.45, 1.55), su76: model('su76/t70_hull', 0.36, 2.15), su85: model('su85', 0.42, 1.95),
+  is2: model('is2 armored driver visor plug', 0.45, 1.58),
+  // SU-76 fixed front armor: center z=1.695, size y=0.04/z=1.05, x rotation=-22°.
+  // Maximum z=1.695+0.525*cos(22°)+0.02*sin(22°)=2.189263655515882 m;
+  // round upward to 2.19 m for a conservative source-derived structural envelope.
+  su76: model('su76 rotated fixed front armor plate/t70_hull', 0.36, 2.19), su85: model('su85', 0.42, 1.95),
 };
 
 /** Common values are gameplay assumptions, never historical climbing/gun specifications. */
