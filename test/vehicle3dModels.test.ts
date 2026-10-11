@@ -33,6 +33,16 @@ describe('ModelCache', () => {
     expect(h.loads).toEqual(['t34_76.glb']);
   });
 
+  it('forwards production articulation metadata with the loaded model', async () => {
+    const metadata = { modelOriginM: { x: 0, y: 0, z: 0 }, turretPivot3M: { x: 0, y: -0.62, z: 0 },
+      gunTrunnionM: { x: 0, y: -1, z: 2 }, wheels: [{ index: 0, side: 'L' as const, centreM: { x: -1, y: 0, z: 0.4 }, radiusM: 0.4 }] };
+    const cache = new ModelCache(async () => ({ t34_76: { ...MANIFEST.t34_76, ...metadata } }), async variant => nodes(variant.nodes));
+    cache.load(['t34_76'], 'summer');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const model = cache.get('t34_76')!;
+    expect({ modelOriginM: model.modelOriginM, turretPivot3M: model.turretPivot3M, gunTrunnionM: model.gunTrunnionM, wheels: model.wheels }).toEqual(metadata);
+  });
+
   it('winter battle: no model until the whitewash is in, so 3D never shows unwashed paint', async () => {
     const h = harness();
     h.cache.load(['t34_76'], 'summer');
@@ -80,4 +90,47 @@ describe('ModelCache', () => {
     expect(h.cache.get('kv1')).toBeNull();
     expect(h.loads).toEqual([]);
   });
+});
+
+import { readFileSync } from 'node:fs';
+import { VEHICLE_GUN_GEOMETRY } from '@/data/vehicleGunGeometry';
+import { VEHICLE_ARMOR_GEOMETRY } from '@/data/vehicleArmorGeometry';
+import type { ManifestEntry } from '@/render/vehicle3d/models';
+
+it('production catalog exports origin, shared ring/trunnion/proxy frames and independently centred wheels', () => {
+  const manifest = JSON.parse(readFileSync('public/models/vehicles.json', 'utf8')).vehicles as Record<string, ManifestEntry & { armorProxy: unknown; geometryFingerprints: { gun: string; armor: string } }>;
+  expect(Object.keys(manifest)).toHaveLength(36);
+  for (const [id, entry] of Object.entries(manifest)) {
+    expect(entry.modelOriginM, id).toEqual({ x: 0, y: 0, z: 0 });
+    const gun = VEHICLE_GUN_GEOMETRY[id], armor = VEHICLE_ARMOR_GEOMETRY[id];
+    expect(entry.gunTrunnionM, id).toEqual(gun?.pivot ?? null);
+    if (entry.hasTurret) expect(entry.turretPivot3M, id).toEqual(gun.ring);
+    else expect(entry.turretPivot3M, id).toBeNull();
+    expect(entry.armorProxy, id).toEqual(armor ? { min: armor.min, max: armor.max } : null);
+    expect(entry.geometryFingerprints.gun, id).toMatch(/^[0-9a-f]{64}$/);
+    expect(entry.geometryFingerprints.armor, id).toMatch(/^[0-9a-f]{64}$/);
+    expect(entry.wheels!.length, id).toBeGreaterThan(0);
+    for (const wheel of entry.wheels!) { expect(wheel.radiusM, id).toBeGreaterThan(0); expect(wheel.centreM.z, id).toBeGreaterThan(0); }
+    for (const variant of [entry.summer, entry.winter].filter(v => v !== null)) {
+      const bytes = readFileSync(`public/models/${variant.file}`);
+      expect(bytes.readUInt32LE(0), variant.file).toBe(0x46546c67);
+      const gltf = JSON.parse(bytes.subarray(20, 20 + bytes.readUInt32LE(12)).toString('utf8'));
+      const nodes = gltf.nodes.filter((node: { mesh?: number }) => node.mesh != null) as { name: string; mesh: number; translation?: number[] }[];
+      expect(nodes.map(node => node.name).sort(), variant.file).toEqual([...variant.nodes].sort());
+      for (const chassis of variant.nodes.filter(name => name.startsWith('hull_'))) {
+        const state = chassis.slice(5);
+        for (const wheel of entry.wheels!) expect(variant.nodes, `${variant.file}:${state}`).toContain(`wheels_${wheel.side}_${wheel.index}_${state}`);
+        if (gun && !entry.hasTurret) expect(variant.nodes, variant.file).toContain(`gun_${state}`);
+      }
+      for (const turret of variant.nodes.filter(name => name.startsWith('turret_'))) if (gun) expect(variant.nodes, variant.file).toContain(`gun_${turret.slice(7)}`);
+      for (const side of ['L', 'R']) for (const chassis of variant.nodes.filter(name => name.startsWith('hull_'))) {
+        const suffix = `_${chassis.slice(5)}`;
+        const bank = nodes.filter(node => node.name.startsWith(`wheels_${side}_`) && node.name.endsWith(suffix));
+        const materials = bank.map(node => gltf.meshes[node.mesh].primitives[0].material);
+        expect(new Set(materials).size, `${variant.file}:${side}${suffix}`).toBe(1);
+        expect(variant.nodes, variant.file).not.toContain(`wheels_${side}${suffix}`);
+      }
+      for (const node of nodes) expect(node.translation ?? [0, 0, 0], `${variant.file}:${node.name}`).toEqual([0, 0, 0]);
+    }
+  }
 });

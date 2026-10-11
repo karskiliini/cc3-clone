@@ -11,6 +11,7 @@ import type { BattleState, Camera, Side, Team, Vec2 } from '@/shared/types';
 import { ORDER_DOT_COLOR, TILE_PX } from '@/shared/types';
 import { facingAngle } from '@/shared/math';
 import { worldToScreen } from '@/engine/camera';
+import { vehicleLook, vehicleScreenPoint } from '@/render/vehicle3d/look';
 import { attackPhase, isOrderActive } from '@/sim/orders';
 
 export interface OrderMarkerHit { teamId: number; kind: 'target' | 'waypoint'; index: number }
@@ -102,7 +103,7 @@ function drawAttackRings(ctx: CanvasRenderingContext2D, cam: Camera, state: Batt
   if (target.vehicleId != null) {
     const v = state.vehicles.get(target.vehicleId);
     if (v && state.spottedVehicles[team.side].has(v.id)) {
-      const p = worldToScreen(cam, v.pos);
+      const p = vehicleScreenPoint(cam, vehicleLook(v, state));
       ctx.beginPath();
       ctx.arc(p.x, p.y, 12 * cam.zoom, 0, Math.PI * 2);
       ctx.stroke();

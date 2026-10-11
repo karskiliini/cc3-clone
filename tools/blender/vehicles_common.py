@@ -80,6 +80,11 @@ class Kit:
         self.name = name
         self.v, self.f, self.mi, self.sm = [], [], [], []
         self.mats = []
+        self.assembly = 'fixed'
+        self.tags = []
+        self.wheel_id = -1
+        self.wheels = []
+        self.gun = None
         self.xform = None       # optional Matrix applied to everything added from now on
 
     def _mat(self, mat):
@@ -99,6 +104,7 @@ class Kit:
             self.f.append(tuple(base + j for j in fc))
             self.mi.append(k)
             self.sm.append(bool(smooth[i]) if smooth else False)
+            self.tags.append((self.assembly, self.wheel_id))
 
     # ---- primitives
     def box(self, size, loc, mat, rot=(0, 0, 0), top=(1.0, 1.0), shift=(0.0, 0.0)):
@@ -158,6 +164,38 @@ class Kit:
         if rot is None:
             rot = {"X": (0, 90, 0), "Y": (-90, 0, 0), "Z": (0, 0, 0)}[axis]
         self.add(vs, fs, mat, loc, rot, sm)
+
+    def wheel_cyl(self, r, length, loc, mat, **kwargs):
+        """Running-wheel primitive, explicitly called only by source running gear.
+        Coaxial tyre/hub cylinders share one wheel; fixed axles and spares are excluded."""
+        side = 'L' if loc[0] < 0 else 'R'
+        key = tuple(loc)
+        index = next((i for i, w in enumerate(self.wheels) if w['sourceCentre'] == key), None)
+        if index is None:
+            index = len(self.wheels)
+            self.wheels.append({'sourceCentre': key, 'radiusM': r, 'side': side})
+        else:
+            self.wheels[index]['radiusM'] = max(r, self.wheels[index]['radiusM'])
+        old = self.assembly, self.wheel_id
+        self.assembly, self.wheel_id = 'wheels_' + side, index
+        self.cyl(r, length, loc, mat, **kwargs)
+        self.assembly, self.wheel_id = old
+
+    def extract(self, assembly):
+        """Split tagged source faces before joining/baking, conserving every primitive/material."""
+        out = Kit(self.name + '_' + assembly)
+        out.mats = self.mats.copy()
+        remap = {}
+        for i, face in enumerate(self.f):
+            if self.tags[i][0] != assembly:
+                continue
+            for vertex in face:
+                if vertex not in remap:
+                    remap[vertex] = len(out.v)
+                    out.v.append(self.v[vertex])
+            out.f.append(tuple(remap[v] for v in face))
+            out.mi.append(self.mi[i]); out.sm.append(self.sm[i]); out.tags.append(self.tags[i])
+        return out
 
     def tube(self, p0, p1, r, mat, seg=8, r2=None):
         """Cylinder between two points (struts, bipod legs, trails, barrels at an elevation)."""
@@ -241,6 +279,8 @@ class Kit:
             me.materials.append(materials[m])
         me.polygons.foreach_set("material_index", self.mi)
         me.polygons.foreach_set("use_smooth", self.sm)
+        ids = me.attributes.new('wheel_id', 'INT', 'FACE')
+        ids.data.foreach_set('value', [tag[1] for tag in self.tags])
         bm = bmesh.new()
         bm.from_mesh(me)
         bmesh.ops.recalc_face_normals(bm, faces=bm.faces)

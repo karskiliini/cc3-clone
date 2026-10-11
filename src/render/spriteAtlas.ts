@@ -340,6 +340,8 @@ export function drawVehiclePart(
    * plain ok / ko entry when the atlas lacks it */
   variant?: 'blown' | 'trackL' | 'trackR',
   season: Season = 'summer',
+  /** Physical fallback supplies its already projected ring anchor. */
+  atTurretPivot = false,
 ): boolean {
   const art = vehicleArtFor(defId);
   defId = art.artId;
@@ -351,7 +353,7 @@ export function drawVehiclePart(
     const atlas = atlases.find((a) => !!a.meta.entries[key]);
     if (!atlas) continue;
     let px = x, py = y;
-    if (part === 'turret' && !(key !== base && variant === 'blown')) {
+    if (part === 'turret' && !atTurretPivot && !(key !== base && variant === 'blown')) {
       const pv = turretPivotM(atlas.meta, defId);
       const c = Math.cos(hullRad), s = Math.sin(hullRad), pxPerM = 10 * zoom;
       // whole-pixel offset: the turret never shimmers against its hull while the vehicle drives

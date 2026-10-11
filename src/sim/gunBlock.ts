@@ -50,7 +50,7 @@ export function orderedGunBlock(state: BattleState, vehicle: Vehicle, order: Ord
 const TEXT: Record<GunBlock, string> = {
   gunDestroyed: 'main gun destroyed',
   noGunner: 'no one to man the gun',
-  sightOut: `sight destroyed: ${SIGHT_DESTROYED_MAX_M} m max`,
+  get sightOut() { return `sight destroyed: ${SIGHT_DESTROYED_MAX_M} m max`; },
   noAmmo: 'out of ammunition',
   outOfRange: 'out of range',
   elevation: 'gun elevation limit',

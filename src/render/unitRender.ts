@@ -13,6 +13,7 @@ import { coverAt } from '@/sim/map';
 import { PALETTE, SIDE_COLOR } from '@/render/palette';
 import { getFlagSprite, unitSpriteScale } from '@/render/sprites';
 import { drawText, textWidth } from '@/render/pixelfont';
+import { VEHICLE_GUN_GEOMETRY } from '@/data/vehicleGunGeometry';
 import { VEHICLE_DEFS } from '@/data/units';
 import { teamBarColor } from '@/ui/hud/hudChrome';
 import { drawOrderMarkers } from '@/render/orderMarkers';
@@ -35,7 +36,7 @@ import { ragdollSample, metresToPx } from '@/render/soldierAnim';
 import type { Debris, GroundItem, Season } from '@/shared/types';
 import { drawRagdollFlight, drawRagdollLanded, ragdollBeginFrame, ragdollPhase } from '@/render/ragdoll';
 import { snapToMuzzle } from '@/render/muzzleSnap';
-import { RECOIL_M, vehicleLook, type VehicleLook } from '@/render/vehicle3d/look';
+import { RECOIL_M, vehicleLook, vehiclePose, vehicleScreenPoint, projectVehicleWorldPoint, type VehicleLook } from '@/render/vehicle3d/look';
 import { vehicles3d, loadVehicleModels } from '@/render/vehicle3d';
 import { bladesFor, grassHandOver, type HullPatch } from '@/render/vehicle3d/grassField';
 import { crushMapFor } from '@/render/grassCrush';
@@ -196,7 +197,7 @@ function drawTeamBars(
     const veh = team.vehicleId != null ? state.vehicles.get(team.vehicleId) : undefined;
     if (veh) {
       const def = VEHICLE_DEFS[veh.defId];
-      const p = worldToScreen(cam, veh.pos);
+      const p = vehicleScreenPoint(cam, vehicleLook(veh, state));
       const halfW = (def ? def.widthM : 3) * 5, halfL = (def ? def.lengthM : 6) * 5;
       // screen half-extents of the rotated hull box
       const c = Math.abs(Math.cos(veh.hullFacing)), sn = Math.abs(Math.sin(veh.hullFacing));
@@ -435,6 +436,7 @@ export function drawVehicleSprite(
   /** 0..1 main-gun recoil (1 = the instant of the shot): the vehicle rocks back and the turret
    * (the whole vehicle for a casemate gun) kicks back along the gun line */
   recoil = 0,
+  physicalTurret?: { x: number; y: number; dirRad: number },
 ): void {
   const vdef = VEHICLE_DEFS[defId];
   if (recoil > 0) {
@@ -455,11 +457,12 @@ export function drawVehicleSprite(
     tcy += (2.2 * s + 1.0 * -c) * pxPerM * 0.9;
     turretRad += 2.3;
   }
+  if (physicalTurret) { tcx = physicalTurret.x; tcy = physicalTurret.y; turretRad = physicalTurret.dirRad; }
   // damage looks: `hull.blown` (open turret ring) with `turret.blown` lying beside it,
   // `hull.trackL|R` for a thrown track (a live hull only; wrecks keep their burnt look)
   const hullVariant = turretBlown ? 'blown' : state === 'ok' && brokenTrack ? (brokenTrack === 'R' ? 'trackR' : 'trackL') : undefined;
   drawVehiclePart(ctx, defId, 'hull', state, hullRad, hullRad, cx, cy, zoom, hullVariant, season);
-  if (vdef?.hasTurret) drawVehiclePart(ctx, defId, 'turret', state, turretRad, hullRad, tcx, tcy, zoom, turretBlown ? 'blown' : undefined, season);
+  if (vdef?.hasTurret) drawVehiclePart(ctx, defId, 'turret', state, turretRad, hullRad, tcx, tcy, zoom, turretBlown ? 'blown' : undefined, season, !!physicalTurret);
 }
 
 /** Smoke from the engine deck, two visual states (user: damaged engines read as an element —
@@ -541,7 +544,9 @@ function drawOpenHatches(ctx: CanvasRenderingContext2D, cam: Camera, state: Batt
   lay.hatches.forEach((h, i) => {
     // a hatch nobody has gone through yet is still shut
     if (veh.exiting && (veh.hatchBusyUntil?.[i] ?? 0) <= 0) return;
-    const w = worldToScreen(cam, hatchWorld(veh, def, h));
+    const hWorld = hatchWorld(veh, def, h), dx = (hWorld.x - veh.pos.x) * TILE_M, dy = (hWorld.y - veh.pos.y) * TILE_M;
+    const c = Math.cos(veh.hullFacing), sn = Math.sin(veh.hullFacing);
+    const w = vehicleScreenPoint(cam, vehicleLook(veh, state), { x: dx * c + dy * sn, y: -dx * sn + dy * c, z: 0 });
     const facing = h.group === 'turret' && def.hasTurret ? veh.turretFacing : veh.hullFacing;
     const r = Math.max(1.5, 0.21 * pxPerM);
     ctx.save();
@@ -568,7 +573,9 @@ function drawHatchFire(
   const lay = vehicleLayout(def);
   const pxPerM = 10 * cam.zoom;
   lay.hatches.forEach((h, i) => {
-    const w = worldToScreen(cam, hatchWorld(veh, def, h));
+    const hWorld = hatchWorld(veh, def, h), dx = (hWorld.x - veh.pos.x) * TILE_M, dy = (hWorld.y - veh.pos.y) * TILE_M;
+    const c = Math.cos(veh.hullFacing), sn = Math.sin(veh.hullFacing);
+    const w = vehicleScreenPoint(cam, vehicleLook(veh, state), { x: dx * c + dy * sn, y: -dx * sn + dy * c, z: 0 });
     const phase = time * 6 + veh.id * 2.7 + i * 1.9;
     const flicker = 0.75 + 0.25 * Math.sin(phase);
     const h0 = (0.5 + 0.22 * Math.sin(phase * 1.7 + i)) * pxPerM;
@@ -598,11 +605,15 @@ function drawHatchFire(
 
 /** One vehicle body from its sprite atlas, as its look says. */
 function drawVehicleLookSprite(ctx: CanvasRenderingContext2D, cam: Camera, look: VehicleLook): void {
-  const p = worldToScreen(cam, look.posTiles);
+  const p = vehicleScreenPoint(cam, look);
   const tl = look.turretLanding ? worldToScreen(cam, look.turretLanding.posTiles) : null;
+  const geometry = VEHICLE_GUN_GEOMETRY[look.defId], def = VEHICLE_DEFS[look.defId];
+  const pose = look.bodyQuaternion ? vehiclePose(look, !!def?.hasTurret,
+    geometry ? { x: geometry.ring.x, y: -geometry.ring.y } : null, geometry?.ring) : null;
+  const physicalTurret = pose?.turretPivot ? { ...projectVehicleWorldPoint(cam, pose.turretPivot), dirRad: -pose.turretYaw } : undefined;
   drawVehicleSprite(ctx, look.defId, look.ko ? 'knockedOut' : 'ok', p.x, p.y, look.hullRad, look.turretRad, cam.zoom,
     look.turretBlown, look.brokenTrack, tl ? { x: tl.x, y: tl.y, dirRad: look.turretLanding!.dirRad } : undefined,
-    look.season, look.recoil);
+    look.season, look.bodyQuaternion ? 0 : look.recoil, physicalTurret);
 }
 
 /** Vehicle bodies first (the 3D layer, or a vehicle's sprite while it has no model, without
@@ -650,14 +661,14 @@ function drawVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
     grass3d = grassHandOver(patches.map((p) => p.id), field.dropped, ok);
   }
   for (const { veh, look } of shown) {
-    const p = worldToScreen(cam, veh.pos);
+    const p = vehicleScreenPoint(cam, look);
     const dmg = vehicleDamageView(veh);
     // a serviceable hull whose crew is outside keeps its live look, hatches open (spec §10)
     if ((look.liveButLeft || veh.exiting) && cam.zoom > 0.5) drawOpenHatches(ctx, cam, state, veh);
     // item 011: a dead hull whose hatches blew shows fire spewing from the open hatches
     if (dmg.hatchesBlown && cam.zoom > 0.4) drawHatchFire(ctx, cam, state, veh, p, state.time);
-    if (dmg.engineSmoke || dmg.engineFire) drawEngineSmoke(ctx, veh, p, state.time, cam.zoom, VEHICLE_DEFS[veh.defId]?.lengthM ?? 6, dmg.engineFire);
-    if (dmg.turretBlown && cam.zoom > 0.4) drawTurretRingFx(ctx, veh, p, state.time, cam.zoom);
+    if (dmg.engineSmoke || dmg.engineFire) drawEngineSmoke(ctx, veh, vehicleScreenPoint(cam, look, { x: 0, y: (VEHICLE_DEFS[veh.defId]?.lengthM ?? 6) * 0.32, z: 0 }), state.time, cam.zoom, 0, dmg.engineFire);
+    if (dmg.turretBlown && cam.zoom > 0.4) drawTurretRingFx(ctx, veh, vehicleScreenPoint(cam, look, VEHICLE_GUN_GEOMETRY[veh.defId]?.ring), state.time, cam.zoom);
   }
 }
 

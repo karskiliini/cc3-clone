@@ -6,7 +6,9 @@ import { requestBattleAtlases } from '@/render/spriteAtlas';
 import { VehicleScene } from '@/render/vehicle3d/vehicleScene';
 import { GlOutput } from '@/render/vehicle3d/glOutput';
 import { loadVehicleModels, modelSource } from '@/render/vehicle3d/models';
-import type { VehicleLook } from '@/render/vehicle3d/look';
+import { Quaternion, Vector3 } from 'three';
+import { hullParams } from '@/data/vehiclePhysics';
+import { type VehicleLook } from '@/render/vehicle3d/look';
 import type { Season } from '@/shared/types';
 import { TILE_PX } from '@/shared/types';
 
@@ -18,8 +20,21 @@ const CELL = Math.ceil(140 * zoom), HEADINGS = [0, 1, 2, 3, 4, 5, 6, 7].map((i) 
 const ids = (q.get('only')?.split(',') ?? Object.keys(VEHICLE_DEFS));
 
 function lookFor(defId: string, hullRad: number): VehicleLook {
-  return { id: 1, defId, posTiles: { x: 0, y: 0 }, hullRad, turretRad: hullRad + 0.6, ko: state === 'ko' || state === 'blown',
-    liveButLeft: false, turretBlown: state === 'blown', brokenTrack: state === 'trackL' ? 'L' : null, turretLanding: null, season, recoil: 0 };
+  const def = VEHICLE_DEFS[defId], p = hullParams(def);
+  const requestedYaw = q.has('turret') ? Number(q.get('turret')) * Math.PI / 180 : 0.6;
+  // Feasible engineering fixture; production copies the actual authoritative gun pose.
+  const relativeYaw = def.hasTurret ? requestedYaw
+    : Math.sign(requestedYaw) * Math.min(Math.abs(requestedYaw), (def.gunArcDeg ?? 0) * Math.PI / 180);
+  const yaw = new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), hullRad);
+  const pitch = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), Number(q.get('pitch') ?? 0) * Math.PI / 180);
+  const roll = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), Number(q.get('roll') ?? 0) * Math.PI / 180);
+  const orientation = yaw.multiply(pitch).multiply(roll);
+  return { bodyQuaternion: { x: orientation.x, y: orientation.y, z: orientation.z, w: orientation.w },
+    worldCG: { x: 0, y: 0, z: p.cgHeightM }, modelOriginLocal: p.modelOriginLocal,
+    gunElevationRad: Number(q.get('elevation') ?? 0) * Math.PI / 180,
+    wheelTravelM: { L: Number(q.get('travelL') ?? 0), R: Number(q.get('travelR') ?? 0) }, wheelDistanceM: Number(q.get('distance') ?? 0),
+    id: 1, defId, posTiles: { x: 0, y: 0 }, hullRad, turretRad: hullRad + relativeYaw, ko: state === 'ko' || state === 'blown',
+    liveButLeft: false, turretBlown: state === 'blown', brokenTrack: state === 'trackL' ? 'L' : null, turretLanding: null, season, recoil: Number(q.get('recoil') ?? 0) };
 }
 /** a camera that puts world tile (0,0) at the cell centre */
 function camAt(): { x: number; y: number; zoom: number } {
@@ -36,10 +51,13 @@ function sprite(defId: string, h: number): CanvasRenderingContext2D {
   return ctx;
 }
 const out3d = GlOutput.create(CELL, CELL)!;
+// Reuse the production pool and one sun shadow target across engineering cells.
+const previewScene = new VehicleScene(modelSource);
 function mesh(defId: string, h: number, shadow: boolean): CanvasRenderingContext2D {
-  const ctx = cellCanvas(); const vs = new VehicleScene(modelSource);
+  const ctx = cellCanvas(); const vs = previewScene;
   vs.begin(); vs.add(lookFor(defId, h)); vs.end();
-  out3d.draw(ctx, vs, camAt(), { shadow }); return ctx;
+  if (!out3d.draw(ctx, vs, camAt(), { shadow })) throw new Error('engineering preview WebGL draw failed');
+  return ctx;
 }
 const luma = (d: Uint8ClampedArray, i: number): number => d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
 function stats(a: CanvasRenderingContext2D, b: CanvasRenderingContext2D): { iou: number; la: number; lb: number } {

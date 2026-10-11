@@ -4,15 +4,20 @@
 // where the blown turret landed), plus the 3D node choice and pose.
 // Render-side only; never read by the sim.
 // ============================================================================
-import type { BattleState, Season, Vec2, Vehicle } from '@/shared/types';
-import { TILE_M } from '@/shared/types';
+import type { BattleState, Season, Vec2, Vec3, HullQuat, Vehicle } from '@/shared/types';
+import { TILE_M, TILE_PX } from '@/shared/types';
 import { vehicleDamageView } from '@/sim/vehicleDamage';
 import { isServiceable } from '@/sim/vehicleCrew';
-import { localToWorldXZ } from './projection';
+import { Quaternion, Vector3 } from 'three';
+import { VEHICLE_DEFS } from '@/data/units';
+import { TILT_RAD, type ViewCam } from './projection';
+import { heightAt } from '@/sim/heightField';
+import { hullParams } from '@/data/vehiclePhysics';
 
 /** How far (m) the shot throws a gun back, and for how long (s) the kick eases out. */
 export const RECOIL_M = 0.26;
 const RECOIL_S = 0.4;
+export const CENTRELINE_WHEEL_EPS_M = 1e-9;
 export function recoilOf(veh: Vehicle, time: number): number {
   if (veh.lastMainShotAt == null) return 0;
   const t = (time - veh.lastMainShotAt) / RECOIL_S;
@@ -36,16 +41,53 @@ export interface VehicleLook {
   season: Season;
   /** 0..1 main-gun recoil (1 = the instant of the shot) */
   recoil: number;
+  /** Copied canonical simulation local-to-world pose in metres; never initialized by rendering. */
+  bodyQuaternion?: HullQuat;
+  worldCG?: Vec3;
+  modelOriginLocal?: Vec3;
+  gunElevationRad?: number;
+  /** Side-average non-horn compression relative to the existing 0.35 travel loaded datum. */
+  wheelTravelM?: { L: number; R: number };
+  /** Existing centreline non-horn supports, copied in the same rear-positive local-Y frame. */
+  centreWheelTravelM?: { yM: number; travelM: number }[];
+  /** Cosmetic current speed × absolute simulation time; never feeds physics/hash. */
+  wheelDistanceM?: number;
+  groundM?: number;
+  turretLandingGroundM?: number;
 }
 
+/** Read only: production ticks own field construction and crater synchronization. */
+function cachedGround(state: BattleState, pos: Vec2): number {
+  if (state.map.heightField) return heightAt(state.map.heightField, pos.x, pos.y);
+  const map = state.map, field = map.ground;
+  if (!field) return 0;
+  const fx = pos.x - 0.5, fy = pos.y - 0.5;
+  const x = Math.max(0, Math.min(map.width - 1, Math.floor(fx))), y = Math.max(0, Math.min(map.height - 1, Math.floor(fy)));
+  const x1 = Math.min(map.width - 1, x + 1), y1 = Math.min(map.height - 1, y + 1);
+  const ax = Math.max(0, Math.min(1, fx - x)), ay = Math.max(0, Math.min(1, fy - y));
+  return (field[y * map.width + x] * (1 - ax) + field[y * map.width + x1] * ax) * (1 - ay)
+    + (field[y1 * map.width + x] * (1 - ax) + field[y1 * map.width + x1] * ax) * ay;
+}
 export function vehicleLook(veh: Vehicle, state: BattleState): VehicleLook {
   const liveButLeft = veh.state === 'abandoned' && isServiceable(veh);
   const ko = veh.state === 'knockedOut' || veh.state === 'burning' || (veh.state === 'abandoned' && !liveButLeft);
   const dmg = vehicleDamageView(veh);
+  const def = VEHICLE_DEFS[veh.defId], p = veh.body && def ? hullParams(def) : null;
+  const wheelTravelM = p ? Object.fromEntries((['L', 'R'] as const).map(side => {
+    const travel = p.contacts.flatMap((c, i) => !c.horn && Math.abs(c.local.x) > CENTRELINE_WHEEL_EPS_M && c.side === (side === 'L' ? -1 : 1) ? [veh.body!.suspensionTravel[i] ?? 0] : []);
+    return [side, travel.reduce((a, b) => a + b, 0) / Math.max(1, travel.length) - 0.35 * p.suspension.travelM];
+  })) as { L: number; R: number } : undefined;
+  const centreWheelTravelM = p?.contacts.flatMap((c, i) => !c.horn && Math.abs(c.local.x) <= CENTRELINE_WHEEL_EPS_M
+    ? [{ yM: c.local.y, travelM: (veh.body!.suspensionTravel[i] ?? 0) - 0.35 * p.suspension.travelM }] : []);
   return {
-    id: veh.id, defId: veh.defId, posTiles: veh.pos, hullRad: veh.hullFacing, turretRad: veh.turretFacing,
+    ...(veh.body ? { bodyQuaternion: { ...veh.body.orientation }, worldCG: { ...veh.body.position } } : {}),
+    ...(p ? { modelOriginLocal: { ...p.modelOriginLocal }, wheelTravelM, centreWheelTravelM } : {}),
+    groundM: cachedGround(state, veh.pos),
+    turretLandingGroundM: veh.turretLanding ? cachedGround(state, veh.turretLanding) : undefined,
+    gunElevationRad: veh.gunElevationRad ?? 0, wheelDistanceM: veh.speed * state.time,
+    id: veh.id, defId: veh.defId, posTiles: { ...veh.pos }, hullRad: veh.hullFacing, turretRad: veh.turretFacing,
     ko, liveButLeft, turretBlown: dmg.turretBlown, brokenTrack: dmg.brokenTrack,
-    turretLanding: veh.turretLanding ? { posTiles: veh.turretLanding, dirRad: veh.turretLandingDir ?? veh.turretFacing + 2.3 } : null,
+    turretLanding: veh.turretLanding ? { posTiles: { ...veh.turretLanding }, dirRad: veh.turretLandingDir ?? veh.turretFacing + 2.3 } : null,
     season: state.map.def.season, recoil: ko ? 0 : recoilOf(veh, state.time),
   };
 }
@@ -68,41 +110,52 @@ export function modelNodes(look: VehicleLook, available: ReadonlySet<string>, ha
 }
 
 export interface VehiclePose {
-  /** three world metres (x east, y up, z south) */
+  /** Three world metres (x east, y up, z south). */
   hullPos: [number, number, number];
-  /** three rotation.y (= -facing) */
   hullYaw: number;
+  hullQuaternion: [number, number, number, number];
   turretPivot: [number, number, number] | null;
   turretYaw: number;
+  turretQuaternion: [number, number, number, number];
 }
 
-export function vehiclePose(look: VehicleLook, hasTurret: boolean, turretPivotM: { x: number; y: number } | null): VehiclePose {
-  let e = look.posTiles.x * TILE_M, s = look.posTiles.y * TILE_M;
-  // recoil, as drawVehicleSprite: the hull rocks back half the recoil; a casemate kicks back the other half too
-  const r = RECOIL_M * look.recoil;
-  if (r > 0) {
-    e -= Math.sin(look.hullRad) * r * 0.5; s += Math.cos(look.hullRad) * r * 0.5;
-    if (!hasTurret) { e -= Math.sin(look.hullRad) * r * 0.5; s += Math.cos(look.hullRad) * r * 0.5; }
-  }
-  const pose: VehiclePose = { hullPos: [e, 0, s], hullYaw: -look.hullRad, turretPivot: null, turretYaw: -look.turretRad };
-  if (!hasTurret || !turretPivotM) return pose;
-  if (look.turretBlown && look.turretLanding) {
-    pose.turretPivot = [look.turretLanding.posTiles.x * TILE_M, 0, look.turretLanding.posTiles.y * TILE_M];
-    pose.turretYaw = -look.turretLanding.dirRad;
-    return pose;
-  }
+/** Axis permutation changes handedness: qThree=(-qx,-qz,-qy,qw). */
+export function threeQuaternion(q: HullQuat): Quaternion { return new Quaternion(-q.x, -q.z, -q.y, q.w); }
+function local(v: Vec3): Vector3 { return new Vector3(v.x, v.z, v.y); }
+export function vehiclePose(look: VehicleLook, hasTurret: boolean, turretPivotM: { x: number; y: number } | null,
+  turretPivot3M?: Vec3 | null): VehiclePose {
+  const hullQ = look.bodyQuaternion ? threeQuaternion(look.bodyQuaternion) : new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), -look.hullRad);
+  const origin = look.worldCG && look.modelOriginLocal
+    ? local(look.worldCG).add(local(look.modelOriginLocal).applyQuaternion(hullQ))
+    : new Vector3(look.posTiles.x * TILE_M, look.groundM ?? 0, look.posTiles.y * TILE_M);
+  const turretQ = hullQ.clone().multiply(new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), -(look.turretRad - look.hullRad)));
+  const pose: VehiclePose = { hullPos: origin.toArray(), hullYaw: -look.hullRad, hullQuaternion: hullQ.toArray(),
+    turretPivot: null, turretYaw: -look.turretRad, turretQuaternion: turretQ.toArray() };
+  if (!hasTurret || (!turretPivotM && !turretPivot3M)) return pose;
   if (look.turretBlown) {
-    // no landing recorded: beside the hull centre (not the ring), as drawVehicleSprite does
-    const c = Math.cos(look.hullRad), sn = Math.sin(look.hullRad);
-    pose.turretPivot = [e + (2.2 * c + 1.0 * sn) * 0.9, 0, s + (2.2 * sn - 1.0 * c) * 0.9];
-    pose.turretYaw = -(look.turretRad + 2.3);
+    if (look.turretLanding) {
+      pose.turretPivot = [look.turretLanding.posTiles.x * TILE_M, look.turretLandingGroundM ?? 0, look.turretLanding.posTiles.y * TILE_M];
+      pose.turretYaw = -look.turretLanding.dirRad;
+    } else {
+      const c = Math.cos(look.hullRad), sn = Math.sin(look.hullRad);
+      pose.turretPivot = [origin.x + (2.2 * c + 1.0 * sn) * 0.9, look.groundM ?? 0, origin.z + (2.2 * sn - 1.0 * c) * 0.9];
+      pose.turretYaw = -(look.turretRad + 2.3);
+    }
+    pose.turretQuaternion = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), pose.turretYaw).toArray();
     return pose;
   }
-  const [pe, ps] = localToWorldXZ(turretPivotM.x, turretPivotM.y, look.hullRad);
-  let te = e + pe, ts = s + ps;
-  if (r > 0) {
-    te -= Math.sin(look.turretRad) * r * 0.5; ts += Math.cos(look.turretRad) * r * 0.5;
-  }
-  pose.turretPivot = [te, 0, ts];
+  const ring = turretPivot3M ?? { x: turretPivotM!.x, y: -turretPivotM!.y, z: 0 };
+  pose.turretPivot = origin.clone().add(local(ring).applyQuaternion(hullQ)).toArray();
   return pose;
+}
+
+/** Project the same model-origin frame used by 3D for fallback and overlay anchors. */
+export function vehicleScreenPoint(cam: ViewCam, look: VehicleLook, point: Vec3 = { x: 0, y: 0, z: 0 }): Vec2 {
+  const pose = vehiclePose(look, false, null);
+  const world = new Vector3(point.x, point.z, point.y).applyQuaternion(new Quaternion().fromArray(pose.hullQuaternion)).add(new Vector3().fromArray(pose.hullPos));
+  return projectVehicleWorldPoint(cam, world.toArray());
+}
+export function projectVehicleWorldPoint(cam: ViewCam, world: [number, number, number]): Vec2 {
+  return { x: (world[0] / TILE_M - cam.x) * TILE_PX * cam.zoom,
+    y: (world[2] / TILE_M - cam.y) * TILE_PX * cam.zoom - world[1] * Math.sin(TILT_RAD) * TILE_PX / TILE_M * cam.zoom };
 }

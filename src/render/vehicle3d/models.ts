@@ -7,9 +7,17 @@
 // ============================================================================
 import { Mesh, MeshLambertMaterial, SRGBColorSpace, type Texture } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import type { Season } from '@/shared/types';
+import type { Vec3, Season } from '@/shared/types';
 
-export interface VehicleModel {
+export interface WheelMetadata { centreM: Vec3; radiusM: number; side: 'L' | 'R'; index?: number }
+export interface ArticulationMetadata {
+  /** Simulation model frame (+x right, +y rear, +z up), all relative to the exported origin. */
+  modelOriginM?: Vec3;
+  turretPivot3M?: Vec3 | null;
+  gunTrunnionM?: Vec3 | null;
+  wheels?: WheelMetadata[];
+}
+export interface VehicleModel extends ArticulationMetadata {
   hasTurret: boolean;
   /** hull-local metres (x right, y forward) the turret turns about */
   turretPivotM: { x: number; y: number } | null;
@@ -20,7 +28,7 @@ export interface VehicleModel {
 export interface ModelSource { get(defId: string): VehicleModel | null }
 
 export interface ManifestVariant { file: string; nodes: string[] }
-export interface ManifestEntry { hasTurret: boolean; turretPivotM: { x: number; y: number } | null; summer: ManifestVariant; winter: ManifestVariant | null }
+export interface ManifestEntry extends ArticulationMetadata { hasTurret: boolean; turretPivotM: { x: number; y: number } | null; summer: ManifestVariant; winter: ManifestVariant | null }
 export type Manifest = Record<string, ManifestEntry>;
 
 type Variant = Map<string, Mesh> | 'pending' | 'failed' | 'none';
@@ -87,7 +95,7 @@ export class ModelCache implements ModelSource {
       else if (e.winter !== 'none') return null;          // pending / failed: the sprite shows the whitewash
     }
     if (!e.model || e.model.winterNodes !== winterNodes) {
-      e.model = { hasTurret: e.info.hasTurret, turretPivotM: e.info.turretPivotM, nodes: e.summer, winterNodes };
+      e.model = { modelOriginM: e.info.modelOriginM, turretPivot3M: e.info.turretPivot3M, gunTrunnionM: e.info.gunTrunnionM, wheels: e.info.wheels, hasTurret: e.info.hasTurret, turretPivotM: e.info.turretPivotM, nodes: e.summer, winterNodes };
     }
     return e.model;
   }

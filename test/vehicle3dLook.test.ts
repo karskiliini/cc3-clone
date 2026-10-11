@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { modelNodes, vehiclePose, RECOIL_M, type VehicleLook } from '@/render/vehicle3d/look';
+import { modelNodes, vehiclePose, type VehicleLook } from '@/render/vehicle3d/look';
 
 function look(over: Partial<VehicleLook> = {}): VehicleLook {
   return {
@@ -42,9 +42,9 @@ describe('vehiclePose', () => {
     expect(p.turretPivot![0]).toBeCloseTo(20.5, 9);
     expect(p.turretPivot![2]).toBeCloseTo(40, 9);
   });
-  it('recoil rocks the hull back along its facing by half the recoil distance', () => {
+  it('recoil leaves the hull origin stationary', () => {
     const p = vehiclePose(look({ recoil: 1 }), true, { x: 0, y: 0 });
-    expect(p.hullPos[2]).toBeCloseTo(40 + RECOIL_M * 0.5, 9);  // facing north: back = south
+    expect(p.hullPos[2]).toBeCloseTo(40, 9);  // facing north: back = south
   });
   it('a blown turret lies at its landing point, pivot on the ground', () => {
     const p = vehiclePose(look({ turretBlown: true, turretLanding: { posTiles: { x: 12, y: 21 }, dirRad: 0.7 } }), true, { x: 0, y: 0.4 });
@@ -60,4 +60,83 @@ describe('vehiclePose', () => {
   it('a turretless vehicle has no turret pivot', () => {
     expect(vehiclePose(look({ defId: 'stug3g' }), false, null).turretPivot).toBeNull();
   });
+});
+
+import { Quaternion, Vector3 } from 'three';
+import { threeQuaternion, vehicleLook, vehicleScreenPoint } from '@/render/vehicle3d/look';
+import { VEHICLE_DEFS } from '@/data/units';
+import { hullParams } from '@/data/vehiclePhysics';
+import { createHullBody } from '@/sim/hullPhysics';
+import { addTank, makeState } from './vehicleDamageHelpers';
+import { flat } from './hullPhysicsHelpers';
+
+it.each([
+  ['north', { x: 0, y: 0, z: 0, w: 1 }, [0, 0, -1], [0, 1, 0]],
+  ['east', { x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 }, [1, 0, 0], [0, 1, 0]],
+  ['pitch', { x: 0.5, y: 0, z: 0, w: Math.sqrt(3) / 2 }, [0, -Math.sqrt(3) / 2, -0.5], [0, 0.5, -Math.sqrt(3) / 2]],
+  ['roll', { x: 0, y: 0.5, z: 0, w: Math.sqrt(3) / 2 }, [0, 0, -1], [Math.sqrt(3) / 2, 0.5, 0]],
+] as const)('maps canonical %s quaternion without handedness error', (_name, q, forward, up) => {
+  const mapped = threeQuaternion(q);
+  new Vector3(0, 0, -1).applyQuaternion(mapped).toArray().forEach((n, i) => expect(n).toBeCloseTo(forward[i], 12));
+  new Vector3(0, 1, 0).applyQuaternion(mapped).toArray().forEach((n, i) => expect(n).toBeCloseTo(up[i], 12));
+});
+
+it('a pitched hull turns its turret by relative 90 degrees about hull-local up', () => {
+  const p = vehiclePose(look({ bodyQuaternion: { x: 0.5, y: 0, z: 0, w: Math.sqrt(3) / 2 },
+    worldCG: { x: 20, y: 40, z: 2 }, modelOriginLocal: { x: 0, y: 0, z: -1 }, turretRad: Math.PI / 2 }), true,
+  { x: 0, y: 0.62 }, { x: 0, y: -0.62, z: 0 });
+  expect(p.turretPivot![0]).toBeCloseTo(20);
+  expect(p.turretPivot![1]).toBeCloseTo(1.5 - 0.62 * Math.sqrt(3) / 2);
+  expect(p.turretPivot![2]).toBeCloseTo(40 + Math.sqrt(3) / 2 - 0.31);
+  const q = new Quaternion().fromArray(p.turretQuaternion);
+  expect(new Vector3(0, 0, -1).applyQuaternion(q).x).toBeCloseTo(1);
+  expect(new Vector3(0, 1, 0).applyQuaternion(q).z).toBeCloseTo(-Math.sqrt(3) / 2);
+});
+
+it('detached turret pose keeps its own landing height and yaw when the body tilts', () => {
+  const l = look({ bodyQuaternion: { x: 0.5, y: 0, z: 0, w: Math.sqrt(3) / 2 },
+    turretBlown: true, turretLanding: { posTiles: { x: 12, y: 21 }, dirRad: Math.PI / 2 }, turretLandingGroundM: 7 });
+  const p = vehiclePose(l, true, { x: 0, y: 0.62 });
+  expect(p.turretPivot).toEqual([24, 7, 42]);
+  const direction = new Vector3(0, 0, -1).applyQuaternion(new Quaternion().fromArray(p.turretQuaternion));
+  expect(direction.x).toBeCloseTo(1); expect(direction.y).toBeCloseTo(0);
+});
+
+it('copies body and contact travel using the existing loaded suspension datum', () => {
+  const state = makeState(), { v } = addTank(state, 't34_76', { x: 20, y: 20 });
+  const def = VEHICLE_DEFS[v.defId], p = hullParams(def);
+  v.body = createHullBody(def, v.pos, 0, flat); v.gunElevationRad = 0.3;
+  v.body.suspensionTravel = p.contacts.map(c => c.horn ? 999 : 0.35 * p.suspension.travelM + (c.side === -1 ? -0.02 : 0.03));
+  const saved = JSON.stringify(v.body), l = vehicleLook(v, state);
+  expect(l.gunElevationRad).toBe(0.3); expect(l.wheelTravelM!.L).toBeCloseTo(-0.02); expect(l.wheelTravelM!.R).toBeCloseTo(0.03);
+  expect(l.worldCG).not.toBe(v.body.position); expect(l.bodyQuaternion).not.toBe(v.body.orientation);
+  expect(l.posTiles).not.toBe(v.pos); l.bodyQuaternion!.x = 99; l.worldCG!.z = 99;
+  expect(JSON.stringify(v.body)).toBe(saved); expect(state.map.heightField).toBeUndefined();
+  v.body.suspensionTravel = p.contacts.map(() => 0.35 * p.suspension.travelM);
+  expect(vehicleLook(v, state).wheelTravelM!.L).toBeCloseTo(0); expect(vehicleLook(v, state).wheelTravelM!.R).toBeCloseTo(0);
+});
+
+it('fallback and overlay screen anchors use rotated model origin and height', () => {
+  const l = look({ bodyQuaternion: { x: 0.5, y: 0, z: 0, w: Math.sqrt(3) / 2 },
+    worldCG: { x: 20, y: 40, z: 2 }, modelOriginLocal: { x: 0, y: 0, z: -1 } });
+  const actual = vehicleScreenPoint({ x: 0, y: 0, zoom: 2 }, l);
+  expect(actual.x).toBeCloseTo(400);
+  expect(actual.y).toBeCloseTo((40 + Math.sqrt(3) / 2) * 20 - 1.5 * Math.sin(Math.PI / 15) * 20);
+});
+
+it('copies centreline support compression without contaminating either track bank', () => {
+  const state = makeState(), { v } = addTank(state, 'kettenkrad', { x: 20, y: 20 });
+  const def = VEHICLE_DEFS[v.defId], p = hullParams(def);
+  v.body = createHullBody(def, v.pos, 0, flat);
+  const nominal = 0.35 * p.suspension.travelM;
+  v.body.suspensionTravel = p.contacts.map(() => nominal);
+  const centreIndex = p.contacts.findIndex(c => !c.horn && c.local.x === 0);
+  const nominalLook = vehicleLook(v, state);
+  expect(nominalLook.centreWheelTravelM).toEqual([{ yM: p.contacts[centreIndex].local.y, travelM: 0 }]);
+  v.body.suspensionTravel[centreIndex] += 0.06;
+  const saved = JSON.stringify(v.body), l = vehicleLook(v, state);
+  expect(l.wheelTravelM!.L).toBeCloseTo(0); expect(l.wheelTravelM!.R).toBeCloseTo(0);
+  expect(l.centreWheelTravelM![0].travelM).toBeCloseTo(0.06);
+  l.centreWheelTravelM![0].travelM = 99;
+  expect(JSON.stringify(v.body)).toBe(saved); expect(state.map.heightField).toBeUndefined();
 });

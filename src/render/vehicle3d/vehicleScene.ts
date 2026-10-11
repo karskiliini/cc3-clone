@@ -4,9 +4,9 @@
 // shown or hidden per frame by modelNodes; the same structure again under the
 // shadow root with a flat black material. Pure scene graph: tested in Node.
 // ============================================================================
-import { BackSide, DirectionalLight, DoubleSide, Group, HemisphereLight, Matrix4, Mesh, MeshBasicMaterial, Scene } from 'three';
+import { BackSide, DirectionalLight, DoubleSide, Group, HemisphereLight, Matrix4, Quaternion, Vector3, Mesh, MeshBasicMaterial, Scene } from 'three';
 import type { ModelSource, VehicleModel } from './models';
-import { modelNodes, vehiclePose, type VehicleLook } from './look';
+import { CENTRELINE_WHEEL_EPS_M, RECOIL_M, modelNodes, vehiclePose, type VehicleLook } from './look';
 import { shadowMatrix, SUN_TO } from './projection';
 import { GrassLayer } from './grassPatch';
 
@@ -27,7 +27,7 @@ const RIM_MAT = new MeshBasicMaterial({ color: 0x000000, side: BackSide, transpa
 const SHADOW_MAP_PX = 4096;
 
 interface Part { group: Group; meshes: Map<string, Mesh>; rims: Map<string, Mesh>; shadowGroup: Group; shadowMeshes: Map<string, Mesh> }
-interface Instance { model: VehicleModel; hull: Part; turret: Part; used: boolean }
+interface Instance { model: VehicleModel; hull: Part; turret: Part; gun: Part; wheelsL: Part; wheelsR: Part; wheels: Map<number, Part>; used: boolean }
 
 export class VehicleScene {
   readonly scene = new Scene();
@@ -49,7 +49,7 @@ export class VehicleScene {
     this.scene.add(sun, sun.target, new HemisphereLight(FILL_SKY, FILL_GROUND, FILL_INTENSITY));
     this.scene.add(this.grass.grass, this.grass.wheat);
     this.shadowRoot.matrixAutoUpdate = false;
-    this.shadowRoot.matrix = new Matrix4().fromArray(shadowMatrix());
+    this.shadowRoot.matrix.identity();
     this.shadowScene.add(this.shadowRoot);
   }
 
@@ -74,22 +74,74 @@ export class VehicleScene {
     let it = this.inst.get(look.id);
     if (!it || it.model !== model) {
       if (it) this.dispose(it);
-      it = { model, hull: this.part(), turret: this.part(), used: false };
+      it = { model, hull: this.part(), turret: this.part(), gun: this.part(), wheelsL: this.part(), wheelsR: this.part(), wheels: new Map(), used: false };
       this.inst.set(look.id, it);
     }
     const names = modelNodes(look, new Set(model.nodes.keys()), model.winterNodes !== null);
-    const pose = vehiclePose(look, model.hasTurret, model.turretPivotM);
+    const pose = vehiclePose(look, model.hasTurret, model.turretPivotM, model.turretPivot3M);
     this.show(it.hull, model, names.hull, names.winterHull);
     it.hull.group.position.fromArray(pose.hullPos);
-    it.hull.group.rotation.set(0, pose.hullYaw, 0);
-    if (names.turret && pose.turretPivot && model.turretPivotM) {
+    it.hull.group.quaternion.fromArray(pose.hullQuaternion);
+    if (names.turret && pose.turretPivot && (model.turretPivotM || model.turretPivot3M)) {
       this.show(it.turret, model, names.turret, names.winterTurret);
       it.turret.group.position.fromArray(pose.turretPivot);
-      it.turret.group.rotation.set(0, pose.turretYaw, 0);
+      it.turret.group.quaternion.fromArray(pose.turretQuaternion);
     } else this.show(it.turret, model, null, false);
-    for (const p of [it.hull, it.turret]) {
+    const gunOwner = model.hasTurret ? it.turret : it.hull;
+    const gunState = (model.hasTurret ? names.turret : names.hull)?.split('_').pop();
+    const gunName = `gun_${gunState}`;
+    this.show(it.gun, model, model.nodes.has(gunName) ? gunName : null, model.hasTurret ? names.winterTurret : names.winterHull);
+    if (model.gunTrunnionM) {
+      const p = model.gunTrunnionM, ownerQ = gunOwner.group.quaternion;
+      const yaw = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), -(look.turretRad - look.hullRad));
+      const elevation = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), look.ko || look.turretBlown ? 0 : look.gunElevationRad ?? 0);
+      const gunQ = ownerQ.clone().multiply(model.hasTurret ? new Quaternion() : yaw).multiply(elevation);
+      it.gun.group.quaternion.copy(gunQ);
+      it.gun.group.position.copy(gunOwner.group.position).add(new Vector3(p.x, p.z, p.y).applyQuaternion(ownerQ));
+      if (!look.ko && !look.turretBlown) it.gun.group.position.add(new Vector3(0, 0, RECOIL_M * look.recoil).applyQuaternion(gunQ));
+    }
+    const wheelState = names.hull.substring('hull_'.length);
+    for (const [side, part] of [['L', it.wheelsL], ['R', it.wheelsR]] as const) {
+      const name = `wheels_${side}_${wheelState}`;
+      this.show(part, model, model.nodes.has(name) ? name : null, names.winterHull);
+      part.group.quaternion.copy(it.hull.group.quaternion);
+      part.group.position.copy(it.hull.group.position).add(new Vector3(0, look.wheelTravelM?.[side] ?? 0, 0).applyQuaternion(part.group.quaternion));
+    }
+    for (const [fallbackIndex, wheel] of (model.wheels ?? []).entries()) {
+      const index = wheel.index ?? fallbackIndex, bank = wheel.side === 'L' ? it.wheelsL : it.wheelsR;
+      let part = it.wheels.get(index);
+      if (!part) {
+        part = this.part(); it.wheels.set(index, part);
+        bank.group.add(part.group); bank.shadowGroup.add(part.shadowGroup);
+      }
+      const name = `wheels_${wheel.side}_${index}_${wheelState}`;
+      this.show(part, model, model.nodes.has(name) ? name : null, names.winterHull);
+      const centre = wheel.centreM;
+      part.group.position.set(centre.x, centre.z, centre.y);
+      // Material side ownership does not make a centreline front wheel a track support.
+      if (Math.abs(centre.x) <= CENTRELINE_WHEEL_EPS_M && look.centreWheelTravelM?.length) {
+        const support = look.centreWheelTravelM.reduce((best, candidate) =>
+          Math.abs(candidate.yM - centre.y) < Math.abs(best.yM - centre.y) ? candidate : best);
+        part.group.position.y += support.travelM - (look.wheelTravelM?.[wheel.side] ?? 0);
+      }
+      // Absolute sim time makes pooled/culled rendering independent of draw frequency.
+      const spin = wheel.radiusM > 0 ? -(look.wheelDistanceM ?? 0) / wheel.radiusM : 0;
+      part.group.quaternion.setFromAxisAngle(new Vector3(1, 0, 0), spin);
+      part.shadowGroup.position.copy(part.group.position);
+      part.shadowGroup.quaternion.copy(part.group.quaternion);
+    }
+    for (const p of [it.hull, it.turret, it.gun, it.wheelsL, it.wheelsR]) {
       p.shadowGroup.position.copy(p.group.position);
-      p.shadowGroup.rotation.copy(p.group.rotation);
+      p.shadowGroup.quaternion.copy(p.group.quaternion);
+      const detached = look.turretBlown && (p === it.turret || p === it.gun && model.hasTurret);
+      const ground = detached ? look.turretLandingGroundM ?? look.groundM ?? 0 : look.groundM ?? 0;
+      p.shadowGroup.matrixAutoUpdate = false;
+      p.group.updateMatrix();
+      const flatten = new Matrix4().fromArray(shadowMatrix());
+      flatten.elements[12] = -flatten.elements[4] * ground;
+      flatten.elements[13] = ground + 0.002;
+      flatten.elements[14] = -flatten.elements[6] * ground;
+      p.shadowGroup.matrix.copy(flatten.multiply(p.group.matrix));
     }
     it.used = true;
     return true;
@@ -97,7 +149,7 @@ export class VehicleScene {
 
   end(): void {
     for (const it of this.inst.values()) {
-      for (const p of [it.hull, it.turret]) { p.group.visible = it.used; p.shadowGroup.visible = it.used; }
+      for (const p of [it.hull, it.turret, it.gun, it.wheelsL, it.wheelsR]) { p.group.visible = it.used; p.shadowGroup.visible = it.used; }
     }
   }
 
@@ -141,7 +193,7 @@ export class VehicleScene {
   }
 
   private dispose(it: Instance): void {
-    for (const p of [it.hull, it.turret]) { p.group.removeFromParent(); p.shadowGroup.removeFromParent(); }
+    for (const p of [it.hull, it.turret, it.gun, it.wheelsL, it.wheelsR]) { p.group.removeFromParent(); p.shadowGroup.removeFromParent(); }
   }
 }
 

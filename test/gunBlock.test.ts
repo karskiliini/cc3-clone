@@ -4,7 +4,7 @@ import { Rng } from '@/shared/rng';
 import { stepVehicles } from '@/sim/vehicle';
 import { stepCombat, pickVehicleTarget } from '@/sim/combat';
 import { stepMorale } from '@/sim/morale';
-import { ensureDamage } from '@/sim/vehicleDamage';
+import { SIGHT_DESTROYED_MAX_M, ensureDamage } from '@/sim/vehicleDamage';
 import { orderedVehicleGunTarget } from '@/sim/vehicleGunTarget';
 import { gunBlockText, mainGunBlock, orderedGunBlock } from '@/sim/gunBlock';
 import { targetableEnemyAt, targetStatusText } from '@/ui/targetHover';
@@ -204,4 +204,8 @@ describe('impossible ordered fire diagnostics', () => {
     expect(pickVehicleTarget(state, shooter.v)).toBeNull();
     expect(orderedGunBlock(state, shooter.v, order)).toBe('outOfRange');
   });
+});
+
+it('deferred sight status keeps the exact existing range label', () => {
+  expect(gunBlockText('sightOut')).toBe(`sight destroyed: ${SIGHT_DESTROYED_MAX_M} m max`);
 });

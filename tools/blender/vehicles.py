@@ -88,17 +88,17 @@ def gear(k, Lt, W, tw, top, n, r, cy=0.0, zs=None, zi=None, tyre=True, interleav
             y = cy - Lt / 2 + 0.45 + r + (span * i / (n - 1) if n > 1 else 0) + 0.03
             xo = x + (s * 0.02 if (not interleave or i % 2 == 0) else -s * 0.06)
             if tyre:
-                k.cyl(r, tw * 0.6, (xo + s * tw * 0.2, y, r + 0.02), "rubber", axis="X", seg=14)
-                k.cyl(r * 0.78, tw * 0.6 + 0.04, (xo + s * tw * 0.2, y, r + 0.02), mat, axis="X", seg=12)
+                k.wheel_cyl(r, tw * 0.6, (xo + s * tw * 0.2, y, r + 0.02), "rubber", axis="X", seg=14)
+                k.wheel_cyl(r * 0.78, tw * 0.6 + 0.04, (xo + s * tw * 0.2, y, r + 0.02), mat, axis="X", seg=12)
             else:
-                k.cyl(r, tw * 0.6 + 0.03, (xo + s * tw * 0.2, y, r + 0.02), mat, axis="X", seg=14)
-            k.cyl(r * 0.25, tw * 0.6 + 0.09, (xo + s * tw * 0.2, y, r + 0.02), "steel", axis="X", seg=8)
-        k.cyl(rs, tw + 0.05, (x, cy + Lt / 2 - rs - 0.03, zs), mat, axis="X", seg=12)
-        k.cyl(rs * 0.4, tw + 0.1, (x, cy + Lt / 2 - rs - 0.03, zs), "steel", axis="X", seg=8)
-        k.cyl(ri, tw + 0.05, (x, cy - Lt / 2 + ri + 0.03, zi), mat, axis="X", seg=12)
+                k.wheel_cyl(r, tw * 0.6 + 0.03, (xo + s * tw * 0.2, y, r + 0.02), mat, axis="X", seg=14)
+            k.wheel_cyl(r * 0.25, tw * 0.6 + 0.09, (xo + s * tw * 0.2, y, r + 0.02), "steel", axis="X", seg=8)
+        k.wheel_cyl(rs, tw + 0.05, (x, cy + Lt / 2 - rs - 0.03, zs), mat, axis="X", seg=12)
+        k.wheel_cyl(rs * 0.4, tw + 0.1, (x, cy + Lt / 2 - rs - 0.03, zs), "steel", axis="X", seg=8)
+        k.wheel_cyl(ri, tw + 0.05, (x, cy - Lt / 2 + ri + 0.03, zi), mat, axis="X", seg=12)
         for i in range(rollers):
             y = cy - Lt / 2 + 0.9 + (Lt - 1.8) * i / max(1, rollers - 1)
-            k.cyl(0.13, tw + 0.04, (x, y, top - 0.16), "rubber", axis="X", seg=8)
+            k.wheel_cyl(0.13, tw + 0.04, (x, y, top - 0.16), "rubber", axis="X", seg=8)
 
 
 def fenders(k, L, W, fw, z, cy=0.0, mat="paint", flaps=True, thick=0.035):
@@ -126,6 +126,11 @@ def spare_track(k, loc, n, along="X", rot=(0, 0, 0), link=(0.2, 0.34, 0.06)):
 
 def barrel(k, y0, length, r, z, brake=None, x=0.0, sleeve=None, taper=0.85, elev=0.0, mat="paint"):
     """Gun tube from y0 forward.  brake=(len, r) adds a muzzle brake; sleeve=(len, r) a recoil sleeve."""
+    previous_assembly = k.assembly
+    k.assembly = 'gun'
+    if k.gun is not None:
+        raise ValueError('multiple main barrels in one source Kit')
+    k.gun = {'pivot': (x, y0, z), 'barrelM': length}
     dz = math.tan(math.radians(elev))
     r *= BARREL_K
     sleeve = (sleeve[0], sleeve[1] * 1.15) if sleeve else None
@@ -141,6 +146,8 @@ def barrel(k, y0, length, r, z, brake=None, x=0.0, sleeve=None, taper=0.85, elev
         k.tube((x, y0 + b0 + brake[0] * 0.3, z + dz * b0), (x, y0 + b0 + brake[0] * 0.55, z + dz * b0),
                brake[1] * 1.12, "gunmetal", seg=10)
     k.tube((x, p1[1] - 0.02, p1[2]), (x, p1[1] + 0.012, p1[2]), r * taper * 0.7, "hole", seg=8)
+
+    k.assembly = previous_assembly
 
 
 def cupola(k, x, y, z, r, h, ko, mat="paint", hinge="rear"):
@@ -486,8 +493,8 @@ def sdkfz251(k, d, ko):
     gear(k, Lt, W - 0.1, tw, top, 6, 0.3, cy=-L / 2 + Lt / 2 + 0.25, interleave=True, rs=0.27, ri=0.26, zs=0.45, zi=0.4)
     # front axle wheels
     for s in (-1, 1):
-        k.cyl(0.42, 0.22, (s * (W / 2 - 0.13), L / 2 - 0.95, 0.42), "rubber", axis="X", seg=16)
-        k.cyl(0.24, 0.24, (s * (W / 2 - 0.13), L / 2 - 0.95, 0.42), "paint", axis="X", seg=10)
+        k.wheel_cyl(0.42, 0.22, (s * (W / 2 - 0.13), L / 2 - 0.95, 0.42), "rubber", axis="X", seg=16)
+        k.wheel_cyl(0.24, 0.24, (s * (W / 2 - 0.13), L / 2 - 0.95, 0.42), "paint", axis="X", seg=10)
         k.box((0.34, 1.45, 0.03), (s * (W / 2 - 0.17), L / 2 - 1.3, 0.9), "paint")                # mudguard
         k.box((0.34, 0.42, 0.03), (s * (W / 2 - 0.17), L / 2 - 0.42, 0.78), "paint", rot=(-32, 0, 0))
         k.box((0.3, 0.03, 0.2), (s * (W / 2 - 0.17), L / 2 - 2.0, 0.8), "paint")                  # fender web to the bay
@@ -990,8 +997,8 @@ def kubelwagen(k, d, ko):
     yf, yr = L / 2 - 0.62, -L / 2 + 0.62
     for s in (-1, 1):
         for y in (yf, yr):
-            k.cyl(wr, ww, (s * (W / 2 - ww / 2 - 0.02), y, wr), "rubber", axis="X", seg=14)
-            k.cyl(wr * 0.55, ww + 0.02, (s * (W / 2 - ww / 2 - 0.02), y, wr), "paint", axis="X", seg=10)
+            k.wheel_cyl(wr, ww, (s * (W / 2 - ww / 2 - 0.02), y, wr), "rubber", axis="X", seg=14)
+            k.wheel_cyl(wr * 0.55, ww + 0.02, (s * (W / 2 - ww / 2 - 0.02), y, wr), "paint", axis="X", seg=10)
             # mudguard: curved plate over the wheel
             k.box((ww + 0.1, 0.62, 0.03), (s * (W / 2 - ww / 2 - 0.02), y, 2 * wr + 0.1), "paint2")
             k.box((ww + 0.1, 0.3, 0.03), (s * (W / 2 - ww / 2 - 0.02), y + 0.4, 2 * wr - 0.02), "paint2", rot=(-40, 0, 0))
@@ -1031,7 +1038,7 @@ def kettenkrad(k, d, ko):
         k.box((tw + 0.08, Lt - 0.05, 0.03), (s * (W / 2 - tw / 2), cyt, top + 0.05), "paint")       # track guards
     # front wheel, fork and handlebar
     yf = L / 2 - 0.35
-    k.cyl(0.3, 0.1, (0, yf, 0.3), "rubber", axis="X", seg=14)
+    k.wheel_cyl(0.3, 0.1, (0, yf, 0.3), "rubber", axis="X", seg=14)
     k.box((0.16, 0.55, 0.03), (0, yf, 0.66), "paint2", rot=(-8, 0, 0))                          # mudguard
     k.tube((0, yf, 0.3), (0, yf - 0.35, 0.95), 0.03, "steel", seg=6)
     k.tube((-0.36, yf - 0.4, 1.0), (0.36, yf - 0.4, 1.0), 0.02, "black", seg=6)
@@ -1188,7 +1195,7 @@ def sherman76(k, d, ko):
         for i in range(3):                                                                       # bogie brackets
             y = -L / 2 + 0.95 + i * (L - 2.0) / 2
             k.box((0.18, 0.55, 0.35), (s * (W / 2 - tw - 0.02), y, 0.5), "paint2")
-            k.cyl(0.1, tw * 0.7, (s * (W / 2 - tw / 2), y - 0.1, top - 0.1), "rubber", axis="X", seg=8)   # return roller
+            k.wheel_cyl(0.1, tw * 0.7, (s * (W / 2 - tw / 2), y - 0.1, top - 0.1), "rubber", axis="X", seg=8)   # return roller
     zr = 1.85
     wb = W - 2 * tw + 0.06
     k.prism([(-L / 2 + 0.45, 0.45), (-L / 2 + 0.2, 1.0), (-L / 2 + 0.3, zr - 0.05), (L / 2 - 1.55, zr), (L / 2 - 0.15, 0.95), (L / 2 - 0.5, 0.45)], wb, "paint")
@@ -1228,11 +1235,11 @@ def bm13(k, d, ko):
     wr = 0.45
     yf = L / 2 - 1.05
     for s in (-1, 1):
-        k.cyl(wr, 0.26, (s * (W / 2 - 0.18), yf, wr), "rubber", axis="X", seg=16)
-        k.cyl(wr * 0.5, 0.28, (s * (W / 2 - 0.18), yf, wr), "paint2", axis="X", seg=10)
+        k.wheel_cyl(wr, 0.26, (s * (W / 2 - 0.18), yf, wr), "rubber", axis="X", seg=16)
+        k.wheel_cyl(wr * 0.5, 0.28, (s * (W / 2 - 0.18), yf, wr), "paint2", axis="X", seg=10)
         for y in (-L / 2 + 1.25, -L / 2 + 2.3):
-            k.cyl(wr, 0.46, (s * (W / 2 - 0.26), y, wr), "rubber", axis="X", seg=16)          # dual wheels
-            k.cyl(wr * 0.5, 0.48, (s * (W / 2 - 0.26), y, wr), "paint2", axis="X", seg=10)
+            k.wheel_cyl(wr, 0.46, (s * (W / 2 - 0.26), y, wr), "rubber", axis="X", seg=16)          # dual wheels
+            k.wheel_cyl(wr * 0.5, 0.48, (s * (W / 2 - 0.26), y, wr), "paint2", axis="X", seg=10)
         # front wings sweeping into the running boards
         k.box((0.42, 1.1, 0.03), (s * (W / 2 - 0.2), yf + 0.05, 1.02), "paint", rot=(8, 0, 0))
         k.box((0.3, 1.0, 0.03), (s * (W / 2 - 0.15), yf - 1.05, 0.62), "paint")

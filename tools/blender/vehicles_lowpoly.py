@@ -4,14 +4,18 @@
 
 Every atlas entry of tools/blender/vehicles.py (hull.ok/ko/blown/trackL/trackR, turret.ok/ko/blown)
 is built from the same procedural model, collapse-decimated to its budget, smart-UV unwrapped, and
-baked (Cycles, CPU) selected-to-active from the full-detail model into one albedo texture (the paint
+split before baking (Cycles, CPU) selected-to-active from the complete original same-part source
+into one albedo texture per fixed/gun/side assembly (the paint
 materials already darken cavities with their own AO node, so no separate AO pass).  One GLB per vehicle (public/models/<id>.glb, whitewashed live looks in <id>_winter.glb),
-nodes named hull_ok ... turret_blown (underscores: three.js strips dots from node names); hull nodes
+nodes retain hull_ok ... turret_blown and add gun and independently centred wheels (underscores:
+three.js strips dots from node names); hull nodes
 are built about the hull centre, turret nodes about their turret-ring centre (vehicles.FRAME axes).  public/models/vehicles.json is the manifest the game reads.
 """
 import json
 import math
 import os
+import re
+import hashlib
 import sys
 
 import bpy
@@ -63,7 +67,7 @@ def tri_count(me):
     return sum(len(p.vertices) - 2 for p in me.polygons)
 
 
-def bake_image(lo, src, name, size):
+def bake_image(lo, src, name, size, bake_operator=None):
     """Bake the colour of src into a fresh float image on lo (selected-to-active).  Only the two
     objects taking part are renderable."""
     for o in bpy.data.objects:
@@ -78,7 +82,7 @@ def bake_image(lo, src, name, size):
     lo.data.materials.append(mat)
     lo.data.polygons.foreach_set("material_index", [0] * len(lo.data.polygons))
     select_only(src, lo)
-    bpy.ops.object.bake(type="DIFFUSE", pass_filter={"COLOR"}, use_selected_to_active=True,
+    (bake_operator or bpy.ops.object.bake)(type="DIFFUSE", pass_filter={"COLOR"}, use_selected_to_active=True,
                         cage_extrusion=0.03, max_ray_distance=0.12, margin=4)
     return img
 
@@ -87,7 +91,7 @@ def linear_to_srgb(a):
     return np.where(a <= 0.0031308, a * 12.92, 1.055 * np.power(np.clip(a, 0, None), 1 / 2.4) - 0.055)
 
 
-def lowpoly(src, name, budget, size):
+def lowpoly(src, name, budget, size, bake_source=None, bake_operator=None):
     """Decimated, unwrapped copy of src with one baked albedo material."""
     lo = bpy.data.objects.new(name, src.data.copy())
     bpy.context.scene.collection.objects.link(lo)
@@ -104,7 +108,7 @@ def lowpoly(src, name, budget, size):
     bpy.ops.mesh.quads_convert_to_tris()
     bpy.ops.uv.smart_project(angle_limit=math.radians(66), island_margin=0.03)
     bpy.ops.object.mode_set(mode="OBJECT")
-    albedo = bake_image(lo, src, name + "_albedo", size)
+    albedo = bake_image(lo, bake_source or src, name + "_albedo", size, bake_operator=bake_operator)
     a = np.array(albedo.pixels[:], dtype=np.float32).reshape(-1, 4)
     a[:, :3] = linear_to_srgb(a[:, :3])
     a[:, 3] = 1.0
@@ -138,27 +142,109 @@ def entries(vid, season):
     return todo
 
 
+def shared_geometry():
+    """Read the existing deterministic TS authorities; refuse mismatched source frames."""
+    gun_path = os.path.join(VC.ROOT, 'src/data/vehicleGunGeometry.ts')
+    armor_path = os.path.join(VC.ROOT, 'src/data/vehicleArmorGeometry.ts')
+    guns = {}
+    for match in re.finditer(r'(\w+): g\(([^)]+)\)', open(gun_path).read()):
+        rx, forward, x, gun_forward, z, length = map(float, match[2].split(','))
+        guns[match[1]] = {'ring': (rx, -forward, 0), 'pivot': (x, -gun_forward, z), 'barrelM': length}
+    armor = {}
+    for match in re.finditer(r"(\w+): box\('[^']+', ([^)]+)\)", open(armor_path).read()):
+        x0,y0,z0,x1,y1,z1 = map(float, match[2].split(','))
+        armor[match[1]] = {'min': {'x': x0, 'y': -y1, 'z': z0}, 'max': {'x': x1, 'y': -y0, 'z': z1}}
+    return guns, armor, {'gun': hashlib.sha256(open(gun_path,'rb').read()).hexdigest(),
+                          'armor': hashlib.sha256(open(armor_path,'rb').read()).hexdigest()}
+
+
+def sim_point(p):
+    return {'x': p[0], 'y': -p[1], 'z': p[2]}
+
+
+def split_wheels(lo, kit, state):
+    """One side bake/material, individual wheel meshes with preserved UVs and own origins."""
+    import bmesh
+    out = []
+    for index, wheel in enumerate(kit.wheels):
+        side = wheel['side']
+        if not lo.name.startswith('wheels_' + side + '_'):
+            continue
+        if not any(tag == ('wheels_' + side, index) for tag in kit.tags):
+            continue
+        me = lo.data.copy()
+        bm = bmesh.new(); bm.from_mesh(me)
+        layer = bm.faces.layers.int.get('wheel_id')
+        if layer is None:
+            raise ValueError('wheel source ownership lost during bake')
+        bmesh.ops.delete(bm, geom=[f for f in bm.faces if f[layer] != index], context='FACES')
+        bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context='VERTS')
+        centre = wheel['sourceCentre']
+        for v in bm.verts:
+            v.co -= VC.Vector(centre)
+        bm.to_mesh(me); bm.free(); me.update()
+        if not len(me.polygons):
+            raise ValueError('wheel source faces lost during bake')
+        ob = bpy.data.objects.new('wheels_%s_%d_%s' % (side,index,state), me)
+        bpy.context.scene.collection.objects.link(ob); out.append(ob)
+    bpy.data.objects.remove(lo)
+    return out
+
+
 def export_vehicle(vid, d, season):
-    clear_scene()
-    setup_cycles()
-    out, pivot = [], None
+    clear_scene(); setup_cycles()
+    out, pivot, metadata = [], None, None
+    guns, armor, fingerprints = shared_geometry()
+    geometry = guns.get(vid)
     for part, st in entries(vid, season):
-        objs, pv, _k = V.build(vid, d, st, part, season)
+        objs, pv, kit = V.build(vid, d, st, part, season)
         pivot = pivot or pv
-        src = objs[0][0]
-        for extra, _vis in objs[1:]:          # the hull's turret-ring drum: only the sprites need it
-            bpy.data.objects.remove(extra)
+        bake_source = objs[0][0]
+        # Same complete original part as the legacy selected-to-active bake: paint AO
+        # sees all neighboring source primitives, while each target topology is split.
+        for obj, _vis in objs[1:]:
+            bpy.data.objects.remove(obj)
+        source_materials = dict(zip(kit.mats, bake_source.data.materials))
+        if st == 'ok' and part == ('turret' if d['hasTurret'] else 'hull'):
+            if bool(kit.gun) != bool(geometry):
+                raise ValueError('%s shared barrel ownership mismatch' % vid)
+            if geometry:
+                actual = sim_point(kit.gun['pivot'])
+                if any(abs(actual[a]-geometry['pivot'][i]) > 1e-10 for i,a in enumerate(('x','y','z'))) or abs(kit.gun['barrelM']-geometry['barrelM']) > 1e-10:
+                    raise ValueError('%s shared trunnion/barrel mismatch: %r vs %r' % (vid, actual, geometry))
+        if st == 'ok' and part == 'hull':
+            ring = (pv[0], -pv[1], 0) if pv and d['hasTurret'] else None
+            if geometry and d['hasTurret'] and any(abs(ring[i]-geometry['ring'][i]) > 1e-10 for i in range(3)):
+                raise ValueError('%s shared turret ring mismatch' % vid)
+            metadata = {'modelOriginM': {'x':0,'y':0,'z':0},
+                'turretPivot3M': dict(zip(('x','y','z'),ring)) if ring else None,
+                'gunTrunnionM': dict(zip(('x','y','z'),geometry['pivot'])) if geometry else None,
+                'wheels': [{'centreM': sim_point(w['sourceCentre']), 'radiusM': w['radiusM'], 'side': w['side'], 'index': i} for i,w in enumerate(kit.wheels)],
+                'armorProxy': armor.get(vid), 'geometryFingerprints': fingerprints}
         budget = BUDGET_OVERRIDE.get(vid, {}).get(part, BUDGET[part])
         size = TEX_STATE.get(st) or TEX_OVERRIDE.get(vid, {}).get(part, TEX[part])
-        out.append(lowpoly(src, "%s_%s" % (part, st), budget, size))
-        bpy.data.objects.remove(src)
-    fname = "%s%s.glb" % (vid, "_winter" if season == "winter" else "")
-    select_only(*out)
-    os.makedirs(MODELS, exist_ok=True)
-    bpy.ops.export_scene.gltf(filepath=os.path.join(MODELS, fname), export_format="GLB", use_selection=True,
-                              export_yup=True, export_apply=True, export_image_format="WEBP",
-                              export_materials="EXPORT", export_texcoords=True, export_normals=True)
-    return {"file": fname, "nodes": [o.name for o in out]}, pivot
+        for assembly in ('fixed', 'gun', 'wheels_L', 'wheels_R'):
+            fragment = kit.extract(assembly)
+            if not fragment.f:
+                continue
+            # Preserve the already bent/askew wreck shape; articulate only live elevation/recoil.
+            src = fragment.build(source_materials)
+            name = '%s_%s' % (part if assembly == 'fixed' else assembly, st)
+            lo = lowpoly(src, name, budget, size, bake_source=bake_source)
+            bpy.data.objects.remove(src)
+            if assembly == 'gun':
+                # Bake in original coordinates so procedural camouflage/dust is unchanged.
+                p = geometry['pivot']
+                source_p = VC.Vector((p[0], -p[1], p[2]))
+                for vertex in lo.data.vertices:
+                    vertex.co -= source_p
+            out.extend(split_wheels(lo, kit, st) if assembly.startswith('wheels_') else [lo])
+        bpy.data.objects.remove(bake_source)
+    fname = '%s%s.glb' % (vid, '_winter' if season == 'winter' else '')
+    select_only(*out); os.makedirs(MODELS, exist_ok=True)
+    bpy.ops.export_scene.gltf(filepath=os.path.join(MODELS, fname), export_format='GLB', use_selection=True,
+        export_yup=True, export_apply=True, export_image_format='WEBP', export_materials='EXPORT', export_texcoords=True, export_normals=True)
+    return {'file': fname, 'nodes': [o.name for o in out]}, pivot, metadata
 
 
 def main():
@@ -178,14 +264,15 @@ def main():
         entry.update({"hasTurret": bool(V.VEHICLES[vid][1]), "lengthM": d["L"], "widthM": d["W"]})
         if args.season in ("summer", "both"):
             log("%s summer" % vid)
-            entry["summer"], pv = export_vehicle(vid, d, "summer")
+            entry["summer"], pv, metadata = export_vehicle(vid, d, "summer")
+            entry.update(metadata)
             entry["turretPivotM"] = {"x": round(pv[0], 3), "y": round(pv[1], 3)} if (pv and entry["hasTurret"]) else None
         if args.season in ("winter", "both"):
             if vid in V.NO_WASH:
                 entry["winter"] = None
             else:
                 log("%s winter" % vid)
-                entry["winter"], _ = export_vehicle(vid, d, "winter")
+                entry["winter"], _, _metadata = export_vehicle(vid, d, "winter")
         entry.setdefault("winter", None)
         manifest["vehicles"][vid] = entry
         with open(mpath, "w") as fh:          # written after every vehicle: an interrupted run keeps its work

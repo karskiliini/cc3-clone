@@ -172,3 +172,128 @@ it('context loss during render reports false in the same frame without needing a
   const ctx = { drawImage() {}, globalAlpha: 1, imageSmoothingEnabled: false, imageSmoothingQuality: 'low' } as unknown as CanvasRenderingContext2D;
   expect(out.draw(ctx, new VehicleScene(src), { x: 0, y: 0, zoom: 1 })).toBe(false);
 });
+
+import { VEHICLE_DEFS } from '@/data/units';
+import { hullParams } from '@/data/vehiclePhysics';
+import { createHullBody } from '@/sim/hullPhysics';
+import { rotate } from '@/sim/hullMath';
+import { vehicleLook } from '@/render/vehicle3d/look';
+import { Rng } from '@/shared/rng';
+import { hashState } from '@/sim/stateHash';
+import { addTank, makeState } from './vehicleDamageHelpers';
+import { flat } from './hullPhysicsHelpers';
+
+it('renders rotated model origin without mutating physical pose or hash', () => {
+  const state = makeState(), { v } = addTank(state, 't34_76', { x: 20, y: 20 });
+  const def = VEHICLE_DEFS[v.defId], p = hullParams(def);
+  v.body = createHullBody(def, v.pos, 0, flat);
+  v.body.orientation = { x: 0.25881904510252074, y: 0, z: 0, w: 0.9659258262890683 };
+  const m = model(['hull_ok'], false), scene = new VehicleScene({ get: () => m });
+  const saved = JSON.stringify(v.body), hash = hashState({ state, rng: new Rng(1) });
+  const l = vehicleLook(v, state), offset = rotate(v.body.orientation, p.modelOriginLocal);
+  for (let i = 0; i < 3; i++) { scene.begin(); expect(scene.add(l)).toBe(true); scene.end(); }
+  scene.scene.updateMatrixWorld(true);
+  const actual = scene.scene.getObjectByName('hull_ok')!.getWorldPosition(new Vector3());
+  expect(actual.x).toBeCloseTo(v.body.position.x + offset.x, 12);
+  expect(actual.y).toBeCloseTo(v.body.position.z + offset.z, 12);
+  expect(actual.z).toBeCloseTo(v.body.position.y + offset.y, 12);
+  expect(JSON.stringify(v.body)).toBe(saved); expect(hashState({ state, rng: new Rng(1) })).toBe(hash);
+});
+
+it('elevates and recoils the gun about its trunnion and moves each wheel bank independently', () => {
+  const m = model(['hull_ok', 'turret_ok', 'gun_ok', 'wheels_L_ok', 'wheels_R_ok']);
+  Object.assign(m, { gunTrunnionM: { x: 0, y: -1.35, z: 1.76 }, turretPivot3M: { x: 0, y: -0.62, z: 0 }, wheels: [] });
+  const vs = new VehicleScene({ get: () => m });
+  vs.begin(); vs.add(look({ gunElevationRad: Math.PI / 6, recoil: 1, wheelTravelM: { L: 0.1, R: 0.2 } } as Partial<VehicleLook>)); vs.end();
+  vs.scene.updateMatrixWorld(true);
+  const hull = vs.scene.getObjectByName('hull_ok')!.getWorldPosition(new Vector3());
+  expect(hull.toArray()).toEqual([20, 0, 40]);
+  const gun = vs.scene.getObjectByName('gun_ok')!;
+  expect(gun.getWorldPosition(new Vector3()).y).toBeCloseTo(1.76 - 0.26 * 0.5, 9);
+  expect(new Vector3(0, 0, -1).transformDirection(gun.matrixWorld).y).toBeCloseTo(0.5, 9);
+  expect(vs.scene.getObjectByName('wheels_L_ok')!.getWorldPosition(new Vector3()).y).toBeCloseTo(0.1);
+  expect(vs.scene.getObjectByName('wheels_R_ok')!.getWorldPosition(new Vector3()).y).toBeCloseTo(0.2);
+});
+
+it('individual wheels spin around their own source centres under the tilted suspension bank', () => {
+  const m = model(['hull_ok', 'wheels_L_0_ok', 'wheels_L_1_ok', 'wheels_R_2_ok'], false);
+  m.wheels = [
+    { index: 0, side: 'L', centreM: { x: -1, y: -2, z: 0.3 }, radiusM: 0.3 },
+    { index: 1, side: 'L', centreM: { x: -1, y: 2, z: 0.3 }, radiusM: 0.3 },
+    { index: 2, side: 'R', centreM: { x: 1, y: 0, z: 0.4 }, radiusM: 0.4 },
+  ];
+  const vs = new VehicleScene({ get: () => m });
+  const l = look({ bodyQuaternion: { x: 0.5, y: 0, z: 0, w: Math.sqrt(3) / 2 }, wheelTravelM: { L: 0.1, R: -0.1 }, wheelDistanceM: 0 });
+  vs.begin(); vs.add(l); vs.end(); vs.scene.updateMatrixWorld(true);
+  const centres = m.wheels.map(w => vs.scene.getObjectByName(`wheels_${w.side}_${w.index}_ok`)!.getWorldPosition(new Vector3()).toArray());
+  const chassis = vs.scene.getObjectByName('hull_ok')!.matrixWorld.clone();
+  vs.begin(); vs.add({ ...l, wheelDistanceM: 1.4 }); vs.end(); vs.scene.updateMatrixWorld(true);
+  m.wheels.forEach((w, i) => {
+    const node = vs.scene.getObjectByName(`wheels_${w.side}_${w.index}_ok`)!;
+    expect(node.getWorldPosition(new Vector3()).toArray()).toEqual(centres[i]);
+    expect(node.parent!.quaternion.x).toBeCloseTo(Math.sin(-1.4 / w.radiusM / 2));
+  });
+  expect(vs.scene.getObjectByName('hull_ok')!.matrixWorld.elements).toEqual(chassis.elements);
+  expect(centres[1][2] - centres[0][2]).toBeCloseTo(2); // pitch rotates the 4m bank span, spin does not orbit centres
+});
+
+it('casemate gun trunnion stays fixed while only its tube traverses and elevates', () => {
+  const m = model(['hull_ok', 'gun_ok'], false);
+  m.gunTrunnionM = { x: 0.18, y: -1.95, z: 1.42 };
+  const vs = new VehicleScene({ get: () => m });
+  vs.begin(); vs.add(look({ defId: 'stug3g', turretRad: Math.PI / 2, gunElevationRad: Math.PI / 6 })); vs.end(); vs.scene.updateMatrixWorld(true);
+  const gun = vs.scene.getObjectByName('gun_ok')!;
+  expect(gun.getWorldPosition(new Vector3()).toArray()).toEqual([20.18, 1.42, 38.05]);
+  const forward = new Vector3(0, 0, -1).transformDirection(gun.matrixWorld);
+  expect(forward.x).toBeCloseTo(Math.sqrt(3) / 2); expect(forward.y).toBeCloseTo(0.5);
+  expect(vs.scene.getObjectByName('hull_ok')!.getWorldPosition(new Vector3()).toArray()).toEqual([20, 0, 40]);
+});
+
+it('cached composite hull and independent landing grounds flatten all shadows without modifying field/body/hash', () => {
+  const state = makeState(), { v } = addTank(state, 't34_76', { x: 0.5, y: 0.5 });
+  v.turretLanding = { x: 1.5, y: 1.5 }; v.turretLandingDir = 0.7;
+  const heights = new Float32Array([7, 8, 10, 12]);
+  state.map.heightField = { res: 1, w: 2, h: 2, ground: heights.slice(), base: heights.slice(), dig: new Float32Array(4), height: heights, canopy: new Float32Array(4), version: 1, marksApplied: 0 };
+  const field = state.map.heightField, snapshot = JSON.stringify(field), hash = hashState({ state, rng: new Rng(1) });
+  v.body = createHullBody(VEHICLE_DEFS[v.defId], v.pos, 0, flat); v.body.position.z += 7;
+  const beforeHash = hashState({ state, rng: new Rng(1) }), savedBody = JSON.stringify(v.body);
+  const m = model(['hull_ok', 'turret_ok', 'gun_ok', 'hull_blown', 'turret_blown', 'gun_blown']); m.gunTrunnionM = { x: 0, y: -1.35, z: 1.76 };
+  const vs = new VehicleScene({ get: () => m }), l = vehicleLook(v, state);
+  expect(l.groundM).toBe(7); expect(l.turretLandingGroundM).toBe(12);
+  for (let i = 0; i < 4; i++) { vs.begin(); vs.add(l); vs.end(); }
+  vs.shadowScene.updateMatrixWorld(true);
+  for (const name of ['hull_ok', 'turret_ok', 'gun_ok']) expect(vs.shadowScene.getObjectByName(name)!.getWorldPosition(new Vector3()).y).toBeCloseTo(7.002);
+  vs.begin(); vs.add({ ...l, turretBlown: true }); vs.end(); vs.shadowScene.updateMatrixWorld(true);
+  expect(vs.shadowScene.getObjectByName('hull_blown')!.getWorldPosition(new Vector3()).y).toBeCloseTo(7.002);
+  expect(vs.shadowScene.getObjectByName('turret_blown')!.getWorldPosition(new Vector3()).y).toBeCloseTo(12.002);
+  expect(vs.shadowScene.getObjectByName('gun_blown')!.getWorldPosition(new Vector3()).y).toBeCloseTo(12.002);
+  expect(state.map.heightField).toBe(field); expect(JSON.stringify(field)).toBe(snapshot); expect(JSON.stringify(v.body)).toBe(savedBody);
+  expect(hashState({ state, rng: new Rng(1) })).toBe(beforeHash); expect(beforeHash).not.toBe(hash);
+});
+
+it('centreline wheel follows its own copied support while track banks and chassis stay fixed', () => {
+  const m = model(['hull_ok', 'wheels_L_0_ok', 'wheels_R_1_ok', 'wheels_R_2_ok'], false);
+  m.wheels = [
+    { index: 0, side: 'L', centreM: { x: -1, y: 0, z: 0.3 }, radiusM: 0.3 },
+    { index: 1, side: 'R', centreM: { x: 1, y: 0, z: 0.3 }, radiusM: 0.3 },
+    { index: 2, side: 'R', centreM: { x: 0, y: -1, z: 0.3 }, radiusM: 0.3 },
+  ];
+  const vs = new VehicleScene({ get: () => m });
+  const l = look({ wheelTravelM: { L: 0.02, R: -0.03 }, centreWheelTravelM: [{ yM: -1.1, travelM: 0 }] });
+  const draw = (travelM: number | null): number[] => {
+    vs.begin(); vs.add({ ...l, centreWheelTravelM: travelM === null ? undefined : [{ yM: -1.1, travelM }] }); vs.end(); vs.scene.updateMatrixWorld(true);
+    return ['hull_ok', 'wheels_L_0_ok', 'wheels_R_1_ok', 'wheels_R_2_ok'].map(name => vs.scene.getObjectByName(name)!.getWorldPosition(new Vector3()).y);
+  };
+  const nominal = draw(0);
+  const close = (actual: number[], expected: number[]): void => actual.forEach((value, i) => expect(value).toBeCloseTo(expected[i], 12));
+  close(nominal, [0, 0.32, 0.27, 0.3]);
+  close(draw(0.06), [0, 0.32, 0.27, 0.36]);
+  close(draw(-0.04), [0, 0.32, 0.27, 0.26]);
+  close(draw(null), [0, 0.32, 0.27, 0.27]); // old optional fixtures retain bank behavior
+  const state = makeState(), { v } = addTank(state, 'kettenkrad', { x: 20, y: 20 });
+  v.body = createHullBody(VEHICLE_DEFS[v.defId], v.pos, 0, flat);
+  const hash = hashState({ state, rng: new Rng(1) }), saved = JSON.stringify(v.body);
+  for (let i = 0; i < 3; i++) { vs.begin(); vs.add(vehicleLook(v, state)); vs.end(); }
+  expect(JSON.stringify(v.body)).toBe(saved); expect(hashState({ state, rng: new Rng(1) })).toBe(hash);
+  expect(state.map.heightField).toBeUndefined();
+});
