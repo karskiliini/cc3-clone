@@ -208,25 +208,60 @@ it('produces identical float state for identical synthetic ground and impulse hi
 
 it.each(['kv1', 'sdkfz251', 'kubelwagen'])('%s settles without flat-ground creep', id => {
   const r = rig(id); r.body.position.z += 0.1;
-  for (let i = 0; i < 20; i++) r.step();
+  const spawn = { ...r.body.position };
+  let maxInitialXY = 0, maxInitialPitch = 0, maxInitialEnergy = 0;
+  for (let i = 0; i < 20; i++) {
+    r.step();
+    if (id === 'sdkfz251') {
+      const dx = r.body.position.x - spawn.x, dy = r.body.position.y - spawn.y;
+      maxInitialXY = Math.max(maxInitialXY, Math.sqrt(dx * dx + dy * dy));
+      maxInitialPitch = Math.max(maxInitialPitch, Math.abs(hullAngles(r.body.orientation).pitch));
+      maxInitialEnergy = Math.max(maxInitialEnergy, kineticEnergy(r.body, r.def));
+    }
+  }
   expect(Math.abs(r.body.velocity.z)).toBeLessThan(0.02);
-  const { x, y, z } = r.body.position;
-  for (let i = 0; i < 200; i++) r.step();
-  expect(Math.abs(r.body.position.z - z)).toBeLessThan(0.01);
+  const { z } = r.body.position;
   if (id === 'sdkfz251') {
-    // Asymmetric supports pitch while settling: loaded contact friction moves
-    // the CG slightly, but the settled pose must not continue to creep.
-    expect(Math.abs(r.body.position.x - x)).toBeLessThan(0.001);
-    expect(Math.abs(r.body.position.y - y)).toBeLessThan(0.001);
-    const settled = { ...r.body.position };
-    for (let i = 0; i < 6000; i++) r.step();
-    expect(Math.abs(r.body.position.x - settled.x)).toBeLessThan(0.001);
-    expect(Math.abs(r.body.position.y - settled.y)).toBeLessThan(0.001);
-    expect(Math.abs(r.body.position.z - settled.z)).toBeLessThan(0.001);
+    // Observed maxima over the initial 20 ticks are 0.0603 m / 0.0437 rad /
+    // 796 J. These ceilings allow 25–33% margin, not an unbounded exception.
+    expect(maxInitialXY).toBeLessThan(0.08);
+    expect(maxInitialPitch).toBeLessThan(0.055);
+    expect(maxInitialEnergy).toBeLessThan(1000);
+    // At 2 s: |pitch|=0.0394 rad and total KE=0.00158 J, including rotation.
+    expect(Math.abs(hullAngles(r.body.orientation).pitch)).toBeLessThan(0.045);
+    expect(kineticEnergy(r.body, r.def)).toBeLessThan(0.005);
+
+    const checkSettledPhase = (ticks: number, energyCeiling: number) => {
+      const position = { ...r.body.position }, angles = hullAngles(r.body.orientation);
+      const drift = { x: 0, y: 0, z: 0 }, rotation = { heading: 0, pitch: 0, roll: 0 };
+      let maxEnergy = 0;
+      for (let i = 0; i < ticks; i++) {
+        r.step();
+        const current = hullAngles(r.body.orientation);
+        for (const axis of ['x', 'y', 'z'] as const)
+          drift[axis] = Math.max(drift[axis], Math.abs(r.body.position[axis] - position[axis]));
+        for (const angle of ['heading', 'pitch', 'roll'] as const)
+          rotation[angle] = Math.max(rotation[angle], Math.abs(current[angle] - angles[angle]));
+        maxEnergy = Math.max(maxEnergy, kineticEnergy(r.body, r.def));
+      }
+      for (const axis of ['x', 'y', 'z'] as const) expect(drift[axis]).toBeLessThan(0.001);
+      // The measured 2→22 s pitch change is 3.10e-5 rad. Sampling each tick
+      // also catches an orientation excursion that returns at the checkpoint.
+      for (const angle of ['heading', 'pitch', 'roll'] as const) expect(rotation[angle]).toBeLessThan(0.0001);
+      expect(Math.abs(hullAngles(r.body.orientation).pitch)).toBeLessThan(0.045);
+      expect(maxEnergy).toBeLessThan(energyCeiling);
+      // 1e-6 J limits an 8 t body's residual motion to at most 16 µm/s
+      // translation or roughly 1e-5 rad/s rotation, far below the quiet gate.
+      expect(kineticEnergy(r.body, r.def)).toBeLessThan(1e-6);
+    };
+    checkSettledPhase(200, 0.005); // 2→22 s, still dissipating the tiny tail.
+    checkSettledPhase(6000, 1e-6); // Another 600 s, with no continuing creep/rotation.
     expect(Math.sqrt(dot(r.body.velocity, r.body.velocity))).toBeLessThan(0.005);
   } else {
+    for (let i = 0; i < 200; i++) r.step();
     expect(r.body.position.x).toBe(20); expect(r.body.position.y).toBe(20);
   }
+  expect(Math.abs(r.body.position.z - z)).toBeLessThan(0.01);
   console.info(id + ' 22s:', { zDrift: r.body.position.z - z, finalVz: r.body.velocity.z });
 });
 
