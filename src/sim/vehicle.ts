@@ -74,7 +74,7 @@ interface AcceptedVehicleMovement {
   checkMines?: boolean;
 }
 
-interface AcceptedHullPoint { pos: Vec2; heading: number }
+interface AcceptedHullPoint { pos: Vec2; heading: number; speedMs: number }
 interface AcceptedHullPose { position: HullBody['position']; orientation: HullBody['orientation'] }
 
 /** Exact XY projection of the accepted solid box, including pitched/rolled roof corners. */
@@ -170,9 +170,16 @@ function syncVehicleOccupants(state: BattleState, v: Vehicle): void {
 function completeVehicleMovement(state: BattleState, rng: Rng, dt: number, v: Vehicle, def: VehicleDef,
   movement: AcceptedVehicleMovement | undefined): void {
   const body = v.body!, heading = v.hullFacing, relativeTurret = wrapAngle(v.turretFacing - heading);
-  const sweep: AcceptedHullPoint[] = [{ pos: { ...v.pos }, heading }];
+  const sweep: AcceptedHullPoint[] = [{ pos: { ...v.pos }, heading, speedMs: 0 }];
   const poses: AcceptedHullPose[] = [];
-  const recordPose = () => poses.push({ position: { ...body.position }, orientation: { ...body.orientation } });
+  let acceptedSpeedMs = 0;
+  const recordPose = () => {
+    poses.push({ position: { ...body.position }, orientation: { ...body.orientation } });
+    const actualHeading = hullAngles(body.orientation).heading;
+    // The preceding accepted segment also owns its complete final rotation.
+    sweep.push({ pos: { x: body.position.x / TILE_M, y: body.position.y / TILE_M },
+      heading: acceptedSpeedMs < 0 ? wrapAngle(actualHeading + Math.PI) : actualHeading, speedMs: acceptedSpeedMs });
+  };
   const wasCoasting = dm.hypot(body.velocity.x, body.velocity.y) > 0.005;
   let blocker: Vehicle | null = null;
   let terrainBlocked = false;
@@ -181,11 +188,17 @@ function completeVehicleMovement(state: BattleState, rng: Rng, dt: number, v: Ve
   stepHullBody(body, def, takeHullDrive(v), groundProbe(state.map), dt, props.speedMul, (from, to) => {
     // At entry this is the complete accepted pose from the preceding substep.
     recordPose();
+    acceptedSpeedMs = 0;
     const length = dm.hypot(to.x - from.x, to.y - from.y);
     if (length === 0) return true;
     const count = Math.max(1, Math.ceil(length / 0.25));
     let previous = { x: from.x / TILE_M, y: from.y / TILE_M };
-    const points: AcceptedHullPoint[] = [];
+    const actualHeading = hullAngles(body.orientation).heading;
+    const speedMs = body.velocity.x * dm.sin(actualHeading) - body.velocity.y * dm.cos(actualHeading);
+    const travelHeading = speedMs < 0 ? wrapAngle(actualHeading + Math.PI) : actualHeading;
+    // Eligibility belongs to this complete candidate's actual velocity. Publish it only
+    // after the entire segment is accepted, including its starting hull footprint.
+    const points: AcceptedHullPoint[] = [{ pos: previous, heading: travelHeading, speedMs }];
     for (let i = 1; i <= count; i++) {
       const pos = { x: (from.x + (to.x - from.x) * i / count) / TILE_M,
         y: (from.y + (to.y - from.y) * i / count) / TILE_M };
@@ -193,14 +206,13 @@ function completeVehicleMovement(state: BattleState, rng: Rng, dt: number, v: Ve
       if (!inBounds(state.map, x, y) || !isPassable(state.map, x, y, 'vehicle')) {
         terrainBlocked = true; return false;
       }
-      const actualHeading = hullAngles(body.orientation).heading;
       const hit = vehicleBlockingAt(state, v, pos, previous, actualHeading);
       if (hit) { blocker ??= hit; return false; }
-      const forwardTravel = (to.x - from.x) * dm.sin(actualHeading) - (to.y - from.y) * dm.cos(actualHeading);
-      points.push({ pos, heading: forwardTravel < 0 ? wrapAngle(actualHeading + Math.PI) : actualHeading });
+      points.push({ pos, heading: travelHeading, speedMs });
       previous = pos;
     }
     sweep.push(...points);
+    acceptedSpeedMs = speedMs;
     return true;
   });
   recordPose();
@@ -208,7 +220,6 @@ function completeVehicleMovement(state: BattleState, rng: Rng, dt: number, v: Ve
   // Hull carry precedes actual traversal; frozen guns retain their pre-step relative angle.
   v.turretFacing = wrapAngle(v.hullFacing + relativeTurret);
   traverseVehicleGun(state, v, def, dt);
-  sweep.push({ pos: { ...v.pos }, heading: v.hullFacing });
   if (blocker) {
     onHullBlocked(state, v, blocker);
     if (v.path.length > 0) armGiveWay(state, v, blocker);
@@ -234,7 +245,8 @@ function targetPosition(state: BattleState, v: Vehicle): Vec2 | null {
 
 function traverseVehicleGun(state: BattleState, v: Vehicle, def: VehicleDef, dt: number): void {
   if (def.hasTurret && turretFrozen(v)) return;
-  if (!v.gunLay) {
+  const live = v.state === 'ok' || v.state === 'immobilized';
+  if (live && !v.gunLay) {
     const target = targetPosition(state, v);
     const want = def.hasTurret && target ? angleTo(v.pos, target) : v.hullFacing;
     v.turretFacing = turnTowards(v.turretFacing, want,
@@ -717,10 +729,16 @@ function coverLookahead(v: Vehicle, route: Vec2[], target: Vec2): Vec2 {
 /** Cover uses a real route and the hull's driving axis. Large turns pivot first; smaller ones
  * drive a tightening arc. Reverse is deliberate and signed, never a sideways vector to cover. */
 function driveToCover(state: BattleState, rng: Rng, dt: number, v: Vehicle, def: VehicleDef, threatPos: Vec2, track: ReverseTrack): AcceptedVehicleMovement | undefined {
+  const tx = Math.floor(v.pos.x), ty = Math.floor(v.pos.y);
+  const tile = tileAt(state.map, tx, ty), props = TERRAIN_PROPS[tile];
+  // Active cover owns its consequence policy even when its request brakes a coasting hull.
+  const movement: AcceptedVehicleMovement = {
+    crushAt: { x: tx, y: ty }, crushTerrain: props.crushable, overrunDir: v.hullFacing,
+  };
   const route = track.route;
   while (route.length > 0 && dist(v.pos, route[0]) < (route.length > 1 ? 0.55 : 0.25)) route.shift();
   const wp = route[0];
-  if (!wp || transportHolds(state, v)) { driveVehicle(v, { speedMs: 0 }, dt); return; }
+  if (!wp || transportHolds(state, v)) { driveVehicle(v, { speedMs: 0 }, dt); return movement; }
   const desired = angleTo(v.pos, wp);
   const rearFacing = wrapAngle(desired + Math.PI);
   // front toward the threat (see the backing decision in stepOneVehicleMind): the driving
@@ -730,9 +748,6 @@ function driveToCover(state: BattleState, rng: Rng, dt: number, v: Vehicle, def:
   if (track.backing && offThreat < Math.PI / 2 - COVER_FLIP_HYST_RAD) track.backing = false;
   else if (!track.backing && offThreat > Math.PI / 2 + COVER_FLIP_HYST_RAD) track.backing = true;
   const desiredHull = track.backing ? rearFacing : desired;
-  const tx = Math.floor(v.pos.x), ty = Math.floor(v.pos.y);
-  const tile = tileAt(state.map, tx, ty);
-  const props = TERRAIN_PROPS[tile];
   const road = tile === 'dirtroad' || tile === 'pavedroad' || tile === 'bridge';
   let speed = (road ? def.speedRoadMs : def.speedOffroadMs * props.speedMul)
     * damageSpeedMul(v) * gradeSpeedMul(state.map, v.pos, wp, GRADE_UPHILL_VEHICLE)
@@ -740,7 +755,10 @@ function driveToCover(state: BattleState, rng: Rng, dt: number, v: Vehicle, def:
   const wheeled = def.turnRadiusM != null;
   turnHull(state, v, def, desiredHull, dt, wheeled ? speed : undefined);
   const error = Math.abs(wrapAngle(desiredHull - driverHeading(v)));
-  if (!wheeled && error > PIVOT_RAD) { driveVehicle(v, { speedMs: 0 }, dt); return { crushAt: { x: tx, y: ty }, crushTerrain: props.crushable }; }
+  if (!wheeled && error > PIVOT_RAD) {
+    driveVehicle(v, { speedMs: 0 }, dt);
+    return movement;
+  }
   speed *= error > SHARP_TURN_RAD ? SHARP_TURN_SPEED_MUL : error > HEADING_ALIGN_RAD ? 0.7 : 1;
   if (!wheeled && error > TRACK_STRAIGHT_RAD) {
     speed = Math.min(speed, Math.max(0.15, hullTurnNow(state, v, def).rate * dist(v.pos, wp) * TILE_M * 0.6));
@@ -751,13 +769,13 @@ function driveToCover(state: BattleState, rng: Rng, dt: number, v: Vehicle, def:
   const lookahead = { x: v.pos.x + dm.sin(direction) * advance, y: v.pos.y - dm.cos(direction) * advance };
   // Preserve the driver's corner/traffic speed gate; the solver still decides actual acceptance.
   if (!isPassable(state.map, Math.floor(lookahead.x), Math.floor(lookahead.y), 'vehicle')
-    || vehicleBlockingAt(state, v, lookahead)) { driveVehicle(v, { speedMs: 0 }, dt); return; }
+    || vehicleBlockingAt(state, v, lookahead)) { driveVehicle(v, { speedMs: 0 }, dt); return movement; }
   driveVehicle(v, { speedMs: track.backing ? -speed : speed }, dt);
   if (v.holdUntil != null) {
     stepHeldFriendly(state, v);
-    if (v.holdUntil != null && state.time < v.holdUntil) { driveVehicle(v, { speedMs: 0 }, dt); return; }
+    if (v.holdUntil != null && state.time < v.holdUntil) { driveVehicle(v, { speedMs: 0 }, dt); return movement; }
   }
-  return { crushAt: { x: tx, y: ty }, crushTerrain: props.crushable, overrunDir: direction };
+  return { ...movement, overrunDir: direction };
 }
 
 
@@ -1179,7 +1197,7 @@ function stepVehicleDriver(state: BattleState, rng: Rng, dt: number, v: Vehicle,
   // (<= 40% of the current maximum beyond 30 deg)
   if (headingErr > PIVOT_RAD) {
     driveVehicle(v, { speedMs: 0 }, dt);
-    return { crushAt: { x: tx, y: ty }, crushTerrain: props.crushable };
+    return { crushAt: { x: tx, y: ty }, crushTerrain: props.crushable, overrunDir: v.hullFacing, checkMines: true };
   }
   let speedMs = fullSpeedMs * (backing ? REVERSE_SPEED_MUL : 1)
     * (headingErr > SHARP_TURN_RAD ? SHARP_TURN_SPEED_MUL : headingErr > HEADING_ALIGN_RAD ? 0.7 : 1);
@@ -1227,7 +1245,7 @@ function stepWheeledDrive(state: BattleState, dt: number, v: Vehicle, def: Vehic
   if (!backing && d <= reach) {
     v.path.shift();
     driveVehicle(v, { speedMs: v.path.length ? speedMs : 0 }, dt);
-    return {};
+    return { overrunDir: driverHeading(v), overrunFirst: true };
   }
   driveVehicle(v, { speedMs: backing ? -speedMs : speedMs }, dt);
   return { overrunDir: backing ? wrapAngle(driverHeading(v) + Math.PI) : driverHeading(v), overrunFirst: true };
@@ -1527,12 +1545,13 @@ function runDown(state: BattleState, v: Vehicle, dirRad: number, s: Soldier): vo
  * 0.7, veteran 0.95) and takes a large stress spike; one who cannot, or who fails, is killed and
  * left crushed in the vehicle's direction of travel. Seeded rng only. */
 export function stepOverrun(state: BattleState, rng: Rng, v: Vehicle, dirRad: number, sweep?: AcceptedHullPoint[]): void {
-  if (Math.abs(v.speed) <= OVERRUN_MIN_SPEED_MS) return;
+  if (!sweep && Math.abs(v.speed) <= OVERRUN_MIN_SPEED_MS) return;
   const def = VEHICLE_DEFS[v.defId];
   if (!def) return;
   const halfW = def.widthM / 2, halfL = def.lengthM / 2;
   const footprint = (pos: Vec2): AcceptedHullPoint | undefined => {
-    for (const point of sweep ?? [{ pos: v.pos, heading: dirRad }]) {
+    for (const point of sweep ?? [{ pos: v.pos, heading: dirRad, speedMs: v.speed }]) {
+      if (Math.abs(point.speedMs) <= OVERRUN_MIN_SPEED_MS) continue;
       const local = hullLocalM(v, point.heading, pos, point.pos);
       if (Math.abs(local.x) <= halfW && Math.abs(local.y) <= halfL) return point;
     }

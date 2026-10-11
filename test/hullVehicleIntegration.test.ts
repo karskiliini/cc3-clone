@@ -249,6 +249,147 @@ it('overrun eligibility covers the accepted path while drawing once per soldier'
   expect(draws).toBe(1);
 });
 
+it('retains fast accepted overrun segments when a later building stop leaves low final speed', () => {
+  for (const stance of ['prone', 'crouching'] as const) {
+    const state = makeState(), { v } = addTank(state, 't34_76', { x: 20.5, y: 30.5 });
+    placeVehicleBody(v, VEHICLE_DEFS[v.defId], v.pos, 0, groundProbe(state.map));
+    v.body!.velocity.y = -120; v.path = [{ x: 20.5, y: 10.5 }];
+    state.map.tiles[25 * state.map.width + 20] = 'buildingStone';
+    const enemy = soldier(99, 98, 'german', { x: 20.5, y: 27.5 }, 'mosin', { stance });
+    state.soldiers.set(enemy.id, enemy); state.teams.set(98, mkTeam(98, 'rifle', [99], 'german', enemy.pos));
+    const rng = new Rng(1); let draws = 0, lookaheadDraws = 0;
+    rng.chance = () => { if (v.pos.y < 27) draws++; else lookaheadDraws++; return false; };
+    stepVehicles(state, rng, SIM_DT);
+    expect(v.pos.y).toBeGreaterThanOrEqual(26); expect(v.pos.y).toBeLessThan(27);
+    expect(Math.abs(v.speed)).toBeLessThan(0.5);
+    expect(enemy.health).toBe('dead');
+    expect(draws).toBe(stance === 'prone' ? 0 : 1);
+    expect(lookaheadDraws).toBe(stance === 'prone' ? 0 : 1);
+    expect(state.events.filter(event => event.kind === 'kill')).toHaveLength(1);
+  }
+});
+
+it('keeps ordinary tracked overrun and one real mine roll while coasting through a route pivot', () => {
+  const state = makeState(), { v } = addTank(state, 't34_76', { x: 20.5, y: 22.2 });
+  placeVehicleBody(v, VEHICLE_DEFS[v.defId], v.pos, 0, groundProbe(state.map));
+  v.body!.velocity.y = -10; v.path = [{ x: 30.5, y: 22.2 }];
+  setMineAt(state.map, 20, 21, MINE_AT);
+  const enemy = soldier(99, 98, 'german', { x: 20.5, y: 21.9 }, 'mosin', { stance: 'prone' });
+  state.soldiers.set(enemy.id, enemy); state.teams.set(98, mkTeam(98, 'rifle', [99], 'german', enemy.pos));
+  const rng = new Rng(1), expectedRng = new Rng(1), chance = rng.chance.bind(rng);
+  let draws = 0;
+  rng.chance = probability => {
+    expect(probability).toBe(0.8); expect(enemy.health).toBe('dead');
+    draws++; return chance(probability);
+  };
+  stepVehicles(state, rng, SIM_DT);
+  expect(takeHullDrive(v).speedMs).toBe(0); expect(takeHullDrive(v).yawRateRadS).toBeGreaterThan(0);
+  expect(v.pos.y).toBeLessThan(22); expect(v.speed).toBeGreaterThan(0.5);
+  expect(enemy.health).toBe('dead'); expect(mineAt(state.map, 20, 21)).toBe(MINE_NONE);
+  expect(draws).toBe(1); expectedRng.next(); expect(rng.state()).toBe(expectedRng.state());
+  expect(state.events.filter(event => event.kind === 'kill')).toHaveLength(1);
+});
+
+it('keeps cover-pivot overrun while retaining the cover branch mine policy', () => {
+  const state = makeState(), { v } = addTank(state, 'pz4gh', { x: 200.5, y: 200.5 }, Math.PI, 60);
+  state.map.tiles[200 * state.map.width + 202] = 'buildingStone';
+  placeVehicleBody(v, VEHICLE_DEFS[v.defId], v.pos, Math.PI, groundProbe(state.map));
+  v.body!.velocity.y = 10;
+  setMineAt(state.map, 200, 200, MINE_AT);
+  const enemy = soldier(99, 98, 'soviet', { x: 200.5, y: 200.8 }, 'mosin', { stance: 'prone' });
+  state.soldiers.set(enemy.id, enemy); state.teams.set(98, mkTeam(98, 'rifle', [99], 'soviet', enemy.pos));
+  onVehicleNearMiss(state, v, WEAPONS.pak40, { x: 200.5, y: 192.5 });
+  const rng = new Rng(3); let draws = 0; rng.chance = () => { draws++; return false; };
+  stepVehicles(state, rng, SIM_DT);
+  expect(isVehicleReversing(state, v)).toBe(true);
+  expect(takeHullDrive(v).speedMs).toBe(0); expect(Math.abs(takeHullDrive(v).yawRateRadS)).toBeGreaterThan(0);
+  expect(v.pos.y).toBeGreaterThan(200.5); expect(v.speed).toBeGreaterThan(0.5);
+  expect(enemy.health).toBe('dead'); expect(draws).toBe(0);
+  expect(mineAt(state.map, 200, 200)).toBe(MINE_AT);
+});
+
+it('keeps the active cover braking profile without ordinary mine checks while coasting over a soldier', () => {
+  const state = makeState(), { v } = addTank(state, 'pz4gh', { x: 200.5, y: 200.5 }, 0, 60);
+  for (let x = 200; x <= 201; x++) state.map.tiles[204 * state.map.width + x] = 'buildingStone';
+  placeVehicleBody(v, VEHICLE_DEFS[v.defId], v.pos, 0, groundProbe(state.map));
+  v.body!.velocity.y = 10; v.holdUntil = 0.5;
+  setMineAt(state.map, 200, 200, MINE_AT);
+  const friend = soldier(97, 96, v.side, { ...v.pos }, 'kar98k');
+  const enemy = soldier(99, 98, 'soviet', { x: 200.5, y: 200.8 }, 'mosin');
+  state.soldiers.set(friend.id, friend); state.teams.set(96, mkTeam(96, 'rifle', [97], v.side, friend.pos));
+  state.soldiers.set(enemy.id, enemy); state.teams.set(98, mkTeam(98, 'rifle', [99], 'soviet', enemy.pos));
+  onVehicleNearMiss(state, v, WEAPONS.pak40, { x: 200.5, y: 192.5 });
+  const rng = new Rng(3), probabilities: number[] = [];
+  rng.chance = probability => { probabilities.push(probability); return false; };
+  stepVehicles(state, rng, SIM_DT);
+  expect(isVehicleReversing(state, v)).toBe(true); expect(takeHullDrive(v).speedMs).toBe(0);
+  expect(v.holdUntil).toBeGreaterThan(state.time); expect(v.pos.y).toBeGreaterThan(200.5);
+  expect(Math.abs(v.speed)).toBeGreaterThan(0.5); expect(enemy.health).toBe('dead');
+  expect(friend.health).toBe('healthy'); expect(probabilities).toEqual([0.85]);
+  expect(mineAt(state.map, 200, 200)).toBe(MINE_AT);
+  expect(state.events.filter(event => event.kind === 'kill')).toHaveLength(1);
+});
+
+it('keeps wheeled completion overrun before crushing and retains its mine policy while braking', () => {
+  const state = makeState(), { v } = addTank(state, 'sdkfz251', { x: 20.5, y: 22.2 });
+  v.path = [{ x: 20.5, y: 22.1 }];
+  placeVehicleBody(v, VEHICLE_DEFS[v.defId], v.pos, 0, groundProbe(state.map));
+  v.body!.velocity.y = -10;
+  state.map.tiles[22 * state.map.width + 20] = 'fence';
+  setTileProfile(getHeightField(state.map), 20, 22, 0);
+  setMineAt(state.map, 20, 21, MINE_AT);
+  const enemy = soldier(99, 98, 'soviet', { x: 20.5, y: 21.9 }, 'mosin');
+  state.soldiers.set(enemy.id, enemy); state.teams.set(98, mkTeam(98, 'rifle', [99], 'soviet', enemy.pos));
+  const rng = new Rng(1); let draws = 0, lookaheadDraws = 0;
+  rng.chance = () => {
+    expect(state.map.tiles[22 * state.map.width + 20]).toBe('fence');
+    if (v.pos.y < 22) draws++; else lookaheadDraws++;
+    return false;
+  };
+  stepVehicles(state, rng, SIM_DT);
+  expect(v.path).toHaveLength(0); expect(takeHullDrive(v).speedMs).toBe(0);
+  expect(v.pos.y).toBeLessThan(22); expect(v.speed).toBeGreaterThan(0.5);
+  expect(enemy.health).toBe('dead'); expect(draws).toBe(1); expect(lookaheadDraws).toBe(1);
+  expect(state.map.tiles[22 * state.map.width + 20]).toBe('open');
+  expect(mineAt(state.map, 20, 21)).toBe(MINE_AT);
+  expect(state.events.filter(event => event.kind === 'kill')).toHaveLength(1);
+});
+
+for (const kind of ['knockedOut', 'abandoned', 'burning'] as const) {
+  it(`carries the ${kind} turret physically without actively traversing to its target`, () => {
+    const state = makeState(), { v } = addTank(state, 't34_76', { x: 20, y: 20 });
+    v.state = kind; v.targetPoint = { x: 30, y: 20 }; v.turretFacing = 0.3;
+    placeVehicleBody(v, VEHICLE_DEFS[v.defId], v.pos, 0, groundProbe(state.map));
+    v.body!.angularVelocity.z = 0.4;
+    stepVehicles(state, new Rng(1), SIM_DT);
+    expect(Math.abs(v.hullFacing)).toBeGreaterThan(0);
+    expect(wrapAngle(v.turretFacing - v.hullFacing)).toBeCloseTo(0.3, 12);
+  });
+}
+
+it('keeps accepted braking movement below the overrun speed threshold ineligible', () => {
+  const state = makeState(), { v } = addTank(state, 't34_76', { x: 20.5, y: 22.2 });
+  placeVehicleBody(v, VEHICLE_DEFS[v.defId], v.pos, 0, groundProbe(state.map));
+  v.body!.velocity.y = -0.3; v.fireHaltUntil = 1;
+  const enemy = soldier(99, 98, 'german', { ...v.pos }, 'mosin', { stance: 'prone' });
+  state.soldiers.set(enemy.id, enemy); state.teams.set(98, mkTeam(98, 'rifle', [99], 'german', enemy.pos));
+  const rng = new Rng(1); let draws = 0; rng.chance = () => { draws++; return false; };
+  stepVehicles(state, rng, SIM_DT);
+  expect(v.pos.y).toBeLessThan(22.2); expect(Math.abs(v.speed)).toBeLessThan(0.5);
+  expect(enemy.health).toBe('healthy'); expect(enemy.crushed).toBeUndefined(); expect(draws).toBe(0);
+});
+
+it('still clamps dead casemate guns to the actual final hull arc', () => {
+  for (const kind of ['knockedOut', 'abandoned', 'burning'] as const) {
+    const state = makeState(), { v } = addTank(state, 'stug3g', { x: 20, y: 20 });
+    v.state = kind; v.targetPoint = { x: 30, y: 20 }; v.turretFacing = 0.8;
+    placeVehicleBody(v, VEHICLE_DEFS[v.defId], v.pos, 0, groundProbe(state.map));
+    v.body!.angularVelocity.z = 0.4;
+    stepVehicles(state, new Rng(1), SIM_DT);
+    expect(wrapAngle(v.turretFacing - v.hullFacing)).toBeCloseTo(VEHICLE_DEFS.stug3g.gunArcDeg! * Math.PI / 180, 12);
+  }
+});
+
 it('overrides a request when burning starts after mind decisions', () => {
   const state = makeState(), { v } = addTank(state, 't34_76', { x: 20, y: 20 });
   v.path = [{ x: 20, y: 10 }]; v.engineOnFire = true; v.engineFireTimer = 8;
