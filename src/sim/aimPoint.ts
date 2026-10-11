@@ -3,13 +3,14 @@
 // recruit; a disabling or a killing spot for men who know their trade). Pure functions of the
 // state: no dice here, the dice are in combat.ts / vehicleDamage.ts.
 import type {
-  AimPoint, BattleState, RoundCounts, RoundType, Soldier, Terrain, Vec2, Vehicle, VehicleDef, WeaponDef,
+  AimPoint, BattleState, RoundCounts, RoundType, Soldier, Terrain, Vec2, Vec3, Vehicle, VehicleDef, WeaponDef,
 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import { angleTo, clamp, dist, wrapAngle } from '@/shared/math';
 import { VEHICLE_DEFS } from '@/data/units';
 import { WEAPONS } from '@/data/weapons';
 import { apcrIssued, bestRoundAgainst, expectedPenetrationChance } from './ballistics';
+import { legacyHullRay } from './hullAim';
 import { expectedArmorMm } from './vehicleDamage';
 import { addMessage } from './messages';
 import { bresenhamTiles } from './los';
@@ -181,11 +182,15 @@ function turningToFlank(v: Vehicle, from: Vec2): boolean {
 /** The gunner's aim point on `target` (requirements B). `counts` = the rounds he has left
  * (null = assume every issued type), `skill` from `gunnerSkill`. */
 export function chooseAimPoint(
-  weapon: WeaponDef, counts: RoundCounts | null, skill: number, from: Vec2, target: Vehicle, year?: number,
+  weapon: WeaponDef, counts: RoundCounts | null, skill: number, from: Vec2, target: Vehicle, year?: number, origin?: Vec3, groundZ = 0,
 ): AimChoice {
   const def: VehicleDef | undefined = VEHICLE_DEFS[target.defId];
   const distM = dist(from, target.pos) * TILE_M;
-  const at = (aim: AimPoint, ace = false) => bestChance(weapon, counts, distM, def ? expectedArmorMm(target, def, from, aim, ace) : 9999, year);
+  const at = (aim: AimPoint, ace = false) => {
+    const ray = def && origin ? legacyHullRay(target, def, { x: origin.x / TILE_M, y: origin.y / TILE_M }, aim, origin.z - (target.body ? 0 : groundZ)) : undefined;
+    if (ray && !target.body) ray.origin.z += groundZ;
+    return bestChance(weapon, counts, distM, def ? expectedArmorMm(target, def, from, aim, ace, ray, groundZ) : 9999, year);
+  };
   const mass = at('mass');
   const choice: AimChoice = { aimPoint: 'mass', round: mass.round, chance: mass.chance, hold: false };
   if (!def || weapon.penetrationMm <= 0) return choice;

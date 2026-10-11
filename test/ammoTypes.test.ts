@@ -200,7 +200,7 @@ describe('running gear', () => {
       const state = makeState();
       const { v } = addTank(state, 'kv1', { x: 100, y: 100 }, 0);
       const res = resolveVehicleHit(state, rng, v, { weapon: WEAPONS.pak38, round: 'ap', shooterPos: { x: 100, y: 0 }, shooterSide: 'german', distM: 200, aimPoint: 'runningGear' });
-      expect(res.location.zone === 'runningGearL' || res.location.zone === 'runningGearR').toBe(true);
+      expect(res.location!.zone === 'runningGearL' || res.location!.zone === 'runningGearR').toBe(true);
       expect(v.state === 'knockedOut' || v.state === 'burning').toBe(false);
       if (v.state === 'immobilized') immobilised++;
     }

@@ -17,8 +17,8 @@ import { hasLOS } from './los';
 import { addStress } from './mind';
 import { addMessage } from './messages';
 import { crewShockSeconds, isServiceable, startExit, stepExit } from './vehicleCrew';
-import { LOOK_IN_HEIGHT_M, LOOK_IN_RANGE_M, passengersAboard, stressPassengers } from './transport';
-import { groundHeightAt } from './map';
+import { passengersAboard, stressPassengers } from './transport';
+import { gunTarget, hullRayTo, intersectVehicle, legacyHullRay, vehicleAimTarget, type HullIntersection, type HullRay } from './hullAim';
 import { detonateVehicle, rackDetonationChance } from './vehicleExplosion';
 
 const DEG = Math.PI / 180;
@@ -305,33 +305,21 @@ export function sightAccuracyMul(v: Vehicle, distM: number): number {
 }
 
 // ------------------------------------------------------------------ hit location
-export type ArmorFace = 'front' | 'side' | 'rear' | 'top';
+export type ArmorFace = 'front' | 'side' | 'rear' | 'top' | 'belly';
 export interface HitLocation {
   zone: VehicleZone;
   face: ArmorFace;
   /** the precise spot, when the round landed on an aimed (or lucky) spot */
   spot?: AimPoint;
+  incidenceCos?: number;
 }
 
 export const TURRET_ZONES = new Set<VehicleZone>(['turretFront', 'turretSide', 'turretRear', 'mantlet', 'cupola']);
 
-/** Off-axis angle (0 = dead ahead, PI = dead astern) and side (+1 = shooter to the right). */
-function aspect(facing: number, from: Vec2, to: Vec2): { off: number; right: number } {
-  const d = wrapAngle(angleTo(from, to) - facing);
-  return { off: Math.abs(d), right: d >= 0 ? 1 : -1 };
-}
-
-/** Chance that a round from this bearing lands on the SIDE rather than the front/rear plate. Front
- * within 40 deg and rear within 25 deg are pure; the side share grows linearly over the next 40. */
+/** Legacy bearing helper retained for tactical callers; hit plates use actual slabs. */
 export function sideShare(offRad: number): number {
   const deg = offRad / DEG;
   return deg <= 90 ? clamp((deg - 40) / 40, 0, 1) : clamp((180 - deg - 25) / 40, 0, 1);
-}
-
-function faceFor(rng: Rng | null, off: number): ArmorFace {
-  const p = sideShare(off);
-  const side = rng ? rng.next() < p : p >= 0.5;
-  return side ? 'side' : off <= Math.PI / 2 ? 'front' : 'rear';
 }
 
 /** Hull-down: a wall, bank or crest between the shooter and the hull leaves only the turret to hit
@@ -343,7 +331,7 @@ export function isHullDown(state: BattleState, v: Vehicle, shooterPos: Vec2): bo
   return !hasLOS(state.map, shooterPos, v.pos, { eyeM: 1.2, targetM: 0.6 }) && hasLOS(state.map, shooterPos, v.pos, { eyeM: 1.2, targetM: 2.2 });
 }
 
-export interface LocateOpts { aimPoint?: AimPoint; hullDown?: boolean; fromAbove?: boolean }
+export interface LocateOpts { aimPoint?: AimPoint; hullDown?: boolean; fromAbove?: boolean; ray?: HullRay; groundZ?: number }
 
 /** Chance that a centre-of-mass hit lands on a weak spot by luck. */
 export const LUCKY_SPOT_CHANCE = 0.06;
@@ -358,59 +346,49 @@ function turretZone(rng: Rng, face: ArmorFace, withSmall: boolean): VehicleZone 
   return face === 'rear' ? 'turretRear' : 'turretSide';
 }
 
-/** Where a hit lands: from the attack bearing relative to hull and turret (which differ when the
- * turret is traversed), weighted by presented area; an aimed spot goes where it was aimed when
- * that spot is presented. */
-export function locateHit(rng: Rng, v: Vehicle, def: VehicleDef, shooterPos: Vec2 | null, opts: LocateOpts = {}): HitLocation {
-  const lay = vehicleLayout(def);
-  if (opts.fromAbove || !shooterPos) {
-    if (lay.openTop) return { zone: 'top', face: 'top' };
-    return rng.next() < 0.35 ? { zone: 'engineDeck', face: 'top' } : { zone: 'top', face: 'top' };
-  }
-  const hull = aspect(v.hullFacing, v.pos, shooterPos);
-  const tur = aspect(def.hasTurret ? v.turretFacing : v.hullFacing, v.pos, shooterPos);
-  const hullFace = faceFor(rng, hull.off);
-  const turFace = faceFor(rng, tur.off);
-  const gear: VehicleZone = hullFace === 'side' ? (hull.right > 0 ? 'runningGearR' : 'runningGearL') : rng.next() < 0.5 ? 'runningGearL' : 'runningGearR';
-
-  const aim = opts.aimPoint && opts.aimPoint !== 'mass' ? opts.aimPoint : undefined;
-  if (aim) {
-    const hullAim = aim !== 'turretRing' && aim !== 'gunMantlet';
-    if (!(hullAim && opts.hullDown)) {
-      switch (aim) {
-        case 'turretRing': return { zone: turretZone(rng, turFace, false), face: turFace, spot: aim };
-        case 'gunMantlet': if (turFace === 'front') return { zone: 'mantlet', face: 'front', spot: aim }; break;
-        case 'driverPlate': if (hullFace === 'front') return { zone: 'hullFrontUpper', face: 'front', spot: aim }; break;
-        case 'lowerHull': return hullFace === 'front' ? { zone: 'hullFrontLower', face: 'front', spot: aim } : { zone: hullFace === 'rear' ? 'hullRear' : 'hullSide', face: hullFace, spot: aim };
-        case 'runningGear': return { zone: gear, face: 'side', spot: aim };
-        case 'engineDeck': case 'rear':
-          if (hullFace === 'rear') return { zone: 'hullRear', face: 'rear', spot: aim };
-          if (hullFace === 'side') return { zone: 'engineDeck', face: 'side', spot: aim };
-          break;
-        case 'sideHull': if (hullFace === 'side') return { zone: 'hullSide', face: 'side', spot: aim }; break;
-      }
+/** Detailed zones stay on the geometrically selected plate; neither aim nor dice
+ * can switch solids or overwrite its face. The expected path calls this without RNG. */
+function plateLocation(hit: HullIntersection, aim: AimPoint = 'mass', rng?: Rng): HitLocation {
+  const { face, solid, incidenceCos } = hit;
+  let zone: VehicleZone = face === 'belly' ? 'belly' : face === 'top' ? 'top'
+    : solid === 'turret' ? (face === 'front' ? 'turretFront' : face === 'rear' ? 'turretRear' : 'turretSide')
+    : face === 'front' ? 'hullFrontUpper' : face === 'rear' ? 'hullRear' : 'hullSide';
+  let spot: AimPoint | undefined;
+  if (solid === 'turret' && face !== 'top' && face !== 'belly') {
+    if (aim === 'turretRing') spot = aim;
+    else if (aim === 'gunMantlet' && face === 'front') { zone = 'mantlet'; spot = aim; }
+    else if (rng) zone = turretZone(rng, face, true);
+  } else if (solid === 'hull') {
+    if (aim === 'driverPlate' && face === 'front') spot = aim;
+    else if (aim === 'lowerHull' && face !== 'top' && face !== 'belly') { zone = face === 'front' ? 'hullFrontLower' : zone; spot = aim; }
+    else if (aim === 'runningGear' && face !== 'top' && face !== 'belly') { zone = hit.pointLocal.x >= 0 ? 'runningGearR' : 'runningGearL'; spot = aim; }
+    else if ((aim === 'rear' && face === 'rear') || (aim === 'engineDeck' && (face === 'top' || face === 'rear'))) { zone = 'engineDeck'; spot = aim; }
+    else if (aim === 'sideHull' && face === 'side') spot = aim;
+    else if (rng) {
+      const r = rng.next();
+      if (face === 'front') zone = r < 0.62 ? 'hullFrontUpper' : 'hullFrontLower';
+      else if (face === 'side' && r < 0.25) zone = 'engineDeck';
+      else if (face === 'rear' && r < 0.25) zone = 'engineDeck';
+      else if (face === 'top' && r < 0.35) zone = 'engineDeck';
     }
   }
-
-  // centre of visible mass
-  const turretShare = opts.hullDown ? 1 : 0.31;
-  const r = rng.next();
-  let loc: HitLocation;
-  if (r < turretShare) loc = { zone: turretZone(rng, turFace, true), face: turFace };
-  else {
-    const h = rng.next();
-    if (hullFace === 'front') loc = h < 0.48 ? { zone: 'hullFrontUpper', face: 'front' } : h < 0.78 ? { zone: 'hullFrontLower', face: 'front' } : { zone: gear, face: 'side' };
-    else if (hullFace === 'side') loc = h < 0.46 ? { zone: 'hullSide', face: 'side' } : h < 0.70 ? { zone: 'engineDeck', face: 'side' } : { zone: gear, face: 'side' };
-    else loc = h < 0.6 ? { zone: 'hullRear', face: 'rear' } : h < 0.75 ? { zone: 'engineDeck', face: 'rear' } : { zone: gear, face: 'side' };
+  if (!spot && rng && rng.next() < LUCKY_SPOT_CHANCE) {
+    if (TURRET_ZONES.has(zone) && zone !== 'cupola') spot = zone === 'mantlet' ? 'gunMantlet' : 'turretRing';
+    else if (zone === 'hullFrontUpper') spot = 'driverPlate';
+    else if (zone === 'hullFrontLower') spot = 'lowerHull';
+    else if (zone === 'hullRear') spot = 'rear';
   }
-  // luck: a weak spot in the zone that was hit
-  if (rng.next() < LUCKY_SPOT_CHANCE) {
-    if (TURRET_ZONES.has(loc.zone) && loc.zone !== 'cupola') loc.spot = loc.zone === 'mantlet' ? 'gunMantlet' : 'turretRing';
-    else if (loc.zone === 'hullFrontUpper') loc.spot = 'driverPlate';
-    else if (loc.zone === 'hullFrontLower') loc.spot = 'lowerHull';
-    else if (loc.zone === 'hullRear') loc.spot = 'rear';
+  return { zone, face, spot, incidenceCos };
+}
+export function locateHit(rng: Rng, v: Vehicle, def: VehicleDef, shooterPos: Vec2 | null, opts: LocateOpts = {}): HitLocation | null {
+  // Unknown source keeps the explicitly requested legacy above-hull policy.
+  if (!opts.ray && (opts.fromAbove || !shooterPos)) {
+    if (vehicleLayout(def).openTop) return { zone: 'top', face: 'top' };
+    return rng.next() < 0.35 ? { zone: 'engineDeck', face: 'top' } : { zone: 'top', face: 'top' };
   }
-  return loc;
+  const ray = opts.ray ?? legacyHullRay(v, def, shooterPos!, opts.aimPoint);
+  const hit = intersectVehicle(v, def, ray, opts.hullDown, opts.groundZ);
+  return hit ? plateLocation(hit, opts.aimPoint, rng) : null;
 }
 
 /** Spot factors on the facing plate (requirements B). */
@@ -419,9 +397,9 @@ export const RUNNING_GEAR_MM = 20;
 const ZONE_ARMOR_FACTOR: Partial<Record<VehicleZone, number>> = { mantlet: 1.1, hullFrontLower: 0.8, cupola: 0.8 };
 
 /** Effective plate (mm) at a hit location. */
-export function locationArmorMm(def: VehicleDef, loc: HitLocation): number {
+function plateArmorMm(def: VehicleDef, loc: HitLocation): number {
   if (loc.zone === 'runningGearL' || loc.zone === 'runningGearR') return RUNNING_GEAR_MM;
-  const base = def.armor[loc.face];
+  const base = loc.face === 'belly' ? def.armor.belly ?? def.armor.top : def.armor[loc.face];
   if (loc.spot) {
     const weak = def.weakSpots?.[loc.spot];
     // a known weak plate only counts from the side it is on (turret ring: any; others: their face)
@@ -429,23 +407,22 @@ export function locationArmorMm(def: VehicleDef, loc: HitLocation): number {
     if (weak != null && applies) return Math.min(weak, base * (ZONE_ARMOR_FACTOR[loc.zone] ?? 1));
     // the spot factor replaces the zone factor (lowerHull and gunMantlet are zones of their own)
     const f = SPOT_ARMOR_FACTOR[loc.spot];
-    if (f != null && loc.face !== 'top') return base * f;
+    if (f != null && loc.face !== 'top' && loc.face !== 'belly') return base * f;
   }
   return base * (ZONE_ARMOR_FACTOR[loc.zone] ?? 1);
 }
 
-/** The plate a gunner reckons with for an aim point from where he stands (no dice: the dominant
- * face for the bearing). Used by aim-point choice, round choice and penChance. */
-export function expectedArmorMm(v: Vehicle, def: VehicleDef, shooterPos: Vec2, aim: AimPoint, ace = false): number {
-  if (aim === 'runningGear') return RUNNING_GEAR_MM;
-  const hull = faceFor(null, aspect(v.hullFacing, v.pos, shooterPos).off);
-  const tur = faceFor(null, aspect(def.hasTurret ? v.turretFacing : v.hullFacing, v.pos, shooterPos).off);
-  const face: ArmorFace = aim === 'turretRing' || aim === 'gunMantlet' ? tur : aim === 'rear' || aim === 'engineDeck' ? (hull === 'rear' ? 'rear' : 'side') : aim === 'sideHull' ? 'side' : hull;
-  const zone: VehicleZone = aim === 'gunMantlet' ? 'mantlet' : aim === 'turretRing' ? 'turretFront' : aim === 'lowerHull' && face === 'front' ? 'hullFrontLower' : 'hullSide';
-  if (aim === 'mass') return def.armor[hull];
-  const loc: HitLocation = { zone, face, spot: aim };
-  if (ace) return locationArmorMm(def, loc);
-  return locationArmorMm({ ...def, weakSpots: undefined }, loc);
+/** Plate thickness along the actual ray, applying obliquity exactly once. */
+export function locationArmorMm(def: VehicleDef, loc: HitLocation): number {
+  return plateArmorMm(def, loc) / Math.max(0.1, loc.incidenceCos ?? 1);
+}
+/** Same geometric cast as actual hits, aimed at the requested point, without dice. */
+export function expectedArmorMm(v: Vehicle, def: VehicleDef, shooterPos: Vec2, aim: AimPoint, ace = false, ray?: HullRay, groundZ = 0): number {
+  const fallback = legacyHullRay(v, def, shooterPos, aim);
+  if (!v.body) fallback.origin.z += groundZ;
+  const hit = intersectVehicle(v, def, ray ?? fallback, false, groundZ);
+  if (!hit) return Infinity;
+  return locationArmorMm(ace ? def : { ...def, weakSpots: undefined }, plateLocation(hit, aim));
 }
 
 // ------------------------------------------------------------------ what is behind a zone
@@ -471,6 +448,8 @@ function zoneContents(def: VehicleDef, loc: HitLocation): ZoneContents {
       return { crew: ['commander'], crewP: 0.75, equip: [], ammoP: 0, fireP: 0 };
     case 'hullFrontUpper':
       return { crew: ['driver', 'radioOp'], crewP: 0.5, equip: [['bowMg', 0.3], ['radio', 0.3], ...(frontDrive ? [['transmission', 0.3] as [VehicleSystem, number]] : [])], ammoP: 0.14, fireP: frontDrive ? 0.1 : 0.08 };
+    case 'belly':
+      return { crew: ['driver', 'radioOp', 'loader'], crewP: 0.3, equip: [['transmission', 0.55], ['fuelLeak', 0.25]], ammoP: 0.2, fireP: 0.12 };
     case 'hullFrontLower':
       return { crew: ['driver'], crewP: 0.3, equip: frontDrive ? [['transmission', 0.75]] : [], ammoP: frontDrive ? 0.1 : 0.2, fireP: frontDrive ? 0.12 : 0.08 };
     case 'hullSide':
@@ -649,17 +628,14 @@ export interface VehicleHitInput {
   /** aim point whose spot was actually hit (omit for centre-of-mass resolution) */
   aimPoint?: AimPoint;
   fromAbove?: boolean;
+  ray?: HullRay;
   /** force the location (tests) */
   location?: HitLocation;
 }
-export interface VehicleHitResult {
-  location: HitLocation;
-  armorMm: number;
-  penetrated: boolean;
-  /** the vehicle was knocked out / set on fire / blew up by this hit */
-  ko: boolean;
+export type VehicleHitResult = {
+  location: HitLocation; armorMm: number; penetrated: boolean; ko: boolean;
   outcome: 'none' | 'bounced' | 'damaged' | 'immobilised' | 'crewHit' | 'fire' | 'explosion' | 'abandoned' | 'knockedOut';
-}
+} | { outcome: 'miss'; location: null; armorMm: null; penetrated: false; ko: false };
 
 const BIG_CLASSES = new Set(['tankgun', 'atgun', 'atrocket']);
 function isBigRound(w: WeaponDef): boolean { return BIG_CLASSES.has(w.cls) || (w.cls === 'grenade' && w.penetrationMm > 0) || (w.cls === 'mortar'); }
@@ -680,16 +656,16 @@ function killAll(state: BattleState, v: Vehicle, team: Team, side: Side): void {
 /** One hit on a vehicle, start to finish. */
 export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, input: VehicleHitInput): VehicleHitResult {
   const def = VEHICLE_DEFS[v.defId];
+  if (!def) return { outcome: 'miss', location: null, armorMm: null, penetrated: false, ko: false };
   const round: RoundType = input.round ?? 'ap';
   const weapon = input.weapon;
   const hullDown = !!input.shooterPos && !input.fromAbove && isHullDown(state, v, input.shooterPos);
-  // a shooter well above an open compartment, close by, fires down into it
-  const looksIn = !!def && !!input.shooterPos && !input.fromAbove && vehicleLayout(def).openTop && input.distM <= LOOK_IN_RANGE_M
-    && groundHeightAt(state.map, input.shooterPos) - groundHeightAt(state.map, v.pos) > LOOK_IN_HEIGHT_M;
-  const location = input.location ?? (def
-    ? locateHit(rng, v, def, input.shooterPos, { aimPoint: input.aimPoint, hullDown, fromAbove: input.fromAbove || looksIn })
-    : { zone: 'hullSide' as VehicleZone, face: 'side' as ArmorFace });
-  const armorMm = def ? locationArmorMm(def, location) : 9999;
+  const legacyOrigin = !input.location && !input.ray && input.shooterPos ? { x: input.shooterPos.x * TILE_M, y: input.shooterPos.y * TILE_M, z: gunTarget(state, input.shooterPos).heightM + 1 } : undefined;
+  const ray = input.ray ?? (legacyOrigin && !input.fromAbove
+    ? hullRayTo(legacyOrigin, vehicleAimTarget(state, v, def, input.aimPoint ?? 'mass', legacyOrigin)) : undefined);
+  const location = input.location ?? locateHit(rng, v, def, input.shooterPos, { aimPoint: input.aimPoint, hullDown, fromAbove: input.fromAbove, ray, groundZ: v.body ? 0 : gunTarget(state, v.pos).heightM - 0.5 });
+  if (!location) return { outcome: 'miss', location: null, armorMm: null, penetrated: false, ko: false };
+  const armorMm = locationArmorMm(def, location);
   const res: VehicleHitResult = { location, armorMm, penetrated: false, ko: false, outcome: 'bounced' };
   const team = state.teams.get(v.teamId);
   // item 013: a KNOCKED-OUT wreck can still be hit, and if the shot finds the ammunition (the
@@ -979,13 +955,13 @@ function nonPenetrating(
 
 /** HE bursting beside or on a vehicle (mortar bombs, grenades, charges, shells that fell short):
  * a burst on the hull is a hit from above; near an open-topped vehicle fragments reach the crew. */
-export function onBlastNearVehicle(state: BattleState, rng: Rng, v: Vehicle, pos: Vec2, weapon: WeaponDef, shooterSide: Side): void {
+export function onBlastNearVehicle(state: BattleState, rng: Rng, v: Vehicle, pos: Vec2, weapon: WeaponDef, shooterSide: Side, trajectory = false): void {
   if (v.state === 'knockedOut' || v.state === 'burning') return;
   const def = VEHICLE_DEFS[v.defId];
   if (!def || weapon.heRadiusM <= 0) return;
   const dM = dist(v.pos, pos) * TILE_M;
   if (dM > Math.max(weapon.heRadiusM, 2)) return;
-  if (dM <= Math.max(1.5, def.widthM / 2)) {
+  if (!trajectory && dM <= Math.max(1.5, def.widthM / 2)) {
     resolveVehicleHit(state, rng, v, { weapon, round: weapon.rounds ? 'he' : 'ap', shooterPos: null, shooterSide, distM: 0, fromAbove: true });
     return;
   }

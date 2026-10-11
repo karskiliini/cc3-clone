@@ -312,7 +312,7 @@ export type AimPoint =
 export type VehicleZone =
   | 'turretFront' | 'turretSide' | 'turretRear' | 'mantlet' | 'cupola'
   | 'hullFrontUpper' | 'hullFrontLower' | 'hullSide' | 'hullRear' | 'engineDeck'
-  | 'runningGearL' | 'runningGearR' | 'top';
+  | 'runningGearL' | 'runningGearR' | 'top' | 'belly';
 
 export type EquipState = 'ok' | 'damaged' | 'destroyed';
 export type VehicleSystem =
@@ -614,6 +614,12 @@ export interface Spark {
   t: number;
   kind: 'armor' | 'dust' | 'wood' | 'stone' | 'brick' | 'body' | 'pen' | 'backblast' | 'leaf' | 'ricochet' | 'groundSplash';
 }
+/** Canonical launch-time terminal trajectory; independent of cosmetic projectiles. */
+export interface IncomingTrajectory {
+  readonly sourcePos: Vec2;
+  readonly endpoint: Vec3;
+  readonly direction: Vec3;
+}
 /** Delayed burst (A1): a thrown grenade/satchel or a mortar bomb in flight; the HE splash (or, for
  * a smoke bomb, the smoke cloud) happens when `state.time >= at`. */
 export interface PendingBurst {
@@ -623,6 +629,7 @@ export interface PendingBurst {
   side: Side;
   shooterId?: number;
   smoke?: boolean;
+  trajectory?: IncomingTrajectory;
 }
 /** Building destruction visuals (B3): dust, chips, settling rubble over `extentTiles`. */
 export interface StructureFx {

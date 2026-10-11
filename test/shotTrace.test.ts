@@ -99,3 +99,24 @@ describe('rounds through vegetation', () => {
     expect(run()).toEqual(run());
   });
 });
+
+it('retains absolute physical heights at obstruction and every deflected leg endpoint', () => {
+  const state = makeState();
+  state.map.tiles[10 * state.map.width + 15] = 'buildingStone';
+  const shot = traceRound(state, new Rng(1), from, to, WEAPONS.mg34, { eyeZ: 10, targetZ: 2 });
+  const f = (shot.impact.x - from.x) / (to.x - from.x);
+  expect(shot.impactZ).toBeCloseTo(10 + (2 - 10) * f, 12);
+  expect(shot.pointsZ).toEqual([10, shot.impactZ]);
+  state.map.tiles[10 * state.map.width + 15] = 'open';
+  let seen = false;
+  for (let seed = 1; seed < 60 && !seen; seed++) {
+    state.map.tiles[10 * state.map.width + 20] = 'woods';
+    const deflected = traceRound(state, new Rng(seed), from, to, { ...WEAPONS.mg34, heRadiusM: 0 }, { eyeZ: 2, targetZ: 1 });
+    if (!deflected.deflected) continue;
+    seen = true;
+    expect(deflected.pointsZ).toHaveLength(deflected.points.length);
+    expect(deflected.pointsZ[0]).toBe(2); expect(deflected.pointsZ.at(-1)).toBe(deflected.impactZ);
+    expect(deflected.pointsZ.every(z => z >= 1 && z <= 2)).toBe(true);
+  }
+  expect(seen).toBe(true);
+});

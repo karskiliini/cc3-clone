@@ -179,3 +179,17 @@ describe('SMG timed rounds in combat', () => {
     expect(team.order).toBeDefined();
   });
 });
+
+import { createHullBody } from '@/sim/hullPhysics';
+import { VEHICLE_DEFS } from '@/data/units';
+import { flat } from './hullPhysicsHelpers';
+it('a small-arms ray passing below the actual hull creates no armor impact or hit response', () => {
+  const { state, tick, start } = scene('mp40', 40);
+  const { v } = addTank(state, 't34_76', { x: 40, y: 60 });
+  v.body = createHullBody(VEHICLE_DEFS[v.defId], v.pos, 0, flat);
+  v.body.position.z += 20; v.state = 'knockedOut';
+  start(); tick(0.5);
+  expect(state.sparks.filter(s => s.kind === 'armor')).toEqual([]);
+  expect(v.hits).toBe(0); expect(v.damage).toBeUndefined();
+  expect(state.tracers.some(t => t.to.x > 45)).toBe(true);
+});

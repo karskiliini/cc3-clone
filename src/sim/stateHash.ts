@@ -122,6 +122,18 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
     h.bool(s.truceOffered);
     h.bool(s.truceAccepted);
   }
+  // Pending explosions are canonical future damage, including launch-time incoming geometry.
+  h.int(state.pendingBursts.length);
+  for (const b of state.pendingBursts) {
+    h.num(b.at); h.vec(b.pos); h.str(b.weaponId); h.str(b.side);
+    h.bool(b.shooterId !== undefined); if (b.shooterId !== undefined) h.int(b.shooterId);
+    h.bool(b.smoke !== undefined); if (b.smoke !== undefined) h.bool(b.smoke);
+    h.bool(!!b.trajectory);
+    if (b.trajectory) {
+      h.vec(b.trajectory.sourcePos);
+      for (const p of [b.trajectory.endpoint, b.trajectory.direction]) { h.num(p.x); h.num(p.y); h.num(p.z); }
+    }
+  }
   // terrain the sim changed: crater marks and how many the height field has stamped (D1)
   h.int(state.map.craterMarks?.length ?? 0);
   // (a field not built yet stamps every mark when it is, so it counts as in step)

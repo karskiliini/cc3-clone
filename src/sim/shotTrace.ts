@@ -11,7 +11,11 @@ import * as dm from '@/shared/dmath';
 
 export interface RoundTrace {
   impact: Vec2;
+  /** Absolute height at the resolved end of the current physical leg. */
+  impactZ: number;
   points: Vec2[];
+  /** Absolute heights paired with each leg endpoint, including deflections. */
+  pointsZ: number[];
   blocked: boolean;
   deflected: boolean;
 }
@@ -32,8 +36,9 @@ export function traceRound(
   state: BattleState, rng: Rng, from: Vec2, to: Vec2, weapon: WeaponDef, heights: LosHeights = {},
 ): RoundTrace {
   const points = [{ ...from }];
+  const pointsZ = [heights.eyeZ ?? (groundAtTile(state.map, Math.floor(from.x), Math.floor(from.y)) + (heights.eyeM ?? 1.7))];
   if (weapon.indirect || weapon.cls === 'mortar' || weapon.cls === 'grenade') {
-    return { impact: { ...to }, points: [...points, { ...to }], blocked: false, deflected: false };
+    return { impact: { ...to }, impactZ: heights.targetZ ?? (groundAtTile(state.map, Math.floor(to.x), Math.floor(to.y)) + (heights.targetM ?? 1.7)), points: [...points, { ...to }], pointsZ: [...pointsZ, heights.targetZ ?? (groundAtTile(state.map, Math.floor(to.x), Math.floor(to.y)) + (heights.targetM ?? 1.7))], blocked: false, deflected: false };
   }
   const map = state.map;
   let start = { ...from }, end = { ...to }, deflected = false, contacts = 0;
@@ -41,9 +46,9 @@ export function traceRound(
   let endZ = heights.targetZ ?? (groundAtTile(map, Math.floor(to.x), Math.floor(to.y)) + (heights.targetM ?? 1.7));
   const visited = new Set<number>();
   const shell = weapon.cls === 'tankgun' || weapon.cls === 'atgun' || weapon.cls === 'atrocket';
-  const finish = (impact: Vec2, blocked: boolean): RoundTrace => {
-    points.push({ ...impact });
-    return { impact: { ...impact }, points, blocked, deflected };
+  const finish = (impact: Vec2, blocked: boolean, impactZ = endZ): RoundTrace => {
+    points.push({ ...impact }); pointsZ.push(impactZ);
+    return { impact: { ...impact }, impactZ, points, pointsZ, blocked, deflected };
   };
   const spark = (pos: Vec2, kind: BattleState['sparks'][number]['kind']) => {
     state.sparks.push({ pos: { ...pos }, kind, t: state.time });
@@ -56,11 +61,11 @@ export function traceRound(
       const f = step / steps;
       const p = { x: start.x + (end.x - start.x) * f, y: start.y + (end.y - start.y) * f };
       const x = Math.floor(p.x), y = Math.floor(p.y);
-      if (!inBounds(map, x, y)) return finish({ x: clamp(p.x, 0, map.width - 0.001), y: clamp(p.y, 0, map.height - 0.001) }, true);
-      const i = y * map.width + x, terrain = map.tiles[i];
       const z = startZ + (endZ - startZ) * f;
+      if (!inBounds(map, x, y)) return finish({ x: clamp(p.x, 0, map.width - 0.001), y: clamp(p.y, 0, map.height - 0.001) }, true, z);
+      const i = y * map.width + x, terrain = map.tiles[i];
       const above = z - groundAtTile(map, x, y);
-      if (above < -0.2) { spark(p, 'dust'); return finish(p, true); }
+      if (above < -0.2) { spark(p, 'dust'); return finish(p, true, z); }
       const startTile = x === Math.floor(from.x) && y === Math.floor(from.y);
       const endTile = x === Math.floor(to.x) && y === Math.floor(to.y);
       const wall = terrain === 'buildingStone' || terrain === 'buildingWood' || terrain === 'stonewall';
@@ -69,7 +74,7 @@ export function traceRound(
         || Math.max(Math.abs(x - Math.floor(to.x)), Math.abs(y - Math.floor(to.y))) <= 1);
       // The aim tile can contain the target at a wall/window, matching LOS endpoint semantics.
       if (wall && !startTile && !endTile && !window) {
-        spark(p, terrain === 'buildingWood' ? 'wood' : 'stone'); return finish(p, true);
+        spark(p, terrain === 'buildingWood' ? 'wood' : 'stone'); return finish(p, true, z);
       }
       if (GROWTH_HEIGHT_M[terrain] && cutGrowthAt(map, p, above) && !visited.has(i)) spark(p, 'leaf');
       if (visited.has(i) || startTile) continue;
@@ -81,11 +86,11 @@ export function traceRound(
       damageVegetation(map, x, y, shell ? 50 : 1);
       spark(p, 'wood');
       contacts++;
-      if ((shell && weapon.heRadiusM > 0) || contacts >= 3 || (!shell && rng.chance(0.18))) return finish(p, true);
+      if ((shell && weapon.heRadiusM > 0) || contacts >= 3 || (!shell && rng.chance(0.18))) return finish(p, true, z);
       if (!rng.chance(shell ? 0.12 : 0.5)) continue;
       deflected = true;
       spark(p, 'ricochet');
-      points.push({ ...p });
+      points.push({ ...p }); pointsZ.push(z);
       const angle = dm.atan2(end.y - start.y, end.x - start.x) + (rng.chance(0.5) ? 1 : -1) * rng.range(0.08, 0.35);
       const remaining = length * (1 - f) * 0.75;
       start = p; startZ = z;
@@ -96,7 +101,7 @@ export function traceRound(
     }
     if (!turned) return finish(end, false);
   }
-  return finish(start, true);
+  return finish(start, true, startZ);
 }
 
 export function traceTracers(state: BattleState, shot: RoundTrace, kind: Tracer['kind'], hit = false): void {

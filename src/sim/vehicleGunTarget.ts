@@ -1,3 +1,5 @@
+import { crewEffects } from './vehicleDamage';
+import { chooseAimPoint, gunnerSkill, splitRounds } from './aimPoint';
 import type { BattleState, Order, Soldier, Vec2, Vehicle, WeaponDef } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import { VEHICLE_DEFS } from '@/data/units';
@@ -9,7 +11,7 @@ import { hasLOS } from './los';
 import { attackPhase } from './orders';
 import { behindGunShield } from './crewWeapon';
 import { bowMgUsable, coaxUsable } from './vehicleDamage';
-import { gunTarget, type GunTarget } from './hullAim';
+import { gunTarget, vehicleAimTarget, vehicleGunRay, type GunTarget } from './hullAim';
 
 export type VehicleGunTarget =
   | { kind: 'soldier'; soldier: Soldier }
@@ -161,15 +163,27 @@ export function orderedGunDiagnosticTarget(state: BattleState, vehicle: Vehicle,
     const weapon = def?.mainWeaponId ? WEAPONS[def.mainWeaponId] : null;
     const target = pickVehicleAttackTarget(state, vehicle, weapon, order);
     if (target === 'free' || target === 'mg') return null;
-    return resolvedGunTarget(state, target ?? { kind: 'point', pos: order.target });
+    return resolvedGunTarget(state, target ?? { kind: 'point', pos: order.target }, vehicle);
   }
   const target = orderedVehicleGunTarget(state, vehicle, order);
-  return target ? resolvedGunTarget(state, target) : null;
+  return target ? resolvedGunTarget(state, target, vehicle) : null;
 }
 
-export function resolvedGunTarget(state: BattleState, target: VehicleGunTarget): GunTarget {
+export function resolvedGunTarget(state: BattleState, target: VehicleGunTarget, shooter?: Vehicle): GunTarget {
   switch (target.kind) {
-    case 'vehicle': return gunTarget(state, target.vehicle.pos, target.vehicle);
+    case 'vehicle': {
+      const mass = gunTarget(state, target.vehicle.pos, target.vehicle);
+      const def = shooter ? VEHICLE_DEFS[shooter.defId] : undefined;
+      const weapon = def?.mainWeaponId ? WEAPONS[def.mainWeaponId] : undefined;
+      const gunner = shooter ? crewEffects(state, shooter).gunner : undefined;
+      if (!shooter || !def || !weapon || !gunner) return mass;
+      const ray = vehicleGunRay(state, shooter, def, mass);
+      const counts = shooter.rounds ? { ...shooter.rounds } : splitRounds(weapon, shooter.mainAmmo, state.config.year);
+      if (shooter.loadedRound) counts[shooter.loadedRound]++;
+      const choice = chooseAimPoint(weapon, weapon.rounds ? counts : null, gunnerSkill(gunner), ray.from, target.vehicle, state.config.year,
+        ray.origin, gunTarget(state, target.vehicle.pos).heightM - 0.5);
+      return vehicleAimTarget(state, target.vehicle, VEHICLE_DEFS[target.vehicle.defId], choice.aimPoint, ray.origin);
+    }
     case 'soldier': return gunTarget(state, target.soldier.pos, undefined, target.soldier);
     case 'point': return gunTarget(state, target.pos);
   }

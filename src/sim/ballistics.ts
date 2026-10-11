@@ -1,4 +1,5 @@
-import type { Health, RoundType, Soldier, Stance, Vec2, Vehicle, WeaponDef } from '@/shared/types';
+import type { Health, IncomingTrajectory, RoundType, Soldier, Stance, Vec2, Vec3, Vehicle, WeaponDef } from '@/shared/types';
+import { TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { clamp, wrapAngle, angleTo } from '@/shared/math';
 import { hastyAccuracy } from './hastyFire';
@@ -157,4 +158,17 @@ export function damageRoll(weapon: WeaponDef, cover: number, rng: Rng): Health |
     return rng.chance(0.6) ? 'dead' : 'incapacitated';
   }
   return 'wounded';
+}
+
+/** P2 canonical ballistic assumption: constant gravity over the existing flight duration.
+ * Only the terminal unit tangent and launch attribution are retained. This is a local
+ * arrival approximation, independent of the renderer's cosmetic arcs. */
+export function ballisticArrival(launch: Vec3, endpoint: Vec3, flightS: number): IncomingTrajectory {
+  if (!(flightS > 0) || !Number.isFinite(flightS)) throw new Error('invalid ballistic duration');
+  const velocity = { x: (endpoint.x - launch.x) / flightS, y: (endpoint.y - launch.y) / flightS,
+    z: (endpoint.z - launch.z) / flightS - 9.81 * flightS / 2 };
+  const speed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z);
+  if (!(speed > 0) || !Number.isFinite(speed)) throw new Error('invalid ballistic terminal velocity');
+  return { sourcePos: { x: launch.x / TILE_M, y: launch.y / TILE_M }, endpoint: { ...endpoint },
+    direction: { x: velocity.x / speed, y: velocity.y / speed, z: velocity.z / speed } };
 }

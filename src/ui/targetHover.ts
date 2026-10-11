@@ -132,7 +132,7 @@ export function targetableEnemyAt(state: BattleState, playerSide: Side, selected
       const shooterDef = shooter ? VEHICLE_DEFS[shooter.defId] : undefined;
       const eligible = shooter && shooterDef?.mainWeaponId && !WEAPONS[shooterDef.mainWeaponId]?.indirect
         ? orderedVehicleGunTarget(state, shooter, hoverOrder(state, playerSide, enemy, world)) : null;
-      const target = eligible ? resolvedGunTarget(state, eligible) : undefined;
+      const target = eligible ? resolvedGunTarget(state, eligible, shooter) : undefined;
       const ray = shooter && shooterDef && target ? vehicleGunRay(state, shooter, shooterDef, target) : undefined;
       // A vehicle main gun profiles its actual chosen member/last-known point. MG-only and
       // nonvehicle observers retain the existing visible-member policy.

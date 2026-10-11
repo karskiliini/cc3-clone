@@ -9,6 +9,7 @@ import {
   chooseAimPoint, gunnerSkill, spotHitMul, aimLayMul, SPOT_MISS_STILL_HITS, AIM_WORDS,
 } from '@/sim/aimPoint';
 import { expectedArmorMm, locateHit, locationArmorMm, LUCKY_SPOT_CHANCE } from '@/sim/vehicleDamage';
+import { intersectVehicle, legacyHullRay } from '@/sim/hullAim';
 import { stepCombat } from '@/sim/combat';
 import { stepCrewWeapons, fireMissionWait } from '@/sim/crewWeapon';
 import { makeState, addTank, addGun, soldier } from './vehicleDamageHelpers';
@@ -99,10 +100,15 @@ describe('aim point choice', () => {
   it('an ace knows the type: the KV-1 turret ring is 60 mm to him, the Tiger has no frontal weak spot', () => {
     const state = makeState(1943);
     const kv = kvAt(state, 300).v;
-    expect(expectedArmorMm(kv, VEHICLE_DEFS.kv1, FROM, 'turretRing', true)).toBe(60);
-    expect(expectedArmorMm(kv, VEHICLE_DEFS.kv1, FROM, 'turretRing', false)).toBeCloseTo(75 * 0.85, 5);
+    const ray = legacyHullRay(kv, VEHICLE_DEFS.kv1, FROM, 'turretRing');
+    const incidence = Math.abs(ray.direction.y) / Math.sqrt(ray.direction.x * ray.direction.x + ray.direction.y * ray.direction.y + ray.direction.z * ray.direction.z);
+    expect(intersectVehicle(kv, VEHICLE_DEFS.kv1, ray)?.face).toBe('front');
+    expect(expectedArmorMm(kv, VEHICLE_DEFS.kv1, FROM, 'turretRing', true)).toBeCloseTo(60 / incidence, 10);
+    expect(expectedArmorMm(kv, VEHICLE_DEFS.kv1, FROM, 'turretRing', false)).toBeCloseTo(75 * 0.85 / incidence, 10);
     expect(VEHICLE_DEFS.tiger.weakSpots).toBeUndefined();
-    expect(expectedArmorMm(kv, VEHICLE_DEFS.kv1, FROM, 'runningGear')).toBe(20);
+    const gearRay = legacyHullRay(kv, VEHICLE_DEFS.kv1, FROM, 'runningGear');
+    const gearIncidence = Math.abs(gearRay.direction.y) / Math.sqrt(gearRay.direction.x * gearRay.direction.x + gearRay.direction.y * gearRay.direction.y + gearRay.direction.z * gearRay.direction.z);
+    expect(expectedArmorMm(kv, VEHICLE_DEFS.kv1, FROM, 'runningGear')).toBeCloseTo(20 / gearIncidence, 10);
   });
 
   it('a veteran holds his fire a moment for a target that is turning its flank to him', () => {
@@ -213,7 +219,7 @@ describe('centre-of-mass luck', () => {
     let spots = 0, thinner = 0;
     const N = 8000;
     for (let i = 0; i < N; i++) {
-      const loc = locateHit(rng, t.v, VEHICLE_DEFS.kv1, FROM);
+      const loc = locateHit(rng, t.v, VEHICLE_DEFS.kv1, FROM)!;
       if (loc.spot) { spots++; if (locationArmorMm(VEHICLE_DEFS.kv1, loc) < VEHICLE_DEFS.kv1.armor.front) thinner++; }
     }
     expect(LUCKY_SPOT_CHANCE).toBeGreaterThanOrEqual(0.05);

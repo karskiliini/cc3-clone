@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import type { BattleState, Soldier, Vehicle } from '@/shared/types';
 import { SIM_DT, TILE_M } from '@/shared/types';
 import { hullParams } from '@/data/vehiclePhysics';
+import { legacyHullRay } from '@/sim/hullAim';
 import { takeHullDrive } from '@/sim/hullDrive';
 import { Rng } from '@/shared/rng';
 import { WEAPONS } from '@/data/weapons';
@@ -182,14 +183,16 @@ describe('hit location', () => {
     v.turretFacing = Math.PI / 2; // turret traversed right: the shooter ahead sees its left side
     const rng = new Rng(1);
     const zones = new Set<string>();
-    for (let i = 0; i < 2000; i++) zones.add(locateHit(rng, v, VEHICLE_DEFS.pz4gh, SHOOTER).zone);
-    expect(zones.has('turretSide')).toBe(true);
+    for (let i = 0; i < 2000; i++) zones.add(locateHit(rng, v, VEHICLE_DEFS.pz4gh, SHOOTER)!.zone);
+    expect(zones.has('turretSide')).toBe(false); // centre ray meets hull, not a random turret
+    const turret = locateHit(rng, v, VEHICLE_DEFS.pz4gh, SHOOTER, { aimPoint: 'turretRing' });
+    expect(turret?.zone).toBe('turretSide');
     expect(zones.has('turretFront')).toBe(false);
     expect(zones.has('hullFrontUpper')).toBe(true);
     expect(zones.has('hullSide')).toBe(false);
   });
 
-  it('a hull-down tank only takes turret-zone hits', () => {
+  it('hull-down blocks hull-entry rays and leaves actual turret-entry rays visible', () => {
     const { state, v } = fresh('t34_76');
     expect(isHullDown(state, v, SHOOTER)).toBe(false);
     for (let dx = -1; dx <= 1; dx++) setTile(state.map, 100 + dx, 99, 'stonewall');
@@ -200,7 +203,11 @@ describe('hit location', () => {
       for (let dx = -1; dx <= 1; dx++) setTile(s2.map, 100 + dx, 99, 'stonewall');
       const t = addTank(s2, 't34_76', { x: 100, y: 100 }, 0);
       const r = resolveVehicleHit(s2, rng, t.v, { weapon: big, round: 'ap', shooterPos: SHOOTER, shooterSide: 'german', distM: 200 });
-      expect(TURRET_ZONES.has(r.location.zone), r.location.zone).toBe(true);
+      expect(r.outcome).toBe('miss'); expect(r.location).toBeNull();
+      const turret = resolveVehicleHit(s2, rng, t.v, { weapon: big, round: 'ap', shooterPos: SHOOTER, shooterSide: 'german', distM: 200,
+        aimPoint: 'turretRing', ray: legacyHullRay(t.v, VEHICLE_DEFS.t34_76, SHOOTER, 'turretRing', 1.5) });
+      expect(turret.outcome).not.toBe('miss');
+      expect(turret.location && TURRET_ZONES.has(turret.location.zone)).toBe(true);
     }
   });
 });

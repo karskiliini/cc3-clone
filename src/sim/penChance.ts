@@ -7,7 +7,7 @@ import { roundPenetrationMm } from '@/sim/ballistics';
 import { SKILL_ACE, chooseAimPoint, gunnerSkill, soldierRounds, vehicleRounds } from '@/sim/aimPoint';
 import { crewEffects, expectedArmorMm, mainGunUsable } from '@/sim/vehicleDamage';
 import * as dm from '@/shared/dmath';
-import { gunTarget, vehicleGunRay } from './hullAim';
+import { gunTarget, hullRayTo, vehicleAimTarget, vehicleGunRay } from './hullAim';
 
 /** Standard normal CDF (Abramowitz-Stegun 7.1.26 via erf), accurate to ~1e-7. */
 function phi(z: number): number {
@@ -53,7 +53,7 @@ export function penRating(chance: number): PenRating {
   return chance >= PEN_LIKELY_FROM ? 'likely' : chance >= PEN_MAYBE_FROM ? 'maybe' : 'none';
 }
 
-interface ArmedMan { weapon: WeaponDef; counts: RoundCounts | null; skill: number }
+interface ArmedMan { weapon: WeaponDef; counts: RoundCounts | null; skill: number; soldier?: Soldier }
 
 /** The team's anti-armour weapons with the man who lays each and the rounds he has left. */
 function teamArmourShooters(state: BattleState, team: Team): ArmedMan[] {
@@ -79,7 +79,7 @@ function teamArmourShooters(state: BattleState, team: Team): ArmedMan[] {
     const counts = w.rounds ? { ...soldierRounds(state, s) } : null;
     const cw = team.crewWeapon;
     if (counts && cw && cw.gunnerId === s.id && cw.chambered && cw.chamberedType) counts[cw.chamberedType]++;
-    out.push({ weapon: w, counts, skill: gunnerSkill(s) });
+    out.push({ weapon: w, counts, skill: gunnerSkill(s), soldier: s });
   }
   return out;
 }
@@ -99,8 +99,10 @@ export function teamPenetrationChance(state: BattleState, team: Team, from: Vec2
   let best = 0;
   for (const m of teamArmourShooters(state, team)) {
     if (distM > m.weapon.rangeM) continue;
-    const choice = chooseAimPoint(m.weapon, m.counts, m.skill, source, target, year);
-    const armorMm = expectedArmorMm(target, def, source, choice.aimPoint, m.skill > SKILL_ACE);
+    const origin = ray?.origin ?? { x: source.x * TILE_M, y: source.y * TILE_M, z: gunTarget(state, source, undefined, m.soldier).heightM };
+    const choice = chooseAimPoint(m.weapon, m.counts, m.skill, source, target, year, origin, gunTarget(state, target.pos).heightM - 0.5);
+    const aimed = ray && shooter && shooterDef ? vehicleGunRay(state, shooter, shooterDef, vehicleAimTarget(state, target, def, choice.aimPoint, ray.origin)) : undefined;
+    const armorMm = expectedArmorMm(target, def, source, choice.aimPoint, m.skill > SKILL_ACE, aimed ? hullRayTo(aimed.origin, aimed.target) : hullRayTo(origin, vehicleAimTarget(state, target, def, choice.aimPoint, origin)), gunTarget(state, target.pos).heightM - 0.5);
     const rounds: RoundType[] = ['ap', 'apcr'];
     for (const r of rounds) {
       if (m.counts && m.counts[r] <= 0) continue;
