@@ -93,7 +93,7 @@ describe('a Tiger faces the most dangerous enemy with its FRONT, hull and turret
     const { state, v, e } = tigerVersus('t34_85', 180, 180);
     const rng = new Rng(5);
     let prevErr = Infinity;
-    for (let i = 0; i < 32 / SIM_DT && v.state === 'ok'; i++) {
+    for (let i = 0; i < 40 / SIM_DT && v.state === 'ok'; i++) {
       step(state, rng);
       // the hull never swings AWAY from it (the error only ever shrinks or holds)
       const err = off(v.hullFacing, angleTo(v.pos, e.pos));

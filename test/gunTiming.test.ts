@@ -1,3 +1,4 @@
+import { groundProbe } from '@/sim/hullGround';
 // Loading and laying phases of tank / SPG main guns and AT guns (req_gun_timing, main part).
 import { describe, it, expect } from 'vitest';
 import type { BattleState, Soldier, Vehicle } from '@/shared/types';
@@ -6,7 +7,7 @@ import { Rng } from '@/shared/rng';
 import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';
 import { stepCombat } from '@/sim/combat';
-import { stepVehicles } from '@/sim/vehicle';
+import { placeVehicleBody, stepVehicles } from '@/sim/vehicle';
 import {
   BRACKET_LOST_M, bracketMul, designateS, fineLayBaseS, fineLayS, followUpLayS, laySkillMul, loadSkillMul, timeToFirstShotS,
   followUpS, hullAssistMinS, missCorrectionS, recoilAimFloor, recoilSettleS,
@@ -230,7 +231,8 @@ describe('bracketing', () => {
       if (b.secondHit) { without++; expect(a.secondHit).toBe(true); }
       if (!a.secondHit && !lostChecked) {
         expect(a.sc.v.gunLay!.misses).toBe(2);
-        a.sc.e.v.pos = { x: a.sc.e.v.pos.x + (BRACKET_LOST_M + 2) / 2, y: a.sc.e.v.pos.y };
+        placeVehicleBody(a.sc.e.v, VEHICLE_DEFS[a.sc.e.v.defId],
+          { x: a.sc.e.v.pos.x + (BRACKET_LOST_M + 2) / 2, y: a.sc.e.v.pos.y }, a.sc.e.v.hullFacing, groundProbe(a.sc.state.map));
         run(a.sc, a.rng, SIM_DT);
         expect(a.sc.v.gunLay!.misses ?? 0).toBe(0);
         lostChecked = true;

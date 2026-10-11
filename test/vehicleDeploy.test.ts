@@ -6,6 +6,7 @@ import { aiDeploy } from '@/sim/ai';
 import { isPassable } from '@/sim/path';
 import { formationBaseHeading, spaceOutVehicles, vehicleDeploySpacing, VEHICLE_DEPLOY_GAP_M } from '@/sim/spawn';
 import { VEHICLE_DEFS } from '@/data/units';
+import { hullAngles } from '@/sim/hullMath';
 import { TILE_M } from '@/shared/types';
 import type { BattleConfig, BattleState, Side } from '@/shared/types';
 
@@ -29,6 +30,9 @@ function expectSpaced(state: BattleState, side: Side): void {
   for (const v of vs) {
     expect(isPassable(state.map, Math.floor(v.pos.x), Math.floor(v.pos.y), 'vehicle')).toBe(true);
     expect(v.pos.x >= zone.x && v.pos.x < zone.x + zone.w && v.pos.y >= zone.y && v.pos.y < zone.y + zone.h).toBe(true);
+    expect(v.body).toBeDefined();
+    expect(v.pos).toEqual({ x: v.body!.position.x / TILE_M, y: v.body!.position.y / TILE_M });
+    expect(hullAngles(v.body!.orientation).heading).toBeCloseTo(heading, 6);
     expect(v.hullFacing).toBeCloseTo(heading, 6);
     expect(v.turretFacing).toBeCloseTo(heading, 6);
     const team = state.teams.get(v.teamId)!;

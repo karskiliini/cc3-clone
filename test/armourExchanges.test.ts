@@ -82,10 +82,10 @@ describe('item 038 — hull-down: eye over the crest, gun line below it', () => 
     let firedAt = -1;
     let creptAt = -1;
     const startX = own.pos.x;
-    for (let i = 0; i < 120; i++) {
-      stepVehicles(state, rng, 0.25);
-      stepCombat(state, rng, 0.25);
-      state.time += 0.25;
+    for (let i = 0; i < 300; i++) {
+      stepVehicles(state, rng, 0.1);
+      stepCombat(state, rng, 0.1);
+      state.time += 0.1;
       if (creptAt < 0 && own.creepForGun) creptAt = state.time;
       const shot = state.events.find((e) => e.kind === 'shot' && (e as { weaponId?: string }).weaponId === 'f34_76' && (e as { side?: string }).side === 'soviet');
       if (shot && firedAt < 0) firedAt = state.time;
@@ -103,10 +103,10 @@ describe('item 038 — hull-down: eye over the crest, gun line below it', () => 
     const rng = new Rng(4);
     let fired = false;
     let creepSeen = false;
-    for (let i = 0; i < 200; i++) {
-      stepVehicles(state, rng, 0.25);
-      stepCombat(state, rng, 0.25);
-      state.time += 0.25;
+    for (let i = 0; i < 500; i++) {
+      stepVehicles(state, rng, 0.1);
+      stepCombat(state, rng, 0.1);
+      state.time += 0.1;
       if (own.creepForGun) creepSeen = true;
       for (const e of state.events) if ((e as { weaponId?: string }).weaponId === 'f34_76') fired = true;
       state.events.length = 0;

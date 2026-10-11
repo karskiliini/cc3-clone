@@ -115,7 +115,7 @@ describe('vehicle crew mind: cover-seeking (spec §10)', () => {
     onVehicleHit(state, v, WEAPONS.pak40, false, { ...pak.pos });
 
     const rng = new Rng(1);
-    for (let i = 0; i < 14 / 0.05; i++) { state.time += 0.05; stepVehicleMinds(state, rng, 0.05); }
+    for (let i = 0; i < 55 / 0.1; i++) { state.time += 0.1; stepVehicles(state, rng, 0.1); }
 
     expect(cmdr.mind.threatLevel).toBeGreaterThan(0);
     // Cover lies to the side: the hull must turn to drive there, instead of facing north while
@@ -180,7 +180,7 @@ describe('vehicle crew mind: cover-seeking (spec §10)', () => {
     const rng = new Rng(1);
     // historical hull rate: the Pz IV pivots at 18 deg/s, so bringing its front round to a threat
     // dead astern takes 10 s before it can back away (was under 5 s at the old 43 deg/s)
-    for (let i = 0; i < 30; i++) stepVehicleMinds(state, rng, 0.5);
+    for (let i = 0; i < 150; i++) { state.time += 0.1; stepVehicles(state, rng, 0.1); }
 
     expect(cmdr.mind.threatLevel).toBeGreaterThan(0);
     // PzKw IV F1 (front 50mm) vs KV-1's 76mm ZiS-5 (pen 70 @300m => ~49mm) is a losing exchange for
@@ -238,7 +238,7 @@ describe('vehicle crew alarm from AT near misses (spec §10c)', () => {
     expect(cmdr.mind.threatLevel).toBeGreaterThanOrEqual(0.8);
 
     const rng = new Rng(1);
-    for (let i = 0; i < 14 / 0.05; i++) { state.time += 0.05; stepVehicleMinds(state, rng, 0.05); }
+    for (let i = 0; i < 55 / 0.1; i++) { if (i % 100 === 0) onVehicleNearMiss(state, v, WEAPONS.pak40, pakPos); state.time += 0.1; stepVehicles(state, rng, 0.1); }
     expect(dist(v.pos, { x: 10.5, y: 10.5 })).toBeGreaterThan(1);
     expect(hasLOS(state.map, v.pos, pakPos)).toBe(false);
   });
@@ -269,7 +269,7 @@ describe('dead hulls stay put (round-4 units finding 2)', () => {
       state.teams.set(1, makeTeam(1, v.id, [cmdr.id]));
       const start = { ...v.pos };
       const rng = new Rng(1);
-      for (let i = 0; i < 20; i++) stepVehicles(state, rng, 0.25);
+      for (let i = 0; i < 50; i++) stepVehicles(state, rng, 0.1);
       expect(v.pos).toEqual(start);
       expect(v.speed).toBe(0);
       expect(v.path).toEqual([]);
@@ -287,7 +287,7 @@ describe('dead hulls stay put (round-4 units finding 2)', () => {
     applyOrder(state, team, { type: 'move', target: { x: 40.5, y: 10.5 }, issuedAt: 0 }, new Rng(1));
     expect(v.path).toEqual([]);
     const start = { ...v.pos };
-    for (let i = 0; i < 10; i++) stepVehicles(state, new Rng(2), 0.25);
+    for (let i = 0; i < 25; i++) stepVehicles(state, new Rng(2), 0.1);
     expect(v.pos).toEqual(start);
   });
 
@@ -299,7 +299,7 @@ describe('dead hulls stay put (round-4 units finding 2)', () => {
     state.soldiers.set(cmdr.id, cmdr);
     state.teams.set(1, makeTeam(1, v.id, [cmdr.id]));
     const rng = new Rng(1);
-    for (let i = 0; i < 20; i++) stepVehicles(state, rng, 0.25);
+    for (let i = 0; i < 50; i++) stepVehicles(state, rng, 0.1);
     expect(v.pos.x).not.toBeCloseTo(10.5, 1);
   });
 });

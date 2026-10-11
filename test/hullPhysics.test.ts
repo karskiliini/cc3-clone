@@ -270,3 +270,27 @@ it('never pulls a separating loaded suspension contact toward the ground', () =>
   r.step();
   expect(r.body.velocity.z).toBeCloseTo(49.019, 10);
 });
+
+it('checks complete normal-impulse translation, rejecting only XY before final support', () => {
+  const slope = (x: number) => ({ heightM: 0.2 * x, normal: { x: -0.2 / Math.sqrt(1.04), y: 0, z: 1 / Math.sqrt(1.04) } });
+  const r = rig('t34_76', slope);
+  r.body.orientation = { x: 1, y: 0, z: 0, w: 0 };
+  r.body.position.z = 4.2; r.body.velocity.z = -10;
+  const before = { ...r.body.position }; let calls = 0, normalMovedXY = false;
+  stepHullBody(r.body, r.def, stop, slope, 0.1, 1, (from, to) => {
+    calls++;
+    expect(to.x - from.x).toBeCloseTo(r.body.velocity.x * 0.01, 12);
+    expect(to.y - from.y).toBeCloseTo(r.body.velocity.y * 0.01, 12);
+    if (to.x !== from.x) normalMovedXY = true;
+    return false;
+  });
+  expect(calls).toBe(10); expect(normalMovedXY).toBe(true);
+  expect(r.body.position.x).toBe(before.x); expect(r.body.position.y).toBe(before.y);
+  expect(r.body.velocity.x).toBe(0); expect(r.body.velocity.y).toBe(0);
+  expect(r.body.orientation).not.toEqual({ x: 1, y: 0, z: 0, w: 0 });
+  const p = hullParams(r.def);
+  for (const x of [p.solidBox.min.x, p.solidBox.max.x]) for (const y of [p.solidBox.min.y, p.solidBox.max.y]) for (const z of [p.solidBox.min.z, p.solidBox.max.z]) {
+    const offset = rotate(r.body.orientation, { x, y, z });
+    expect(r.body.position.z + offset.z).toBeGreaterThanOrEqual(slope(r.body.position.x + offset.x).heightM - 1e-8);
+  }
+});

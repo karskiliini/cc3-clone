@@ -6,6 +6,7 @@ import { Rng } from '@/shared/rng';
 import { VEHICLE_DEFS } from '@/data/units';
 import { WEAPONS } from '@/data/weapons';
 import { stepVehicles } from '@/sim/vehicle';
+import { takeHullDrive } from '@/sim/hullDrive';
 import { stepMovement } from '@/sim/movement';
 import { stepMinds } from '@/sim/mind';
 import { stepCombat, applyHESplash } from '@/sim/combat';
@@ -61,12 +62,22 @@ describe('mounting a halftrack', () => {
     const start = { ...v.pos };
     const boardedAt: number[] = [];
     let last = 0, t = 0, maxClimbing = 0;
+    let settled: typeof start | undefined;
     while (aboard(men, v).length < 10 && t < 90) {
       step(state, rng, 0.1); t += 0.1;
       const n = aboard(men, v).length;
       if (n > last) { boardedAt.push(t); last = n; }
       maxClimbing = Math.max(maxClimbing, men.filter((m) => m.hatch).length);
-      if (n < 10) expect(dist(v.pos, start)).toBeLessThan(1e-6);
+      if (n < 10) {
+        expect(takeHullDrive(v).speedMs).toBe(0);
+        // Task 3's independent halftrack settling ceiling, unchanged here.
+        expect(dist(v.pos, start) * TILE_M).toBeLessThan(0.08);
+        if (t >= 3) {
+          settled ??= { ...v.pos };
+          expect(Math.hypot(v.body!.velocity.x, v.body!.velocity.y)).toBeLessThan(0.005);
+          expect(dist(v.pos, settled) * TILE_M).toBeLessThan(0.001);
+        }
+      }
     }
     expect(aboard(men, v).length).toBe(10);
     expect(maxClimbing).toBe(1); // one at a time

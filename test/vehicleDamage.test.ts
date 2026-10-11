@@ -1,7 +1,9 @@
 // Locational vehicle damage (req_ammo_damage C): zones, crew roles, equipment states.
 import { describe, it, expect } from 'vitest';
 import type { BattleState, Soldier, Vehicle } from '@/shared/types';
-import { SIM_DT } from '@/shared/types';
+import { SIM_DT, TILE_M } from '@/shared/types';
+import { hullParams } from '@/data/vehiclePhysics';
+import { takeHullDrive } from '@/sim/hullDrive';
 import { Rng } from '@/shared/rng';
 import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';
@@ -226,13 +228,23 @@ describe('crew casualties by role', () => {
     for (let i = 0; i < 20; i++) { state.time += SIM_DT; stepVehicles(state, rng, SIM_DT); }
     expect(v.speed).toBeGreaterThan(0);
     const y0 = v.pos.y;
+    const initialSpeed = Math.abs(v.speed), p = hullParams(VEHICLE_DEFS[v.defId]);
+    const loadedFraction = p.contacts.filter((c, i) => !c.horn && v.body!.suspensionTravel[i] > 0).length
+      / p.contacts.filter(c => !c.horn).length;
+    // Independent controller time constant plus Coulomb braking distance and one tick.
+    const stopBoundM = initialSpeed * 0.4 / loadedFraction
+      + initialSpeed ** 2 / (2 * 0.8 * 9.81 * loadedFraction) + initialSpeed * SIM_DT;
     seatOccupant(state, v, 'driver')!.health = 'dead';
     expect(SEAT_SWAP_S.driver).toBeGreaterThanOrEqual(10);
     expect(SEAT_SWAP_S.driver).toBeLessThanOrEqual(15);
     const stopAt = state.time;
-    while (state.time - stopAt < SEAT_SWAP_S.driver - 1) { state.time += SIM_DT; stepVehicles(state, rng, SIM_DT); }
+    while (state.time - stopAt < SEAT_SWAP_S.driver - 2) { state.time += SIM_DT; stepVehicles(state, rng, SIM_DT); }
     expect(v.speed).toBe(0);
-    expect(Math.abs(v.pos.y - y0)).toBeLessThan(0.2);
+    expect(Math.abs(v.pos.y - y0) * TILE_M).toBeLessThan(stopBoundM);
+    const stopped = { ...v.pos };
+    for (let i = 0; i < 10; i++) { state.time += SIM_DT; stepVehicles(state, rng, SIM_DT); }
+    expect(Math.hypot(v.body!.velocity.x, v.body!.velocity.y)).toBeLessThan(0.005);
+    expect(Math.hypot(v.pos.x - stopped.x, v.pos.y - stopped.y) * TILE_M).toBeLessThan(0.005);
     while (state.time - stopAt < SEAT_SWAP_S.driver + 3) { state.time += SIM_DT; stepVehicles(state, rng, SIM_DT); }
     expect(v.speed).toBeGreaterThan(0);
     expect(seatOccupant(state, v, 'radioOp')).toBeNull(); // the man beside him took the seat
@@ -289,7 +301,9 @@ describe('equipment states', () => {
       if (damaged) ensureDamage(v).engine = 'damaged';
       v.path = [{ x: 100, y: 10 }];
       const rng = new Rng(1);
-      for (let i = 0; i < 30; i++) { state.time += SIM_DT; stepVehicles(state, rng, SIM_DT); }
+      // At 3 s acceleration is still converging; 6 s retains the exact requested half-speed ratio.
+      for (let i = 0; i < 60; i++) { state.time += SIM_DT; stepVehicles(state, rng, SIM_DT); }
+      expect(takeHullDrive(v).speedMs).toBe(VEHICLE_DEFS.t34_76.speedOffroadMs * (damaged ? 0.5 : 1));
       return v.speed;
     };
     expect(speedOf(true)).toBeCloseTo(speedOf(false) * 0.5, 5);

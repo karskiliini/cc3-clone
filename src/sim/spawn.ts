@@ -9,6 +9,8 @@ import { rollExperience } from '@/data/experience';
 import { baseMotivation, createMind, rollTrait } from './mind';
 import { isPassable } from './path';
 import * as dm from '@/shared/dmath';
+import { placeVehicleBody } from './vehicle';
+import { groundProbe } from './hullGround';
 
 const RELOAD_HEAVY = new Set(['mortar', 'atgun', 'atrocket']);
 
@@ -277,14 +279,17 @@ export function findVehicleDeploySpot(state: BattleState, side: Side, defId: str
 }
 
 /** Move one deployed vehicle team (hull, team anchor and mounted crew) to `pos`. */
-function placeVehicleTeam(state: BattleState, veh: Vehicle, pos: Vec2): void {
-  veh.pos = { x: pos.x, y: pos.y };
+export function placeVehicleTeam(state: BattleState, veh: Vehicle, pos: Vec2, heading = veh.hullFacing): void {
+  const def = VEHICLE_DEFS[veh.defId];
+  if (def) placeVehicleBody(veh, def, pos, heading, groundProbe(state.map));
+  veh.turretFacing = heading;
   const team = state.teams.get(veh.teamId);
   if (!team) return;
   team.pos = { x: pos.x, y: pos.y };
-  for (const sid of team.soldierIds) {
-    const so = state.soldiers.get(sid);
-    if (so && so.vehicleId === veh.id) so.pos = { x: pos.x, y: pos.y };
+  for (const so of state.soldiers.values()) if (so.vehicleId === veh.id) {
+    so.pos = { ...veh.pos };
+    const passengerTeam = state.teams.get(so.teamId);
+    if (passengerTeam) passengerTeam.pos = { ...veh.pos };
   }
 }
 
@@ -300,9 +305,7 @@ export function spaceOutVehicles(state: BattleState, side: Side): void {
   for (const v of state.vehicles.values()) {
     if (v.side !== side) continue;
     const spot = findVehicleDeploySpot(state, side, v.defId, v.pos, settled);
-    if (spot.x !== v.pos.x || spot.y !== v.pos.y) placeVehicleTeam(state, v, spot);
-    v.hullFacing = heading;
-    v.turretFacing = heading;
+    placeVehicleTeam(state, v, spot, heading);
     settled.push(v);
   }
 }
@@ -360,6 +363,7 @@ export function spawnTeam(state: BattleState, def: TeamDef, side: Side, pos: Vec
       burnTimer: 0,
       hits: 0,
     };
+    if (vdef) placeVehicleBody(vehicle, vdef, pos, facing, groundProbe(state.map));
     state.vehicles.set(vehicle.id, vehicle);
     team.vehicleId = vehicle.id;
   }

@@ -1,6 +1,6 @@
 import { wireAt, consumeWire, WIRE_INTACT, VEHICLE_BREAK_CHANCE } from './wire';
-import { TILE_M, otherSide } from '@/shared/types';
-import type { BattleState, HullDrive, Soldier, Team, Vec2, Vehicle, VehicleDef, WeaponDef } from '@/shared/types';
+import { SIM_DT, TILE_M, otherSide } from '@/shared/types';
+import type { BattleState, HullBody, HullDrive, HullGroundProbe, Soldier, Team, Vec2, Vehicle, VehicleDef, WeaponDef } from '@/shared/types';
 import { Rng } from '@/shared/rng';
 import { angleTo, clamp, dist, turnTowards, vadd, vnorm, vscale, vsub, wrapAngle } from '@/shared/math';
 import { idx, inBounds, setTile, tileAt } from './map';
@@ -31,29 +31,39 @@ import { stepTransport, transportHolds } from './transport';
 import { isDazed } from './daze';
 import * as dm from '@/shared/dmath';
 import { beginHullDrive, requestHullDrive, takeHullDrive } from './hullDrive';
+import { createHullBody, stepHullBody, syncHullGroundVersion, wakeHull } from './hullPhysics';
+import { groundProbe, groundVersion } from './hullGround';
+import { hullAngles, rotate } from './hullMath';
+import { hullParams } from '@/data/vehiclePhysics';
 
-/** One request producer for every driving branch. Yaw patches are incremental rates so a
- * driver's correction and damaged-track pull both survive this tick. Task 5B replaces
- * the legacy pose backend with one body step after all decisions have been produced. */
-function driveVehicle(v: Vehicle, patch: Partial<HullDrive>, dt: number, legacyFacing?: number): void {
+/** Driver previews and consequence metadata live for this tick only. They never own pose. */
+interface VehicleDriverTick { heading: number; movement?: AcceptedVehicleMovement }
+const driverTicks = new WeakMap<Vehicle, VehicleDriverTick>();
+function driverHeading(v: Vehicle): number { return driverTicks.get(v)?.heading ?? v.hullFacing; }
+
+function driveVehicle(v: Vehicle, patch: Partial<HullDrive>, dt: number, facing?: number): void {
   const current = takeHullDrive(v);
   const speedMs = patch.speedMs ?? current.speedMs;
   const yawRateRadS = current.yawRateRadS + (patch.yawRateRadS ?? 0);
   requestHullDrive(v, { speedMs, yawRateRadS, brake: speedMs === 0 && yawRateRadS === 0 });
-  applyLegacyDrive(v, patch, dt, legacyFacing);
+  if (patch.yawRateRadS != null) {
+    const tick = driverTicks.get(v);
+    if (tick) tick.heading = facing ?? wrapAngle(tick.heading + patch.yawRateRadS * dt);
+  }
 }
 
-/** Private backend seam: preserve the legacy pose order until body integration in Task 5B.
- * Keep the already-calculated heading to avoid a divide/multiply rounding change. */
-function applyLegacyDrive(v: Vehicle, patch: Partial<HullDrive>, dt: number, legacyFacing?: number): void {
-  if (patch.speedMs != null) v.speed = patch.speedMs;
-  if (patch.yawRateRadS != null) v.hullFacing = legacyFacing ?? wrapAngle(v.hullFacing + patch.yawRateRadS * dt);
+/** Public gameplay coordinates are tiles; the body stores CG metres. */
+export function syncVehicleFromBody(v: Vehicle): void {
+  if (!v.body) return;
+  v.pos = { x: v.body.position.x / TILE_M, y: v.body.position.y / TILE_M };
+  v.hullFacing = hullAngles(v.body.orientation).heading;
+  v.speed = v.body.velocity.x * dm.sin(v.hullFacing) - v.body.velocity.y * dm.cos(v.hullFacing);
 }
 
-/** Accepted XY placement in the temporary backend; Task 5B replaces this with swept body
- * acceptance and derives Vehicle.pos from the resulting body, without snapshot/run/restore. */
-function applyLegacyTranslation(v: Vehicle, next: Vec2): void {
-  v.pos = next;
+/** Explicit spawn/deploy relocation resets the body and public pose atomically. */
+export function placeVehicleBody(v: Vehicle, def: VehicleDef, pos: Vec2, heading: number, probe: HullGroundProbe): void {
+  v.body = createHullBody(def, pos, heading, probe);
+  syncVehicleFromBody(v);
 }
 
 interface AcceptedVehicleMovement {
@@ -64,21 +74,176 @@ interface AcceptedVehicleMovement {
   checkMines?: boolean;
 }
 
-/** Gameplay effects run once, against the accepted legacy position. The ordering and origin
- * tile are deliberate: wheels run over men before crushing, tracks crush before overrun/mines.
- * Task 5B must call this after accepted body movement, never at a speculative candidate. */
+interface AcceptedHullPoint { pos: Vec2; heading: number }
+interface AcceptedHullPose { position: HullBody['position']; orientation: HullBody['orientation'] }
+
+/** Exact XY projection of the accepted solid box, including pitched/rolled roof corners. */
+function hullFootprint(def: VehicleDef, pose: AcceptedHullPose): Vec2[] {
+  const box = hullParams(def).solidBox, points: Vec2[] = [];
+  for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) {
+    const r = rotate(pose.orientation, { x, y, z });
+    points.push({ x: (pose.position.x + r.x) / TILE_M, y: (pose.position.y + r.y) / TILE_M });
+  }
+  points.sort((a, b) => a.x - b.x || a.y - b.y);
+  const turn = (a: Vec2, b: Vec2, c: Vec2) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  const half = (ordered: Vec2[]): Vec2[] => {
+    const out: Vec2[] = [];
+    for (const point of ordered) {
+      while (out.length >= 2 && turn(out[out.length - 2], out[out.length - 1], point) <= 0) out.pop();
+      out.push(point);
+    }
+    return out.slice(0, -1);
+  };
+  return [...half(points), ...half([...points].reverse())];
+}
+
+/** SAT with tile axes supplied by the bounding range and each polygon edge normal. */
+function footprintTouchesTile(polygon: Vec2[], x: number, y: number): boolean {
+  for (let i = 0; i < polygon.length; i++) {
+    const a = polygon[i], b = polygon[(i + 1) % polygon.length];
+    const nx = a.y - b.y, ny = b.x - a.x;
+    let lo = Infinity, hi = -Infinity;
+    for (const point of polygon) {
+      const projection = point.x * nx + point.y * ny;
+      lo = Math.min(lo, projection); hi = Math.max(hi, projection);
+    }
+    const origin = x * nx + y * ny;
+    const tileLo = origin + Math.min(0, nx) + Math.min(0, ny);
+    const tileHi = origin + Math.max(0, nx) + Math.max(0, ny);
+    if (hi < tileLo || lo > tileHi) return false;
+  }
+  return true;
+}
+
+function footprintTiles(state: BattleState, def: VehicleDef, poses: AcceptedHullPose[]): Set<number> {
+  const tiles = new Set<number>();
+  for (const pose of poses) {
+    const polygon = hullFootprint(def, pose);
+    const minX = Math.max(0, Math.floor(Math.min(...polygon.map(p => p.x))));
+    const maxX = Math.min(state.map.width - 1, Math.floor(Math.max(...polygon.map(p => p.x))));
+    const minY = Math.max(0, Math.floor(Math.min(...polygon.map(p => p.y))));
+    const maxY = Math.min(state.map.height - 1, Math.floor(Math.max(...polygon.map(p => p.y))));
+    for (let y = minY; y <= maxY; y++) for (let x = minX; x <= maxX; x++) {
+      if (footprintTouchesTile(polygon, x, y)) tiles.add(idx(state.map, x, y));
+    }
+  }
+  return tiles;
+}
+
+/** Effects use the accepted polyline in each branch's original relative order. */
 function processAcceptedVehicleMovement(
   state: BattleState, rng: Rng, v: Vehicle, def: VehicleDef, movement: AcceptedVehicleMovement | undefined,
+  sweep: AcceptedHullPoint[], poses: AcceptedHullPose[],
 ): void {
   if (!movement) return;
-  if (movement.overrunFirst && movement.overrunDir != null) stepOverrun(state, rng, v, movement.overrunDir);
-  if (movement.crushAt) {
-    const { x, y } = movement.crushAt;
-    if (movement.crushTerrain) crushTile(state.map, x, y);
+  const moved = sweep.some(p => p.pos.x !== sweep[0].pos.x || p.pos.y !== sweep[0].pos.y);
+  const overrun = () => {
+    if (moved && movement.overrunDir != null) stepOverrun(state, rng, v, movement.overrunDir, sweep);
+  };
+  if (movement.overrunFirst) overrun();
+  if (movement.crushAt) for (const key of footprintTiles(state, def, poses)) {
+    const x = key % state.map.width, y = Math.floor(key / state.map.width);
+    if (TERRAIN_PROPS[tileAt(state.map, x, y)].crushable) crushTile(state.map, x, y);
     treeCrushByVehicle(state.map, x, y, def.lengthM);
   }
-  if (!movement.overrunFirst && movement.overrunDir != null) stepOverrun(state, rng, v, movement.overrunDir);
-  if (movement.checkMines) vehicleMineCheck(state, v, rng);
+  // Mines retain the centre sweep, independently of hull footprint or accepted rotation.
+  const tiles = new Set<number>();
+  for (const { pos } of sweep) tiles.add(idx(state.map, Math.floor(pos.x), Math.floor(pos.y)));
+  if (!movement.overrunFirst) overrun();
+  if (moved && movement.checkMines) for (const key of tiles) {
+    vehicleMineCheck(state, v, rng, { x: key % state.map.width, y: Math.floor(key / state.map.width) });
+  }
+}
+
+function syncVehicleOccupants(state: BattleState, v: Vehicle): void {
+  const teams = new Set<number>([v.teamId]);
+  for (const soldier of state.soldiers.values()) if (soldier.vehicleId === v.id) {
+    soldier.pos = { ...v.pos }; teams.add(soldier.teamId);
+  }
+  for (const id of teams) {
+    const team = state.teams.get(id);
+    if (team) team.pos = { ...v.pos };
+  }
+}
+
+/** Complete each hull sequentially: later hulls see earlier accepted final positions. */
+function completeVehicleMovement(state: BattleState, rng: Rng, dt: number, v: Vehicle, def: VehicleDef,
+  movement: AcceptedVehicleMovement | undefined): void {
+  const body = v.body!, heading = v.hullFacing, relativeTurret = wrapAngle(v.turretFacing - heading);
+  const sweep: AcceptedHullPoint[] = [{ pos: { ...v.pos }, heading }];
+  const poses: AcceptedHullPose[] = [];
+  const recordPose = () => poses.push({ position: { ...body.position }, orientation: { ...body.orientation } });
+  const wasCoasting = dm.hypot(body.velocity.x, body.velocity.y) > 0.005;
+  let blocker: Vehicle | null = null;
+  let terrainBlocked = false;
+  const props = TERRAIN_PROPS[tileAt(state.map, Math.floor(v.pos.x), Math.floor(v.pos.y))];
+  syncHullGroundVersion(body, groundVersion(state.map));
+  stepHullBody(body, def, takeHullDrive(v), groundProbe(state.map), dt, props.speedMul, (from, to) => {
+    // At entry this is the complete accepted pose from the preceding substep.
+    recordPose();
+    const length = dm.hypot(to.x - from.x, to.y - from.y);
+    if (length === 0) return true;
+    const count = Math.max(1, Math.ceil(length / 0.25));
+    let previous = { x: from.x / TILE_M, y: from.y / TILE_M };
+    const points: AcceptedHullPoint[] = [];
+    for (let i = 1; i <= count; i++) {
+      const pos = { x: (from.x + (to.x - from.x) * i / count) / TILE_M,
+        y: (from.y + (to.y - from.y) * i / count) / TILE_M };
+      const x = Math.floor(pos.x), y = Math.floor(pos.y);
+      if (!inBounds(state.map, x, y) || !isPassable(state.map, x, y, 'vehicle')) {
+        terrainBlocked = true; return false;
+      }
+      const actualHeading = hullAngles(body.orientation).heading;
+      const hit = vehicleBlockingAt(state, v, pos, previous, actualHeading);
+      if (hit) { blocker ??= hit; return false; }
+      const forwardTravel = (to.x - from.x) * dm.sin(actualHeading) - (to.y - from.y) * dm.cos(actualHeading);
+      points.push({ pos, heading: forwardTravel < 0 ? wrapAngle(actualHeading + Math.PI) : actualHeading });
+      previous = pos;
+    }
+    sweep.push(...points);
+    return true;
+  });
+  recordPose();
+  syncVehicleFromBody(v);
+  // Hull carry precedes actual traversal; frozen guns retain their pre-step relative angle.
+  v.turretFacing = wrapAngle(v.hullFacing + relativeTurret);
+  traverseVehicleGun(state, v, def, dt);
+  sweep.push({ pos: { ...v.pos }, heading: v.hullFacing });
+  if (blocker) {
+    onHullBlocked(state, v, blocker);
+    if (v.path.length > 0) armGiveWay(state, v, blocker);
+  } else if (!terrainBlocked) blockedSince.delete(v);
+  if (terrainBlocked && v.creepForGun) v.creepForGun = false;
+  // Live hulls coasting through a halt/seat loss or pivoting for the gun keep ordinary effects.
+  // Dead wrecks receive physics but acquire no new movement RNG/effects profile.
+  const live = v.state === 'ok' || v.state === 'immobilized';
+  const coasting = wasCoasting || dm.hypot(body.velocity.x, body.velocity.y) > 0.005;
+  const profile = movement ?? (live && (coasting || takeHullDrive(v).yawRateRadS !== 0) ? {
+    crushAt: sweep[0].pos, overrunDir: v.speed < 0 ? wrapAngle(v.hullFacing + Math.PI) : v.hullFacing,
+    overrunFirst: def.turnRadiusM != null, checkMines: def.turnRadiusM == null,
+  } : undefined);
+  processAcceptedVehicleMovement(state, rng, v, def, live ? profile : undefined, sweep, poses);
+  syncVehicleOccupants(state, v);
+  driverTicks.delete(v);
+}
+
+function targetPosition(state: BattleState, v: Vehicle): Vec2 | null {
+  return v.targetSoldierId != null ? state.soldiers.get(v.targetSoldierId)?.pos ?? null
+    : v.targetVehicleId != null ? state.vehicles.get(v.targetVehicleId)?.pos ?? null : v.targetPoint;
+}
+
+function traverseVehicleGun(state: BattleState, v: Vehicle, def: VehicleDef, dt: number): void {
+  if (def.hasTurret && turretFrozen(v)) return;
+  if (!v.gunLay) {
+    const target = targetPosition(state, v);
+    const want = def.hasTurret && target ? angleTo(v.pos, target) : v.hullFacing;
+    v.turretFacing = turnTowards(v.turretFacing, want,
+      turretTraverseRad(def, v, crewEffects(state, v).gunner?.experience) * dt);
+  }
+  if (!def.hasTurret) {
+    const arc = gunArcRad(def);
+    v.turretFacing = wrapAngle(v.hullFacing + clamp(wrapAngle(v.turretFacing - v.hullFacing), -arc, arc));
+  }
 }
 
 const HEADING_ALIGN_RAD = 0.35;
@@ -98,7 +263,6 @@ const K_TURN_DONE_RAD = (35 * Math.PI) / 180;
 const K_TURN_SPEED_MUL = 0.35;
 /** Laying the gun with the hull when the turret is stuck: this share of the hull's turn rate. */
 export const FROZEN_TURRET_HULL_LAY = 0.5;
-const frozenRel = new WeakMap<Vehicle, number>();
 const BURN_TO_KO_S = 30;
 /** Engine-deck fire (vehicleDamage.ts): after this many seconds it may escalate to the full
  * 'burning' state, or die out — the crew fighting the fire. */
@@ -484,7 +648,9 @@ function stepOneVehicleMind(state: BattleState, rng: Rng, dt: number, v: Vehicle
     if (!track.target) track.searchAfter = state.time + 2;
   }
   if (track.target) {
-    processAcceptedVehicleMovement(state, rng, v, def, driveToCover(state, rng, dt, v, def, top.pos, track));
+    const movement = driveToCover(state, rng, dt, v, def, top.pos, track);
+    const tick = driverTicks.get(v);
+    if (tick) tick.movement = movement;
   }
 }
 
@@ -504,9 +670,13 @@ export function stepTrackDriveProbe(state: BattleState, v: Vehicle, speedHintMs:
 /** Test probe: run one reversing step with a fixed dt (item 022). */
 export function driveReversingProbe(state: BattleState, v: Vehicle, speedMs: number, threatPos: Vec2, dest: Vec2, dt: number): void {
   beginHullDrive(v);
-  const movement = driveReversing(state, dt, v, speedMs, threatPos, dest);
   const def = VEHICLE_DEFS[v.defId];
-  if (def) processAcceptedVehicleMovement(state, NO_RNG, v, def, movement);
+  if (!def) return;
+  v.body ??= createHullBody(def, v.pos, v.hullFacing, groundProbe(state.map));
+  syncVehicleFromBody(v);
+  driverTicks.set(v, { heading: v.hullFacing });
+  const movement = driveReversing(state, dt, v, speedMs, threatPos, dest);
+  completeVehicleMovement(state, NO_RNG, dt, v, def, movement);
 }
 
 function driveReversing(state: BattleState, dt: number, v: Vehicle, speedMs: number, threatPos: Vec2, dest: Vec2): AcceptedVehicleMovement | undefined {
@@ -521,29 +691,13 @@ function driveReversing(state: BattleState, dt: number, v: Vehicle, speedMs: num
   // Reversing means the vehicle's rear (hullFacing + PI) leads toward dest; only reverse while the
   // hull stays within 30 deg of the threat, i.e. never turn away from it to chase a better reverse
   // heading — the vehicle simply backs up along whatever line the hull-toward-threat constraint allows.
-  const hullFacesThreat = Math.abs(wrapAngle(v.hullFacing - desiredHull)) <= DEG30;
+  const hullFacesThreat = Math.abs(wrapAngle(driverHeading(v) - desiredHull)) <= DEG30;
   if (!hullFacesThreat && !wheeled) { driveVehicle(v, { speedMs: 0 }, dt); return; }
 
   const revSpeed = speedMs * 0.6 * damageSpeedMul(v);
   driveVehicle(v, { speedMs: -revSpeed }, dt);
-  const distTiles = (revSpeed * dt) / TILE_M;
-  // item 022: a tank moves only along its tracks — reversing drives BACKWARD along the hull's
-  // rear axis, never a straight line to the destination. The driver shapes the course by
-  // steering the hull (turnHull above); the tracks follow where the hull points.
-  const rear = { x: -dm.sin(v.hullFacing), y: dm.cos(v.hullFacing) };
-  const next = vadd(v.pos, vscale(rear, distTiles));
-  // A fleeing vehicle never leaves the battlefield: backing past the map edge stops the hull at
-  // the border (it stands there, still facing the threat, until the 10 s cooldown cycle forces a
-  // re-engage). Without this a panic reverse could drive the tank clean off the visible map.
-  if (!inBounds(state.map, Math.floor(next.x), Math.floor(next.y))) {
-    driveVehicle(v, { speedMs: 0 }, dt);
-    return;
-  }
-  const remaining = dist(v.pos, dest);
-  if (remaining <= distTiles && !hullBlocked(state, v, dest)) { applyLegacyTranslation(v, { ...dest }); driveVehicle(v, { speedMs: 0 }, dt); }
-  else if (hullBlocked(state, v, next)) driveVehicle(v, { speedMs: 0 }, dt); // reversing into another hull blocks the same
-  else applyLegacyTranslation(v, next);
-  return { overrunDir: wrapAngle(v.hullFacing + Math.PI) };
+  if (dist(v.pos, dest) < 0.25) driveVehicle(v, { speedMs: 0 }, dt);
+  return { overrunDir: wrapAngle(driverHeading(v) + Math.PI) };
 }
 
 
@@ -585,27 +739,24 @@ function driveToCover(state: BattleState, rng: Rng, dt: number, v: Vehicle, def:
     * (track.backing ? 0.6 : 1);
   const wheeled = def.turnRadiusM != null;
   turnHull(state, v, def, desiredHull, dt, wheeled ? speed : undefined);
-  const error = Math.abs(wrapAngle(desiredHull - v.hullFacing));
-  if (!wheeled && error > PIVOT_RAD) { driveVehicle(v, { speedMs: 0 }, dt); return; }
+  const error = Math.abs(wrapAngle(desiredHull - driverHeading(v)));
+  if (!wheeled && error > PIVOT_RAD) { driveVehicle(v, { speedMs: 0 }, dt); return { crushAt: { x: tx, y: ty }, crushTerrain: props.crushable }; }
   speed *= error > SHARP_TURN_RAD ? SHARP_TURN_SPEED_MUL : error > HEADING_ALIGN_RAD ? 0.7 : 1;
   if (!wheeled && error > TRACK_STRAIGHT_RAD) {
     speed = Math.min(speed, Math.max(0.15, hullTurnNow(state, v, def).rate * dist(v.pos, wp) * TILE_M * 0.6));
   }
   driveVehicle(v, { yawRateRadS: trackPullRad(v) }, dt);
-  const direction = track.backing ? wrapAngle(v.hullFacing + Math.PI) : v.hullFacing;
+  const direction = track.backing ? wrapAngle(driverHeading(v) + Math.PI) : driverHeading(v);
   const advance = Math.min(dist(v.pos, wp), speed * dt / TILE_M);
-  const next = { x: v.pos.x + dm.sin(direction) * advance, y: v.pos.y - dm.cos(direction) * advance };
-  if (!isPassable(state.map, Math.floor(next.x), Math.floor(next.y), 'vehicle')) { driveVehicle(v, { speedMs: 0 }, dt); return; }
-  // item 038: the cover drive's old terrain-only check let two hulls drive into overlap — block
-  // against live hulls too (wrecks are solid but the collision step's separation handles them).
-  if (hullBlocker(state, v, next) != null) { driveVehicle(v, { speedMs: 0 }, dt); return; }
+  const lookahead = { x: v.pos.x + dm.sin(direction) * advance, y: v.pos.y - dm.cos(direction) * advance };
+  // Preserve the driver's corner/traffic speed gate; the solver still decides actual acceptance.
+  if (!isPassable(state.map, Math.floor(lookahead.x), Math.floor(lookahead.y), 'vehicle')
+    || vehicleBlockingAt(state, v, lookahead)) { driveVehicle(v, { speedMs: 0 }, dt); return; }
   driveVehicle(v, { speedMs: track.backing ? -speed : speed }, dt);
-  if (v.holdUntil != null && state.time < v.holdUntil) {
-    stepOverrun(state, rng, v, direction);
+  if (v.holdUntil != null) {
+    stepHeldFriendly(state, v);
     if (v.holdUntil != null && state.time < v.holdUntil) { driveVehicle(v, { speedMs: 0 }, dt); return; }
   }
-  if (vehicleBlockingAt(state, v, next)) { driveVehicle(v, { speedMs: 0 }, dt); return; } // another hull: it stands
-  applyLegacyTranslation(v, next);
   return { crushAt: { x: tx, y: ty }, crushTerrain: props.crushable, overrunDir: direction };
 }
 
@@ -625,10 +776,10 @@ function hullRadiusTiles(v: Vehicle): number {
 /** Another vehicle (running or a wreck) whose hull `v` would run into standing at `p`, moving on
  * from where it is now: one it already overlaps (they started too close) only blocks it from
  * closing in further, so the two can always drive apart. */
-export function vehicleBlockingAt(state: BattleState, v: Vehicle, p: Vec2): Vehicle | null {
+export function vehicleBlockingAt(state: BattleState, v: Vehicle, p: Vec2, from: Vec2 = v.pos, heading = v.hullFacing): Vehicle | null {
   for (const o of state.vehicles.values()) {
     if (o === v) continue;
-    if (hullsOverlap(v, p, o) && dist(o.pos, p) < dist(o.pos, v.pos) - 1e-6) return o;
+    if (hullsOverlap(v, p, o, heading) && dist(o.pos, p) < dist(o.pos, from) - 1e-6) return o;
   }
   return null;
 }
@@ -785,20 +936,6 @@ function backsOnMove(state: BattleState, v: Vehicle): boolean {
   return back;
 }
 
-/** Moves `v` to `next` unless another hull is in the way (then see onHullBlocked). */
-function driveTo(state: BattleState, v: Vehicle, next: Vec2): boolean {
-  const blocker = vehicleBlockingAt(state, v, next);
-  if (blocker) {
-    onHullBlocked(state, v, blocker); // parked on the goal: arrived; else wait, then route round
-    if (v.path.length > 0) armGiveWay(state, v, blocker); // still stuck on a parked friend: back up
-    return false;
-  }
-  blockedSince.delete(v);
-  applyLegacyTranslation(v, next);
-  return true;
-}
-
-
 /** Hull turn rate right now, rad/s, and the only direction it can turn (0 = either): the vehicle's
  * historical turn-in-place figure (also the cap while driving); x0.7 on soft ground; ONE damaged
  * track: only toward that side, at half rate; a destroyed track or dead engine: none. A
@@ -818,16 +955,13 @@ export function hullTurnNow(state: BattleState, v: Vehicle, def: VehicleDef, spe
 export function turnHull(state: BattleState, v: Vehicle, def: VehicleDef, desired: number, dt: number, speedMs?: number): void {
   const { rate, onlyDir } = hullTurnNow(state, v, def, speedMs);
   if (rate <= 0) return;
-  let diff = wrapAngle(desired - v.hullFacing);
+  let diff = wrapAngle(desired - driverHeading(v));
   if (onlyDir !== 0 && Math.abs(diff) > 0.02 && Math.sign(diff) !== onlyDir) diff -= Math.sign(diff) * Math.PI * 2;
   const step = Math.max(-rate * dt, Math.min(rate * dt, diff));
-  driveVehicle(v, { yawRateRadS: dt > 0 ? step / dt : 0 }, dt, wrapAngle(v.hullFacing + step));
+  driveVehicle(v, { yawRateRadS: dt > 0 ? step / dt : 0 }, dt, wrapAngle(driverHeading(v) + step));
 }
 
 
-/** The hull heading each vehicle had when it was last stepped: a turret is carried round by its hull. */
-// Task 5B replaces this legacy tick-to-tick carry with the accepted body heading delta.
-const lastHull = new WeakMap<Vehicle, number>();
 const kTurning = new WeakSet<Vehicle>();
 const DEG = Math.PI / 180;
 
@@ -851,7 +985,16 @@ export function stepVehicleMinds(state: BattleState, rng: Rng, dt: number): void
  * terrain, and progresses burning vehicles towards knocked-out. Also steps crew psychology and
  * automatic reversing-to-cover (spec §10). */
 export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
-  for (const v of state.vehicles.values()) beginHullDrive(v);
+  if (dt !== SIM_DT) throw new Error('Vehicle physics dt must equal SIM_DT');
+  for (const v of state.vehicles.values()) {
+    const def = VEHICLE_DEFS[v.defId];
+    if (def) {
+      v.body ??= createHullBody(def, v.pos, v.hullFacing, groundProbe(state.map));
+      syncVehicleFromBody(v);
+    }
+    beginHullDrive(v);
+    driverTicks.set(v, { heading: v.hullFacing });
+  }
   stepVehicleMinds(state, rng, dt);
   stepTransport(state, dt); // passengers boarding and leaving
   stepVehicleCrews(state, rng, dt); // hatch queues, climbs, crews going back (spec 2026-09-17 §10)
@@ -883,71 +1026,41 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
         if (team) addMessage(state, `${team.name}\nEngine fire out.`, 'good', team.side);
       }
     }
-    // A burning, knocked-out or abandoned vehicle is dead weight: it never drives, and any path
-    // left over from an order or a reverse-to-cover is dropped. Immobilized is NOT in this list.
-    if (v.state === 'knockedOut' || v.state === 'burning' || v.state === 'abandoned') { v.speed = 0; v.path = []; continue; }
-
     const def = VEHICLE_DEFS[v.defId];
-    if (!def) continue;
-
-    processAcceptedVehicleMovement(state, rng, v, def, stepVehicleDriver(state, rng, dt, v, def));
+    if (!def) { driverTicks.delete(v); continue; }
+    const dead = v.state === 'knockedOut' || v.state === 'burning' || v.state === 'abandoned';
+    let movement = driverTicks.get(v)?.movement;
+    if (dead) v.path = [];
+    else movement = stepVehicleDriver(state, rng, dt, v, def) ?? movement;
+    // Minds run before crew/damage. A request from a now-disabled driver cannot survive.
+    if (dead || isImmobile(v) || !crewEffects(state, v).canDrive) beginHullDrive(v);
+    completeVehicleMovement(state, rng, dt, v, def, movement);
   }
 }
 
-/** Produce this tick's driver decisions and retain the legacy movement backend. Every branch
- * returns here so accepted-motion consequences have one caller, including cover's caller above. */
+/** Produce driver requests. Every early return rejoins the one physical completion path. */
 function stepVehicleDriver(state: BattleState, rng: Rng, dt: number, v: Vehicle, def: VehicleDef): AcceptedVehicleMovement | undefined {
   const map = state.map;
-  let targetPos: Vec2 | null = null;
-  if (v.targetSoldierId != null) {
-    const t = state.soldiers.get(v.targetSoldierId);
-    if (t) targetPos = t.pos;
-  } else if (v.targetVehicleId != null) {
-    const t = state.vehicles.get(v.targetVehicleId);
-    if (t) targetPos = t.pos;
-  } else if (v.targetPoint) {
-    targetPos = v.targetPoint;
-  }
+  const targetPos = targetPosition(state, v);
 
   const track = reverseTracks.get(state)?.get(v.id);
   const isReversing = !!track?.target;
   stepCrewSeats(state, v); // dead men's seats are taken over (driver first)
 
-  // the turret (and a casemate's gun) rides on the hull: whatever the hull turned since the last
-  // step carried it round too; its own traverse then works against that at its limited rate
-  const carried = wrapAngle(v.hullFacing - (lastHull.get(v) ?? v.hullFacing));
-  lastHull.set(v, v.hullFacing);
-  if (carried !== 0 && !turretFrozen(v)) v.turretFacing = wrapAngle(v.turretFacing + carried);
   const gunnerExp = crewEffects(state, v).gunner?.experience;
-  // where the gun is wanted: the gunner's lay (sim/combat.ts), else the ordered fire point
   const layPos: Vec2 | null = v.gunLay && v.gunLay.designateLeftS <= 0 ? v.gunLay.aim : null;
-
   const frozen = def.hasTurret && turretFrozen(v);
-  if (frozen) {
-    // the turret no longer traverses: it goes where the hull goes, and a standing tank lays its
-    // gun by turning the hull (much slower)
+  // Preview the legacy idle traverse only for driver's hull-assist comparisons.
+  const turretPreview = !frozen && !v.gunLay
+    ? turnTowards(v.turretFacing, def.hasTurret && targetPos ? angleTo(v.pos, targetPos) : v.hullFacing,
+      turretTraverseRad(def, v, gunnerExp) * dt) : v.turretFacing;
+  if (frozen && targetPos && v.path.length === 0 && !isReversing && !isImmobile(v) && crewEffects(state, v).canDrive) {
     const rel = wrapAngle(v.turretFacing - v.hullFacing);
-    if (targetPos && v.path.length === 0 && !isReversing && !isImmobile(v) && crewEffects(state, v).canDrive) {
-      const facing = turnTowards(v.hullFacing, wrapAngle(angleTo(v.pos, layPos ?? targetPos) - rel), hullTurnNow(state, v, def).rate * FROZEN_TURRET_HULL_LAY * dt);
-      driveVehicle(v, { yawRateRadS: dt > 0 ? wrapAngle(facing - v.hullFacing) / dt : 0 }, dt, facing);
-    }
-    frozenRel.set(v, rel);
-  } else if (v.gunLay) {
-    // the gunner is laying: sim/combat.ts traverses the turret / the casemate's gun at its real
-    // rate; here a casemate's gun is only kept inside its arc as the hull turns under it
-    if (!def.hasTurret) {
-      const arc = gunArcRad(def);
-      v.turretFacing = wrapAngle(v.hullFacing + Math.max(-arc, Math.min(arc, wrapAngle(v.turretFacing - v.hullFacing))));
-    }
-  } else {
-    // no target: the gun comes back to the ordered fire point or to the hull's axis, at the
-    // vehicle's own historical traverse rate (no shared rule)
-    const want = def.hasTurret && targetPos ? angleTo(v.pos, targetPos) : v.hullFacing;
-    v.turretFacing = turnTowards(v.turretFacing, want, turretTraverseRad(def, v, gunnerExp) * dt);
+    const facing = turnTowards(v.hullFacing, wrapAngle(angleTo(v.pos, layPos ?? targetPos) - rel),
+      hullTurnNow(state, v, def).rate * FROZEN_TURRET_HULL_LAY * dt);
+    driveVehicle(v, { yawRateRadS: dt > 0 ? wrapAngle(facing - v.hullFacing) / dt : 0 }, dt, facing);
   }
-  if (frozen) v.turretFacing = wrapAngle(v.hullFacing + frozenRel.get(v)!);
-
-  if (isReversing) { if (frozen) v.turretFacing = wrapAngle(v.hullFacing + frozenRel.get(v)!); return; } // handled by stepVehicleMinds' cover drive this same tick
+  if (isReversing) return; // cover minds already produced this tick's request
 
   const canDrive = !isImmobile(v) && crewEffects(state, v).canDrive;
   // a short halt for an aimed shot (sim/combat.ts): the vehicle stands, keeps its route, and
@@ -958,20 +1071,9 @@ function stepVehicleDriver(state: BattleState, rng: Rng, dt: number, v: Vehicle,
   if (v.creepForGun && v.creepAim != null && canDrive && (!v.creepUntil || state.time < v.creepUntil)) {
     const aim = v.creepAim;
     turnHull(state, v, def, angleTo(v.pos, aim), dt);
-    const headingErr = Math.abs(wrapAngle(angleTo(v.pos, aim) - v.hullFacing));
+    const headingErr = Math.abs(wrapAngle(angleTo(v.pos, aim) - driverHeading(v)));
     const crawlMs = headingErr <= TRACK_STRAIGHT_RAD ? Math.min(0.8, def.speedOffroadMs) : 0;
-    const stepTiles = (crawlMs * dt) / TILE_M;
-    const fwd = { x: dm.sin(v.hullFacing), y: -dm.cos(v.hullFacing) };
-    const next = vadd(v.pos, vscale(fwd, stepTiles));
-    const nx = Math.floor(next.x), ny = Math.floor(next.y);
-    if (stepTiles > 0 && inBounds(map, nx, ny) && isPassable(map, nx, ny, 'vehicle') && !hullBlocked(state, v, next)) {
-      applyLegacyTranslation(v, next);
-      driveVehicle(v, { speedMs: crawlMs }, dt);
-    } else {
-      driveVehicle(v, { speedMs: 0 }, dt);
-      // aligned but cannot advance (blocked or impassable ahead): give up this creep
-      if (crawlMs > 0) v.creepForGun = false;
-    }
+    driveVehicle(v, { speedMs: crawlMs }, dt);
     return;
   }
   if (v.creepForGun) { v.creepForGun = false; v.creepAim = undefined; }
@@ -994,7 +1096,7 @@ function stepVehicleDriver(state: BattleState, rng: Rng, dt: number, v: Vehicle,
       // a turret-ring shot waiting to happen. A bare target point (a lay the gunner can swing to
       // himself) or a fleeting aim never moves the hull; only a REAL threat does (mind spec §10).
       const hullErr = bearing != null ? Math.abs(wrapAngle(bearing - v.hullFacing)) : Infinity;
-      const turretErr = targetPos != null ? Math.abs(wrapAngle(angleTo(v.pos, targetPos) - v.turretFacing)) : Infinity;
+      const turretErr = targetPos != null ? Math.abs(wrapAngle(angleTo(v.pos, targetPos) - turretPreview)) : Infinity;
       const heldArc = targetPos != null && (ownTeam?.order?.type === 'defend' || ownTeam?.order?.type === 'ambush');
       // the gun is laid (or laying) on the commander's top ARMOUR threat (a tank or AT gun that
       // can hurt us, mind spec §10): the front armour goes to it too. Without this the hull
@@ -1002,7 +1104,7 @@ function stepVehicleDriver(state: BattleState, rng: Rng, dt: number, v: Vehicle,
       // engaged from behind finished the duel with its tail and engine deck to the enemy gun.
       const armourThreat = layPos != null && !!mind && mind.threatLevel >= 0.7 && mind.threatDir != null
         && Math.abs(wrapAngle(angleTo(v.pos, layPos) - mind.threatDir!)) <= ARMOUR_THREAT_MATCH_RAD;
-      const turretErrToBearing = armourThreat ? Math.abs(wrapAngle(bearing! - v.turretFacing)) : turretErr;
+      const turretErrToBearing = armourThreat ? Math.abs(wrapAngle(bearing! - turretPreview)) : turretErr;
       const worthHull = (heldArc || armourThreat)
         && (hullErr / hullTurnRad(def) < turretErrToBearing / turretTraverseRad(def, v, gunnerExp)
           || (turretErrToBearing < COARSE_LAY_RAD && hullErr > COARSE_LAY_RAD));
@@ -1014,15 +1116,15 @@ function stepVehicleDriver(state: BattleState, rng: Rng, dt: number, v: Vehicle,
       // swing the hull to catch it — sooner the more experienced he is (gunTiming.hullAssistMinS)
       // — unless an armour threat elsewhere wants the front plate
       const catchTarget = layPos != null && (armourThreat || !mind || mind.threatLevel < 0.7);
-      if (bearing != null && (worthHull || ((threat || casemate || catchTarget) && wantsHullTurn(def, v, bearing, gunnerExp, cmdr?.experience)))) turnHull(state, v, def, bearing, dt);
+      if (bearing != null && (worthHull || ((threat || casemate || catchTarget) && wantsHullTurn(def, { ...v, turretFacing: turretPreview }, bearing, gunnerExp, cmdr?.experience)))) turnHull(state, v, def, bearing, dt);
     }
     return;
   }
   // a transport stands still while anyone boards or leaves (it keeps its route)
   if (transportHolds(state, v)) { driveVehicle(v, { speedMs: 0 }, dt); return; }
   // a man under the hull with nowhere to go: stand still and wait (he is re-prompted to dodge)
-  if (v.holdUntil != null && state.time < v.holdUntil) {
-    stepOverrun(state, rng, v, angleTo(v.pos, v.path[0]));
+  if (v.holdUntil != null) {
+    stepHeldFriendly(state, v);
     if (v.holdUntil != null && state.time < v.holdUntil) { driveVehicle(v, { speedMs: 0 }, dt); return; }
   }
   v.holdUntil = undefined;
@@ -1046,16 +1148,7 @@ function stepVehicleDriver(state: BattleState, rng: Rng, dt: number, v: Vehicle,
   if (v.giveWayUntil != null) {
     if (state.time < v.giveWayUntil) {
       const spd = def.speedOffroadMs * 0.5;
-      const stepTiles = (spd * dt) / TILE_M;
-      const back = { x: -dm.sin(v.hullFacing), y: dm.cos(v.hullFacing) };
-      const next = vadd(v.pos, vscale(back, stepTiles));
-      const nx = Math.floor(next.x), ny = Math.floor(next.y);
-      if (inBounds(map, nx, ny) && isPassable(map, nx, ny, 'vehicle') && !hullBlocked(state, v, next)) {
-        applyLegacyTranslation(v, next);
-        driveVehicle(v, { speedMs: -spd }, dt);
-      } else {
-        driveVehicle(v, { speedMs: 0 }, dt); // nowhere to back into: try the forward route from where it stands
-      }
+      driveVehicle(v, { speedMs: -spd }, dt);
       return { overrunDir: wrapAngle(v.hullFacing + Math.PI) };
     }
     v.giveWayUntil = undefined;
@@ -1081,13 +1174,12 @@ function stepVehicleDriver(state: BattleState, rng: Rng, dt: number, v: Vehicle,
   // reversing (a plain Move to a point behind): the tail is steered at the waypoint
   const aim = backing ? wrapAngle(desired + Math.PI) : desired;
   turnHull(state, v, def, aim, dt);
-  if (frozen) v.turretFacing = wrapAngle(v.hullFacing + frozenRel.get(v)!);
-  const headingErr = Math.abs(wrapAngle(aim - v.hullFacing));
+  const headingErr = Math.abs(wrapAngle(aim - driverHeading(v)));
   // tracked: a big heading error is turned out on the spot; a sharp turn under way costs speed
   // (<= 40% of the current maximum beyond 30 deg)
   if (headingErr > PIVOT_RAD) {
     driveVehicle(v, { speedMs: 0 }, dt);
-    return;
+    return { crushAt: { x: tx, y: ty }, crushTerrain: props.crushable };
   }
   let speedMs = fullSpeedMs * (backing ? REVERSE_SPEED_MUL : 1)
     * (headingErr > SHARP_TURN_RAD ? SHARP_TURN_SPEED_MUL : headingErr > HEADING_ALIGN_RAD ? 0.7 : 1);
@@ -1103,27 +1195,13 @@ function stepVehicleDriver(state: BattleState, rng: Rng, dt: number, v: Vehicle,
   driveVehicle(v, { speedMs: backing ? -speedMs : speedMs }, dt);
   // one damaged track drags the hull to that side; the driver keeps correcting
   driveVehicle(v, { yawRateRadS: trackPullRad(v) }, dt);
-  const travelNow = backing ? wrapAngle(v.hullFacing + Math.PI) : v.hullFacing;
-
-  const distTiles = (speedMs * dt) / TILE_M;
-  // an arc never lands exactly on a waypoint: an intermediate one counts as passed from close by
-  const reach = v.path.length > 1 ? Math.max(distTiles, WAYPOINT_REACH_TILES) : distTiles;
-  if (d <= reach || d < 1e-4) {
-    if (v.path.length === 1 && !driveTo(state, v, { x: wp.x, y: wp.y })) return;
-    v.path.shift();
-  } else if (headingErr <= TRACK_STRAIGHT_RAD) {
-    // item 022: lined up — drive along the hull axis (the residual error is turned out as it
-    // goes); never a straight line to the waypoint, tracks only go where the hull points
-    const fwd = { x: dm.sin(travelNow), y: -dm.cos(travelNow) };
-    if (!driveTo(state, v, vadd(v.pos, vscale(fwd, distTiles)))) return;
-  } else {
-    const fwd = { x: dm.sin(travelNow), y: -dm.cos(travelNow) };
-    const next = vadd(v.pos, vscale(fwd, distTiles));
-    const nt = tileAt(map, Math.floor(next.x), Math.floor(next.y));
-    // never cut a corner into something a vehicle cannot enter: turn on the spot instead
-    if (!Number.isFinite(TERRAIN_PROPS[nt].vehicleCost)) driveVehicle(v, { speedMs: 0 }, dt);
-    else if (!driveTo(state, v, next)) return;
-  }
+  const travelNow = backing ? wrapAngle(driverHeading(v) + Math.PI) : driverHeading(v);
+  const lookahead = { x: v.pos.x + dm.sin(travelNow) * speedMs * dt / TILE_M,
+    y: v.pos.y - dm.cos(travelNow) * speedMs * dt / TILE_M };
+  if (!isPassable(map, Math.floor(lookahead.x), Math.floor(lookahead.y), 'vehicle')) driveVehicle(v, { speedMs: 0 }, dt);
+  // Completion reads the preceding accepted position, never requested speed * dt.
+  const reach = v.path.length > 1 ? WAYPOINT_REACH_TILES : 0.25;
+  if (d <= reach) v.path.shift();
 
   return { crushAt: { x: tx, y: ty }, crushTerrain: props.crushable, overrunDir: angleTo(v.pos, wp), checkMines: true };
 }
@@ -1132,7 +1210,7 @@ function stepVehicleDriver(state: BattleState, rng: Rng, dt: number, v: Vehicle,
  * speed / turning radius. Small errors: it drives at the waypoint while steering; larger ones: it
  * drives an arc along its own heading at 40% speed; facing the wrong way: it backs up with the
  * wheels locked over (K-turn) until roughly lined up. Returns the accepted movement
- * consequences when the legacy drive completed. */
+ * profile for physical completion. */
 function stepWheeledDrive(state: BattleState, dt: number, v: Vehicle, def: VehicleDef, wp: Vec2, desired: number, fullSpeedMs: number): AcceptedVehicleMovement | undefined {
   const map = state.map;
   const err = wrapAngle(desired - v.hullFacing);
@@ -1144,33 +1222,15 @@ function stepWheeledDrive(state: BattleState, dt: number, v: Vehicle, def: Vehic
   if (speedMs <= 0) { driveVehicle(v, { speedMs: 0 }, dt); return; }
   turnHull(state, v, def, desired, dt, speedMs);
   driveVehicle(v, { yawRateRadS: trackPullRad(v) }, dt);
-  const stepTiles = (speedMs * dt) / TILE_M;
   const d = dist(v.pos, wp);
-  // close enough to a waypoint that is not the last: on to the next (an arc never hits it exactly)
-  const reach = v.path.length > 1 ? Math.max(stepTiles, 1.5) : stepTiles;
-  if (!backing && (d <= reach || d < 1e-4)) {
-    if (v.path.length === 1 && !driveTo(state, v, { x: wp.x, y: wp.y })) return;
+  const reach = v.path.length > 1 ? 1.5 : 0.25;
+  if (!backing && d <= reach) {
     v.path.shift();
-    driveVehicle(v, { speedMs }, dt);
+    driveVehicle(v, { speedMs: v.path.length ? speedMs : 0 }, dt);
     return {};
   }
-  let next: Vec2;
-  if (backing || absErr > HEADING_ALIGN_RAD) {
-    const sign = backing ? -1 : 1;
-    next = { x: v.pos.x + dm.sin(v.hullFacing) * stepTiles * sign, y: v.pos.y - dm.cos(v.hullFacing) * stepTiles * sign };
-    const ntx = Math.floor(next.x), nty = Math.floor(next.y);
-    if (!inBounds(map, ntx, nty) || !isPassable(map, ntx, nty, 'vehicle')) {
-      // no room for the manoeuvre: shuffle toward the waypoint at a crawl instead
-      next = vadd(v.pos, vscale(vnorm(vsub(wp, v.pos)), Math.min(d, stepTiles * 0.5)));
-    }
-  } else {
-    next = vadd(v.pos, vscale(vnorm(vsub(wp, v.pos)), Math.min(d, stepTiles)));
-    // never step off the map: at the border the hull stops (the waypoint itself is on-map)
-    if (!inBounds(map, Math.floor(next.x), Math.floor(next.y))) { driveVehicle(v, { speedMs: 0 }, dt); return; }
-  }
-  if (!driveTo(state, v, next)) return;
   driveVehicle(v, { speedMs: backing ? -speedMs : speedMs }, dt);
-  return { overrunDir: backing ? wrapAngle(v.hullFacing + Math.PI) : v.hullFacing, overrunFirst: true };
+  return { overrunDir: backing ? wrapAngle(driverHeading(v) + Math.PI) : driverHeading(v), overrunFirst: true };
 }
 
 /** Hulls closer than this (m, centre to centre) take the ram damage roll. */
@@ -1198,14 +1258,14 @@ export function stepVehicleCollisions(state: BattleState, rng: Rng, dt: number):
       // speed: reversing counts), projected on the line between the centres. Two tanks driving
       // side by side, or one pulling away from the other, are not closing at all.
       const ux = (b.pos.x - a.pos.x) / (dM / TILE_M || 1), uy = (b.pos.y - a.pos.y) / (dM / TILE_M || 1);
-      const va = { x: dm.sin(a.hullFacing) * a.speed, y: -dm.cos(a.hullFacing) * a.speed };
-      const vb = { x: dm.sin(b.hullFacing) * b.speed, y: -dm.cos(b.hullFacing) * b.speed };
+      const va = a.body?.velocity ?? { x: dm.sin(a.hullFacing) * a.speed, y: -dm.cos(a.hullFacing) * a.speed };
+      const vb = b.body?.velocity ?? { x: dm.sin(b.hullFacing) * b.speed, y: -dm.cos(b.hullFacing) * b.speed };
       const closing = Math.max(0, (va.x - vb.x) * ux + (va.y - vb.y) * uy);
       // hard block: the faster hull is stopped — never ride over another. Item 038: its route is
       // kept (a hull-blocked tank waits in its lane; two tanks parked close used to cancel each
       // other's routes every tick and never moved again).
-      const faster = Math.abs(a.speed) >= Math.abs(b.speed) ? a : b;
-      if (Math.abs(faster.speed) > 0.05) faster.speed = 0;
+      const faster = dm.hypot(va.x, va.y) >= dm.hypot(vb.x, vb.y) ? a : b;
+      if (dm.hypot(va.x, va.y) > 0.05 || dm.hypot(vb.x, vb.y) > 0.05) stopVehicleXY(faster);
       // item 038 escape: hulls inside the block radius gently separate (no damage) — the cover
       // drive's terrain-only check can park two hulls on one spot, and a back-up cannot start
       // from inside the other's ellipse.
@@ -1260,7 +1320,9 @@ function separateHulls(state: BattleState, a: Vehicle, b: Vehicle): void {
       const fx = Math.floor(nx), fy = Math.floor(ny);
       if (!inBounds(state.map, fx, fy) || !isPassable(state.map, fx, fy, 'vehicle')) continue;
       if (hullBlocker(state, v, { x: nx, y: ny }, partner) != null) continue;
-      v.pos = { x: nx, y: ny };
+      v.body ??= createHullBody(VEHICLE_DEFS[v.defId], v.pos, v.hullFacing, groundProbe(state.map));
+      v.body.position.x = nx * TILE_M; v.body.position.y = ny * TILE_M;
+      wakeHull(v.body); syncVehicleFromBody(v);
       return true;
     }
     return false;
@@ -1269,6 +1331,11 @@ function separateHulls(state: BattleState, a: Vehicle, b: Vehicle): void {
   const movedB = bMovable ? tryMove(b, a, ux, uy, stepEach) : false;
   if (!movedA && bMovable) tryMove(b, a, ux, uy, stepBoth);
   if (!movedB && aMovable) tryMove(a, b, -ux, -uy, stepBoth);
+}
+
+function stopVehicleXY(v: Vehicle): void {
+  if (v.body) { v.body.velocity.x = 0; v.body.velocity.y = 0; wakeHull(v.body); syncVehicleFromBody(v); }
+  else v.speed = 0;
 }
 
 const GIVEWAY_DELAY_S = 2.5;
@@ -1304,21 +1371,21 @@ function hullBlocker(state: BattleState, v: Vehicle, next: Vec2, exclude?: Vehic
 
 /** Would `v`, standing at `at`, overlap `o`'s hull? Each footprint is an ellipse: its radius along
  * the line between the centres runs from half-width (side to side) to half-length (nose to tail). */
-function hullsOverlap(v: Vehicle, at: Vec2, o: Vehicle): boolean {
+function hullsOverlap(v: Vehicle, at: Vec2, o: Vehicle, heading = v.hullFacing): boolean {
   // a driver keeps clear of another hull: within contact distance counts as in the way, so only a
   // deliberate ram (or a shove) ever brings two hulls together at speed
-  return hullGapM(v, at, o) < HULL_CONTACT_M;
+  return hullGapM(v, at, o, heading) < HULL_CONTACT_M;
 }
 
 /** Metres of clear ground between `v` (standing at `at`) and `o` along the line between their
  * centres; negative when the footprints overlap. */
-function hullGapM(v: Vehicle, at: Vec2, o: Vehicle): number {
+function hullGapM(v: Vehicle, at: Vec2, o: Vehicle, heading = v.hullFacing): number {
   const def = VEHICLE_DEFS[v.defId], od = VEHICLE_DEFS[o.defId];
   if (!def || !od) return Infinity;
   const dx = (at.x - o.pos.x) * TILE_M, dy = (at.y - o.pos.y) * TILE_M;
   const d = dm.hypot(dx, dy);
   if (d < 1e-3) return -1;
-  const relV = Math.abs(wrapAngle(dm.atan2(dx, -dy) - v.hullFacing));
+  const relV = Math.abs(wrapAngle(dm.atan2(dx, -dy) - heading));
   const relO = Math.abs(wrapAngle(dm.atan2(-dx, dy) - o.hullFacing));
   const rV = def.widthM / 2 + (def.lengthM / 2 - def.widthM / 2) * Math.abs(dm.cos(relV));
   const rO = od.widthM / 2 + (od.lengthM / 2 - od.widthM / 2) * Math.abs(dm.cos(relO));
@@ -1352,7 +1419,7 @@ function collideDamage(state: BattleState, rng: Rng, a: Vehicle, b: Vehicle, clo
       if (worsen(v, sys, to)) done++;
     }
     if (done > 0) {
-      v.speed = 0;
+      stopVehicleXY(v);
       const team = state.teams.get(v.teamId);
       if (team) addMessage(state, `${team.name}\nCollision! Running gear damaged.`, 'bad', team.side);
       state.events.push({ kind: 'armorClank', pos: { ...v.pos }, side: otherSide(v.side) });
@@ -1381,8 +1448,8 @@ const HALT_MSG_EVERY_S = 10;
 const STUCK_S = 5;
 
 /** Position of `p` in the hull frame of `v`, metres: x to the right, y ahead along `dirRad`. */
-function hullLocalM(v: Vehicle, dirRad: number, p: Vec2): { x: number; y: number } {
-  const dx = (p.x - v.pos.x) * TILE_M, dy = (p.y - v.pos.y) * TILE_M;
+function hullLocalM(v: Vehicle, dirRad: number, p: Vec2, at: Vec2 = v.pos): { x: number; y: number } {
+  const dx = (p.x - at.x) * TILE_M, dy = (p.y - at.y) * TILE_M;
   const fx = dm.sin(dirRad), fy = -dm.cos(dirRad);
   return { x: dx * -fy + dy * fx, y: dx * fx + dy * fy };
 }
@@ -1404,8 +1471,8 @@ export function canReactToOverrun(state: BattleState, s: Soldier): boolean {
 
 
 /** Nearest free spot beside the hull (the side he is already on first), tile coords, or null. */
-function dodgeSpot(state: BattleState, v: Vehicle, dirRad: number, s: Soldier, halfWidthM: number): Vec2 | null {
-  const local = hullLocalM(v, dirRad, s.pos);
+function dodgeSpot(state: BattleState, v: Vehicle, dirRad: number, s: Soldier, halfWidthM: number, at: Vec2 = v.pos): Vec2 | null {
+  const local = hullLocalM(v, dirRad, s.pos, at);
   const fx = dm.sin(dirRad), fy = -dm.cos(dirRad);
   const rx = -fy, ry = fx; // hull right
   const first = local.x >= 0 ? 1 : -1;
@@ -1459,25 +1526,30 @@ function runDown(state: BattleState, v: Vehicle, dirRad: number, s: Soldier): vo
  * nearest free tile (never killed). An enemy who can react dodges with probability 0.85 (green
  * 0.7, veteran 0.95) and takes a large stress spike; one who cannot, or who fails, is killed and
  * left crushed in the vehicle's direction of travel. Seeded rng only. */
-export function stepOverrun(state: BattleState, rng: Rng, v: Vehicle, dirRad: number): void {
+export function stepOverrun(state: BattleState, rng: Rng, v: Vehicle, dirRad: number, sweep?: AcceptedHullPoint[]): void {
   if (Math.abs(v.speed) <= OVERRUN_MIN_SPEED_MS) return;
   const def = VEHICLE_DEFS[v.defId];
   if (!def) return;
   const halfW = def.widthM / 2, halfL = def.lengthM / 2;
-  const reach = (dm.hypot(halfW, halfL) + 0.5) / TILE_M;
+  const footprint = (pos: Vec2): AcceptedHullPoint | undefined => {
+    for (const point of sweep ?? [{ pos: v.pos, heading: dirRad }]) {
+      const local = hullLocalM(v, point.heading, pos, point.pos);
+      if (Math.abs(local.x) <= halfW && Math.abs(local.y) <= halfL) return point;
+    }
+    return undefined;
+  };
   for (const s of state.soldiers.values()) {
     if (s.vehicleId != null) continue;
-    if (Math.abs(s.pos.x - v.pos.x) > reach || Math.abs(s.pos.y - v.pos.y) > reach) continue;
-    const local = hullLocalM(v, dirRad, s.pos);
-    if (Math.abs(local.x) > halfW || Math.abs(local.y) > halfL) continue;
-    if (s.health === 'dead') { if (!s.crushed) runDown(state, v, dirRad, s); continue; }
+    const hit = footprint(s.pos);
+    if (!hit) continue;
+    if (s.health === 'dead') { if (!s.crushed) runDown(state, v, hit.heading, s); continue; }
     if (s.dodgeUntil != null && state.time < s.dodgeUntil) continue;
     const friendly = s.side === v.side;
-    const spot = dodgeSpot(state, v, dirRad, s, halfW);
+    const spot = dodgeSpot(state, v, hit.heading, s, halfW, hit.pos);
     const dodges = !!spot && (friendly || (canReactToOverrun(state, s) && rng.chance(overrunDodgeChance(s))));
     if (!dodges) {
       if (friendly) { holdForFriendly(state, v, s); continue; } // nowhere to go: the driver waits
-      runDown(state, v, dirRad, s);
+      runDown(state, v, hit.heading, s);
       continue;
     }
     if (s.health === 'incapacitated') { s.pos = spot!; continue; } // dragged clear by his comrades
@@ -1494,9 +1566,7 @@ export function stepOverrun(state: BattleState, rng: Rng, v: Vehicle, dirRad: nu
     const cw = team.crewWeapon;
     if (!cw || cw.destroyed || team.side === v.side) continue;
     if (!crewServedClass(cw.weaponId)) continue;
-    if (Math.abs(cw.pos.x - v.pos.x) > reach || Math.abs(cw.pos.y - v.pos.y) > reach) continue;
-    const local = hullLocalM(v, dirRad, cw.pos);
-    if (Math.abs(local.x) > halfW || Math.abs(local.y) > halfL) continue;
+    if (!footprint(cw.pos)) continue;
     cw.destroyed = true;
     cw.abandoned = true;
     cw.mission = undefined;
@@ -1510,6 +1580,27 @@ export function stepOverrun(state: BattleState, rng: Rng, v: Vehicle, dirRad: nu
 }
 
 
+
+/** A held friendly remains a driver gate after physical braking falls below overrun speed.
+ * This checks only actual occupancy; it adds no enemy injury or dodge RNG. */
+function stepHeldFriendly(state: BattleState, v: Vehicle): void {
+  const def = VEHICLE_DEFS[v.defId];
+  if (!def) return;
+  let occupied = false;
+  for (const s of state.soldiers.values()) {
+    if (s.side !== v.side || s.vehicleId != null || s.health === 'dead') continue;
+    const local = hullLocalM(v, v.hullFacing, s.pos);
+    if (Math.abs(local.x) > def.widthM / 2 || Math.abs(local.y) > def.lengthM / 2) continue;
+    occupied = true;
+    const spot = dodgeSpot(state, v, v.hullFacing, s, def.widthM / 2);
+    if (spot && (s.dodgeUntil == null || state.time >= s.dodgeUntil)) {
+      if (s.health === 'incapacitated') s.pos = spot;
+      else { s.path = [spot, ...s.path]; s.dodgeUntil = state.time + 1.2; }
+    }
+    holdForFriendly(state, v, s);
+  }
+  if (!occupied) v.holdUntil = undefined;
+}
 
 /** A friendly under the hull with no dodge spot: stop the vehicle, re-prompt him once per second,
  * warn once per 10 s; if he is still stuck after 5 s, nudge him to the nearest free tile (he is

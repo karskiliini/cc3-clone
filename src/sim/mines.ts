@@ -1,4 +1,4 @@
-import type { BattleState, GameMap, Soldier, Vehicle } from '@/shared/types';
+import type { BattleState, GameMap, Soldier, Vehicle, Vec2 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { addMessage } from './messages';
@@ -92,10 +92,11 @@ export function soldierMineCheck(state: BattleState, s: Soldier, rng: Rng): void
 }
 
 /** Vehicle mine trigger: AT mines only; AP mines are ignored by tracked hulls. */
-export function vehicleMineCheck(state: BattleState, v: Vehicle, rng: Rng): void {
-  const kind = mineAt(state.map, v.pos.x, v.pos.y);
+export function vehicleMineCheck(state: BattleState, v: Vehicle, rng: Rng, at: Vec2 = v.pos): void {
+  const x = Math.floor(at.x), y = Math.floor(at.y);
+  const kind = mineAt(state.map, x, y);
   if (kind !== MINE_AT) return;
-  const idx = tileIdx(state.map, v.pos.x, v.pos.y);
+  const idx = tileIdx(state.map, x, y);
   if (v.mineTileSeen === idx) return;
   v.mineTileSeen = idx;
   if (!rng.chance(0.8)) return;

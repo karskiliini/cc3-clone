@@ -143,7 +143,7 @@ function nextBit(n: number): number {
 describe('optional body hashing', () => {
   it('distinguishes absent and present body and leaves body, ground and random stream alone', () => {
     const b = battle(), v = b.state.vehicles.values().next().value!;
-    const absent = hashState(b); v.body = body();
+    delete v.body; const absent = hashState(b); v.body = body();
     expect(hashState(b)).not.toBe(absent);
     const before = structuredClone(v.body), rng = b.rng.state(), ground = b.state.map.heightField;
     expect(hashState(b)).toBe(hashState(b));

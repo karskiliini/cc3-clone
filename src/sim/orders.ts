@@ -16,6 +16,8 @@ import { settleTile } from './coverSeek';
 import { isDazed } from './daze';
 import { onCrewOrder } from './crewWeapon';
 import { RADIO_OUT_ORDER_DELAY_S, radioOut } from './vehicleDamage';
+import { placeVehicleBody } from './vehicle';
+import { groundProbe } from './hullGround';
 
 const INCAPABLE_ACTIVITIES = new Set(['pinned', 'cowering', 'panicked', 'routed', 'surrendered']);
 
@@ -580,7 +582,8 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
       // the battle runs a vehicle never snaps: the driver swings the hull and the gunner the
       // turret at their real rates (stepVehicles' standing branch, heldArc) toward the arc.
       if (state.phase === 'deploy' && dist(vehicle.pos, order.target) > 1e-3) {
-        vehicle.hullFacing = angleTo(vehicle.pos, order.target);
+        const def = VEHICLE_DEFS[vehicle.defId];
+        if (def) placeVehicleBody(vehicle, def, vehicle.pos, angleTo(vehicle.pos, order.target), groundProbe(state.map));
         vehicle.turretFacing = vehicle.hullFacing;
       }
     }

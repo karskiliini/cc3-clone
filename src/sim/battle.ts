@@ -13,7 +13,8 @@ import { isPassable } from './path';
 import { spawnTeam, layoutTeamPositions } from './spawn';
 import { applyOrder, stepAttackOrders, spottedEnemyTeamAt } from './orders';
 import { stepMovement } from './movement';
-import { stepVehicles } from './vehicle';
+import { stepVehicles, placeVehicleBody } from './vehicle';
+import { groundProbe } from './hullGround';
 import { getGrowth, stepGrowth } from './growth';
 import { flee, stepVictory } from './victory';
 import { compareCommands, resolveControllers, type Command, type CommandBody } from './commands';
@@ -390,7 +391,15 @@ export class Battle {
     team.pos = { x: pos.x, y: pos.y };
     if (team.vehicleId != null) {
       const veh = this.state.vehicles.get(team.vehicleId);
-      if (veh) veh.pos = { x: pos.x, y: pos.y };
+      if (veh) {
+        const def = VEHICLE_DEFS[veh.defId];
+        if (def) placeVehicleBody(veh, def, pos, veh.hullFacing, groundProbe(this.state.map));
+        for (const soldier of this.state.soldiers.values()) if (soldier.vehicleId === veh.id) {
+          soldier.pos = { ...veh.pos };
+          const passengerTeam = this.state.teams.get(soldier.teamId);
+          if (passengerTeam) passengerTeam.pos = { ...veh.pos };
+        }
+      }
     }
     const members = team.soldierIds.map((sid) => this.state.soldiers.get(sid)).filter((s): s is Soldier => !!s);
     // Natural formation shape (spawn.ts), each man on his own passable tile.

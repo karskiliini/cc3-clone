@@ -16,9 +16,9 @@ describe('flame tanks', () => {
     state.spotted.soviet = new Set([1]);
     const rng = new Rng(7);
     let flame = 0;
-    for (let t = 0; t < 3600 && flame === 0; t++) {
-      stepVehicles(state, rng, 1 / 30);
-      stepCombat(state, rng, 1 / 30);
+    for (let t = 0; t < 1200 && flame === 0; t++) {
+      stepVehicles(state, rng, 0.1);
+      stepCombat(state, rng, 0.1);
       flame = state.tracers.filter((tr) => tr.kind === 'flame').length;
     }
     expect(flame).toBeGreaterThan(0);

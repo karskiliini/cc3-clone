@@ -1,3 +1,6 @@
+import { placeVehicleBody } from '@/sim/vehicle';
+import { VEHICLE_DEFS } from '@/data/units';
+import { groundProbe } from '@/sim/hullGround';
 // Combat FX / medic / assault — behaviour contracts for the spec-combat-fx work.
 import { describe, it, expect } from 'vitest';
 import { Battle } from '@/sim/battle';
@@ -54,7 +57,7 @@ describe('projectiles in flight (A1)', () => {
     if (!enemyTeam) return;
     const veh = [...st.vehicles.values()].find((v) => v.side !== gunner.side);
     if (!veh) return;
-    veh.pos = { x: gunner.pos.x + 8, y: gunner.pos.y };
+    placeVehicleBody(veh, VEHICLE_DEFS[veh.defId], { x: gunner.pos.x + 8, y: gunner.pos.y }, veh.hullFacing, groundProbe(st.map));
     st.spottedVehicles[gunner.side].add(veh.id);
     applyOrder(st, team, { type: 'fire', target: veh.pos, targetTeamId: enemyTeam.id, issuedAt: st.time }, new Rng(3));
     let sawRocket = false;

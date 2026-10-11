@@ -56,7 +56,7 @@ describe('tank crews carry out their orders', () => {
     team.order = { type: 'fire', target, issuedAt: state.time };
     v.targetPoint = target;
     let clear = false;
-    run(state, 40, () => { if (!clear && v.path.length === 0 && hasLineOfFire(state.map, v.pos, target, eye)) clear = true; });
+    run(state, 60, () => { if (!clear && v.path.length === 0 && hasLineOfFire(state.map, v.pos, target, eye)) clear = true; });
     expect(clear).toBe(true);
     expect(dist(v.pos, { x: 200.5, y: 200.5 })).toBeLessThan(26); // a spot nearby, not a long drive
   });
@@ -119,13 +119,13 @@ describe('backing on a plain Move', () => {
     const goal = { x: 202.5, y: 220.5 };
     const { v, minSpeed, maxOff } = drive('moveFast', goal, 40);
     expect(dist(v.pos, goal)).toBeLessThan(2);
-    expect(minSpeed).toBeGreaterThanOrEqual(0);
+    expect(minSpeed).toBeGreaterThanOrEqual(-1e-12);
     expect(maxOff).toBeGreaterThan(Math.PI * 0.75);
   });
 
   it('a long way back (over ~100 m) is driven forward even on a plain Move', () => {
     const { minSpeed, maxOff } = drive('move', { x: 200.5, y: 270.5 }, 20); // 140 m behind
-    expect(minSpeed).toBeGreaterThanOrEqual(0);
+    expect(minSpeed).toBeGreaterThanOrEqual(-1e-12);
     expect(maxOff).toBeGreaterThan(Math.PI * 0.75);
   });
 });

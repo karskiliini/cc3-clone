@@ -1,7 +1,12 @@
+import { rotate, add, cross, dot } from '@/sim/hullMath';
+import { groundProbe } from '@/sim/hullGround';
 // Tank overrun (spec 2026-09-17 §7).
 import { describe, it, expect } from 'vitest';
 import type { BattleConfig, BattleState, GameMap, MapDef, Soldier, Team, Terrain, Vehicle } from '@/shared/types';
-import { SIM_DT } from '@/shared/types';
+import { SIM_DT, TILE_M } from '@/shared/types';
+import { hullParams } from '@/data/vehiclePhysics';
+import { VEHICLE_DEFS } from '@/data/units';
+import { takeHullDrive } from '@/sim/hullDrive';
 import { Rng } from '@/shared/rng';
 import { createMind } from '@/sim/mind';
 import { stepVehicles, canReactToOverrun, overrunDodgeChance } from '@/sim/vehicle';
@@ -170,6 +175,25 @@ describe('daze and overrun', () => {
   });
 });
 
+/** Normal load from fixture geometry/contact state; the belly carries the remaining weight. */
+function suspensionLoadFraction(state: BattleState, v: Vehicle): number {
+  const body = v.body!, p = hullParams(VEHICLE_DEFS[v.defId]), probe = groundProbe(state.map);
+  const count = p.contacts.filter(c => !c.horn).length, k = p.suspension.springKNm * 1000;
+  const damping = 2 * p.suspension.damping * Math.sqrt(k * p.massKg / count);
+  let vertical = 0;
+  for (const contact of p.contacts) {
+    const offset = rotate(body.orientation, contact.local), point = add(body.position, offset);
+    const hit = probe(point.x, point.y), separation = (hit.heightM - point.z) * hit.normal.z;
+    if (separation <= 0) continue;
+    const compression = Math.min(p.suspension.travelM, separation);
+    const velocity = add(body.velocity, cross(body.angularVelocity, offset));
+    const normal = Math.max(0, k * compression + 10 * k * Math.max(0, separation - p.suspension.travelM)
+      - damping * dot(velocity, hit.normal));
+    vertical += normal * hit.normal.z;
+  }
+  return vertical / (p.massKg * 9.81);
+}
+
 describe('friendly hold and 0.5 m/s threshold', () => {
   /** A corridor of impassable rock both sides of the road at y=30 so a friendly in the way has
    * nowhere to dodge: the vehicle must halt, never crush him. */
@@ -185,24 +209,51 @@ describe('friendly hold and 0.5 m/s threshold', () => {
 
   it('a friendly with nowhere to dodge halts the vehicle (speed 0 while held) and is never crushed', () => {
     const { state, tank, friend } = corridor();
-    drive(state, new Rng(7), 3.5);
-    expect(friend.health).not.toBe('dead');
-    expect(friend.crushed).toBeUndefined();
-    // halted in front of the man: held, warning message issued
-    expect(tank.pos.x).toBeLessThan(29.9);
+    const rng = new Rng(7);
+    for (let i = 0; i < 45 && tank.holdUntil == null; i++) drive(state, rng, SIM_DT);
+    expect(tank.holdUntil).toBeDefined();
+    const atHold = { ...tank.pos }, initialSpeed = Math.abs(tank.speed);
+    const p = hullParams(VEHICLE_DEFS[tank.defId]);
+    const loadedFraction = p.contacts.filter((c, i) => !c.horn && tank.body!.suspensionTravel[i] > 0).length
+      / p.contacts.filter(c => !c.horn).length;
+    // Banks leave all contacts loaded, but frictionless belly support carries ~60% of weight.
+    // The independently checked 0.4 mg floor supplies the conservative Coulomb term.
+    const normalFloor = 0.4;
+    const stopBoundM = initialSpeed * 0.4 / loadedFraction
+      + initialSpeed ** 2 / (2 * 0.8 * 9.81 * normalFloor) + initialSpeed * SIM_DT;
+    const draws = rng.chance.bind(rng);
+    let holdDraws = 0;
+    rng.chance = probability => { holdDraws++; return draws(probability); };
+    for (let i = 0; i < 60; i++) {
+      drive(state, rng, SIM_DT);
+      expect(takeHullDrive(tank)).toEqual({ speedMs: 0, yawRateRadS: 0, brake: true });
+      expect(suspensionLoadFraction(state, tank)).toBeGreaterThanOrEqual(normalFloor);
+      expect(friend.health).not.toBe('dead');
+      expect(friend.crushed).toBeUndefined();
+      expect(Math.hypot(tank.pos.x - atHold.x, tank.pos.y - atHold.y) * TILE_M).toBeLessThan(stopBoundM);
+    }
+    expect(Math.hypot(tank.body!.velocity.x, tank.body!.velocity.y)).toBeLessThan(0.005);
+    const rest = { ...tank.pos };
+    drive(state, rng, 1);
+    expect(Math.hypot(tank.pos.x - rest.x, tank.pos.y - rest.y) * TILE_M).toBeLessThan(0.005);
+    expect(holdDraws).toBe(0);
     expect(state.messages.map((m) => m.text).some((t) => t.includes('our men in the way'))).toBe(true);
     expect(tank.holdUntil).toBeDefined();
   });
 
   it('the held vehicle resumes once the man moves aside', () => {
     const { state, tank, friend } = corridor();
-    drive(state, new Rng(7), 3.5);
-    expect(tank.pos.x).toBeLessThan(29.9);
+    const rng = new Rng(7);
+    for (let i = 0; i < 45 && tank.holdUntil == null; i++) drive(state, rng, SIM_DT);
+    expect(tank.holdUntil).toBeDefined();
+    drive(state, rng, 6);
+    expect(takeHullDrive(tank).speedMs).toBe(0);
+    const heldX = tank.pos.x;
     // clear the way: he is no longer under the hull
     friend.pos = { x: 30.5, y: 27.5 };
     friend.stance = 'standing';
     drive(state, new Rng(8), 3);
-    expect(tank.pos.x).toBeGreaterThan(31);
+    expect(tank.pos.x).toBeGreaterThan(heldX + 1);
   });
 
   it('an enemy is crushed at 0.5 m/s: a slow enemy push still runs him down', () => {

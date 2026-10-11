@@ -69,7 +69,8 @@ export function applyHullImpulse(body: HullBody, impulse: Vec3, point: Vec3, def
 }
 
 /** One production tick, always ten 10 ms semi-implicit steps. */
-export function stepHullBody(body: HullBody, def: VehicleDef, drive: HullDrive, probe: HullGroundProbe, dt: number, going = 1): void {
+export function stepHullBody(body: HullBody, def: VehicleDef, drive: HullDrive, probe: HullGroundProbe, dt: number, going = 1,
+  acceptTranslation?: (from: Vec3, to: Vec3) => boolean): void {
   if (dt !== SIM_DT) throw new Error('Hull physics dt must equal SIM_DT');
   const hasInput = drive.speedMs !== 0 || drive.yawRateRadS !== 0;
   if (hasInput) wakeHull(body);
@@ -149,7 +150,13 @@ export function stepHullBody(body: HullBody, def: VehicleDef, drive: HullDrive, 
       body.velocity = add(body.velocity, scale(contact.n, impulse / massKg));
       body.angularVelocity = add(body.angularVelocity, scale(contact.u, impulse));
     }
-    body.position = add(body.position, scale(body.velocity, H));
+    const candidate = add(body.position, scale(body.velocity, H));
+    if (acceptTranslation && !acceptTranslation(body.position, candidate)) {
+      // Boolean blockers provide no normal: conservatively stop XY without wall sliding.
+      body.velocity.x = 0; body.velocity.y = 0;
+      candidate.x = body.position.x; candidate.y = body.position.y;
+    }
+    body.position = candidate;
     const w = body.angularVelocity;
     const qdot = multiply({ ...w, w: 0 }, body.orientation), q = body.orientation;
     body.orientation = normalize({ x: q.x + 0.5 * H * qdot.x, y: q.y + 0.5 * H * qdot.y,
