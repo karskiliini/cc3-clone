@@ -820,14 +820,14 @@ function atTraceOptions(state: BattleState, weapon: WeaponDef, excludeVehicleId?
     } };
 }
 /** Contact effects follow the trace, never a speculative launch-line hull overlap. */
-function interdictImpact(state: BattleState, rng: Rng, from: Vec2, weapon: WeaponDef, shooterSide: Side, shot: RoundTrace): void {
+function interdictImpact(state: BattleState, rng: Rng, from: Vec2, weapon: WeaponDef, round: RoundType, shooterSide: Side, shot: RoundTrace): void {
   const impact = { ...shot.impact }, atRocket = weapon.cls === 'atrocket';
   state.projectiles.push({ kind: atRocket ? 'atrocket' : 'shell', weaponId: weapon.id, from: { ...from }, to: impact,
     t0: state.time, flightS: Math.max(0.08, dist(from, impact) * TILE_M / (atRocket ? 80 : 600)), dirRad: angleTo(from, impact), arcM: 0, hitKind: 'impact', preResolved: true });
   state.explosions.push({ pos: impact, radiusM: 0, t: 0, kind: 'small' });
   if (shot.vehicleContact) {
     const { vehicle, ray } = shot.vehicleContact;
-    const result = resolveVehicleHit(state, rng, vehicle, { weapon, shooterPos: from, shooterSide, distM: dist(from, impact) * TILE_M, ray });
+    const result = resolveVehicleHit(state, rng, vehicle, { weapon, round, shooterPos: from, shooterSide, distM: dist(from, impact) * TILE_M, ray });
     if (result.outcome !== 'miss') {
       state.sparks.push({ pos: impact, t: state.time, kind: 'armor' });
       if (vehicle.state !== 'knockedOut' && vehicle.state !== 'burning') onVehicleHit(state, vehicle, weapon, result.penetrated, from);
@@ -852,7 +852,7 @@ export function shotInterdiction(state: BattleState, rng: Rng, from: Vec2, to: V
   const endZ = heights.targetZ ?? gunTarget(state, to).heightM - 0.5 + (heights.targetM ?? 1.5);
   const shot = traceRound(state, rng, from, to, rw, { eyeZ: originZ, targetZ: endZ }, options);
   if (!shot.blocked && !shot.deflected) return false;
-  interdictImpact(state, rng, from, rw, shooterSide, shot);
+  interdictImpact(state, rng, from, rw, round, shooterSide, shot);
   return true;
 }
 
@@ -898,7 +898,7 @@ function fireAtVehicle(
   const rw = roundWeapon(weapon, round);
   const shotPath = traceRound(state, rng, shooterPos, target.posTiles, rw, heights, atTraceOptions(state, rw, shot.shooterVehicleId));
   const contact = shotPath.vehicleContact;
-  if (contact && contact.vehicle.id !== vehicle.id) { interdictImpact(state, rng, shooterPos, rw, shooterSide, shotPath); return false; }
+  if (contact && contact.vehicle.id !== vehicle.id) { interdictImpact(state, rng, shooterPos, rw, round, shooterSide, shotPath); return false; }
   const intercepted = !contact && (shotPath.blocked || shotPath.deflected);
   const r = intercepted ? Infinity : rng.next();
   // a clean miss is seen to fly past the hull and strike the ground beyond it (visual only: the

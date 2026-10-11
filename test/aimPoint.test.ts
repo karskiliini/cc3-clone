@@ -252,7 +252,7 @@ it('keeps crew-served tactical aim and ammo consistent with the actual plate on 
     expect(hit.location?.face).toBe('front');
     expect(expectedArmorFrom(state, t.v, VEHICLE_DEFS.kv1, origin, aim, true)).toBe(hit.armorMm);
     const plate = aim === 'runningGear' ? 20 : aim === 'gunMantlet' ? VEHICLE_DEFS.kv1.armor.front * 1.1 : locationArmorMm(VEHICLE_DEFS.kv1, { ...hit.location!, incidenceCos: 1 });
-    expect(hit.armorMm).toBeCloseTo(plate * Math.sqrt(ray.direction.x ** 2 + ray.direction.y ** 2 + ray.direction.z ** 2) / Math.abs(ray.direction.y), 10);
+    expect(hit.armorMm).toBeCloseTo(plate * Math.sqrt(ray.direction.x * ray.direction.x + ray.direction.y * ray.direction.y + ray.direction.z * ray.direction.z) / Math.abs(ray.direction.y), 10);
     return { aim, round: g.team.crewWeapon!.mission!.wantRound };
   };
   expect(selection(100, false)).toEqual(selection(0, false));

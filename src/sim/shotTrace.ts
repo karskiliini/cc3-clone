@@ -66,7 +66,7 @@ export function traceRound(
   for (let leg = 0; leg < 4; leg++) {
     const length = dist(start, end), steps = Math.max(1, Math.ceil(length * 4));
     const ray: HullRay = { origin: { x: start.x * TILE_M, y: start.y * TILE_M, z: startZ }, direction: { x: (end.x - start.x) * TILE_M, y: (end.y - start.y) * TILE_M, z: endZ - startZ } };
-    const rayLength = Math.sqrt(ray.direction.x ** 2 + ray.direction.y ** 2 + ray.direction.z ** 2);
+    const rayLength = Math.sqrt(ray.direction.x * ray.direction.x + ray.direction.y * ray.direction.y + ray.direction.z * ray.direction.z);
     const candidate = options.vehicleContact?.(ray, rayLength);
     const contact = candidate && candidate.hit.distance >= 0 && candidate.hit.distance <= rayLength ? candidate : null;
     const contactFraction = contact && rayLength > 0 ? contact.hit.distance / rayLength : Infinity;

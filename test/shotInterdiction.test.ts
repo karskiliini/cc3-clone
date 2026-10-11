@@ -357,3 +357,42 @@ it('direct rocket fire reaches its target beneath a raised intermediate hull wit
   expect(state.explosions.every(e => Math.abs(e.pos.x - raised.pos.x) > 2)).toBe(true);
   expect(state.sparks.filter(s => s.kind === 'armor').every(s => Math.abs(s.pos.x - raised.pos.x) > 2)).toBe(true);
 });
+
+
+import { resolveVehicleHit } from '@/sim/vehicleDamage';
+import { TILE_M } from '@/shared/types';
+
+it.each([
+  { round: 'he' as const, weapon: WEAPONS.kwk40_75, defId: 't34_76', penetrated: false },
+  { round: 'apcr' as const, weapon: WEAPONS.pak38, defId: 'kv1', penetrated: true },
+])('preserves $round penetration policy at an intermediate hull versus the seeded direct control', ({ round, weapon, defId, penetrated }) => {
+  const from = { x: 2.5, y: 10.5 }, to = { x: 18.5, y: 10.5 };
+  const state = makeState(), control = makeState();
+  const v = makeVehicle({ defId, pos: { x: 10.5, y: 10.5 } });
+  const direct = makeVehicle({ defId, pos: { ...v.pos } });
+  state.vehicles.set(v.id, v); control.vehicles.set(direct.id, direct);
+  const ray = { origin: { x: from.x * TILE_M, y: from.y * TILE_M, z: 1 },
+    direction: { x: (to.x - from.x) * TILE_M, y: 0, z: 0 } };
+  // Level side entry is at the known hull width boundary, not the vehicle centre.
+  const entryX = v.pos.x * TILE_M - VEHICLE_DEFS[defId].widthM / 2;
+  const controlWeapon = round === 'apcr' ? { ...weapon, heRadiusM: 0 } : weapon;
+  const rng = new Rng(7), directRng = new Rng(7);
+  const result = resolveVehicleHit(control, directRng, direct, { weapon: controlWeapon, round,
+    shooterPos: from, shooterSide: 'german', distM: entryX - ray.origin.x, ray });
+  expect(result.location?.face).toBe('side'); expect(result.penetrated).toBe(penetrated);
+  expect(shotInterdiction(state, rng, from, to, weapon, 0.7, 'german', { eyeZ: 1, targetZ: 1 }, round)).toBe(true);
+  expect(state.projectiles[0].to.x * TILE_M).toBeCloseTo(entryX, 10);
+  expect(v.hits).toBe(direct.hits); expect(v.damage).toEqual(direct.damage);
+  expect(v.state).toBe(direct.state); expect(rng.state()).toBe(directRng.state());
+  if (round === 'apcr') expect(state.explosions.every(e => e.radiusM === 0)).toBe(true);
+});
+
+it.each(['he', 'apcr'] as const)('does not fabricate %s contact or splash below a raised hull', round => {
+  const state = makeState(), from = { x: 2.5, y: 10.5 }, to = { x: 18.5, y: 10.5 };
+  const v = makeVehicle({ pos: { x: 10.5, y: 10.5 } });
+  v.body = createHullBody(VEHICLE_DEFS[v.defId], v.pos, 0, flat); v.body.position.z += 20;
+  state.vehicles.set(v.id, v); const rng = new Rng(7), before = rng.state();
+  expect(shotInterdiction(state, rng, from, to, WEAPONS.kwk40_75, 0.7, 'german', { eyeZ: 1, targetZ: 1 }, round)).toBe(false);
+  expect(v.hits).toBe(0); expect(v.damage).toBeUndefined(); expect(rng.state()).toBe(before);
+  expect(state.projectiles).toEqual([]); expect(state.explosions).toEqual([]); expect(state.events).toEqual([]); expect(state.sparks).toEqual([]);
+});
