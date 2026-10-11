@@ -25,6 +25,24 @@ export const VL_CAPTURE_SECONDS = 5;
 
 // ---------------------------------------------------------------- geometry
 export interface Vec2 { x: number; y: number }
+/** Sim metres: x east/right, y south/rear, z up. */
+export interface Vec3 { x: number; y: number; z: number }
+/** Unit quaternion rotating body-local vectors into world space. */
+export interface HullQuat { x: number; y: number; z: number; w: number }
+export interface HullBody {
+  position: Vec3; orientation: HullQuat;
+  velocity: Vec3; angularVelocity: Vec3; // world frame, m/s and rad/s
+  suspensionTravel: number[]; // compression metres, deterministic contact order
+  asleep: boolean; hungUp: boolean; overturned: boolean;
+  quietS: number; tippedS: number; hungS: number;
+  rockPhaseS: number; rockTries: number;
+  groundVersion: number;
+}
+export interface HullDrive { speedMs: number; yawRateRadS: number; brake: boolean }
+export interface HullGroundSample { heightM: number; normal: Vec3 }
+export type HullGroundProbe = (xM: number, yM: number) => HullGroundSample;
+/** springKNm is kN/m; damping is a dimensionless critical-damping ratio. */
+export interface SuspensionDef { springKNm: number; damping: number; travelM: number }
 export interface Rect { x: number; y: number; w: number; h: number }
 /** Facing 0..7, 0 = north (up), clockwise: 1 NE, 2 E, 3 SE, 4 S, 5 SW, 6 W, 7 NW */
 export type Facing8 = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
@@ -625,6 +643,16 @@ export interface VehicleDef {
   kind: 'tank' | 'spg' | 'halftrack' | 'armoredcar';
   lengthM: number;
   widthM: number;
+  /** Optional for legacy literals; catalog values are normalized simulation estimates. */
+  massT?: number;
+  hullHeightM?: number;       // hull above clearance, excludes turret
+  cgHeightM?: number;         // above the model's ground origin
+  suspension?: SuspensionDef;
+  driveKind?: 'tracked' | 'halftrack' | 'wheeled';
+  slopeComfortDeg?: number;
+  slopeTipDeg?: number;
+  gunDepressionDeg?: number;
+  gunElevationDeg?: number;
   speedRoadMs: number;        // metres per second
   speedOffroadMs: number;
   /** @deprecated legacy hull turn rate (rad/s). No entry of data/units.ts carries it any more; it is
@@ -643,7 +671,7 @@ export interface VehicleDef {
   turnRadiusM?: number;
   /** rounds in the ready rack: they load at full speed, the rest x1.25 from the hull racks */
   readyRack?: number;
-  armor: { front: number; side: number; rear: number; top: number };  // mm
+  armor: { front: number; side: number; rear: number; top: number; belly?: number };  // mm
   mainWeaponId: string | null;
   coaxWeaponId: string | null;
   /** hull machine gun in the bow (ball mount, or the IS-2's fixed one), worked by the radio
@@ -691,6 +719,8 @@ export interface Vehicle {
   defId: string;
   pos: Vec2;                  // tile coords
   hullFacing: number;         // radians, 0 = north, clockwise
+  body?: HullBody;
+  gunElevationRad?: number;
   turretFacing: number;       // radians absolute
   state: VehicleState;
   mainAmmo: number;

@@ -1,10 +1,11 @@
 import type { Side, TeamDef, VehicleDef } from '@/shared/types';
+import { resolveVehiclePhysics } from '@/data/vehiclePhysics';
 
 // ============================================================================
 // Vehicles
 // ============================================================================
 
-function v(d: VehicleDef): VehicleDef { return d; }
+function v(d: VehicleDef): VehicleDef { return { ...d, ...resolveVehiclePhysics(d) }; }
 
 /* TURN RATES are per-vehicle historical figures; there is no shared default (sim/gunTiming.ts).
  * `turretTraverseDegS`: typical combat traverse (German powered traverse depended on engine revs:

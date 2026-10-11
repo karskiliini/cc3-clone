@@ -88,6 +88,16 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
     h.int(v.coaxAmmo);
     h.int(v.hits);
     h.num(v.speed);
+    const b = v.body; h.bool(!!b);
+    if (b) {
+      for (const p of [b.position, b.velocity, b.angularVelocity]) { h.num(p.x); h.num(p.y); h.num(p.z); }
+      const q = b.orientation; h.num(q.x); h.num(q.y); h.num(q.z); h.num(q.w);
+      h.int(b.suspensionTravel.length); for (const x of b.suspensionTravel) h.num(x);
+      h.bool(b.asleep); h.bool(b.hungUp); h.bool(b.overturned);
+      h.num(b.quietS); h.num(b.tippedS); h.num(b.hungS); h.num(b.rockPhaseS);
+      h.int(b.rockTries); h.int(b.groundVersion);
+    }
+    h.num(v.gunElevationRad ?? 0);
     h.int(v.path.length);
     if (v.damage) for (const k of Object.keys(v.damage).sort()) { h.str(k); h.str(v.damage[k as keyof typeof v.damage]); }
     else h.int(-1);
