@@ -529,6 +529,8 @@ function writeTile(field: HeightField, tx: number, ty: number, samples: ArrayLik
 }
 
 export function buildHeightField(map: GameMap): HeightField {
+  // Rebuilding this map changes its geometry and must invalidate sleeping hulls.
+  const version = map.heightField ? map.heightField.version + 1 : 1;
   const R = HF_RES;
   const w = map.width * R, h = map.height * R;
   const field: HeightField = {
@@ -536,7 +538,7 @@ export function buildHeightField(map: GameMap): HeightField {
     ground: new Float32Array(w * h),
     base: new Float32Array(w * h), dig: new Float32Array(w * h),
     height: new Float32Array(w * h), canopy: new Float32Array(w * h),
-    version: 1, marksApplied: 0,
+    version, marksApplied: 0,
   };
   const ctx: FieldCtx = { map, buildings: computeBuildings(map), lineSegs: computeLineSegs(map), overrides: new Map() };
   ctxByField.set(field, ctx);
@@ -576,7 +578,8 @@ export function buildHeightField(map: GameMap): HeightField {
   stampTrenchSegs(field, vecSegs);
   stampMapCraters(map, field);
   syncCraterMarks(map, field);
-  field.version = 1;
+  // Initial crater stamping is part of this build, not a separate revision.
+  field.version = version;
   return field;
 }
 
