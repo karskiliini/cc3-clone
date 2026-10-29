@@ -10,6 +10,16 @@ function wallAcross(state: BattleState, x: number): void {
 }
 
 describe('pointer hover label', () => {
+  it('keeps the ground type and cover visible under named places and decorative rocks', () => {
+    const state = makeState(), p = { x: 20.5, y: 20.5 }, i = 20 * state.map.width + 20;
+    state.map.victoryLocations.push({ id: 0, name: 'Church', ...p, value: 3, owner: null, captureTimer: 0, capturingSide: null });
+    state.map.tiles[i] = 'floor';
+    expect(hoverInfoAt(state, 'german', p)).toMatchObject({ text: 'Church', terrainText: 'Terrain: Church floor', coverText: 'Terrain cover: Good (50%)' });
+    state.map.tiles[i] = 'grass';
+    expect(hoverInfoAt(state, 'german', p)).toMatchObject({ terrainText: 'Terrain: Grass', coverText: 'Terrain cover: Little (5%)' });
+    state.map.decor = [{ kind: 'rocks', ...p }];
+    expect(hoverInfoAt(state, 'german', p)?.terrainText).toBe('Terrain: Rocks / Grass');
+  });
   it('retains unit type when a team is renamed or its hovered soldier is incapacitated', () => {
     const state = makeState(), at = { x: 10, y: 10 };
     const man = soldier(1, 1, 'german', at, 'kar98k'); state.soldiers.set(1, man);

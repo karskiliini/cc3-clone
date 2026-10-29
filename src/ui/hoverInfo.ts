@@ -23,6 +23,7 @@ export type HoverTone = 'own' | 'enemy' | 'dead' | 'place';
 export interface HoverInfo {
   text: string;
   coverText?: string;
+  terrainText?: string;
   unitTypeText?: string;
   tone: HoverTone;
   /** The hovered unit (tile coords) and its size, so the label can be kept off it. */
@@ -77,7 +78,7 @@ export function vehicleLabel(v: Vehicle, viewer: Side): string {
 const TERRAIN_NAME: Record<Terrain, string> = {
   open: 'Open ground', grass: 'Grass', tallgrass: 'Tall grass', crops: 'Wheat field',
   dirtroad: 'Dirt road', pavedroad: 'Road', woods: 'Woods', scatteredtrees: 'Trees',
-  buildingWood: 'Wooden house', buildingStone: 'Stone house', floor: 'House',
+  buildingWood: 'Wooden house', buildingStone: 'Stone house', floor: 'Building floor',
   rubble: 'Rubble', stonewall: 'Stone wall', hedge: 'Hedge', fence: 'Fence', water: 'Water',
   bridge: 'Bridge', snow: 'Snow', mud: 'Mud', crater: 'Crater', trench: 'Trench',
 };
@@ -197,7 +198,13 @@ export function hoverInfoAt(state: BattleState, viewer: Side, p: Vec2, pxPerTile
   if (!place) return null;
   const cover = omniCoverAt(state.map, p);
   const quality = cover >= 0.7 ? 'Excellent' : cover >= 0.45 ? 'Good' : cover >= 0.2 ? 'Partial' : cover > 0 ? 'Little' : 'None';
-  return { text: place, tone: 'place', coverText: `Terrain cover: ${quality} (${Math.round(cover * 100)}%)` };
+  const t = state.map.tiles[Math.floor(p.y) * state.map.width + Math.floor(p.x)];
+  let terrain = terrainLabel(t, state.map.def.season);
+  if (t === 'floor' && place !== terrain) terrain = `${place} floor`;
+  const rock = (state.map.decor ?? state.map.def.decor ?? []).some(d => d.kind === 'rocks' && dist(d, p) <= 0.75);
+  if (rock) terrain = `Rocks / ${terrain}`;
+  return { text: place, tone: 'place', terrainText: terrain === place ? undefined : `Terrain: ${terrain}`,
+    coverText: `Terrain cover: ${quality} (${Math.round(cover * 100)}%)` };
 }
 
 export interface ReadoutLine { text: string; color: string }
