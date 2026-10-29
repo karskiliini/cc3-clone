@@ -94,3 +94,5 @@ order first (hotkey, order bar, or right-click menu), then click the target.
   `docs/critique` — art critiques used to drive fidelity passes.
 
 Casualty graphics: wounded uniforms show blood, with heavier staining on incapacitated and dead soldiers. The texture finish follows the existing Blender pose during movement, dragging and blast flight, and is cached per sprite cell with bounded memory. Review both sides, seasons and battle zooms in `tools/casualtyPreview.html`.
+
+Infantry stationed inside buildings seek reachable, available firing windows in the ordered fire direction or Defend/Ambush facing. They keep their issued order while moving through the interior, reserve different windows and fire after arriving. Active crew guns continue to use their own placement drill.

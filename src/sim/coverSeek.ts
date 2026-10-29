@@ -13,6 +13,7 @@ import { isPassable } from './path';
 import { inBounds } from './map';
 import { addMessage } from './messages';
 import { isDazed } from './daze';
+import { seekBuildingStation } from './buildingStations';
 import { fireHazards, nearFireHazard } from './vehicleExplosion';
 import * as dm from '@/shared/dmath';
 
@@ -139,6 +140,7 @@ function seekForSoldier(state: BattleState, rng: Rng, s: Soldier): void {
       return;
     }
   }
+  if (seekBuildingStation(state, s, team)) return;
   if (threats.length === 0) {
     // No contact yet: settled men still occupy the best nearby omni-cover (foxhole/trench/
     // crater/building) — the user rule "always choose to enter the cover". Directional
