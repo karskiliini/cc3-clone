@@ -1,3 +1,4 @@
+import { vehicleCrewDuty } from '@/sim/vehicleCrewDuty';
 // ============================================================================
 // soldierMonitor.ts — the "soldier monitor" popup that floats over the
 // bottom-right of the MAP VIEWPORT (not the bottom panel) whenever a team is
@@ -12,7 +13,7 @@ import { WEAPONS } from '@/data/weapons';
 import { crewTaskWord, CREW_TASK_WORDS } from '@/sim/crewWeapon';
 import { isDazed } from '@/sim/daze';
 import { AIM_WORD, AIM_WORDS, ROUND_LABEL, soldierRounds, vehicleRounds } from '@/sim/aimPoint';
-import { DAMAGE_WORDS, ROLE_WORD, crewRoleOf, vehicleDamageView } from '@/sim/vehicleDamage';
+import { DAMAGE_WORDS, ROLE_WORD, crewRoleOf, seatRoles, vehicleDamageView } from '@/sim/vehicleDamage';
 import { VEHICLE_DEFS } from '@/data/units';
 import { drawHudBevel, hitRect, setHudFont, fitHudText } from './hudChrome';
 
@@ -106,18 +107,23 @@ export const MONITOR_GUN_WORDS: string[] = [
 /** Every word the role and status/activity columns can show. */
 export const MONITOR_ROLE_WORDS = ['Leader', 'Gunner', 'Assist', 'Assist. Ldr.', 'Loader', 'Driver', 'Commander', 'Soldat', 'Radioman', 'Crew'];
 export const MONITOR_STATUS_WORDS = ['Healthy', 'Slightly injured', 'Incap.', 'Dead', 'Pinned', 'Cowering', 'Panicked', 'Broken', 'Berserk', 'Dazed'];
-export const MONITOR_ACTIVITY_WORDS = ['Dead', 'Unconscious', 'Wary', 'Shaken', 'Driving', 'Moving', 'Running', 'Crawling', 'Firing', 'Reloading', 'Loading', 'Assisting', 'Defending', 'Ambushing', 'Hiding', 'Fleeing', 'Charging', 'Surrendered', 'Waiting', 'Changing seat', 'Bailing out', 'Mounting', 'Mounted', 'Dismounting', ...CREW_TASK_WORDS, ...AIM_WORDS, ...MONITOR_GUN_WORDS];
+export const MONITOR_ACTIVITY_WORDS = ['Dead', 'Unconscious', 'Wary', 'Shaken', 'Driving', 'Watching', 'Moving', 'Running', 'Crawling', 'Firing', 'Reloading', 'Loading', 'Assisting', 'Defending', 'Ambushing', 'Hiding', 'Fleeing', 'Charging', 'Surrendered', 'Waiting', 'Changing seat', 'Bailing out', 'Mounting', 'Mounted', 'Dismounting', ...CREW_TASK_WORDS, ...AIM_WORDS, ...MONITOR_GUN_WORDS];
 /** Damaged-system words of the vehicle header (two per line). */
 export const MONITOR_DAMAGE_WORDS = DAMAGE_WORDS;
 export const MONITOR_DAMAGE_CELL = { maxW: Math.floor((WIDTH - 12) / 2) - 4, font: 'micro' as const };
 
 const GUNNER_WEAPON_CLASSES = new Set<WeaponClass>(['lmg', 'hmg', 'mortar', 'atgun', 'atrocket']);
 
-function role(vehicle: Vehicle | undefined, soldiers: Soldier[], index: number, s: Soldier, state?: BattleState): string {
+export function soldierRoleWord(vehicle: Vehicle | undefined, soldiers: Soldier[], index: number, s: Soldier, state?: BattleState): string {
   if (vehicle && state) {
     // the seat he holds now (crew swap seats when men fall: sim/vehicleDamage.ts)
     const r = s.vehicleId === vehicle.id ? crewRoleOf(state, vehicle, s.id) : null;
     if (r) return ROLE_WORD[r];
+    const def = VEHICLE_DEFS[vehicle.defId];
+    if ((s.health === 'dead' || s.health === 'incapacitated') && def) {
+      const original = seatRoles(def)[state.teams.get(vehicle.teamId)?.soldierIds.indexOf(s.id) ?? -1];
+      return original ? ROLE_WORD[original] : 'Crew';
+    }
     if (s.health !== 'dead' && s.health !== 'incapacitated') return 'Crew';
   }
   if (vehicle) {
@@ -149,21 +155,26 @@ function healthColor(s: Soldier): string {
   }
 }
 
-/** Vehicle crew, when not actively firing/reloading/moving, read by role
- * rather than by generic activity (matches the original's Driving/Loading/
- * Assisting vocabulary for tank/gun crews). */
+/** Conservative labels for callers without live seat/phase state. */
 function crewFallbackWord(roleName: string): string {
-  if (roleName === 'Driver') return 'Driving';
-  if (roleName === 'Loader') return 'Loading';
+  if (roleName === 'Driver') return 'Waiting';
+  if (roleName === 'Loader') return 'Waiting';
   return 'Assisting';
 }
 
-function activityWord(s: Soldier, team: Team | null, vehicle: Vehicle | undefined, roleName: string): string {
+export function activityWord(s: Soldier, team: Team | null, vehicle: Vehicle | undefined, roleName: string, state?: BattleState): string {
   if (s.health === 'dead' || s.activity === 'dead') return 'Dead';
   if (s.health === 'incapacitated' || s.activity === 'incapacitated') return 'Unconscious';
   // on a hatch, half out of (or into) the vehicle (spec 2026-09-17 §10)
   if (s.hatch) return s.hatch.kind === 'mount' ? 'Mounting' : s.hatch.passenger && !s.hatch.panicked ? 'Dismounting' : 'Bailing out';
   if (s.seat === 'passenger' && s.vehicleId != null) return 'Mounted';
+  if (vehicle && state) {
+    const duty = vehicleCrewDuty(state, vehicle, s);
+    if (duty === 'loading') return vehicle.loadedRound ? loadingWord(vehicle.loadedRound, vehicle.loadProgress ?? 0) : 'Loading';
+    if (duty === 'aiming') return vehicle.aimPoint && vehicle.aimPoint !== 'mass' ? `Aiming: ${AIM_WORD[vehicle.aimPoint]}` : layingWord(vehicle.layProgress ?? 0);
+    if (duty) return { driving: 'Driving', firing: 'Firing', watching: 'Watching', waiting: 'Waiting', changingSeat: 'Changing seat' }[duty];
+  }
+
   // spec §7: show the mental-state word for wary/shaken, which have no dedicated Activity of their
   // own (calm/alert are unremarkable and keep the normal activity word).
   // a man working a crew-served weapon shows his task (spec 2026-09-17 §6)
@@ -345,6 +356,7 @@ export function weaponReadout(s: Soldier, team: Team | null, vehicle: Vehicle | 
   if (vehicle) {
     const def = VEHICLE_DEFS[vehicle.defId];
     const mainId = def?.mainWeaponId ?? null;
+    if (vehicle.seatSwap && vehicle.seatSwap.soldierId === s.id) return { glyph: null, label: '', rounds: null };
     // the man who lays the gun (the commander in a two-man turret) shows the round actually in
     // the breech and how many of that type are left; nothing loaded: just the total
     const laysGun = roleName === 'Gunner' || (roleName === 'Commander' && !!vehicle.seats && vehicle.seats.gunner === s.id && vehicle.seats.commander === s.id);
@@ -361,8 +373,8 @@ export function weaponReadout(s: Soldier, team: Team | null, vehicle: Vehicle | 
         : { glyph: null, label: '', rounds: null };
     }
     if (roleName === 'Loader') return { glyph: null, label: '', rounds: mainId ? vehicle.mainAmmo : null };
-    if (roleName === 'Radioman' && def?.coaxWeaponId) {
-      return { glyph: 'coaxmg', label: shortWeaponName(def.coaxWeaponId), rounds: vehicle.coaxAmmo };
+    if (roleName === 'Radioman' && def?.bowWeaponId) {
+      return { glyph: 'coaxmg', label: shortWeaponName(def.bowWeaponId), rounds: vehicle.bowAmmo ?? 250 };
     }
     return { glyph: null, label: '', rounds: null };
   }
@@ -535,7 +547,7 @@ export class SoldierMonitorPopup {
       const rowY = bodyY + i * ROW_H;
       const y1 = rowY + 1;
       const y2 = rowY + 1 + CELL_H + 1;
-      const roleName = role(vehicle, soldiers, this.scroll + i, s, state);
+      const roleName = soldierRoleWord(vehicle, soldiers, this.scroll + i, s, state);
 
       // line 1: [name] (role) [status]
       const nameR: Rect = { x: contentX, y: y1, w: NAME_W, h: CELL_H };
@@ -555,8 +567,8 @@ export class SoldierMonitorPopup {
       const actR: Rect = { x: contentX, y: y2, w: NAME_W, h: CELL_H };
       drawHudBevel(ctx, actR, true, HUD.black);
       setHudFont(ctx, 'micro');
-      cellText(ctx, actR, activityWord(s, team, vehicle, roleName), activityColor(s));
-      const ro = weaponReadout(s, team, vehicle, roleName);
+      cellText(ctx, actR, activityWord(s, team, s.vehicleId === vehicle?.id ? vehicle : undefined, roleName, state), activityColor(s));
+      const ro = weaponReadout(s, team, s.vehicleId === vehicle?.id ? vehicle : undefined, roleName);
       const glyphX = roleR.x + 6;
       if (ro.glyph) drawWeaponGlyph(ctx, glyphX, y2 + 3, ro.glyph);
       setHudFont(ctx, 'micro');

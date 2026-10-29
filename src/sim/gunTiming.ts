@@ -11,7 +11,7 @@ import { TILE_M } from '@/shared/types';
 import { angleTo, clamp, dist, wrapAngle } from '@/shared/math';
 import { VEHICLE_DEFS } from '@/data/units';
 import { WEAPONS } from '@/data/weapons';
-import { crewEffects, isImmobile, seatOccupant, systemState, traverseMul, turretFrozen, vehicleLayout } from './vehicleDamage';
+import { crewEffects, vehicleLoader, isImmobile, seatOccupant, systemState, traverseMul, turretFrozen, vehicleLayout } from './vehicleDamage';
 
 const DEG = Math.PI / 180;
 
@@ -86,7 +86,7 @@ export function loadPaceMul(state: BattleState, v: Vehicle, onRoad: boolean): nu
  * loader's skill and health, a dead loader (`reloadMul` from crewEffects: the commander loads,
  * x1.8), the cramped two-man turret, and the hull racks once the ready rack is empty. */
 export function vehicleLoadS(state: BattleState, v: Vehicle, def: VehicleDef, weapon: WeaponDef, reloadMul: number, gunner: Soldier | null): number {
-  const loader = seatOccupant(state, v, 'loader') ?? vehicleCommander(state, v) ?? gunner;
+  const loader = vehicleLoader(state, v) ?? gunner;
   let t = weaponLoadS(weapon) * reloadMul * loadSkillMul(loader?.experience ?? EXP_REGULAR);
   if (loader && loader.health === 'wounded') t *= LOAD_LOADER_WOUNDED_MUL;
   if (def.hasTurret && vehicleLayout(def).twoManTurret) t *= LOAD_CRAMPED_TURRET_MUL;

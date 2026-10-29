@@ -1,3 +1,4 @@
+import { syncVehicleCrewDuties } from './vehicleCrewDuty';
 import { PASSENGER_FIRE_MUL } from './transport';
 import type {
   AimPoint, BattleEvent, BattleMessage, BattleState, Health, RoundType, Side, Soldier, Team, Vec2, Vehicle, WeaponDef,
@@ -38,7 +39,7 @@ import {
   gunnerSkill, noteOutOf, shotBlocker, soldierRounds, spotHitMul, vehicleRounds,
 } from './aimPoint';
 import {
-  bowGunner, bowMgUsable, coaxUsable, crewEffects, systemState, expectedArmorMm, isImmobile, mainGunUsable, onBlastNearVehicle, resolveVehicleHit, sightAccuracyMul,
+  vehicleLoader, bowGunner, bowMgUsable, coaxUsable, crewEffects, systemState, expectedArmorMm, isImmobile, mainGunUsable, onBlastNearVehicle, resolveVehicleHit, sightAccuracyMul,
   turretFrozen, vehicleLayout,
 } from './vehicleDamage';
 import { attackPhase } from './orders';
@@ -2180,6 +2181,9 @@ function stepVehicleRockets(state: BattleState, rng: Rng, dt: number, vehicle: V
     vehicle.gunState = 'laying';
     return;
   }
+  if (vehicle.mainFireTimer > 0 && crew.gunner && vehicleLoader(state, vehicle)?.id === crew.gunner.id) {
+    vehicle.gunState = 'loading'; return;
+  }
   // the rack traverses within its arc at the mount's real rate
   const arc = gunArcRad(def);
   const rate = turretTraverseRad(def, vehicle, crew.gunner?.experience ?? 0);
@@ -2203,6 +2207,7 @@ function stepVehicleRockets(state: BattleState, rng: Rng, dt: number, vehicle: V
   vehicle.rocketSalvoLeft = (vehicle.rocketSalvoLeft ?? 1) - 1;
   vehicle.mainAmmo--;
   vehicle.lastMainShotAt = state.time;
+  if (crew.gunner) crew.gunner.lastFiredAt = state.time;
   state.events.push({ kind: 'shot', pos: { ...vehicle.pos }, weaponId: weapon.id, side: vehicle.side });
   state.flashes.push({ pos: { ...vehicle.pos }, facing: vehicle.turretFacing, t: 0, kind: 'shell' });
   addShots(state, vehicle.side, 1);
@@ -2255,7 +2260,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
   if (!def) return;
 
   // LOADING (the loader's job): motion and nerves slow him while he works
-  if (vehicle.mainFireTimer > 0) {
+  if (vehicle.mainFireTimer > 0 && vehicleLoader(state, vehicle)) {
     const here = tileAt(state.map, Math.floor(vehicle.pos.x), Math.floor(vehicle.pos.y));
     const onRoad = here === 'dirtroad' || here === 'pavedroad' || here === 'bridge';
     vehicle.mainFireTimer = Math.max(0, vehicle.mainFireTimer - dt / loadPaceMul(state, vehicle, onRoad));
@@ -2402,9 +2407,10 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
 
     // the turret (or the casemate's gun within its arc) comes round at its limited rate, once the
     // commander has called the target; a frozen turret is laid by turning the hull (vehicle.ts)
+    const gunnerLoading = vehicle.mainFireTimer > 0 && vehicleLoader(state, vehicle)?.id === gunner.id;
     const designated = lay.designateLeftS <= 0;
-    if (!designated) { if (los) lay.designateLeftS = Math.max(0, lay.designateLeftS - dt); }
-    else if (!turretFrozen(vehicle)) {
+    if (!designated) { if (los && !gunnerLoading) lay.designateLeftS = Math.max(0, lay.designateLeftS - dt); }
+    else if (!gunnerLoading && !turretFrozen(vehicle)) {
       const rate = turretTraverseRad(def, vehicle, gunner.experience);
       if (def.hasTurret) vehicle.turretFacing = turnTowards(vehicle.turretFacing, desired, rate * dt);
       else {
@@ -2429,7 +2435,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
     }
     if (lay.swayLeftS! > 0) {
       lay.swayLeftS = Math.max(0, lay.swayLeftS! - dt); // the recoil settles whatever else happens
-    } else if (designated && los && facingDiff <= COARSE_LAY_RAD && lay.fineLeftS > 0 && (!ownMoving || fireOnMove)) {
+    } else if (!gunnerLoading && designated && los && facingDiff <= COARSE_LAY_RAD && lay.fineLeftS > 0 && (!ownMoving || fireOnMove)) {
       lay.fineLeftS = Math.max(0, lay.fineLeftS - dt);
     }
     const left = clamp(1 - (lay.designateLeftS + lay.fineLeftS + (lay.swayLeftS ?? 0)) / Math.max(1e-6, lay.totalS), 0, 1);
@@ -2481,6 +2487,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
       let missed = true;
       vehicle.loadedRound = undefined;
       vehicle.lastMainShotAt = state.time;
+      gunner.lastFiredAt = state.time;
       addShots(state, vehicle.side, 1);
       state.events.push({ kind: 'shot', pos: { ...vehicle.pos }, weaponId: weapon.id, side: vehicle.side });
       state.flashes.push({ pos: { ...vehicle.pos }, facing: facingRef, t: 0, kind: 'shell' });
@@ -2545,7 +2552,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
     vehicle.fireHaltSince = undefined;
   }
 
-  if (def.coaxWeaponId && vehicle.coaxAmmo > 0 && coaxUsable(vehicle) && (crew.gunner || crew.commanderUp)) {
+  if (def.coaxWeaponId && vehicle.coaxAmmo > 0 && coaxUsable(vehicle) && crew.gunner && !(vehicle.mainFireTimer > 0 && vehicleLoader(state, vehicle)?.id === crew.gunner.id)) {
     const coax = WEAPONS[def.coaxWeaponId];
     const mgTarget = pickVehicleMgTarget(state, vehicle, 400, pickCoaxTarget(state, vehicle, 400));
     const infTarget = mgTarget?.kind === 'soldier' ? mgTarget.soldier : null;
@@ -2619,6 +2626,7 @@ function fireVehicleMgRound(
   state: BattleState, rng: Rng, vehicle: Vehicle, gunner: Soldier | null | undefined,
   muzzle: Vec2, weapon: WeaponDef, target: Target, skillMul = 1, tracerKind: 'mg' | 'bullet' = 'mg',
 ): void {
+  if (gunner) gunner.lastFiredAt = state.time;
   const victim = target.kind === 'soldier' ? target.soldier : null;
   const aim = target.kind === 'point' && target.guesstimate ? estimateAim(state, rng, muzzle, target.pos) : targetPosOf(target);
   const hit = victim ? rng.chance(vehicleHitChance(weapon, dist(muzzle, aim) * TILE_M, coverAt(state.map, aim), victim.stance,
@@ -2739,5 +2747,6 @@ export function stepCombat(state: BattleState, rng: Rng, dt: number): void {
 
   for (const vehicle of state.vehicles.values()) {
     stepVehicleCombat(state, rng, dt, vehicle, track);
+    syncVehicleCrewDuties(state, vehicle);
   }
 }

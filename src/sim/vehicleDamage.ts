@@ -124,7 +124,7 @@ export function seatOccupant(state: BattleState, v: Vehicle, role: CrewRole): So
   const id = seats[role];
   if (id == null) return null;
   const s = state.soldiers.get(id);
-  return able(s, v) ? s : null;
+  return able(s, v) && v.seatSwap?.soldierId !== id ? s : null;
 }
 
 /** Role of a crewman, by the highest-priority seat he holds (or is moving to). */
@@ -212,10 +212,8 @@ export const STAND_IN_GUNNER_MUL = 0.7;
 export function crewEffects(state: BattleState, v: Vehicle): CrewEffects {
   const seats = ensureSeats(state, v);
   let gunner = seatOccupant(state, v, 'gunner');
-  if (!('gunner' in seats)) {
-    const team = state.teams.get(v.teamId);
-    if (team) for (const id of team.soldierIds) { const s = state.soldiers.get(id); if (able(s, v)) { gunner = s; break; } }
-  }
+  if (!('gunner' in seats)) gunner = seatOccupant(state, v, 'commander') ?? seatOccupant(state, v, 'loader');
+  if (gunner && seats.driver === gunner.id) gunner = null;
   let gunnerMul = 1;
   if (gunner && 'gunner' in seats && gunner.id !== originalSeatId(state, v, 'gunner')) {
     gunnerMul = STAND_IN_GUNNER_MUL * clamp((0.7 + gunner.experience / 300) / 0.85, 0.8, 1.1);
@@ -280,14 +278,27 @@ export function mainGunUsable(v: Vehicle): boolean { return systemState(v, 'main
 export function coaxUsable(v: Vehicle): boolean { return systemState(v, 'coaxMg') !== 'destroyed'; }
 export function bowMgUsable(v: Vehicle): boolean { return systemState(v, 'bowMg') !== 'destroyed'; }
 
+/** The designated loader, or a turret crewman covering that missing duty. A driver never loads. */
+export function vehicleLoader(state: BattleState, v: Vehicle): Soldier | null {
+  if (!VEHICLE_DEFS[v.defId]?.mainWeaponId || !mainGunUsable(v) || v.state === 'burning' || v.state === 'knockedOut' || v.state === 'abandoned') return null;
+  const driverId = ensureSeats(state, v).driver;
+  for (const role of ['loader', 'commander', 'gunner'] as const) {
+    const man = seatOccupant(state, v, role);
+    if (man && man.id !== driverId) return man;
+  }
+  return null;
+}
+
 /** The man at the bow MG, or null: the radio operator / bow gunner AT HIS OWN SEAT (dead, bailed
  * out, or moved to another seat = nobody; `stepCrewSeats` empties the seat he leaves). A vehicle
- * with a hull MG but no radio operator's seat (IS-2: a fixed gun) has the driver fire it. */
+ * with a hull MG but no radio operator's seat (IS-2: a fixed gun) uses the driver at a halt. */
 export function bowGunner(state: BattleState, v: Vehicle): Soldier | null {
   const def = VEHICLE_DEFS[v.defId];
   if (!def?.bowWeaponId) return null;
   const seats = ensureSeats(state, v);
-  return seatOccupant(state, v, 'radioOp' in seats ? 'radioOp' : 'driver');
+  const gunner = seatOccupant(state, v, 'radioOp' in seats ? 'radioOp' : 'driver');
+  // A fixed driver-operated hull gun is worked at a halt; a separate bow gunner fires on the move.
+  return gunner && !(gunner.id === seats.driver && Math.abs(v.speed) > 0.1) ? gunner : null;
 }
 export function turretFrozen(v: Vehicle): boolean { return systemState(v, 'traverse') === 'destroyed' || !!v.turretBlown; }
 /** Turret traverse rate multiplier (a jammed ring that still moves is slow). */

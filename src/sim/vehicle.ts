@@ -16,7 +16,7 @@ import { addStress, addOrMergeBelief } from './mind';
 import { bestRoundAgainst } from './ballistics';
 import { crewServedClass } from './crewWeapon';
 import {
-  bailOut, crewEffects, damageSpeedMul, isImmobile, mainGunUsable, stepCrewSeats, stepVehicleDamage, trackPullRad, turretFrozen, worsen,
+  vehicleLoader, bailOut, crewEffects, damageSpeedMul, isImmobile, mainGunUsable, stepCrewSeats, stepVehicleDamage, trackPullRad, turretFrozen, worsen,
 } from './vehicleDamage';
 import { cookOffLive, stepCookOff, stepFragmentLandings } from './vehicleExplosion';
 import { vehicleRounds } from './aimPoint';
@@ -896,7 +896,9 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     const carried = wrapAngle(v.hullFacing - (lastHull.get(v) ?? v.hullFacing));
     lastHull.set(v, v.hullFacing);
     if (carried !== 0 && !turretFrozen(v)) v.turretFacing = wrapAngle(v.turretFacing + carried);
-    const gunnerExp = crewEffects(state, v).gunner?.experience;
+    const gunner = crewEffects(state, v).gunner;
+    const gunnerExp = gunner?.experience;
+    const canTraverse = !!gunner && !(v.mainFireTimer > 0 && vehicleLoader(state, v)?.id === gunner.id);
     // where the gun is wanted: the gunner's lay (sim/combat.ts), else the ordered fire point
     const layPos: Vec2 | null = v.gunLay && v.gunLay.designateLeftS <= 0 ? v.gunLay.aim : null;
 
@@ -916,7 +918,7 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
         const arc = gunArcRad(def);
         v.turretFacing = wrapAngle(v.hullFacing + Math.max(-arc, Math.min(arc, wrapAngle(v.turretFacing - v.hullFacing))));
       }
-    } else {
+    } else if (canTraverse) {
       // no target: the gun comes back to the ordered fire point or to the hull's axis, at the
       // vehicle's own historical traverse rate (no shared rule)
       const want = def.hasTurret && targetPos ? angleTo(v.pos, targetPos) : v.hullFacing;

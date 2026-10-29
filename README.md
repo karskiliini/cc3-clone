@@ -102,3 +102,5 @@ Anti-tank gun crews inside buildings prepare exterior wall openings toward Fire 
 Run the offline replay CLI with `node tools/replay.mjs` (uses the installed Vite transformer).
 
 Tank driving builds speed gradually, brakes for stops and retains tight route corners beside walls. Tanks and tracked SPGs route through woods and topple trees contacted by their hulls; fallen trunks remain low infantry cover. Tall grass and crops screen distant vehicle sightings, with less concealment while moving or firing and where growth has been flattened. The grass fringe uses curved blades and sunlit tips around the lower hull. Review both field-driving sequences in `tools/tankFieldPreview.html`.
+
+Vehicle crew activities follow occupied seats and actual gun phases: the driver drives, the gunner aims/fires, and the loader loads. A lone gunner covering loading pauses his aim and coax fire until finished; separate crewmen work in parallel. Men changing seats cannot work either station during the transfer. The monitor shows current duties and the radioman's own bow-gun ammunition; bailed-out men show their handheld weapons.
