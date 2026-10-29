@@ -15,11 +15,13 @@ import { VEHICLE_DEFS } from '@/data/units';
 import { dist } from '@/shared/math';
 import { worldToScreen } from '@/engine/camera';
 import { drawText, textWidth } from '@/render/pixelfont';
+import { omniCoverAt } from '@/sim/cover';
 
 export type HoverTone = 'own' | 'enemy' | 'dead' | 'place';
 
 export interface HoverInfo {
   text: string;
+  coverText?: string;
   tone: HoverTone;
   /** The hovered unit (tile coords) and its size, so the label can be kept off it. */
   anchor?: Vec2;
@@ -179,7 +181,10 @@ export function hoverInfoAt(state: BattleState, viewer: Side, p: Vec2, pxPerTile
   }
   if (fallen) return manInfo(fallen.s);
   const place = placeLabelAt(state.map, p);
-  return place ? { text: place, tone: 'place' } : null;
+  if (!place) return null;
+  const cover = omniCoverAt(state.map, p);
+  const quality = cover >= 0.7 ? 'Excellent' : cover >= 0.45 ? 'Good' : cover >= 0.2 ? 'Partial' : cover > 0 ? 'Little' : 'None';
+  return { text: place, tone: 'place', coverText: `Terrain cover: ${quality} (${Math.round(cover * 100)}%)` };
 }
 
 export interface ReadoutLine { text: string; color: string }

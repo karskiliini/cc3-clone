@@ -993,6 +993,7 @@ export class BattleScreen implements Screen {
     if (!this.overHud(mouse) && !this.commandMenu.isOpen) {
       const lines: ReadoutLine[] = [];
       if (this.hoverInfo) lines.push({ text: this.hoverInfo.text, color: HOVER_TONE_COLOR[this.hoverInfo.tone] });
+      if (this.hoverInfo?.coverText) lines.push({ text: this.hoverInfo.coverText, color: '#bfe6a4' });
       const status = this.targetHover ? targetStatusText(this.targetHover) : null;
       if (status && !this.hoverInfo?.text.includes(`(${status})`)) lines.push({ text: status, color: this.targetHover?.dead ? '#b8b8b0' : '#ff9070' });
       const elev = elevationTextAt(state.map, screenToWorld(cam, mouse));

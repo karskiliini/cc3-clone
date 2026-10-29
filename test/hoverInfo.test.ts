@@ -10,6 +10,17 @@ function wallAcross(state: BattleState, x: number): void {
 }
 
 describe('pointer hover label', () => {
+  it('shows the actual terrain cover beside its name, including bunker protection', () => {
+    const state = makeState(), p = { x: 15.5, y: 15.5 }, i = 15 * state.map.width + 15;
+    expect(hoverInfoAt(state, 'german', p)?.coverText).toBe('Terrain cover: None (0%)');
+    state.map.tiles[i] = 'trench';
+    expect(hoverInfoAt(state, 'german', p)?.coverText).toBe('Terrain cover: Excellent (80%)');
+    state.map.tiles[i] = 'rubble';
+    expect(hoverInfoAt(state, 'german', p)?.coverText).toBe('Terrain cover: Good (50%)');
+    state.map.bunkerId = new Int16Array(state.map.tiles.length).fill(-1); state.map.bunkerId[i] = 0;
+    expect(hoverInfoAt(state, 'german', p)?.coverText).toBe('Terrain cover: Excellent (85%)');
+    expect(hoverInfoAt(state, 'german', { x: -2, y: -2 })).toBeNull();
+  });
   it('names the ground by terrain and season', () => {
     expect(terrainLabel('crops', 'summer')).toBe('Wheat field');
     expect(terrainLabel('woods', 'summer')).toBe('Woods');

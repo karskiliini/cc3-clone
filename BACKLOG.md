@@ -9,6 +9,10 @@ Process requests in the order received. New requests are appended to the queue w
 - Keep completed items and their verification evidence below.
 - After each completed fix or feature passes verification, commit it and push the new version to GitHub on the current working branch. This is an ongoing user preference.
 Pushing to GitHub works again (since 2026-09-25); the earlier Zscaler push blocker no longer applies.
+## Session continuation (2026-10-29)
+
+The requests from this conversation are tracked in `docs/session-feedback-queue.md`; reconcile existing implementations before repeating them. The resumed branch includes published gameplay (`origin/vehicles-3d-p1`) plus current GitHub main security fixes. Other worktrees and their uncommitted work are preserved.
+
 ## Active
 
 None — next is 044 M2 (relay server and browser transport).
