@@ -80,7 +80,7 @@ export function drawRagdollFlight(ctx: CanvasRenderingContext2D, cam: Camera, s:
   if (!atlas || !entry) return;
   const dirs = atlas.meta.dirs;
   const dir = Math.round((heading / (Math.PI * 2)) * dirs);
-  drawAtlasFrame(ctx, atlas, key, dir, Math.min(entry.frames - 1, Math.floor(sample.t * entry.frames)), g.x, g.y - lift, zoom, true);
+  drawAtlasFrame(ctx, atlas, key, dir, Math.min(entry.frames - 1, Math.floor(sample.t * entry.frames)), g.x, g.y - lift, zoom, true, s.health);
 }
 
 /** Draw the pose he landed in (corpse or stunned survivor). False = caller draws its usual sprite. */
@@ -94,5 +94,5 @@ export function drawRagdollLanded(ctx: CanvasRenderingContext2D, cam: Camera, s:
   const p = worldToScreen(cam, s.pos);
   const dirs = atlas.meta.dirs;
   const dir = Math.round((ragdollHeading(b, s.pos) / (Math.PI * 2)) * dirs) + v.landed * 3;
-  return drawAtlasFrame(ctx, atlas, key, dir, 0, p.x, p.y, cam.zoom, true);
+  return drawAtlasFrame(ctx, atlas, key, dir, 0, p.x, p.y, cam.zoom, true, s.health);
 }

@@ -121,17 +121,17 @@ function drawSoldierFromAtlas(
     // a casualty being dragged to cover: on his back, head toward the man pulling him
     const hd = headingTo(s.pos, draggedBy.pos);
     downHeading.set(s.id, hd);
-    return drawAtlasSoldier(ctx, atlas, DRAGGED_KEYS, hd, (e) => e.frames - 1, p.x, p.y, zoom) != null;
+    return drawAtlasSoldier(ctx, atlas, DRAGGED_KEYS, hd, (e) => e.frames - 1, p.x, p.y, zoom, s.health) != null;
   }
   if (s.health === 'incapacitated' && !isMoving(s, trackSpeed(tr))) {
-    return drawAtlasSoldier(ctx, atlas, WOUNDED_KEYS, downHeading.get(s.id) ?? (s.facing * Math.PI) / 4, (e) => e.frames - 1, p.x, p.y, zoom) != null;
+    return drawAtlasSoldier(ctx, atlas, WOUNDED_KEYS, downHeading.get(s.id) ?? (s.facing * Math.PI) / 4, (e) => e.frames - 1, p.x, p.y, zoom, s.health) != null;
   }
   const patient = s.carrying ? state.soldiers.get(s.carrying.patientId) : undefined;
   if (patient) {
     // dragging him: facing the casualty, stepping backwards (still frame when halted)
     const moving = isMoving(s, trackSpeed(tr));
     return drawAtlasSoldier(ctx, atlas, DRAG_KEYS, smoothHeading(tr, headingTo(s.pos, patient.pos, (s.facing * Math.PI) / 4), time),
-      (entry) => (moving ? frameFor(s, time, 'walk', entry, trackSpeed(tr), 'calm', tr.motion.gaitCycles) : 0), p.x, p.y, zoom) != null;
+      (entry) => (moving ? frameFor(s, time, 'walk', entry, trackSpeed(tr), 'calm', tr.motion.gaitCycles) : 0), p.x, p.y, zoom, s.health) != null;
   }
   const prev = tr.prev ?? tr.posture;
   const posture = transitionPosture(prev, tr.posture, time - tr.since);
@@ -143,7 +143,7 @@ function drawSoldierFromAtlas(
   const climb = hatchClimbAnim(s, time);
   if (climb) {
     // through a hatch (spec §10): the climb's own pose by progress, or stooped then kneeling
-    return drawAtlasSoldier(ctx, atlas, climb.keys, climb.heading, (entry, key) => hatchClimbFrame(key, entry.frames, climb.progress, time), p.x, p.y, zoom) != null;
+    return drawAtlasSoldier(ctx, atlas, climb.keys, climb.heading, (entry, key) => hatchClimbFrame(key, entry.frames, climb.progress, time), p.x, p.y, zoom, s.health) != null;
   }
   if (crew?.keys) {
     // working a crew task (spec §6): the task's pose, its frame driven by the task's progress
@@ -152,7 +152,7 @@ function drawSoldierFromAtlas(
     const hd = smoothHeading(tr, crew.heading ?? (crew.facing * Math.PI) / 4, time);
     return drawAtlasSoldier(ctx, atlas, crew.keys, hd,
       (entry) => (prog == null ? frameFor(s, time, 'idle', entry, 0, pick.mood) : progressFrame(prog, entry.frames)),
-      p.x + j0.x, p.y + j0.y, zoom) != null;
+      p.x + j0.x, p.y + j0.y, zoom, s.health) != null;
   }
   if (crew?.pose) {
     const mood = moodFor(s);
@@ -168,9 +168,9 @@ function drawSoldierFromAtlas(
     // getting down / getting up (`standing.drop`, by progress)
     const drop = postureDropProgress(prev, tr.posture, time - tr.since, trackSpeed(tr));
     if (drop != null && drawAtlasSoldier(ctx, atlas, [`standing.drop@${pick.weapon}`, 'standing.drop'], smoothHeading(tr, heading, time),
-      (entry) => progressFrame(drop, entry.frames), p.x + j.x, p.y + j.y, zoom) != null) return true;
+      (entry) => progressFrame(drop, entry.frames), p.x + j.x, p.y + j.y, zoom, s.health) != null) return true;
   }
-  return drawAtlasSoldier(ctx, atlas, keys, smoothHeading(tr, heading, time), (entry) => frameFor(s, time, action, entry, trackSpeed(tr), pick.mood, tr.motion.gaitCycles), p.x + j.x, p.y + j.y, zoom) != null;
+  return drawAtlasSoldier(ctx, atlas, keys, smoothHeading(tr, heading, time), (entry) => frameFor(s, time, action, entry, trackSpeed(tr), pick.mood, tr.motion.gaitCycles), p.x + j.x, p.y + j.y, zoom, s.health) != null;
 }
 
 /** wf19/round6 team status bar, re-measured on the ref11 soldier column
@@ -407,8 +407,8 @@ function drawCorpses(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     if (s.crushed) {
       // run down by a vehicle (spec §7): pressed flat along its direction of travel
       drawCrushedGround(ctx, p, s.crushed.dir, cam.zoom, s.id, !!atlas);
-      if (atlas && !drawAtlasSoldier(ctx, atlas, [`corpse.crushed${s.id % 4}`, 'corpse.crushed0'], s.crushed.dir, (e) => e.frames - 1, p.x, p.y, cam.zoom)) {
-        drawAtlasSoldier(ctx, atlas, [`corpse${s.id % 8}`, 'corpse0', 'prone.hit'], s.crushed.dir, (e) => e.frames - 1, p.x, p.y, cam.zoom);
+      if (atlas && !drawAtlasSoldier(ctx, atlas, [`corpse.crushed${s.id % 4}`, 'corpse.crushed0'], s.crushed.dir, (e) => e.frames - 1, p.x, p.y, cam.zoom, s.health)) {
+        drawAtlasSoldier(ctx, atlas, [`corpse${s.id % 8}`, 'corpse0', 'prone.hit'], s.crushed.dir, (e) => e.frames - 1, p.x, p.y, cam.zoom, s.health);
         drawCrushedTreads(ctx, p, s.crushed.dir, cam.zoom);
       }
       continue;
@@ -416,7 +416,7 @@ function drawCorpses(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     // thrown by a blast: the flight is drawn with the living (drawSoldiers, above the vehicles);
     // afterwards the corpse keeps the pose it landed in
     if (s.blast && (ragdollPhase(s, state.time).phase === 'flight' || drawRagdollLanded(ctx, cam, s, season))) continue;
-    if (atlas) drawAtlasSoldier(ctx, atlas, [`corpse${s.id % 8}`, `corpse${s.id % 4}`, 'corpse0', 'prone.hit'], (s.facing * Math.PI) / 4, (e) => e.frames - 1, p.x, p.y, cam.zoom);
+    if (atlas) drawAtlasSoldier(ctx, atlas, [`corpse${s.id % 8}`, `corpse${s.id % 4}`, 'corpse0', 'prone.hit'], (s.facing * Math.PI) / 4, (e) => e.frames - 1, p.x, p.y, cam.zoom, s.health);
   }
   ctx.restore();
 }

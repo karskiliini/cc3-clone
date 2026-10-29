@@ -92,3 +92,5 @@ order first (hotkey, order bar, or right-click menu), then click the target.
 - `tools/*.html` — dev preview pages (maps, sprites, effects, UI screens, audio).
 - `docs/superpowers/specs` — design spec; `docs/reference` — notes from the original manual;
   `docs/critique` — art critiques used to drive fidelity passes.
+
+Casualty graphics: wounded uniforms show blood, with heavier staining on incapacitated and dead soldiers. The texture finish follows the existing Blender pose during movement, dragging and blast flight, and is cached per sprite cell with bounded memory. Review both sides, seasons and battle zooms in `tools/casualtyPreview.html`.

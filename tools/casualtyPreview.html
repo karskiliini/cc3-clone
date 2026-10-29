@@ -1,0 +1,8 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Casualty sprite review</title>
+<style>body{background:#23251e;color:#e3ddc6;font:14px monospace;margin:24px}h1{font-size:22px}label{margin-right:20px}select{font:inherit}canvas{display:block;image-rendering:pixelated;max-width:100%;margin-top:15px}p{max-width:900px;line-height:1.5}</style></head><body>
+<h1>Wounded and fallen soldiers</h1><p>Each pair shows the original figure above and its casualty appearance below. Moving wounded men retain their weapon and animation; incapacitated and dead men use their fallen poses.</p>
+<label>Side <select id="side"><option>german</option><option>soviet</option></select></label>
+<label>Season <select id="season"><option>summer</option><option>winter</option></select></label>
+<label>Battle zoom <select id="zoom"><option value="1">1×</option><option value="2">2×</option><option value="4">4× inspection</option></select></label>
+<span id="status">Loading…</span><canvas id="scene" width="1050" height="690"></canvas>
+<script type="module" src="./casualtyPreview.ts"></script></body></html>

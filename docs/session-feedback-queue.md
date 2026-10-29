@@ -7,14 +7,14 @@ Reconciled 2026-10-29. This session is not complete. Process these requests in a
 - Fetched GitHub; updated main to b6bd89a. Continued on `codex/resume-battle-feedback` from published gameplay 3f04887, merging current main as f0ca7c3. Retained three.js dependencies and main's patched TypeScript/Vite/Vitest versions. Other worktrees remain untouched.
 - Explosion protection (old item 010) was already committed as 06bbd9e and is present in this baseline; the old main backlog was stale.
 - No commit author, subject or body in available Git history identifies Bonsai-2. Attribution remains unresolved; do not label other authors' commits Bonsai. Inspect actual changes before relying on uncertain provenance. Identifiable earlier GLM patch commits are f01a0b3 and its corrective 58e4d6a; this is not evidence of Bonsai authorship.
-- Mac mini capacity checked: load 17.53 on 10 cores, 22 GiB disk available. Heavy rendering and broad tests deferred while loaded. Focused checks may run locally. Blood sprite generation (S01) remains pending; no bloody-art completion is claimed.
+- Mac mini capacity checked: load 17.53 on 10 cores, 22 GiB disk available. Heavy rendering and broad tests deferred while loaded. Focused checks may run locally. S01 was subsequently completed with a cached texture finish over the existing Blender sprites, avoiding a heavy asset re-render.
 - Merge dependencies: npm reported zero known vulnerabilities. Endor dependency-reviewer package-risk lookup is unavailable in this tool session; its separate malware/license/policy assessment is unknown, not approved by the npm audit result.
 
 ## Requests
 
 | ID | Request and acceptance | Current status |
 | --- | --- | --- |
-| S01 | Bloody wounded/dead sprites that clearly distinguish incapacitated soldiers. Verify at battle zooms. | Pending; needs art and visual verification. |
+| S01 | Bloody wounded/dead sprites that clearly distinguish incapacitated soldiers. Verify at battle zooms. | Complete: cached cloth-only blood finish for wounded, incapacitated, dead, dragged and blast figures; preserves silhouette and weapon detail. 64 focused tests and TypeScript pass; browser checked 1,152 combinations across both sides, seasons, scales and 16 headings. |
 | S02 | Unit type in the elevation hover tooltip, including weapon-specific teams. | Existing unit/vehicle labels found; audit all types. |
 | S03 | Terrain name and cover quality in the hover tooltip. | Cover quality and percentage added from `omniCoverAt`, beside existing place name/elevation. Includes bunker cover; 16 hover/cover tests and `tsc --noEmit` pass. Named church-floor distinctions remain to audit. |
 | S04 | Building occupants seek useful cover/windows; directional fire orders move them to a firing opening. | Reconcile existing building behavior; verify end to end. |
@@ -44,3 +44,5 @@ Reconciled 2026-10-29. This session is not complete. Process these requests in a
 ## Verification limits
 
 2026-10-29: `npx vitest run test/hoverInfo.test.ts test/cover.test.ts`: 2 files, 16 tests pass on Vitest 4.1.12. `npx tsc --noEmit` passes. No full-suite, production build or new browser visual acceptance claimed for this resumed change. Existing broad-test evidence belongs to its recorded historical revisions.
+
+S01 verification (2026-10-29): `npx vitest run test/casualtyArt.test.ts test/spriteAtlas.test.ts test/mgMountRender.test.ts test/ragdoll.test.ts test/soldierAnim.test.ts test/smgAnim.test.ts`: 5 matching files, 64 tests passed. `npx tsc --noEmit` and explicit preview typecheck passed. Browser visually checked German summer at 1x and Soviet winter at 2x; 9 poses × 16 directions × 8 atlas variants all gained blood. Preview: `tools/casualtyPreview.html`. Cached 1,000 blits measured ~0.8 ms; 16 new cells after image decode ~4.2 ms. Broad suite/build deferred while the mini is heavily loaded.

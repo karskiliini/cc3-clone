@@ -13,7 +13,8 @@
 // seasons not in the current battle are freed.
 // The index maths and key handling are pure (unit-tested in node); only load/draw touch the DOM.
 // ============================================================================
-import type { Season, Side } from '@/shared/types';
+import { bloodSeverity, bloodyCell } from './casualtyArt';
+import type { Health, Season, Side } from '@/shared/types';
 import { resolveEntryKey } from '@/render/soldierAnim';
 import { VEHICLE_DEFS } from '@/data/units';
 
@@ -272,21 +273,25 @@ export function freeAllAtlases(): void { slots.clear(); wanted = []; }
 /** Blit one frame with its anchor on (x, y). False = entry missing / atlas has no image.
  * `smooth`: at a zoom that is not a whole multiple of the atlas scale (the continuous zoom steps
  * 0.8, 1.25, 1.56 ...) resample with filtering instead of dropping / doubling uneven pixel rows. */
-export function drawAtlasFrame(ctx: CanvasRenderingContext2D, atlas: Atlas | null, key: string, dir: number, frame: number, x: number, y: number, zoom: number, smooth = false): boolean {
+export function drawAtlasFrame(ctx: CanvasRenderingContext2D, atlas: Atlas | null, key: string, dir: number, frame: number, x: number, y: number, zoom: number, smooth = false, health: Health = 'healthy'): boolean {
   if (!atlas || !atlas.image) return false;
   const entry = atlas.meta.entries[key];
   if (!entry) return false;
   const r = atlasCellRect(atlas.meta, atlasFrameIndex(entry, atlas.meta.dirs, dir, frame));
   const d = atlasDestRect(atlas.meta, x, y, zoom);
+  const severity = bloodSeverity(health);
+  const cell = severity ? bloodyCell(atlas.image, r, severity) : null;
+  const source = cell ?? atlas.image;
+  const sx = cell ? 0 : r.sx, sy = cell ? 0 : r.sy;
   const k = zoom / atlas.meta.scale;
   if (smooth && Math.abs(k - Math.round(k)) > 0.01) {
     const was = ctx.imageSmoothingEnabled;
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(atlas.image, r.sx, r.sy, r.sw, r.sh, d.dx, d.dy, d.dw, d.dh);
+    ctx.drawImage(source, sx, sy, r.sw, r.sh, d.dx, d.dy, d.dw, d.dh);
     ctx.imageSmoothingEnabled = was;
   } else {
-    ctx.drawImage(atlas.image, r.sx, r.sy, r.sw, r.sh, d.dx, d.dy, d.dw, d.dh);
+    ctx.drawImage(source, sx, sy, r.sw, r.sh, d.dx, d.dy, d.dw, d.dh);
   }
   return true;
 }
@@ -320,14 +325,14 @@ export function partsAtlas(side: Side, season: Season, zoom: number): Atlas | nu
  * soldierAnim.entryKeyChain). Returns the key used, or null => draw the code-made fallback. */
 export function drawSoldier(
   ctx: CanvasRenderingContext2D, atlas: Atlas | null, keys: readonly string[], dirRad: number,
-  frameOf: (entry: AtlasEntry, key: string) => number, x: number, y: number, zoom: number,
+  frameOf: (entry: AtlasEntry, key: string) => number, x: number, y: number, zoom: number, health: Health = 'healthy',
 ): string | null {
   if (!atlas || !atlas.image) return null;
   const key = resolveEntryKey(atlas.meta.entries, keys);
   if (!key) return null;
   const dirs = atlas.meta.dirs;
   const dir = ((Math.round((dirRad / (Math.PI * 2)) * dirs) % dirs) + dirs) % dirs;
-  return drawAtlasFrame(ctx, atlas, key, dir, frameOf(atlas.meta.entries[key], key), x, y, zoom, true) ? key : null;
+  return drawAtlasFrame(ctx, atlas, key, dir, frameOf(atlas.meta.entries[key], key), x, y, zoom, true, health) ? key : null;
 }
 
 /** Hull or turret from the 64 pre-rendered directions. The turret is placed on its ring:
