@@ -19,7 +19,7 @@ Classic (as in the original) and modern controls coexist. There is never a defau
 order first (hotkey, order bar, or right-click menu), then click the target.
 
 - Select: left click a soldier or a team box; drag a rectangle on the map for group select;
-  Shift adds to the selection; Ctrl+A selects all; double-click a team box to centre on it.
+  Shift adds to the selection; Ctrl+A selects all; double-click a team box to select all units of that exact catalog type and centre on the clicked team. Shift-double-click adds that type to the current selection.
 - Orders: press **Z** Move, **X** Move Fast, **C** Sneak, **V** Fire, **B** Smoke, **N** Defend,
   **M** Ambush (or click the order bar in the bottom strip, or right-click for the classic menu),
   then click the target. Shift-click adds waypoints (visited in click order before the final click). Esc cancels.

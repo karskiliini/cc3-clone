@@ -28,7 +28,7 @@ import { isRemountTarget } from '@/sim/vehicleCrew';
 import { drawText, textWidth } from '@/render/pixelfont';
 import { MainMenuScreen } from '@/ui/screens/mainMenu';
 import { drawTargetHighlight, targetCursorKind, targetStatusText, targetableEnemyAt, teamObserver, type TargetHover } from '@/ui/targetHover';
-import { TeamGrid } from '@/ui/hud/teamGrid';
+import { TeamGrid, sameTypeTeamIds } from '@/ui/hud/teamGrid';
 import { CombatMessages } from '@/ui/hud/combatMessages';
 import { teamSmokeMinRangeM, drawAimRangeFeedback } from '@/ui/losTool';
 import { aimLineProfile, aimPointClass } from '@/sim/losProfile';
@@ -600,13 +600,17 @@ export class BattleScreen implements Screen {
     // The roster keeps out-of-action teams (greyed, status in red); TeamGrid ignores clicks on them.
     const gridClick = this.teamGrid.update(input, this.rosterTeams(battle.playerSide()));
     if (gridClick != null) {
-      if (gridClick.shift) this.toggleInSelection(gridClick.id);
-      else this.setSelection([gridClick.id]);
       if (gridClick.doubleClick) {
         const team = state.teams.get(gridClick.id);
-        if (team) centerCamera(cam, team.pos);
+        if (team) {
+          const ids = sameTypeTeamIds(battle.selectableTeams(battle.playerSide()), team);
+          if (gridClick.shift) this.addToSelection(ids);
+          else this.setSelection(ids);
+          centerCamera(cam, team.pos);
+        }
         clampCamera(cam, state.map.width, state.map.height);
-      }
+      } else if (gridClick.shift) this.toggleInSelection(gridClick.id);
+      else this.setSelection([gridClick.id]);
     }
 
     // Hover feedback: which friendly team (if any) sits under the pointer

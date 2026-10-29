@@ -35,34 +35,40 @@ export interface TeamGridClick {
   /** Shift was held: caller should toggle this id into the selection rather
    * than replacing it. */
   shift: boolean;
-  /** Second click on the same box within the double-click window: caller
-   * should centre the camera on this team. */
+  /** Second click on the same team: select every available team of its exact catalog type. */
   doubleClick: boolean;
 }
 
 const DOUBLE_CLICK_MS = 350;
 
+/** Catalog identity keeps calibres/models separate despite sharing a broad type or icon.
+ * Use the whole selectable roster, including teams beyond the fifteen visible boxes. */
+export function sameTypeTeamIds(teams: readonly Team[], source: Team): number[] {
+  if (source.outOfAction) return [];
+  return [source, ...teams.filter(t => t.id !== source.id)]
+    .filter(t => !t.outOfAction && t.side === source.side && t.defId === source.defId && t.type === source.type)
+    .map(t => t.id);
+}
+
 export class TeamGrid {
   private hoverIndex = -1;
-  private lastClickIndex = -1;
+  private lastClickId: number | null = null;
   private lastClickTime = 0;
 
-  update(input: InputState, teams: Team[]): TeamGridClick | null {
+  update(input: InputState, teams: Team[], now = performance.now()): TeamGridClick | null {
     this.hoverIndex = -1;
     let clicked: TeamGridClick | null = null;
-    const now = performance.now();
     for (let i = 0; i < COLS * ROWS; i++) {
       const r = boxRect(i);
       if (hitRect(input.mouse, r) && !(i < teams.length && teams[i].outOfAction)) this.hoverIndex = i;
-      if (i >= teams.length || teams[i].outOfAction) continue;
-      for (const c of input.clicks) {
-        if (c.button === 0 && hitRect({ x: c.x, y: c.y }, r)) {
-          const doubleClick = this.lastClickIndex === i && now - this.lastClickTime < DOUBLE_CLICK_MS;
-          clicked = { id: teams[i].id, shift: input.keysDown.has('shift'), doubleClick };
-          this.lastClickIndex = i;
-          this.lastClickTime = now;
-        }
-      }
+    }
+    for (const c of input.clicks) {
+      const team = c.button === 0 ? teams.slice(0, COLS * ROWS).find((t, i) => !t.outOfAction && hitRect(c, boxRect(i))) : undefined;
+      if (!team) { this.lastClickId = null; continue; }
+      const doubleClick = this.lastClickId === team.id && now >= this.lastClickTime && now - this.lastClickTime < DOUBLE_CLICK_MS;
+      clicked = { id: team.id, shift: input.keysDown.has('shift'), doubleClick };
+      this.lastClickId = doubleClick ? null : team.id;
+      this.lastClickTime = now;
     }
     return clicked;
   }
