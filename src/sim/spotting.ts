@@ -1,3 +1,4 @@
+import { tileStanding } from './growth';
 import type { BattleState, Side, Soldier, Stance, Vec2, Vehicle } from '@/shared/types';
 import { SIDES, otherSide, TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
@@ -248,6 +249,27 @@ export function observerStandingSpotScore(
 }
 
 
+/** Tall growth hides the lower silhouette, while turret tops remain visible nearby.
+ * Sample the standing skirt outside the flattened hull, never count its own crushed tracks. */
+export function vehicleGrowthRangeMul(state: BattleState, v: Vehicle): number {
+  const def = VEHICLE_DEFS[v.defId];
+  if (!def) return 1;
+  let screening = 0;
+  const f = v.hullFacing;
+  for (const side of [-1, 1]) for (const along of [-0.7, 0, 0.7]) {
+    const a = along * def.lengthM / 2 / TILE_M, b = side * (def.widthM / 2 + 0.8) / TILE_M;
+    const x = Math.floor(v.pos.x + dm.sin(f) * a + dm.cos(f) * b);
+    const y = Math.floor(v.pos.y - dm.cos(f) * a + dm.sin(f) * b);
+    if (x < 0 || y < 0 || x >= state.map.width || y >= state.map.height) continue;
+    const i = y * state.map.width + x, t = state.map.tiles[i];
+    if (t === 'tallgrass' || t === 'crops') screening += tileStanding(state.map, i) * (t === 'crops' ? 1 : 0.85);
+  }
+  const fired = state.time - (v.lastMainShotAt ?? -999) < 2
+    || (state.teams.get(v.teamId)?.soldierIds ?? []).some(id => state.time - (state.soldiers.get(id)?.lastFiredAt ?? -999) < 2);
+  const benefit = fired ? 0.06 : Math.abs(v.speed) > 0.5 ? 0.2 : 0.35;
+  return 1 - screening / 6 * benefit;
+}
+
 /** Item 014: a vehicle inside another burning vehicle's firelight (and with LOS) is revealed. */
 
 /** Item 014: position of the burning wreck whose firelight covers `ev` (null if none). */
@@ -376,6 +398,7 @@ export function updateSpotting(state: BattleState, rng: Rng): void {
       const litBy = item14FloorM(state, ev) > 0;
       const firePos = litBy ? nearestFirePos(state, ev) : null;
       let clear = false;
+      const growthRangeM = VEHICLE_SPOT_RANGE_M * vehicleGrowthRangeMul(state, ev);
       for (const sp of spotters) {
         if (distSqTiles(sp.pos, ev.pos) <= floorTiles * floorTiles) { clear = true; break; }
         if (firePos) {
@@ -384,7 +407,7 @@ export function updateSpotting(state: BattleState, rng: Rng): void {
             : losTrace(state.map, sp.pos, firePos, { eyeM: spotterEyeM(sp), targetM: EYE_VEHICLE_M }).visibility;
           if (fireVis > 0) { clear = true; break; }
         }
-        const visibility = observerVisibility(state, sp, ev.pos, VEHICLE_SPOT_RANGE_M, losFor, EYE_VEHICLE_M);
+        const visibility = observerVisibility(state, sp, ev.pos, growthRangeM, losFor, EYE_VEHICLE_M);
         if (visibility > 0) { clear = true; break; }
       }
       if (clear) newSpottedVehicles.add(ev.id);

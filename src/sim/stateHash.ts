@@ -59,6 +59,10 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
   h.num(state.time);
   h.int(state.nextId);
   h.str(state.phase);
+  h.int(state.map.fallenTrees?.size ?? 0);
+  for (const [i, tree] of state.map.fallenTrees ?? []) {
+    h.int(i); h.num(tree.facing); h.num(tree.fellAt); h.str(state.map.tiles[i]);
+  }
   for (const s of state.soldiers.values()) {
     h.int(s.id);
     h.vec(s.pos);

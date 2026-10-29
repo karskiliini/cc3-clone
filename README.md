@@ -100,3 +100,5 @@ Infantry stationed inside buildings seek reachable, available firing windows in 
 Anti-tank gun crews inside buildings prepare exterior wall openings toward Fire targets or Defend/Ambush facing. A helper walks to the wall and works on it; the crew then packs, pushes and redeploys the gun with its barrel outside. Shots and muzzle flashes originate at the barrel. New movement orders interrupt the drill, and surviving helpers can replace a fallen worker. Review the sequence in `tools/gunOpeningPreview.html`.
 
 Run the offline replay CLI with `node tools/replay.mjs` (uses the installed Vite transformer).
+
+Tank driving builds speed gradually, brakes for stops and retains tight route corners beside walls. Tanks and tracked SPGs route through woods and topple trees contacted by their hulls; fallen trunks remain low infantry cover. Tall grass and crops screen distant vehicle sightings, with less concealment while moving or firing and where growth has been flattened. The grass fringe uses curved blades and sunlit tips around the lower hull. Review both field-driving sequences in `tools/tankFieldPreview.html`.

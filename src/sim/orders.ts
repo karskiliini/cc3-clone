@@ -7,7 +7,7 @@ import { addMessage } from './messages';
 import type { Rng } from '@/shared/rng';
 import { angleTo, clamp, dist, facingFromAngle, facingTo, vadd, vnorm, vscale, vsub } from '@/shared/math';
 import { teamInCommand } from './command';
-import { findPath, isPassable, type TileCostFn } from './path';
+import { findPath, isPassable, vehicleMover, type Mover, type TileCostFn } from './path';
 import { fireHazards, nearFireHazard } from './vehicleExplosion';
 import { teamHasSmoke } from './team';
 import { isFirstFireFrozen, isLeaderless } from './mind';
@@ -150,8 +150,8 @@ export const FIRE_HAZARD_PATH_COST = 4;
 /** The extra path cost for routes while something burns, or undefined when nothing does (the usual
  * case: findPath then runs exactly as before). Men on foot and open-topped vehicles (halftracks)
  * keep clear of a hulk that may cook off; closed-up armour does not care. */
-export function fireHazardCost(state: BattleState, mover: 'infantry' | 'vehicle', softVehicle = false): TileCostFn | undefined {
-  if (mover === 'vehicle' && !softVehicle) return undefined;
+export function fireHazardCost(state: BattleState, mover: Mover, softVehicle = false): TileCostFn | undefined {
+  if (mover !== 'infantry' && !softVehicle) return undefined;
   const hazards = fireHazards(state);
   if (hazards.length === 0) return undefined;
   const p = { x: 0, y: 0 };
@@ -162,7 +162,7 @@ export function fireHazardCost(state: BattleState, mover: 'infantry' | 'vehicle'
  * (`fireHazardCost`; `softVehicle`: an open-topped vehicle, which avoids them like infantry).
  * skipped (the route goes on to the next one). Records per-point leg headings for followers, and
  * records a failed leg's point so `stepOrderWaypoints` can drop the waypoint no one will visit. */
-export function routeVia(state: BattleState, from: Vec2, points: readonly Vec2[], mover: 'infantry' | 'vehicle', softVehicle = false): Vec2[] {
+export function routeVia(state: BattleState, from: Vec2, points: readonly Vec2[], mover: Mover, softVehicle = false): Vec2[] {
   const hazardCost = fireHazardCost(state, mover, softVehicle);
   if (points.length === 1) {
     const path = findPath(state.map, from, points[0], mover, undefined, hazardCost);
@@ -551,7 +551,7 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
 
   if (type === 'move' || type === 'moveFast' || type === 'sneak') {
     if (isVehicleTeam) {
-      if (vehicle) vehicle.path = routeVia(state, vehicle.pos, orderRoutePoints(order), 'vehicle', VEHICLE_DEFS[vehicle.defId]?.layout?.openTop === true);
+      if (vehicle) vehicle.path = routeVia(state, vehicle.pos, orderRoutePoints(order), vehicleMover(VEHICLE_DEFS[vehicle.defId]), VEHICLE_DEFS[vehicle.defId]?.layout?.openTop === true);
     } else {
       const leader = state.soldiers.get(team.leaderId);
       leaderPath = leader ? routeVia(state, leader.pos, orderRoutePoints(order), 'infantry') : [];

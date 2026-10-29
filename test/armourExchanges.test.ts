@@ -12,6 +12,7 @@ import { stepCombat, pickVehicleTarget, vehicleAreaTarget } from '@/sim/combat';
 import { stepVehicles } from '@/sim/vehicle';
 import { hasLOS, hasLineOfFire, EYE_VEHICLE_M, VEHICLE_GUN_M } from '@/sim/los';
 import { Battle } from '@/sim/battle';
+import { WEAPONS } from '@/data/weapons';
 import { DEFAULT_FORCES } from '@/data/operation';
 import { Rng } from '@/shared/rng';
 import type { BattleConfig, BattleState, Vehicle } from '@/shared/types';
@@ -153,7 +154,8 @@ describe('item 038 — seeded armour exchange (moscow_1941, seed 9)', () => {
     };
     const battle = new Battle(config);
     battle.start();
-    const MAIN = new Set(['kwk39_50', 'kwk37_75', 'kv_zis5', '45mm_20k', 'pak38', 'pak36', 'zis3_76', 'f34_76']);
+    // Include the actual Soviet AT-gun IDs as well as tank guns: both sides' cannon fire counts.
+    const MAIN = new Set(Object.values(WEAPONS).filter(w => w.cls === 'tankgun' || w.cls === 'atgun').map(w => w.id));
     const bySide = { german: 0, soviet: 0 };
     for (let i = 0; i < 300; i++) {
       battle.step(1);

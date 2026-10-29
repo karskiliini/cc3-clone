@@ -1,3 +1,4 @@
+import { drawFallenTrees } from './treeFx';
 // ============================================================================
 // unitRender.ts — draws soldiers, vehicles, selection rings, VL flags, team
 // labels and order lines/arcs for the battle viewport.
@@ -1158,6 +1159,7 @@ export function drawUnits(
   ctx.imageSmoothingEnabled = false;
 
   ensureAtlases(state);
+  drawFallenTrees(ctx, cam, state);
   ragdollBeginFrame(state.time);
   drawCorpses(ctx, cam, state, playerSide, showDead);
   drawLooseObjects(ctx, cam, state, false, showDead);

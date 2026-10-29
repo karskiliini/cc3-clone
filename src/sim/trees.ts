@@ -1,24 +1,5 @@
-// ============================================================================
-// trees.ts — trees as physical objects a battle acts on.
-//
-// * Vehicles drive THROUGH woods and scattered trees: each tree tile the hull
-//   crosses is crushed (pushed down, 'rubble' — trunks and brash) unless it is
-//   the reserved impassable core (a tank cannot flatten a dense wood core, only
-//   its edge and scattered trees; see TREE_STRENGTH).
-// * A shell or HE burst on a tree tile FELLS the tree (crushTile) and throws a
-//   dust burst; an HE burst of heRadiusM >= 3 may also IGNITE the felled wood.
-// * Fire spreads: each burning tree tile, once per second, may ignite an
-//   adjacent tree tile (chance rises the longer it has burned).
-//   Fire burns for BURN_S then dies to 'rubble'.
-// * Fire HURTS: any soldier on a burning tile (or adjacent to one, lighter)
-//   takes damage; able men automatically dodge — they path away from burning
-//   tiles (the mind's threat set is extended by fire tiles, same machinery as
-//   burning vehicles).
-//
-// All state lives in WeakMaps keyed by the GameMap: no BattleState field, no
-/** Damage a soldier standing IN fire takes per second (roll gate). */
-// determinism change for existing tests.
-// ============================================================================
+// Trees are crushable obstacles. Felled trunks become low rubble cover, retaining a
+// direction and time for the renderer's falling animation. Wheels do not flatten woods.
 import type { BattleState, GameMap, Side, Soldier, Terrain, Vec2, WeaponDef } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
@@ -26,15 +7,11 @@ import { dist } from '@/shared/math';
 import { tileAt, idx, inBounds } from './map';
 import { TERRAIN_PROPS } from './terrain';
 import { crushTile } from './structures';
+import { refreshTiles } from './heightField';
 import { addMessage } from './messages';
 import { addStress } from './mind';
 import { applyHit } from './combat';
 import * as dm from '@/shared/dmath';
-
-/** Dense woods core (the AI's concealment heart) resists crushing; the fringe
- * and scattered trees go down. `woods` needs a vehicle of this length (m) or
- * more to crush; smaller vehicles are stopped by the trunk mass as before. */
-export const TREE_CRUSH_MIN_LENGTH_M = 5;
 
 /** A burning tree tile burns this many seconds before dying to rubble. */
 export const TREE_BURN_S = 45;
@@ -87,18 +64,24 @@ export function damageVegetation(map: GameMap, tx: number, ty: number, damage: n
   if (total < strength) { hits.set(i, total); return false; }
   hits.delete(i);
   fires.get(map)?.delete(i);
-  return crushTile(map, tx, ty);
+  return terrain === 'hedge' ? crushTile(map, tx, ty) : fellTree(map, tx, ty, 0, 0);
 }
 
-/** A vehicle of `lengthM` crossing tree tile (tx,ty): crush it (push it down
- * into brash/rubble). Dense `woods` core resists vehicles shorter than
- * TREE_CRUSH_MIN_LENGTH_M. Returns true when the tile changed. */
-export function treeCrushByVehicle(map: GameMap, tx: number, ty: number, lengthM: number): boolean {
-  if (!inBounds(map, tx, ty)) return false;
-  const t = tileAt(map, tx, ty);
-  if (!TREE_TILES.has(t)) return false;
-  if (t === 'woods' && lengthM < TREE_CRUSH_MIN_LENGTH_M) return false;
-  return crushTile(map, tx, ty);
+/** Replace canopy by low trunk/brash cover; keep this persistent even after the dust clears. */
+function fellTree(map: GameMap, tx: number, ty: number, facing: number, time: number): boolean {
+  if (!treeTileAt(map, tx, ty)) return false;
+  crushTile(map, tx, ty);
+  const i = idx(map, tx, ty);
+  map.tiles[i] = 'rubble';
+  (map.fallenTrees ??= new Map()).set(i, { facing, fellAt: time });
+  if (map.heightField) refreshTiles(map, [i]);
+  return true;
+}
+
+/** Called only for tracked armour, including light tanks. */
+export function treeCrushByVehicle(map: GameMap, tx: number, ty: number, lengthM: number, facing = 0, time = 0): boolean {
+  if (!inBounds(map, tx, ty) || lengthM <= 0) return false;
+  return fellTree(map, tx, ty, facing, time);
 }
 
 /** HE burst at `pos` with `weapon`: fell trees it reaches; large HE may ignite
@@ -116,7 +99,7 @@ export function treesInBlast(state: BattleState, rng: Rng, pos: Vec2, weapon: We
       if (!TREE_TILES.has(t)) continue;
       const d = dm.hypot(tx + 0.5 - pos.x, ty + 0.5 - pos.y);
       if (d > rTiles) continue;
-      const crushed = crushTile(map, tx, ty);
+      const crushed = fellTree(map, tx, ty, dm.atan2(tx + 0.5 - pos.x, -(ty + 0.5 - pos.y)), state.time);
       if (crushed && weapon.heRadiusM >= TREE_IGNITE_RADIUS_M && rng.chance(TREE_IGNITE_CHANCE)) {
         igniteTree(state, tx, ty);
       }
@@ -128,7 +111,7 @@ export function igniteTree(state: BattleState, tx: number, ty: number): void {
   const map = state.map;
   if (!inBounds(map, tx, ty)) return;
   const i = idx(map, tx, ty);
-  if (!TREE_TILES.has(tileAt(map, tx, ty))) return;
+  if (!TREE_TILES.has(tileAt(map, tx, ty)) && !map.fallenTrees?.has(i)) return;
   const m = fireMap(map);
   if (m.has(i)) return;
   m.set(i, { ignitedAt: state.time, lastSpreadAt: state.time, lastDamageAt: state.time });
@@ -171,7 +154,7 @@ export function stepTreeFires(state: BattleState, rng: Rng, dt: number): void {
     }
     // burn out
     if (state.time - f.ignitedAt >= TREE_BURN_S) {
-      crushTile(map, tx, ty); // charcoal and brash
+      fellTree(map, tx, ty, 0, state.time); // standing trees fall into charcoal and brash
       dead.push(i);
       continue;
     }

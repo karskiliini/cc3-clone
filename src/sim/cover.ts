@@ -18,6 +18,7 @@ export const BUNKER_COVER = 0.85;
 
 function omniCoverOf(map: GameMap, tx: number, ty: number, t: Terrain): number {
   if (map.bunkerId && map.bunkerId[ty * map.width + tx] >= 0) return BUNKER_COVER;
+  if (map.fallenTrees?.has(ty * map.width + tx)) return 0.35;
   return OMNI_COVER[t] ?? TERRAIN_PROPS[t].cover;
 }
 
@@ -40,6 +41,7 @@ export interface CoverContext {
 function linearCoverOf(map: GameMap, x: number, y: number, ctx?: CoverContext): number {
   if (!inBounds(map, x, y)) return 0;
   const t = tileAt(map, x, y);
+  if (map.fallenTrees?.has(y * map.width + x)) return 0.3;
   const lc = LINEAR_COVER[t];
   if (lc !== undefined) return lc;
   if (ctx?.wreckTiles?.has(`${x},${y}`)) return 0.6;

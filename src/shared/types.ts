@@ -207,6 +207,8 @@ export interface GameMap {
   craterMarks?: CraterMark[];
   /** tile indexes changed since last render bake (e.g. vehicle crushing terrain); renderer clears this */
   dirtyTiles?: number[];
+  /** Felled trunks remain physical low cover; direction/time also drive the falling animation. */
+  fallenTrees?: Map<number, { facing: number; fellAt: number }>;
   /** surface height model (sim/heightField.ts), built at map load and updated by blasts/damage */
   heightField?: HeightField;
   /** Per-tile GROUND elevation in metres (row-major, width*height) — the landform under every

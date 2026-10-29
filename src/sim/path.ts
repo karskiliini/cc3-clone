@@ -1,8 +1,16 @@
-import type { GameMap, Vec2 } from '@/shared/types';
+import type { GameMap, Vec2, VehicleDef } from '@/shared/types';
 import { TERRAIN_PROPS } from './terrain';
 import { idx, inBounds } from './map';
 
-type Mover = 'infantry' | 'vehicle';
+export type Mover = 'infantry' | 'vehicle' | 'tank';
+/** Fully tracked armour can force tree stands; wheels and halftracks keep normal routes. */
+export function vehicleMover(def: VehicleDef | undefined): Mover {
+  return def && (def.kind === 'tank' || def.kind === 'spg') ? 'tank' : 'vehicle';
+}
+export function terrainMoveCost(t: GameMap['tiles'][number], mover: Mover): number {
+  if (mover === 'tank' && (t === 'woods' || t === 'scatteredtrees')) return 1.15;
+  return mover === 'infantry' ? TERRAIN_PROPS[t].infantryCost : TERRAIN_PROPS[t].vehicleCost;
+}
 
 /** Steepest local grade a tracked vehicle will attempt (25% ~= 14 degrees). Above that the bank
  * is a wall as far as the vehicle is concerned; infantry scramble up anything. Map relief is
@@ -13,14 +21,35 @@ export function isPassable(map: GameMap, x: number, y: number, mover: Mover): bo
   if (!inBounds(map, x, y)) return false;
   const i = idx(map, x, y);
   const t = map.tiles[i];
-  const cost = mover === 'infantry' ? TERRAIN_PROPS[t].infantryCost : TERRAIN_PROPS[t].vehicleCost;
+  const cost = terrainMoveCost(t, mover);
   if (!Number.isFinite(cost)) return false;
-  if (mover === 'vehicle') {
+  if (mover !== 'infantry') {
     const steep = map.groundSteep;
     if (steep && steep[i] > VEHICLE_MAX_GRADE) return false;
     if (map.bunkerId && map.bunkerId[i] >= 0) return false; // a pillbox is a solid obstacle to tracks
   }
   return true;
+}
+
+/** Visit every grid cell touched by a fractional segment, including both sides of corners.
+ * Fixed-distance probes can miss a narrow wall corner and strand a turning hull against it. */
+export function segmentPassable(map: GameMap, a: Vec2, b: Vec2, mover: Mover): boolean {
+  let x = Math.floor(a.x), y = Math.floor(a.y);
+  const endX = Math.floor(b.x), endY = Math.floor(b.y);
+  const dx = b.x - a.x, dy = b.y - a.y, sx = Math.sign(dx), sy = Math.sign(dy);
+  const stepX = dx ? Math.abs(1 / dx) : Infinity, stepY = dy ? Math.abs(1 / dy) : Infinity;
+  let nextX = dx ? (sx > 0 ? x + 1 - a.x : a.x - x) / Math.abs(dx) : Infinity;
+  let nextY = dy ? (sy > 0 ? y + 1 - a.y : a.y - y) / Math.abs(dy) : Infinity;
+  for (let n = 0; n <= map.width + map.height; n++) {
+    if (!isPassable(map, x, y, mover)) return false;
+    if (x === endX && y === endY) return true;
+    if (Math.abs(nextX - nextY) < 1e-10) {
+      if (!isPassable(map, x + sx, y, mover) || !isPassable(map, x, y + sy, mover)) return false;
+      x += sx; y += sy; nextX += stepX; nextY += stepY;
+    } else if (nextX < nextY) { x += sx; nextX += stepX; }
+    else { y += sy; nextY += stepY; }
+  }
+  return false;
 }
 
 /** Step cost is terrain only — deliberately NOT slope-weighted. Adding a slope term to A* was
@@ -30,7 +59,7 @@ export function isPassable(map: GameMap, x: number, y: number, mover: Mover): bo
  * move (movement.ts's gradeSpeedMul) and in what a vehicle can climb at all (isPassable). */
 function costOf(map: GameMap, x: number, y: number, mover: Mover): number {
   const t = map.tiles[idx(map, x, y)];
-  return mover === 'infantry' ? TERRAIN_PROPS[t].infantryCost : TERRAIN_PROPS[t].vehicleCost;
+  return terrainMoveCost(t, mover);
 }
 
 function octile(dx: number, dy: number): number {

@@ -50,7 +50,8 @@ describe('rounds through vegetation', () => {
     const index = 10 * state.map.width + 20;
     state.map.tiles[index] = 'woods';
     const shot = traceRound(state, new Rng(1), from, to, WEAPONS.kwk40_75);
-    expect(state.map.tiles[index]).toBe('open');
+    expect(state.map.tiles[index]).toBe('rubble');
+    expect(state.map.fallenTrees?.has(index)).toBe(true);
     expect(shot.blocked).toBe(true);
     expect(Math.floor(shot.impact.x)).toBe(20);
   });
@@ -60,7 +61,7 @@ describe('rounds through vegetation', () => {
     state.map.tiles[10 * state.map.width + 20] = 'woods';
     // Combat passes the actual round profile: AP/APCR have no explosive radius.
     const shot = traceRound(state, new Rng(1), from, to, { ...WEAPONS.kwk40_75, heRadiusM: 0 });
-    expect(state.map.tiles[10 * state.map.width + 20]).toBe('open');
+    expect(state.map.tiles[10 * state.map.width + 20]).toBe('rubble');
     expect(shot.blocked).toBe(false);
     expect(shot.impact).toEqual(to);
   });

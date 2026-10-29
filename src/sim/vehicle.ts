@@ -11,7 +11,7 @@ import { VEHICLE_DEFS } from '@/data/units';
 import { WEAPONS } from '@/data/weapons';
 import { EYE_VEHICLE_M, hasLOS, hasLineOfFire, losTrace } from './los';
 import { gradeSpeedMul, GRADE_UPHILL_VEHICLE } from './movement';
-import { findPath, isPassable } from './path';
+import { findPath, isPassable, vehicleMover, terrainMoveCost, segmentPassable } from './path';
 import { addStress, addOrMergeBelief } from './mind';
 import { bestRoundAgainst } from './ballistics';
 import { crewServedClass } from './crewWeapon';
@@ -30,6 +30,37 @@ import { stepVehicleCrews } from './vehicleCrew';
 import { stepTransport, transportHolds } from './transport';
 import { isDazed } from './daze';
 import * as dm from '@/shared/dmath';
+
+/** Ordinary throttle limits in m/s². Emergency collision/pivot stops remain immediate. */
+export const DRIVE_ACCEL_MS2 = 0.85;
+export const DRIVE_BRAKE_MS2 = 2;
+export function driveThrottle(v: Vehicle, wanted: number, dt: number): number {
+  // Shifting reverse first stops the tracks; never move in the wrong commanded direction.
+  if (v.speed * wanted < 0) return 0;
+  const current = Math.abs(v.speed), target = Math.abs(wanted);
+  const rate = target > current ? DRIVE_ACCEL_MS2 * damageSpeedMul(v) : DRIVE_BRAKE_MS2;
+  return Math.sign(wanted) * (current + clamp(target - current, -rate * dt, rate * dt));
+}
+
+/** Trees contacted by the actual footprint topple before the axle reaches their tile. */
+function crushHullTrees(state: BattleState, v: Vehicle): void {
+  const def = VEHICLE_DEFS[v.defId];
+  if (!def || Math.abs(v.speed) < 0.01) return;
+  if (vehicleMover(def) !== 'tank') {
+    const x = Math.floor(v.pos.x), y = Math.floor(v.pos.y);
+    if (tileAt(state.map, x, y) === 'scatteredtrees') treeCrushByVehicle(state.map, x, y, def.lengthM, v.hullFacing, state.time);
+    return;
+  }
+  const f = v.hullFacing, facing = v.speed < 0 ? wrapAngle(f + Math.PI) : f;
+  const fx = dm.sin(f), fy = -dm.cos(f), rx = dm.cos(f), ry = dm.sin(f);
+  for (let a = -def.lengthM / 2; a <= def.lengthM / 2 + 0.01; a += 0.5) {
+    for (let b = -def.widthM / 2; b <= def.widthM / 2 + 0.01; b += 0.5) {
+      const x = v.pos.x + (fx * a + rx * b) / TILE_M;
+      const y = v.pos.y + (fy * a + ry * b) / TILE_M;
+      treeCrushByVehicle(state.map, Math.floor(x), Math.floor(y), def.lengthM, facing, state.time);
+    }
+  }
+}
 
 const HEADING_ALIGN_RAD = 0.35;
 /** Tracked vehicles: beyond this heading error they stop and pivot; beyond SHARP_TURN_RAD they
@@ -261,7 +292,7 @@ function findVehicleCoverRoute(state: BattleState, v: Vehicle, threatPos: Vec2):
       if (dx * dx + dy * dy > 144) continue;
       const tx = cx + dx, ty = cy + dy;
       if (!inBounds(map, tx, ty)) continue;
-      if (!isPassable(map, tx, ty, 'vehicle')) continue;
+      if (!isPassable(map, tx, ty, vehicleMover(VEHICLE_DEFS[v.defId]))) continue;
       const tile = { x: tx + 0.5, y: ty + 0.5 };
       if (tooClose(tile)) continue;
       const trace = losTrace(map, tile, threatPos);
@@ -276,7 +307,7 @@ function findVehicleCoverRoute(state: BattleState, v: Vehicle, threatPos: Vec2):
   for (const { target, distance } of candidates) {
     if (distance < 0.5) return { target, route: [] };
     // Cover is local: bound route work, and reject partial A* paths into unreachable pockets.
-    const route = findPath(map, v.pos, target, 'vehicle', 2000);
+    const route = findPath(map, v.pos, target, vehicleMover(VEHICLE_DEFS[v.defId]), 2000);
     const end = route.at(-1);
     if (end && dist(end, target) < 0.5) return { target, route };
   }
@@ -540,9 +571,10 @@ function driveToCover(state: BattleState, rng: Rng, dt: number, v: Vehicle, def:
   }
   v.hullFacing = wrapAngle(v.hullFacing + trackPullRad(v) * dt);
   const direction = track.backing ? wrapAngle(v.hullFacing + Math.PI) : v.hullFacing;
+  speed = Math.abs(driveThrottle(v, speed * (track.backing ? -1 : 1), dt));
   const advance = Math.min(dist(v.pos, wp), speed * dt / TILE_M);
   const next = { x: v.pos.x + dm.sin(direction) * advance, y: v.pos.y - dm.cos(direction) * advance };
-  if (!isPassable(state.map, Math.floor(next.x), Math.floor(next.y), 'vehicle')) { v.speed = 0; return; }
+  if (!isPassable(state.map, Math.floor(next.x), Math.floor(next.y), vehicleMover(VEHICLE_DEFS[v.defId]))) { v.speed = 0; return; }
   // item 038: the cover drive's old terrain-only check let two hulls drive into overlap — block
   // against live hulls too (wrecks are solid but the collision step's separation handles them).
   if (hullBlocker(state, v, next) != null) { v.speed = 0; return; }
@@ -554,7 +586,7 @@ function driveToCover(state: BattleState, rng: Rng, dt: number, v: Vehicle, def:
   if (vehicleBlockingAt(state, v, next)) { v.speed = 0; return; } // another hull: it stands
   v.pos = next;
   if (props.crushable) crushTile(state.map, tx, ty);
-  treeCrushByVehicle(state.map, tx, ty, def.lengthM);
+  crushHullTrees(state, v);
   stepOverrun(state, rng, v, direction);
 }
 
@@ -610,7 +642,7 @@ function onHullBlocked(state: BattleState, v: Vehicle, blocker: Vehicle): void {
     const c = { x: x + 0.5, y: y + 0.5 };
     return others.some((o) => dist(o.pos, c) < r + hullRadiusTiles(o)) ? 40 : 0;
   };
-  const route = findPath(state.map, v.pos, goal, 'vehicle', 6000, aroundHulls);
+  const route = findPath(state.map, v.pos, goal, vehicleMover(VEHICLE_DEFS[v.defId]), 6000, aroundHulls);
   if (route.length > 0) v.path = route;
 }
 
@@ -640,7 +672,7 @@ function seekFiringSpot(state: BattleState, v: Vehicle, def: VehicleDef): void {
     for (let k = 0; k < n; k++) {
       const a = (k / n) * Math.PI * 2;
       const c = { x: Math.floor(v.pos.x + dm.sin(a) * r) + 0.5, y: Math.floor(v.pos.y - dm.cos(a) * r) + 0.5 };
-      if (!isPassable(state.map, Math.floor(c.x), Math.floor(c.y), 'vehicle')) continue;
+      if (!isPassable(state.map, Math.floor(c.x), Math.floor(c.y), vehicleMover(VEHICLE_DEFS[v.defId]))) continue;
       const toTarget = dist(c, target);
       if (toTarget > rangeTiles || vehicleBlockingAt(state, v, c)) continue;
       const score = toTarget;
@@ -648,7 +680,7 @@ function seekFiringSpot(state: BattleState, v: Vehicle, def: VehicleDef): void {
       best = c; bestScore = score;
     }
     if (best) {
-      const route = findPath(state.map, v.pos, best, 'vehicle', 4000);
+      const route = findPath(state.map, v.pos, best, vehicleMover(VEHICLE_DEFS[v.defId]), 4000);
       if (route.length > 0 && dist(route[route.length - 1], best) <= 1) { v.path = route; return; }
     }
   }
@@ -669,14 +701,15 @@ const ARRIVED_OFF_BOW = Math.PI / 3;
  * and it passes clear of every other hull (nor through the vehicle its route went round). */
 function straightDrivable(state: BattleState, v: Vehicle, b: Vec2, maxCost: number): boolean {
   const a = v.pos;
+  if (!segmentPassable(state.map, a, b, vehicleMover(VEHICLE_DEFS[v.defId]))) return false;
   const d = dist(a, b);
   const n = Math.max(1, Math.ceil(d / 0.3));
   const others = [...state.vehicles.values()].filter((o) => o !== v && dist(o.pos, a) < d + hullRadiusTiles(v) + hullRadiusTiles(o) + 2);
   for (let i = 1; i <= n; i++) {
     const p = { x: a.x + ((b.x - a.x) * i) / n, y: a.y + ((b.y - a.y) * i) / n };
     const x = Math.floor(p.x), y = Math.floor(p.y);
-    if (!isPassable(state.map, x, y, 'vehicle')) return false;
-    if (TERRAIN_PROPS[tileAt(state.map, x, y)].vehicleCost > maxCost) return false;
+    if (!isPassable(state.map, x, y, vehicleMover(VEHICLE_DEFS[v.defId]))) return false;
+    if (terrainMoveCost(tileAt(state.map, x, y), vehicleMover(VEHICLE_DEFS[v.defId])) > maxCost) return false;
     for (const o of others) if (hullsOverlap(v, p, o) && dist(o.pos, p) < dist(o.pos, a)) return false;
   }
   return true;
@@ -693,11 +726,11 @@ function pursuePath(state: BattleState, v: Vehicle, def: VehicleDef, travelFacin
   const isPinned = (p: Vec2): boolean => pinned.some((w) => dist(w, p) <= 1);
   // a waypoint under the hull is reached (its bearing is meaningless that close: chasing it only
   // spins the tank on the spot); one fallen behind is passed
-  while (path.length > 1 && (dist(v.pos, path[0]) < WAYPOINT_REACH_TILES
+  while (path.length > 1 && straightDrivable(state, v, path[1], Infinity) && (dist(v.pos, path[0]) < WAYPOINT_REACH_TILES
     || (dist(v.pos, path[0]) < PASSED_TILES && offBow(path[0]) > Math.PI / 2 && !isPinned(path[0])))) path.shift();
-  let skip = 0, maxCost = TERRAIN_PROPS[tileAt(state.map, Math.floor(v.pos.x), Math.floor(v.pos.y))].vehicleCost;
+  let skip = 0, maxCost = terrainMoveCost(tileAt(state.map, Math.floor(v.pos.x), Math.floor(v.pos.y)), vehicleMover(def));
   for (let i = 0; i < path.length && dist(v.pos, path[i]) <= LOOKAHEAD_TILES; i++) {
-    maxCost = Math.max(maxCost, TERRAIN_PROPS[tileAt(state.map, Math.floor(path[i].x), Math.floor(path[i].y))].vehicleCost);
+    maxCost = Math.max(maxCost, terrainMoveCost(tileAt(state.map, Math.floor(path[i].x), Math.floor(path[i].y)), vehicleMover(def)));
     if (i > 0 && straightDrivable(state, v, path[i], maxCost)) skip = i;
     if (isPinned(path[i])) break; // the player's waypoint: steer for it, never past it
   }
@@ -742,8 +775,13 @@ function driveTo(state: BattleState, v: Vehicle, next: Vec2): boolean {
     if (v.path.length > 0) armGiveWay(state, v, blocker); // still stuck on a parked friend: back up
     return false;
   }
+  if (!isPassable(state.map, Math.floor(next.x), Math.floor(next.y), vehicleMover(VEHICLE_DEFS[v.defId]))) {
+    v.speed = 0;
+    return false;
+  }
   blockedSince.delete(v);
   v.pos = next;
+  crushHullTrees(state, v);
   return true;
 }
 
@@ -903,9 +941,10 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
       const fwd = { x: dm.sin(v.hullFacing), y: -dm.cos(v.hullFacing) };
       const next = vadd(v.pos, vscale(fwd, stepTiles));
       const nx = Math.floor(next.x), ny = Math.floor(next.y);
-      if (stepTiles > 0 && inBounds(map, nx, ny) && isPassable(map, nx, ny, 'vehicle') && !hullBlocked(state, v, next)) {
+      if (stepTiles > 0 && inBounds(map, nx, ny) && isPassable(map, nx, ny, vehicleMover(VEHICLE_DEFS[v.defId])) && !hullBlocked(state, v, next)) {
         v.pos = next;
         v.speed = crawlMs;
+        crushHullTrees(state, v);
       } else {
         v.speed = 0;
         // aligned but cannot advance (blocked or impassable ahead): give up this creep
@@ -984,14 +1023,15 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     // briefly along its own axis, then re-approaches the route.
     if (v.giveWayUntil != null) {
       if (state.time < v.giveWayUntil) {
-        const spd = def.speedOffroadMs * 0.5;
+        const spd = Math.abs(driveThrottle(v, -def.speedOffroadMs * 0.5, dt));
         const stepTiles = (spd * dt) / TILE_M;
         const back = { x: -dm.sin(v.hullFacing), y: dm.cos(v.hullFacing) };
         const next = vadd(v.pos, vscale(back, stepTiles));
         const nx = Math.floor(next.x), ny = Math.floor(next.y);
-        if (inBounds(map, nx, ny) && isPassable(map, nx, ny, 'vehicle') && !hullBlocked(state, v, next)) {
+        if (inBounds(map, nx, ny) && isPassable(map, nx, ny, vehicleMover(VEHICLE_DEFS[v.defId])) && !hullBlocked(state, v, next)) {
           v.pos = next;
           v.speed = -spd;
+          crushHullTrees(state, v);
         } else {
           v.speed = 0; // nowhere to back into: try the forward route from where it stands
         }
@@ -1009,12 +1049,12 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     const onRoad = tile === 'dirtroad' || tile === 'pavedroad' || tile === 'bridge';
     const baseSpeed = onRoad ? def.speedRoadMs : def.speedOffroadMs;
     // slope: tracks lose far more than legs do on a climb (GRADE_UPHILL_VEHICLE)
-    const fullSpeedMs = (onRoad ? baseSpeed : baseSpeed * props.speedMul)
+    const fullSpeedMs = (onRoad ? baseSpeed : baseSpeed * props.speedMul * (tile === 'woods' ? 0.65 : tile === 'scatteredtrees' ? 0.8 : 1))
       * gradeSpeedMul(map, v.pos, wp, GRADE_UPHILL_VEHICLE) * damageSpeedMul(v);
 
     if (def.turnRadiusM != null) {
       // wheel-steered halftrack: it cannot pivot; it drives an arc, or backs up in a K-turn
-      if (stepWheeledDrive(state, rng, dt, v, def, wp, desired, fullSpeedMs)) { if (props.crushable) crushTile(map, tx, ty); treeCrushByVehicle(map, tx, ty, def.lengthM); }
+      if (stepWheeledDrive(state, rng, dt, v, def, wp, desired, fullSpeedMs) && props.crushable) crushTile(map, tx, ty);
       continue;
     }
 
@@ -1040,6 +1080,9 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
       const rate = hullTurnNow(state, v, def).rate;
       speedMs = Math.min(speedMs, Math.max(0.3, rate * d * TILE_M * 0.6));
     }
+    // Brake for the final stop, and build speed gradually after a turn or short halt.
+    speedMs = Math.min(speedMs, Math.sqrt(2 * DRIVE_BRAKE_MS2 * d * TILE_M));
+    speedMs = Math.abs(driveThrottle(v, speedMs * (backing ? -1 : 1), dt));
     v.speed = backing ? -speedMs : speedMs;
     // one damaged track drags the hull to that side; the driver keeps correcting
     v.hullFacing = wrapAngle(v.hullFacing + trackPullRad(v) * dt);
@@ -1048,9 +1091,13 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     const distTiles = (speedMs * dt) / TILE_M;
     // an arc never lands exactly on a waypoint: an intermediate one counts as passed from close by
     const reach = v.path.length > 1 ? Math.max(distTiles, WAYPOINT_REACH_TILES) : distTiles;
-    if (d <= reach || d < 1e-4) {
+    if ((d <= reach && (v.path.length === 1 || straightDrivable(state, v, v.path[1], Infinity))) || d < 1e-4) {
       if (v.path.length === 1 && !driveTo(state, v, { x: wp.x, y: wp.y })) continue;
       v.path.shift();
+      if (v.path.length > 0) {
+        const step = Math.min(distTiles, dist(v.pos, v.path[0]));
+        if (!driveTo(state, v, { x: v.pos.x + dm.sin(travelNow) * step, y: v.pos.y - dm.cos(travelNow) * step })) continue;
+      } else v.speed = 0;
     } else if (headingErr <= TRACK_STRAIGHT_RAD) {
       // item 022: lined up — drive along the hull axis (the residual error is turned out as it
       // goes); never a straight line to the waypoint, tracks only go where the hull points
@@ -1061,12 +1108,11 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
       const next = vadd(v.pos, vscale(fwd, distTiles));
       const nt = tileAt(map, Math.floor(next.x), Math.floor(next.y));
       // never cut a corner into something a vehicle cannot enter: turn on the spot instead
-      if (!Number.isFinite(TERRAIN_PROPS[nt].vehicleCost)) v.speed = 0;
+      if (!Number.isFinite(terrainMoveCost(nt, vehicleMover(def)))) v.speed = 0;
       else if (!driveTo(state, v, next)) continue;
     }
 
     if (props.crushable) crushTile(map, tx, ty);
-    treeCrushByVehicle(map, tx, ty, def.lengthM);
     stepOverrun(state, rng, v, angleTo(v.pos, wp));
     vehicleMineCheck(state, v, rng);
   }
@@ -1103,7 +1149,7 @@ function stepWheeledDrive(state: BattleState, rng: Rng, dt: number, v: Vehicle, 
     const sign = backing ? -1 : 1;
     next = { x: v.pos.x + dm.sin(v.hullFacing) * stepTiles * sign, y: v.pos.y - dm.cos(v.hullFacing) * stepTiles * sign };
     const ntx = Math.floor(next.x), nty = Math.floor(next.y);
-    if (!inBounds(map, ntx, nty) || !isPassable(map, ntx, nty, 'vehicle')) {
+    if (!inBounds(map, ntx, nty) || !isPassable(map, ntx, nty, vehicleMover(VEHICLE_DEFS[v.defId]))) {
       // no room for the manoeuvre: shuffle toward the waypoint at a crawl instead
       next = vadd(v.pos, vscale(vnorm(vsub(wp, v.pos)), Math.min(d, stepTiles * 0.5)));
     }
@@ -1203,7 +1249,7 @@ function separateHulls(state: BattleState, a: Vehicle, b: Vehicle): void {
       if (dist({ x: nx, y: ny }, partner.pos) <= d0) continue;
       // third hulls: the landing must clear their footprint outright
       const fx = Math.floor(nx), fy = Math.floor(ny);
-      if (!inBounds(state.map, fx, fy) || !isPassable(state.map, fx, fy, 'vehicle')) continue;
+      if (!inBounds(state.map, fx, fy) || !isPassable(state.map, fx, fy, vehicleMover(VEHICLE_DEFS[v.defId]))) continue;
       if (hullBlocker(state, v, { x: nx, y: ny }, partner) != null) continue;
       v.pos = { x: nx, y: ny };
       return true;

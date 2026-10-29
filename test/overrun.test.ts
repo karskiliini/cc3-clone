@@ -185,7 +185,7 @@ describe('friendly hold and 0.5 m/s threshold', () => {
 
   it('a friendly with nowhere to dodge halts the vehicle (speed 0 while held) and is never crushed', () => {
     const { state, tank, friend } = corridor();
-    drive(state, new Rng(7), 3.5);
+    drive(state, new Rng(7), 8);
     expect(friend.health).not.toBe('dead');
     expect(friend.crushed).toBeUndefined();
     // halted in front of the man: held, warning message issued
@@ -196,12 +196,12 @@ describe('friendly hold and 0.5 m/s threshold', () => {
 
   it('the held vehicle resumes once the man moves aside', () => {
     const { state, tank, friend } = corridor();
-    drive(state, new Rng(7), 3.5);
+    drive(state, new Rng(7), 8);
     expect(tank.pos.x).toBeLessThan(29.9);
     // clear the way: he is no longer under the hull
     friend.pos = { x: 30.5, y: 27.5 };
     friend.stance = 'standing';
-    drive(state, new Rng(8), 3);
+    drive(state, new Rng(8), 5);
     expect(tank.pos.x).toBeGreaterThan(31);
   });
 

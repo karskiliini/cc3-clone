@@ -246,7 +246,7 @@ export class GrassFx {
         const out = (0.5 + h2 * 2.5) * z; // blades start at uneven distances outside the hull
         const bx0 = ax + (bx - ax) * t + nx * out + (h1 - 0.5) * step * 2.4;
         const by0 = ay + (by - ay) * t + ny * out;
-        const reach = (1.5 + near * 2.6 + h2 * h2 * 4.5) * z * tall;
+        const reach = (2.5 + near * 3.8 + h2 * h2 * 5.0) * z * tall;
         // mostly the darker tones: the light ones are the rare sunlit tips
         ctx.strokeStyle = cols[Math.min(cols.length - 1, Math.floor(h1 * h1 * cols.length))];
         ctx.globalAlpha = 0.85;
@@ -254,8 +254,16 @@ export class GrassFx {
         ctx.beginPath();
         ctx.moveTo(bx0, by0);
         // blades stand up (up-screen) and lean in over the hull edge
-        ctx.lineTo(bx0 - nx * reach * 0.7 + (h3 - 0.2) * 3 * z, by0 - ny * reach * 0.7 - reach * 0.5);
+        const tipX = bx0 - nx * reach * 0.7 + (h3 - 0.2) * 3 * z;
+        const tipY = by0 - ny * reach * 0.7 - reach * 0.5;
+        ctx.quadraticCurveTo(bx0 - nx * reach * 0.2, by0 - reach * 0.7, tipX, tipY);
         ctx.stroke();
+        // Fine sunlit tips and occasional seed heads break up the flat hull outline.
+        if (h2 > 0.7) {
+          ctx.strokeStyle = cols[cols.length - 1]; ctx.globalAlpha = 0.65;
+          ctx.lineWidth = Math.max(0.5, z * 0.45);
+          ctx.beginPath(); ctx.moveTo(tipX, tipY); ctx.lineTo(tipX + z * 0.5, tipY - z * tall); ctx.stroke();
+        }
       }
     };
     const corner = (a: number, b: number): [number, number] => [c.x + fx * a * hl + rx * b * hw, c.y + fy * a * hl + ry * b * hw];

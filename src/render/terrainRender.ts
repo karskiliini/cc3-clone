@@ -2632,7 +2632,7 @@ function paintDetail(ctx: CanvasRenderingContext2D, map: GameMap, wx: number, wy
   const t = tileAt(map, wx, wy);
   switch (t) {
     case 'mud': paintMud(ctx, wx, wy, ox, oy, seed); break;
-    case 'rubble': paintRubbleDebris(ctx, wx, wy, ox, oy, seed, season); break;
+    case 'rubble': if (!map.fallenTrees?.has(wy * map.width + wx)) paintRubbleDebris(ctx, wx, wy, ox, oy, seed, season); break;
     case 'crater': break; // drawn by the earthwork pass (craterArt) in bakeChunk
     case 'trench': break; // likewise: trench vectors, foxholes, or an auto-foxhole per stray tile
     case 'hedge': if (!vectorLineTerrains.has('hedge')) paintHedge(ctx, map, wx, wy, ox, oy, seed, season); break;
@@ -3218,7 +3218,7 @@ export class TerrainRenderer {
     const waterGrid = buildGrid(map, x0, y0, CHUNK_TILES, isWater);
     // rubble spreads only ~1 tile past its footprint (not the wider AREA_BLUR used for
     // crops/mud/tallgrass), so debris reads as a collapsed building, not a blanket stain.
-    const rubbleGrid = buildGrid(map, x0, y0, CHUNK_TILES, isRubble, 1);
+    const rubbleGrid = buildGrid(map, x0, y0, CHUNK_TILES, isRubble, 1, (x, y) => map.fallenTrees?.has(y * map.width + x) ? 'open' : tileAt(map, x, y));
     // blurred so the dirty-snow shoulder doesn't show tile stair-steps along road edges
     const dirtyGrid = season === 'winter' ? buildGrid(map, x0, y0, CHUNK_TILES, isDirtySource, 1) : cropsGrid;
     const gu = this.groundUnder, mw = map.width, mh = map.height;
