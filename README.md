@@ -96,3 +96,7 @@ order first (hotkey, order bar, or right-click menu), then click the target.
 Casualty graphics: wounded uniforms show blood, with heavier staining on incapacitated and dead soldiers. The texture finish follows the existing Blender pose during movement, dragging and blast flight, and is cached per sprite cell with bounded memory. Review both sides, seasons and battle zooms in `tools/casualtyPreview.html`.
 
 Infantry stationed inside buildings seek reachable, available firing windows in the ordered fire direction or Defend/Ambush facing. They keep their issued order while moving through the interior, reserve different windows and fire after arriving. Active crew guns continue to use their own placement drill.
+
+Anti-tank gun crews inside buildings prepare exterior wall openings toward Fire targets or Defend/Ambush facing. A helper walks to the wall and works on it; the crew then packs, pushes and redeploys the gun with its barrel outside. Shots and muzzle flashes originate at the barrel. New movement orders interrupt the drill, and surviving helpers can replace a fallen worker. Review the sequence in `tools/gunOpeningPreview.html`.
+
+Run the offline replay CLI with `node tools/replay.mjs` (uses the installed Vite transformer).

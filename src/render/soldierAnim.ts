@@ -446,6 +446,7 @@ export function headingTo(from: Vec2, to: Vec2, fallback = 0): number {
 export interface CrewTaskAnim { keys: string[]; progress: number | null; fallbackPose: 'gunnerKneel' | 'loaderRound' | 'loaderShell' | 'mgProne' | 'haul' }
 
 const CREW_TASK_KEY: Record<CrewTaskId, { key: string; rev?: boolean; legacy: string[]; pose: CrewTaskAnim['fallbackPose'] }> = {
+  breachWall: { key: 'crew.dig', legacy: ['crew.trail'], pose: 'gunnerKneel' },
   unhook: { key: 'crew.haul', legacy: [], pose: 'haul' },
   hook: { key: 'crew.haul', rev: true, legacy: [], pose: 'haul' },
   spreadLeft: { key: 'crew.trail', legacy: ['crew.haul'], pose: 'haul' },
@@ -494,7 +495,7 @@ export function crewTaskAnim(s: Soldier, time: number): CrewTaskAnim | null {
   const p = Math.max(0, Math.min(1, t.progress));
   return {
     keys: [d.key, ...d.legacy, 'kneeling.reload', 'kneeling.idle'],
-    progress: t.id === 'lay' ? null : d.rev ? 1 - p : p,
+    progress: t.id === 'breachWall' ? (time % 1.2) / 1.2 : t.id === 'lay' ? null : d.rev ? 1 - p : p,
     fallbackPose: d.pose,
   };
 }

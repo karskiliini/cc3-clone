@@ -547,6 +547,27 @@ function finishChanges(state: BattleState, changed: number[]): void {
   if (dirty.length < 20000) for (const i of changed) dirty.push(i);
 }
 
+/** Controlled crew work, not an HE hit: cut one wall bay without a blast/debris casualty roll.
+ * Existing building damage still matters: undermining an unstable wall can cave its roof in. */
+export function prepareGunOpening(state: BattleState, p: Vec2, side: Side): boolean {
+  const map = state.map, x = Math.floor(p.x), y = Math.floor(p.y);
+  if (x < 0 || y < 0 || x >= map.width || y >= map.height) return false;
+  const i = y * map.width + x, t = map.tiles[i];
+  if (!isWall(t)) return t === 'rubble';
+  getHeightField(map);
+  const st = getState(map);
+  const ev: BlastEvent = { side, changed: [i], breaches: [], caveIns: new Map(), collapses: [] };
+  st.hp[i] = NaN; map.tiles[i] = 'rubble'; map.windows[i] = 0;
+  setTileOverride(map, x, y, H_BREACH_LIP);
+  const b = st.buildings.get(map.buildingId[i]);
+  if (b) { b.breached.add(i); updateBuilding(state, st, b, ev); }
+  resolveCasualties(state, st, ev, p);
+  pushStructureFx(state, 'breach', p, t === 'buildingStone');
+  finishChanges(state, ev.changed);
+  addMessage(state, 'Gun opening prepared.', 'info', side);
+  return true;
+}
+
 /** A vehicle drove over a crushable tile (hedge/fence): flatten it through the same path as a
  * blast so the height field and renderer stay in step. Returns true when the tile changed. */
 export function crushTile(map: GameMap, tx: number, ty: number): boolean {

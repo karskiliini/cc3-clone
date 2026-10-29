@@ -815,7 +815,9 @@ export function crewSoldierDraws(state: BattleState): Map<number, CrewSoldierDra
         }
         const toGun = Math.atan2(cw.pos.x - s.pos.x, -(cw.pos.y - s.pos.y));
         const alongGun = s.crewTask?.id === 'lay' || s.crewTask?.id === 'fire' || s.crewTask == null || cls === 'hmg';
-        const heading = alongGun ? cw.facing : toGun;
+        const heading = s.crewTask?.id === 'breachWall' && cw.gunOpening
+          ? Math.atan2(cw.gunOpening.wall.x - s.pos.x, -(cw.gunOpening.wall.y - s.pos.y))
+          : alongGun ? cw.facing : toGun;
         const keys = cls === 'hmg' && alongGun && isGunner ? ['crew.mg', ...anim.keys] : anim.keys;
         const p = anim.progress;
         out.set(s.id, {

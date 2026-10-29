@@ -44,7 +44,7 @@ import {
 import { attackPhase } from './orders';
 import {
   fireMissionWait, onMissionRound, crewFeedsAmmo, hasChamberedRound, takeChamberedRound, chamberedRoundType, missionAimPoint,
-  missionBracketMul, onMissionShotAtVehicle, behindGunShield, weaponFramePoint,
+  missionBracketMul, onMissionShotAtVehicle, behindGunShield, weaponFramePoint, crewShotOrigin,
 } from './crewWeapon';
 import { observerVisibility } from './spotting';
 import { isCrawlingUnderFire } from './hitTheDirt';
@@ -368,14 +368,16 @@ function pickTarget(state: BattleState, soldier: Soldier, team: Team | undefined
 
   // A firer's sightline starts at his own eye height and ends at the target's silhouette, so a
   // crest between them masks the shot for a prone man where a standing one still has it.
-  const firerEyeM = eyeHeightM(soldier.stance);
+  const source = crewShotOrigin(state, soldier);
+  const fireFrom = source?.pos ?? soldier.pos;
+  const firerEyeM = source?.heightM ?? eyeHeightM(soldier.stance);
   const inRangeLOS = (pos: Vec2): boolean => {
-    const dM = dist(soldier.pos, pos) * TILE_M;
+    const dM = dist(fireFrom, pos) * TILE_M;
     if (dM > maxRangeM) return false;
-    return hasLOS(map, soldier.pos, pos, { eyeM: firerEyeM });
+    return hasLOS(map, fireFrom, pos, { eyeM: firerEyeM });
   };
-  const pointAt = (pos: Vec2): Target | null => dist(soldier.pos, pos) * TILE_M <= maxRangeM
-    ? areaPoint(state, soldier.pos, pos, canGuesstimate(weapon), { eyeM: firerEyeM }) : null;
+  const pointAt = (pos: Vec2): Target | null => dist(fireFrom, pos) * TILE_M <= maxRangeM
+    ? areaPoint(state, fireFrom, pos, canGuesstimate(weapon), { eyeM: firerEyeM }) : null;
 
   const { soldiers: cands, vehicles: vcands } = gatherCandidates(state, soldier.side);
   const preferVehicles = AT_WEAPON_CLASSES.has(weapon.cls);
@@ -782,6 +784,7 @@ function roundWeapon(weapon: WeaponDef, round: RoundType): WeaponDef {
 }
 
 interface VehicleShot {
+  sourceHeightM?: number;
   round?: RoundType;
   aimPoint?: AimPoint;
   /** gunner skill 0..1 (aimed shots) */
@@ -893,7 +896,7 @@ function fireAtVehicle(
   const pAny = aim === 'mass' ? p : pSpot + (p - pSpot) * SPOT_MISS_STILL_HITS;
   const r = rng.next();
   const rw = roundWeapon(weapon, round);
-  const shotPath = traceRound(state, rng, shooterPos, vehicle.pos, rw, { eyeM: EYE_VEHICLE_M, targetM: EYE_VEHICLE_M });
+  const shotPath = traceRound(state, rng, shooterPos, vehicle.pos, rw, { eyeM: shot.sourceHeightM ?? EYE_VEHICLE_M, targetM: EYE_VEHICLE_M });
   const intercepted = shotPath.blocked || shotPath.deflected;
   // a clean miss is seen to fly past the hull and strike the ground beyond it (visual only: the
   // physics above traced the line to the hull)
@@ -988,24 +991,27 @@ function areaImpact(state: BattleState, rng: Rng, from: Vec2, side: Side, weapon
 
 function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: WeaponDef, target: Target, wantTracer: boolean): void {
   const map = state.map;
+  const source = crewShotOrigin(state, shooter);
+  const fireFrom = source?.pos ?? shooter.pos;
+  const fireHeight = source?.heightM ?? eyeHeightM(shooter.stance);
   if (shooter.aiming?.hasty) {
-    const aim = targetPosOf(target), range = dist(shooter.pos, aim);
-    const heading = angleTo(shooter.pos, aim) + rng.gauss() * (shooter.aiming.hasty === 'panic' ? 0.12 : 0.045);
+    const aim = targetPosOf(target), range = dist(fireFrom, aim);
+    const heading = angleTo(fireFrom, aim) + rng.gauss() * (shooter.aiming.hasty === 'panic' ? 0.12 : 0.045);
     resolveSmallArmsRay(state, rng, shooter, weapon,
-      { x: shooter.pos.x + dm.sin(heading) * range, y: shooter.pos.y - dm.cos(heading) * range }, heading);
+      { x: fireFrom.x + dm.sin(heading) * range, y: fireFrom.y - dm.cos(heading) * range }, heading);
     return;
   }
   if (target.kind === 'point') {
-    const aim = target.guesstimate ? estimateAim(state, rng, shooter.pos, target.pos) : target.pos;
-    const shot = traceRound(state, rng, shooter.pos, aim, weapon, { eyeM: eyeHeightM(shooter.stance), targetM: target.guesstimate ? 0.5 : 1.7 });
+    const aim = target.guesstimate ? estimateAim(state, rng, fireFrom, target.pos) : target.pos;
+    const shot = traceRound(state, rng, fireFrom, aim, weapon, { eyeM: fireHeight, targetM: target.guesstimate ? 0.5 : 1.7 });
     if (wantTracer) traceTracers(state, shot, tracerKindFor(weapon));
-    areaImpact(state, rng, shooter.pos, shooter.side, weapon, shot.impact, shooter, !!target.guesstimate);
+    areaImpact(state, rng, fireFrom, shooter.side, weapon, shot.impact, shooter, !!target.guesstimate);
     return;
   }
 
   if (target.kind === 'vehicle') {
     const vehicle = target.vehicle;
-    const distM = dist(shooter.pos, vehicle.pos) * TILE_M;
+    const distM = dist(fireFrom, vehicle.pos) * TILE_M;
     const speedMs = Math.abs(vehicle.speed);
     const p = vehicleHitChance(weapon, distM, 0, 'standing', speedMs > 0.1, speedMs) * (shooter.seat === 'passenger' ? PASSENGER_FIRE_MUL : 1) * recoveryFactor(shooter, state.time);
     const team = state.teams.get(shooter.teamId);
@@ -1014,21 +1020,21 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
     // a gun's layer chose his aim point when he laid (crewWeapon.ts); an AT rifleman / rocket man as he fires
     const aimPoint = weapon.penetrationMm <= 0 ? 'mass'
       : crewServed ? missionAimPoint(team, vehicle.id)
-        : chooseAimPoint(weapon, null, skill, shooter.pos, vehicle, state.config.year).aimPoint;
+        : chooseAimPoint(weapon, null, skill, fireFrom, vehicle, state.config.year).aimPoint;
     // a gun crew that watched its last round fall corrects the next one (bracketing)
-    const bracket = crewServed ? missionBracketMul(team, shooter.pos, vehicle) : 1;
-    const hit = fireAtVehicle(state, rng, weapon, shooter.pos, shooter.side, vehicle, Math.min(0.97, p * bracket), wantTracer, {
-      round: crewServed ? chamberedRoundType(team, shooter) : 'ap', aimPoint, skill, shooterTeamId: shooter.teamId,
+    const bracket = crewServed ? missionBracketMul(team, fireFrom, vehicle) : 1;
+    const hit = fireAtVehicle(state, rng, weapon, fireFrom, shooter.side, vehicle, Math.min(0.97, p * bracket), wantTracer, {
+      round: crewServed ? chamberedRoundType(team, shooter) : 'ap', aimPoint, skill, shooterTeamId: shooter.teamId, sourceHeightM: source?.heightM,
     });
-    if (crewServed) onMissionShotAtVehicle(team, hit, shooter.pos, vehicle);
+    if (crewServed) onMissionShotAtVehicle(team, hit, fireFrom, vehicle);
     return;
   }
 
   const victim = target.soldier;
-  const distM = dist(shooter.pos, victim.pos) * TILE_M;
+  const distM = dist(fireFrom, victim.pos) * TILE_M;
   // Directional cover (spec §9): the protection victim's tile offers against fire arriving FROM
   // the shooter's bearing, not the omni `soldier.cover` (kept only for display).
-  const angleFromVictimToShooter = angleTo(victim.pos, shooter.pos);
+  const angleFromVictimToShooter = angleTo(victim.pos, fireFrom);
   const cover = coverFrom(map, victim.pos, angleFromVictimToShooter);
   const moving = victim.activity === 'moving' || victim.activity === 'movingFast' || victim.activity === 'sneaking';
   const p = hitChance(weapon, distM, cover, victim.stance, shooter, moving) * (shooter.seat === 'passenger' ? PASSENGER_FIRE_MUL : 1) * recoveryFactor(shooter, state.time);
@@ -1043,8 +1049,8 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
   // strikes the plate and ricochets (the angled plate throws it off). Suppression still lands:
   // the men behind the plate hear it. HE and shells are resolved by their own blast/AT paths.
   if (SMALL_ARMS_CLASSES.has(weapon.cls) && weapon.heRadiusM === 0
-    && behindGunShield(state, victim, shooter.pos)) {
-    if (wantTracer) state.tracers.push({ from: { ...shooter.pos }, to: { ...victim.pos }, t: 0, hit: false, kind: tracerKindFor(weapon) });
+    && behindGunShield(state, victim, fireFrom)) {
+    if (wantTracer) state.tracers.push({ from: { ...fireFrom }, to: { ...victim.pos }, t: 0, hit: false, kind: tracerKindFor(weapon) });
     // ricochet off the angled plate: spark at the shield line, thrown to a deflected side
     const team = state.teams.get(victim.teamId);
     const cw = team?.crewWeapon;
@@ -1058,16 +1064,16 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
   }
 
   if (rng.chance(p)) {
-    const shot = traceRound(state, rng, shooter.pos, victim.pos, weapon, { eyeM: eyeHeightM(shooter.stance), targetM: eyeHeightM(victim.stance) });
+    const shot = traceRound(state, rng, fireFrom, victim.pos, weapon, { eyeM: fireHeight, targetM: eyeHeightM(victim.stance) });
     if (wantTracer) traceTracers(state, shot, tracerKindFor(weapon), !shot.blocked && !shot.deflected);
     if (shot.blocked || shot.deflected) {
-      areaImpact(state, rng, shooter.pos, shooter.side, weapon, shot.impact, shooter);
+      areaImpact(state, rng, fireFrom, shooter.side, weapon, shot.impact, shooter);
       return;
     }
     if (weapon.heRadiusM > 0 && weapon.cls !== 'flamethrower' && weapon.cls !== 'grenade') {
       // One casualty roll for the direct hit, with the same wave affecting nearby men using
       // their original posture and cover. Do not hit the target once here and again in splash.
-      applyHESplash(state, rng, { ...victim.pos }, weapon, shooter.side, shooter.pos, undefined,
+      applyHESplash(state, rng, { ...victim.pos }, weapon, shooter.side, fireFrom, undefined,
         { directHitId: victim.id, killer: shooter });
       return;
     }
@@ -1078,11 +1084,11 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
   } else {
     const spread = 0.5 + distM / 200;
     const aimed = { x: victim.pos.x + rng.gauss() * spread, y: victim.pos.y + rng.gauss() * spread };
-    const shot = traceRound(state, rng, shooter.pos, aimed, weapon, { eyeM: eyeHeightM(shooter.stance), targetM: eyeHeightM(victim.stance) });
+    const shot = traceRound(state, rng, fireFrom, aimed, weapon, { eyeM: fireHeight, targetM: eyeHeightM(victim.stance) });
     const impact = shot.impact;
     if (wantTracer) traceTracers(state, shot, tracerKindFor(weapon));
     if (shot.blocked || shot.deflected) {
-      areaImpact(state, rng, shooter.pos, shooter.side, weapon, impact, shooter);
+      areaImpact(state, rng, fireFrom, shooter.side, weapon, impact, shooter);
       return;
     }
     if (weapon.heRadiusM === 0) {
@@ -1090,7 +1096,7 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
     } else {
       // explosive miss: one splash resolves casualties, knockdown and the crater with every
       // man's ORIGINAL posture and shelter (the old double pass used positions mid-throw)
-      applyHESplash(state, rng, impact, weapon, shooter.side, shooter.pos, undefined, { killer: shooter });
+      applyHESplash(state, rng, impact, weapon, shooter.side, fireFrom, undefined, { killer: shooter });
       return;
     }
     onIncomingFire(state, rng, victim, shooter, impact, weapon.cls);
@@ -1101,7 +1107,7 @@ function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: We
       const dTiles = dist(s2.pos, impact);
       // Cover blocks near-miss suppression too: a round that stops at a wall does not
       // pressure the man standing just beyond it (same rule as areaImpact above).
-      if (dTiles <= SUPPRESSION_SPLASH_RADIUS_TILES && roundCanReach(map, shooter.pos, s2.pos)) {
+      if (dTiles <= SUPPRESSION_SPLASH_RADIUS_TILES && roundCanReach(map, fireFrom, s2.pos)) {
         const amount = weapon.suppression * 40 * (1 - (s2.cover ?? 0) * 0.5);
         s2.suppression = clamp(s2.suppression + amount, 0, 100);
         addSuppressionStat(state, shooter.side, amount);
@@ -1244,9 +1250,10 @@ function fireBurst(state: BattleState, rng: Rng, soldier: Soldier, weapon: Weapo
     weapon.cls === 'atgun' ? 1.0 :
     weapon.cls === 'atrocket' ? 0.9 :
     0.55;
-  const mx = soldier.pos.x + dm.sin(soldier.facing) * muzzleOffM;
-  const my = soldier.pos.y - dm.cos(soldier.facing) * muzzleOffM;
-  state.flashes.push({ pos: { x: mx, y: my }, facing: facingAngle(soldier.facing), t: 0, kind: flashKind });
+  const gunSource = crewShotOrigin(state, soldier);
+  const mx = gunSource?.pos.x ?? soldier.pos.x + dm.sin(soldier.facing) * muzzleOffM;
+  const my = gunSource?.pos.y ?? soldier.pos.y - dm.cos(soldier.facing) * muzzleOffM;
+  state.flashes.push({ pos: { x: mx, y: my }, facing: gunSource?.facing ?? facingAngle(soldier.facing), t: 0, kind: flashKind });
   state.events.push({ kind: 'shot', pos: { ...soldier.pos }, weaponId: weapon.id, side: soldier.side });
   // B2: a rocket launcher vents its backblast — a dust puff behind the firer (opposite his
   // facing), read by the renderer as a flash with no muzzle cone.
@@ -1397,7 +1404,7 @@ function stepGrenades(state: BattleState, rng: Rng, dt: number, track: CombatTra
   if (!grenadeWeapon) return;
   for (const s of state.soldiers.values()) {
     if (s.health === 'dead' || s.health === 'incapacitated') continue;
-    if (s.carryingMgMount != null || s.crewTask?.id === 'liftTripod' || s.crewTask?.id === 'placeTripod') continue;
+    if (s.carryingMgMount != null || s.crewTask?.id === 'liftTripod' || s.crewTask?.id === 'placeTripod' || s.crewTask?.id === 'breachWall') continue;
     if (s.smgBurst && state.time < s.smgBurst.until) continue;
     if (s.activity === 'surrendered' || s.activity === 'routed' || s.activity === 'sneaking' || s.activity === 'ambushing') continue;
     if (s.grenades <= 0 || isStunned(s, state.time) || isDazed(s, state.time)) continue;

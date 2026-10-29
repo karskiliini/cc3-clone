@@ -16,6 +16,7 @@
 import { bloodSeverity, bloodyCell } from './casualtyArt';
 import type { Health, Season, Side } from '@/shared/types';
 import { resolveEntryKey } from '@/render/soldierAnim';
+import { crewMuzzleOffset } from '@/shared/weaponGeometry';
 import { VEHICLE_DEFS } from '@/data/units';
 
 export interface AtlasEntry {
@@ -386,16 +387,12 @@ export function drawWeapon(
  * where flashes, tracers and the mortar puff start. Read from the weapons atlas (tools/blender/
  * weapons.py writes `weapons.<id>.muzzleM` with y forward); the table mirrors it for the moments
  * before the atlas has loaded. */
-const MUZZLE_FWD_M: Record<string, number> = {
-  mortar81: 0.99, mortar82: 0.99, mg34_hmg: 1.425, mg42_hmg: 1.425, maxim: 1.296,
-  pak38: 2.71, pak40: 3.31, m1937_45mm: 2.0, zis3: 3.19, ptrd: 1.86,
-};
 export function weaponMuzzleM(weaponId: string): { x: number; y: number } {
   const meta = (getAtlas(weaponAtlasName(1)) ?? getAtlas(weaponAtlasName(2)))?.meta as
     (AtlasMeta & { weapons?: Record<string, { muzzleM?: { x: number; y: number } }> }) | undefined;
   const m = meta?.weapons?.[weaponId]?.muzzleM;
   if (m) return { x: m.x, y: -m.y };
-  return { x: 0, y: -(MUZZLE_FWD_M[weaponId] ?? 1) };
+  return crewMuzzleOffset(weaponId);
 }
 
 /** Draw a crew-served weapon in the first of `states` its atlas carries (drill-step looks such as

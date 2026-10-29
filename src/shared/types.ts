@@ -970,6 +970,12 @@ export type CrewWeaponPhase = 'packed' | 'settingUp' | 'ready' | 'packing';
 
 export interface CrewWeaponState {
   weaponId: string;
+  /** Preparing and occupying a real opening in the exterior wall of the gun's building. */
+  gunOpening?: {
+    wall: Vec2; station: Vec2; pivot: Vec2; facing: number; target: Vec2; orderAt: number;
+    stage: 'work' | 'pack' | 'haul' | 'deploy'; worked: number; workerId?: number; path: Vec2[];
+  };
+  preparedOpening?: Vec2;
   /** A separate physical load: the gunner cannot carry both gun and mount. */
   mount?: {
     state: 'deployed' | 'carried' | 'ground'; pos: Vec2; carrierId: number | null;
@@ -1040,7 +1046,7 @@ export type CrewTaskId =
   // heavy MGs
   | 'placeTripod' | 'mountGun' | 'feedBelt' | 'dismountGun' | 'liftTripod'
   // serving the weapon
-  | 'load' | 'lay' | 'fire' | 'dropRound' | 'unload';
+  | 'load' | 'lay' | 'fire' | 'dropRound' | 'unload' | 'breachWall';
 
 /** The weapon sprite state that goes with the task state (renderer; falls back to setup/half/packed). */
 export type CrewWeaponVisual =

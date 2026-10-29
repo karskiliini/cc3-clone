@@ -3,7 +3,7 @@
 // (multiplayer plan §7 P4). Two runs of the same log, on any machine or engine, must print the
 // same chain; the first differing line is the tick a desync entered.
 //
-//   npx vite-node tools/replay.ts <replay.json> [--until <tick>] [--out <chain.txt>] [--quiet]
+//   node tools/replay.mjs <replay.json> [--until <tick>] [--out <chain.txt>] [--quiet]
 //
 // The chain is one line per tick: "<tick> <hash as 8 hex digits>". --out writes it to a file
 // (and --quiet then prints only the summary). The summary says whether the replay reached the
@@ -21,7 +21,7 @@ const opt = (name: string): string | undefined => {
 };
 const file = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--until' && args[i - 1] !== '--out');
 if (!file) {
-  console.error('usage: npx vite-node tools/replay.ts <replay.json> [--until <tick>] [--out <chain.txt>] [--quiet]');
+  console.error('usage: node tools/replay.mjs <replay.json> [--until <tick>] [--out <chain.txt>] [--quiet]');
   process.exit(2);
 }
 

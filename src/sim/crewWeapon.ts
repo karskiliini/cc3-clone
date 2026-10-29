@@ -46,6 +46,8 @@ import { formationBaseHeading, rotateOffset } from './spawn';
 import { isDazed, recoveryFactor } from './daze';
 import { INFANTRY_PACE, infantrySpeedMs } from './infantryPace';
 import * as dm from '@/shared/dmath';
+import { crewMuzzleOffset } from '@/shared/weaponGeometry';
+import { prepareGunOpening } from './structures';
 
 export type CrewServedClass = 'mortar' | 'hmg' | 'atgun' | 'rocket';
 const CREW_SERVED = new Set<WeaponClass>(['mortar', 'hmg', 'atgun', 'rocket']);
@@ -73,7 +75,7 @@ export const TASK_S: Record<CrewTaskId, number> = {
   liftLeft: 1, liftRight: 1, closeLeft: 1.5, closeRight: 1.5, hook: 1,
   placeBaseplate: 3, mountTube: 2, setBipod: 2, liftBipod: 1, dismountTube: 1, liftBaseplate: 1,
   placeTripod: 3, mountGun: 2, feedBelt: 2, dismountGun: 1.5, liftTripod: 1.5,
-  load: 3.5, lay: 2, fire: 0, dropRound: 2, unload: 2,
+  load: 3.5, lay: 2, fire: 0, dropRound: 2, unload: 2, breachWall: 30,
 };
 /** A gunner feeding his own belts takes twice as long (no assistant: 4 s). */
 export const SELF_FEED_FACTOR = 2;
@@ -107,7 +109,7 @@ const TASK_STATUS: Record<CrewTaskId, TeamStatusWord> = {
   placeBaseplate: 'Setting up', mountTube: 'Setting up', setBipod: 'Setting up',
   liftBipod: 'Packing up', dismountTube: 'Packing up', liftBaseplate: 'Packing up',
   placeTripod: 'Setting up', mountGun: 'Setting up', feedBelt: 'Loading', dismountGun: 'Packing up', liftTripod: 'Packing up',
-  load: 'Loading', lay: 'Aiming', fire: 'Firing', dropRound: 'Loading', unload: 'Loading',
+  load: 'Loading', lay: 'Aiming', fire: 'Firing', dropRound: 'Loading', unload: 'Loading', breachWall: 'Setting up',
 };
 /** What one crewman is doing, for the soldier monitor's activity cell. */
 export const TASK_WORD: Record<CrewTaskId, string> = {
@@ -116,7 +118,7 @@ export const TASK_WORD: Record<CrewTaskId, string> = {
   placeBaseplate: 'Baseplate', mountTube: 'Mounting tube', setBipod: 'Setting bipod',
   liftBipod: 'Packing up', dismountTube: 'Packing up', liftBaseplate: 'Packing up',
   placeTripod: 'Tripod', mountGun: 'Mounting gun', feedBelt: 'Feeding belt', dismountGun: 'Packing up', liftTripod: 'Packing up',
-  load: 'Loading', lay: 'Aiming', fire: 'Firing', dropRound: 'Dropping round', unload: 'Unloading',
+  load: 'Loading', lay: 'Aiming', fire: 'Firing', dropRound: 'Dropping round', unload: 'Unloading', breachWall: 'Opening wall',
 };
 export const CREW_TASK_WORDS: string[] = [...new Set(Object.values(TASK_WORD)), 'MG mount'];
 
@@ -225,7 +227,7 @@ export function taskStationM(cw: CrewWeaponState, cls: CrewServedClass, task: Cr
     case 'placeTripod': case 'liftTripod': return { x: 0, y: cw.weaponId === 'maxim' ? 1.75 : 0.7 };
     case 'mountGun': case 'dismountGun': return { x: 0.7, y: 0.55 };
     case 'load': case 'dropRound': case 'feedBelt': case 'unload': return L.loader;
-    case 'lay': case 'fire': return L.gunner;
+    case 'lay': case 'fire': case 'breachWall': return L.gunner;
   }
 }
 
@@ -613,7 +615,7 @@ export function separateMgMount(cw: CrewWeaponState): boolean {
 
 function abandon(state: BattleState, team: Team, cw: CrewWeaponState, why: 'fled' | 'fell'): void {
   if (cw.abandoned) return;
-  cw.abandoned = true;
+  cw.abandoned = true; cw.gunOpening = undefined;
   cw.abandonedAt = state.time;
   cw.workers = {};
   // (half-assembled: it lies as it is, with the work already done; a returning crew carries on)
@@ -1059,6 +1061,126 @@ export function isHaulingGun(state: BattleState, s: Soldier): boolean {
   return gunHaulers(state, team!, cw).some((h) => h.id === s.id);
 }
 
+/** Physical source after a gun has been pushed into its prepared opening. */
+export function crewShotOrigin(state: BattleState, s: Soldier): { pos: Vec2; heightM: number; facing: number } | null {
+  const cw = state.teams.get(s.teamId)?.crewWeapon;
+  if (!cw?.preparedOpening || cw.abandoned || cw.destroyed || cw.phase !== 'ready' || cw.gunnerId !== s.id || cw.weaponId !== s.weaponId) return null;
+  return { pos: weaponFramePoint(cw.pos, cw.facing, crewMuzzleOffset(cw.weaponId)), heightM: 0.9, facing: cw.facing };
+}
+
+function planGunOpening(state: BattleState, team: Team, cw: CrewWeaponState): CrewWeaponState['gunOpening'] {
+  const map = state.map, order = team.order;
+  if (!order || !['fire', 'defend', 'ambush'].includes(order.type) || !isInAction(cw)) return;
+  const bx = Math.floor(cw.pos.x), by = Math.floor(cw.pos.y);
+  if (!inBounds(map, bx, by) || tileAt(map, bx, by) !== 'floor') return;
+  const bid = map.buildingId[by * map.width + bx];
+  if (bid < 0) return;
+  const target = order.type === 'fire' ? order.target : {
+    x: cw.pos.x + dm.sin(facingAngle(team.facing)) * 30,
+    y: cw.pos.y - dm.cos(facingAngle(team.facing)) * 30,
+  };
+  if (dist(target, cw.pos) < 1) return;
+  const facing = angleTo(cw.pos, target), ux = dm.sin(facing), uy = -dm.cos(facing);
+  for (let d = 0.2; d <= Math.min(12, dist(target, cw.pos)); d += 0.2) {
+    const x = Math.floor(cw.pos.x + ux * d), y = Math.floor(cw.pos.y + uy * d);
+    if (!inBounds(map, x, y) || map.buildingId[y * map.width + x] !== bid) return;
+    const t = tileAt(map, x, y);
+    if (t !== 'buildingStone' && t !== 'buildingWood' && t !== 'rubble') continue;
+    const wall = { x: x + 0.5, y: y + 0.5 };
+    const beyond = { x: wall.x + ux, y: wall.y + uy };
+    if (!inBounds(map, Math.floor(beyond.x), Math.floor(beyond.y))) return;
+    if (map.buildingId[Math.floor(beyond.y) * map.width + Math.floor(beyond.x)] === bid) {
+      if (t === 'rubble') continue;
+      return;
+    }
+    const station = { x: wall.x - ux * 0.9, y: wall.y - uy * 0.9 };
+    const offset = weaponFramePoint({ x: 0, y: 0 }, facing, crewMuzzleOffset(cw.weaponId));
+    const pivot = { x: wall.x + ux * 0.8 - offset.x, y: wall.y + uy * 0.8 - offset.y };
+    if (cw.preparedOpening && dist(cw.preparedOpening, wall) < 0.1 && dist(cw.pos, pivot) < 0.3
+      && Math.abs(wrapAngle(cw.facing - facing)) < 0.15) return;
+    const inside = (p: Vec2) => inBounds(map, Math.floor(p.x), Math.floor(p.y))
+      && map.buildingId[Math.floor(p.y) * map.width + Math.floor(p.x)] === bid
+      && (['floor', 'rubble'].includes(tileAt(map, Math.floor(p.x), Math.floor(p.y)))
+        || (Math.floor(p.x) === x && Math.floor(p.y) === y));
+    const posts = [haulStationM(cw.weaponId, 0), haulStationM(cw.weaponId, 1), CREW_LAYOUT.atgun.gunner, crewLayout(cw.weaponId).loader];
+    if (!inside(station) || !inside(pivot) || posts.some(p => !inside(weaponFramePoint(pivot, facing, p)))) return;
+    const path = findPath(map, cw.pos, pivot, 'infantry', 2000);
+    if ((!path.length && dist(cw.pos, pivot) > 0.3) || path.some(p => !inside(p))) return;
+    return { wall, station, pivot, facing, target: { ...target }, orderAt: order.issuedAt, stage: t === 'rubble' ? 'pack' : 'work', worked: 0, path: [] };
+  }
+}
+
+/** A worker goes to the wall, opens it, then the crew packs, pushes and sets the gun up again. */
+function stepGunOpening(state: BattleState, team: Team, cw: CrewWeaponState, gunner: Soldier, dt: number): boolean {
+  cw.gunOpening ??= planGunOpening(state, team, cw);
+  const drill = cw.gunOpening;
+  if (!drill) return false;
+  const order = team.order;
+  if (!order || order.issuedAt !== drill.orderAt || !['fire', 'defend', 'ambush'].includes(order.type)) {
+    cw.gunOpening = undefined; return false;
+  }
+  clearMission(cw); gunner.fireTimer = Math.max(gunner.fireTimer, dt + 0.01);
+  if (drill.stage === 'work' && tileAt(state.map, Math.floor(drill.wall.x), Math.floor(drill.wall.y)) === 'rubble') drill.stage = 'pack';
+  if (drill.stage === 'work') {
+    cw.open = ['breachWall'];
+    const bid = state.map.buildingId[Math.floor(cw.pos.y) * state.map.width + Math.floor(cw.pos.x)];
+    const inside = (p: Vec2) => inBounds(state.map, Math.floor(p.x), Math.floor(p.y))
+      && state.map.buildingId[Math.floor(p.y) * state.map.width + Math.floor(p.x)] === bid
+      && ['floor', 'rubble'].includes(tileAt(state.map, Math.floor(p.x), Math.floor(p.y)));
+    let worker = drill.workerId != null ? state.soldiers.get(drill.workerId) : undefined;
+    if (!isAbleCrewman(state, worker) || worker.id === gunner.id || worker.carrying || worker.pickup || (worker.bandageUntil ?? 0) > state.time
+      || drill.path.some(p => !inside(p))) {
+      worker = undefined; drill.workerId = undefined; drill.path = [];
+      const candidates = team.soldierIds.map(id => state.soldiers.get(id)).filter((s): s is Soldier => isAbleCrewman(state, s)
+        && s.id !== gunner.id && !s.carrying && !s.pickup && (s.bandageUntil ?? 0) <= state.time && inside(s.pos))
+        .sort((a, b) => dist(a.pos, drill.station) - dist(b.pos, drill.station) || a.id - b.id);
+      for (const candidate of candidates) {
+        const path = findPath(state.map, candidate.pos, drill.station, 'infantry', 2000);
+        if (path.some(p => !inside(p)) || (!path.length && dist(candidate.pos, drill.station) > AT_STATION_TILES)) continue;
+        worker = candidate; drill.workerId = candidate.id; drill.path = path; break;
+      }
+    }
+    if (!worker) return true;
+    worker.aiming = undefined; worker.smgBurst = undefined; worker.fireTimer = Math.max(worker.fireTimer, 0.5);
+    const next = drill.path[0] ?? drill.station;
+    if (dist(worker.pos, drill.station) > AT_STATION_TILES) {
+      walkTo(state, worker, next, dt);
+      if (drill.path.length && dist(worker.pos, next) <= AT_STATION_TILES) drill.path.shift();
+      worker.crewTask = { id: 'breachWall', progress: 0, walking: true }; return true;
+    }
+    const total = tileAt(state.map, Math.floor(drill.wall.x), Math.floor(drill.wall.y)) === 'buildingWood' ? 18 : 35;
+    drill.worked += dt * recoveryFactor(worker, state.time) / crewDrillFactor(worker.experience);
+    worker.facing = facingFromAngle(angleTo(worker.pos, drill.wall)); worker.stance = 'crouching';
+    worker.crewTask = { id: 'breachWall', progress: clamp(drill.worked / total, 0, 1), walking: false };
+    if (drill.worked < total) return true;
+    if (!prepareGunOpening(state, drill.wall, team.side)) { cw.gunOpening = undefined; return false; }
+    drill.stage = 'pack'; setGoal(cw, 'pack');
+  }
+  if (drill.stage === 'pack') {
+    setGoal(cw, 'pack');
+    stepTasks(state, team, cw, 'atgun', gunner, true, dt); deriveLegacy(cw, 'atgun');
+    if (cw.phase === 'packed') {
+      const path = findPath(state.map, cw.pos, drill.pivot, 'infantry', 2000);
+      if (!path.length && dist(cw.pos, drill.pivot) > 0.3) return true;
+      if (path.some(p => !['floor', 'rubble'].includes(tileAt(state.map, Math.floor(p.x), Math.floor(p.y))))) return true;
+      drill.stage = 'haul'; gunner.path = path;
+      gunner.path.push({ ...drill.pivot }); gunner.activity = 'moving';
+    }
+    return true;
+  }
+  if (drill.stage === 'haul') {
+    if (!isAbleCrewman(state, gunner) || gunner.path.some(p => !['floor', 'rubble'].includes(tileAt(state.map, Math.floor(p.x), Math.floor(p.y))))) return true;
+    haulGun(state, team, cw, gunner, dt);
+    if (gunner.path.length === 0 && dist(cw.pos, drill.pivot) < 0.1) {
+      drill.stage = 'deploy'; setGoal(cw, 'deploy'); cw.setAt = state.time;
+    }
+    return true;
+  }
+  stepTasks(state, team, cw, 'atgun', gunner, false, dt); deriveLegacy(cw, 'atgun');
+  if (cw.phase === 'ready') { cw.preparedOpening = { ...drill.wall }; cw.gunOpening = undefined; }
+  return true;
+}
+
 function stepTeamWeapon(state: BattleState, team: Team, dt: number): void {
   let cw = team.crewWeapon;
   const weaponId = cw?.weaponId ?? teamCrewWeaponId(state, team);
@@ -1124,6 +1246,7 @@ function stepTeamWeapon(state: BattleState, team: Team, dt: number): void {
   }
 
   const orderedMove = isOrderedMove(team, gunner, cw);
+  if (cls === 'atgun' && !orderedMove && stepGunOpening(state, team, cw, gunner, dt)) return;
   if (cls === 'hmg') {
     const mount = cw.mount!;
     const helpers = mountHelpers(state, team, cw);
@@ -1216,7 +1339,11 @@ function gateFire(cw: CrewWeaponState, gunner: Soldier, dt: number): void {
 export function stepCrewWeapons(state: BattleState, dt: number): void {
   for (const s of state.soldiers.values()) s.carryingMgMount = undefined;
   for (const team of state.teams.values()) {
-    if (team.crewWeapon?.destroyed) continue; // item 028: smashed by an overrun — inert forever
+    if (team.crewWeapon?.destroyed) {
+      team.crewWeapon.gunOpening = undefined;
+      for (const id of team.soldierIds) { const s = state.soldiers.get(id); if (s) s.crewTask = undefined; }
+      continue;
+    } // item 028: smashed by an overrun — inert forever
     // riding in a transport with the weapon packed: it goes where its gunner goes
     if (team.transportId != null && team.crewWeapon) {
       const g = state.soldiers.get(team.crewWeapon.gunnerId);
@@ -1236,6 +1363,7 @@ export function isHeldForPacking(state: BattleState, s: Soldier): boolean {
   const team = state.teams.get(s.teamId);
   const cw = team?.crewWeapon;
   if (!cw) return false;
+  if (cw.gunOpening && !cw.abandoned && !cw.destroyed && !isFleeing(s)) return true;
   if (cw.mount?.recovery?.soldierId === s.id) return true;
   if (cw.abandoned) return false;
   if (cw.mountBlocked && cw.gunnerId === s.id && !isFleeing(s)) return true;
@@ -1251,6 +1379,8 @@ export function onCrewOrder(state: BattleState, team: Team, type: OrderType): vo
   const cls = crewServedClass(cw.weaponId);
   if (!cls) return;
   ensureTaskState(cw, cls);
+  cw.gunOpening = undefined;
+  if (MOVE_ORDERS.has(type)) cw.preparedOpening = undefined;
   if (MOVE_ORDERS.has(type)) {
     const gunner = state.soldiers.get(cw.gunnerId);
     if (gunner && gunner.path.length > 0 && cw.goal !== 'pack') { setGoal(cw, 'pack'); clearMission(cw); deriveLegacy(cw, cls); }
@@ -1263,6 +1393,7 @@ export function onCrewOrder(state: BattleState, team: Team, type: OrderType): vo
 export function crewWeaponStatus(team: Team): TeamStatusWord | null {
   const cw = team.crewWeapon;
   if (!cw || cw.abandoned) return null;
+  if (cw.gunOpening) return 'Setting up';
   if (cw.mountBlocked) return 'Need carrier';
   if (cw.mount?.recovery) return 'Recovering mount';
   if (cw.lightMode) return null;
@@ -1408,7 +1539,7 @@ export function fireMissionWait(state: BattleState, team: Team | undefined, gunn
   const cls = crewServedClass(cw.weaponId);
   if (!cls) return 0;
   ensureTaskState(cw, cls);
-  if (!isInAction(cw) || cw.goal !== 'deploy' || cw.abandoned || !canWorkGun(gunner)) { clearMission(cw); return 1; }
+  if (cw.gunOpening || !isInAction(cw) || cw.goal !== 'deploy' || cw.abandoned || !canWorkGun(gunner)) { clearMission(cw); return 1; }
   const m = cw.mission;
   const movedM = m ? dist(m.layAim, req.aim) * TILE_M : Infinity;
   const sameTrack = !!m && m.targetTeamId != null && m.targetTeamId === req.targetTeamId;

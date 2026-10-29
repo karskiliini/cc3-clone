@@ -96,6 +96,17 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
     h.int(t.id);
     h.vec(t.pos);
     h.str(t.status);
+    const opening = t.crewWeapon?.gunOpening;
+    h.str(opening?.stage); h.vec(t.crewWeapon?.preparedOpening);
+    const port = t.crewWeapon?.preparedOpening;
+    if (port) h.str(state.map.tiles[Math.floor(port.y) * state.map.width + Math.floor(port.x)]);
+    if (opening) {
+      h.vec(opening.wall); h.vec(opening.station); h.vec(opening.pivot); h.vec(opening.target);
+      h.num(opening.facing); h.num(opening.orderAt); h.num(opening.worked); h.int(opening.workerId ?? -1);
+      h.int(opening.path.length); for (const p of opening.path) h.vec(p);
+      const i = Math.floor(opening.wall.y) * state.map.width + Math.floor(opening.wall.x);
+      h.str(state.map.tiles[i]);
+    }
   }
   for (const vl of state.map.victoryLocations) {
     h.int(vl.id);

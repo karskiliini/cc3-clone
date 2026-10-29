@@ -186,7 +186,7 @@ describe('replay (P4)', () => {
     try {
       const logFile = join(dir, 'replay.json'), chainFile = join(dir, 'chain.txt');
       writeFileSync(logFile, JSON.stringify(log));
-      const r = spawnSync('npx', ['vite-node', 'tools/replay.ts', logFile, '--out', chainFile, '--quiet'], {
+      const r = spawnSync(process.execPath, ['tools/replay.mjs', logFile, '--out', chainFile, '--quiet'], {
         cwd: ROOT, encoding: 'utf8', timeout: 120_000,
       });
       expect(r.status, r.stderr).toBe(0);
@@ -248,7 +248,7 @@ describe('replay of a battle ended by a command (043 review)', () => {
     try {
       const file = join(dir, 'fled.json');
       writeFileSync(file, JSON.stringify(makeReplayLog(fled())));
-      const r = spawnSync('npx', ['vite-node', 'tools/replay.ts', file, '--quiet'], { cwd: ROOT, encoding: 'utf8' });
+      const r = spawnSync(process.execPath, ['tools/replay.mjs', file, '--quiet'], { cwd: ROOT, encoding: 'utf8' });
       expect(r.stderr).toContain('matches the recorded final hash');
       expect(r.status).toBe(0);
     } finally {
