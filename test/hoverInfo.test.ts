@@ -10,6 +10,17 @@ function wallAcross(state: BattleState, x: number): void {
 }
 
 describe('pointer hover label', () => {
+  it('retains unit type when a team is renamed or its hovered soldier is incapacitated', () => {
+    const state = makeState(), at = { x: 10, y: 10 };
+    const man = soldier(1, 1, 'german', at, 'kar98k'); state.soldiers.set(1, man);
+    const team = mkTeam(1, 'rifle', [1], 'german', at); team.name = 'Alpha'; team.defId = 'ger_rifle_43'; state.teams.set(1, team);
+    expect(hoverInfoAt(state, 'german', at)).toMatchObject({ text: 'Alpha', unitTypeText: 'Type: Rifle Squad' });
+    man.health = 'incapacitated';
+    expect(hoverInfoAt(state, 'german', at)).toMatchObject({ text: 'Wounded', unitTypeText: 'Type: Rifle Squad' });
+    team.defId = 'ger_mortar81'; team.type = 'mortar';
+    expect(hoverInfoAt(state, 'german', at)?.unitTypeText).toBe('Type: 8cm Mortar');
+    expect(hoverInfoAt(state, 'soviet', at)?.unitTypeText).toBeUndefined();
+  });
   it('shows the actual terrain cover beside its name, including bunker protection', () => {
     const state = makeState(), p = { x: 15.5, y: 15.5 }, i = 15 * state.map.width + 15;
     expect(hoverInfoAt(state, 'german', p)?.coverText).toBe('Terrain cover: None (0%)');

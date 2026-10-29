@@ -15,7 +15,7 @@ Reconciled 2026-10-29. This session is not complete. Process these requests in a
 | ID | Request and acceptance | Current status |
 | --- | --- | --- |
 | S01 | Bloody wounded/dead sprites that clearly distinguish incapacitated soldiers. Verify at battle zooms. | Complete: cached cloth-only blood finish for wounded, incapacitated, dead, dragged and blast figures; preserves silhouette and weapon detail. 64 focused tests and TypeScript pass; browser checked 1,152 combinations across both sides, seasons, scales and 16 headings. |
-| S02 | Unit type in the elevation hover tooltip, including weapon-specific teams. | Existing unit/vehicle labels found; audit all types. |
+| S02 | Unit type in the elevation hover tooltip, including weapon-specific teams. | Complete: separate Type line retains catalog type for renamed teams and casualties, including 8cm mortars; vehicles retain model and category. Hidden enemies reveal no type. 12 hover tests and TypeScript pass. |
 | S03 | Terrain name and cover quality in the hover tooltip. | Cover quality and percentage added from `omniCoverAt`, beside existing place name/elevation. Includes bunker cover; 16 hover/cover tests and `tsc --noEmit` pass. Named church-floor distinctions remain to audit. |
 | S04 | Building occupants seek useful cover/windows; directional fire orders move them to a firing opening. | Reconcile existing building behavior; verify end to end. |
 | S05 | PAK crews prepare a wall opening and position the gun barrel to fire outside, with crew animation. | Pending audit/implementation. |

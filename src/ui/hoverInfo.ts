@@ -9,9 +9,10 @@
 // status word), placed below-right of the pointer and pushed clear of the
 // hovered unit so the label never covers it.
 // ============================================================================
-import type { BattleState, Camera, GameMap, Season, Side, Soldier, Terrain, Vec2, Vehicle } from '@/shared/types';
+import type { BattleState, Camera, GameMap, Season, Side, Soldier, TeamType, Terrain, Vec2, Vehicle } from '@/shared/types';
 import { TILE_M, TILE_PX, VIEW_W } from '@/shared/types';
-import { VEHICLE_DEFS } from '@/data/units';
+import { TEAM_DEFS, VEHICLE_DEFS } from '@/data/units';
+import { WEAPONS } from '@/data/weapons';
 import { dist } from '@/shared/math';
 import { worldToScreen } from '@/engine/camera';
 import { drawText, textWidth } from '@/render/pixelfont';
@@ -22,6 +23,7 @@ export type HoverTone = 'own' | 'enemy' | 'dead' | 'place';
 export interface HoverInfo {
   text: string;
   coverText?: string;
+  unitTypeText?: string;
   tone: HoverTone;
   /** The hovered unit (tile coords) and its size, so the label can be kept off it. */
   anchor?: Vec2;
@@ -41,6 +43,12 @@ const SOLDIER_PICK_PX = 12;
 const HULL_SLOP_PX = 4;
 /** A victory location's name shows within this many metres of its flag. */
 const VL_RADIUS_M = 6;
+const TYPE_NAMES: Record<TeamType, string> = {
+  rifle: 'Rifle Squad', smg: 'SMG Squad', mg: 'Machine-gun Team', mortar: 'Mortar Team',
+  atgun: 'Anti-tank Gun', sniper: 'Sniper', atteam: 'Anti-tank Team', tank: 'Tank',
+  spg: 'Self-propelled Gun', halftrack: 'Half-track', command: 'Command Team',
+  engineer: 'Engineer Squad', rocket: 'Rocket Team', transport: 'Transport',
+};
 
 function known(state: BattleState, viewer: Side, side: Side, id: number, vehicle: boolean): boolean {
   if (side === viewer) return true;
@@ -161,7 +169,11 @@ export function hoverInfoAt(state: BattleState, viewer: Side, p: Vec2, pxPerTile
     else if (s.health === 'incapacitated') text = 'Wounded';
     else if (s.activity === 'surrendered') text = 'Surrendered';
     else text = state.teams.get(s.teamId)?.name ?? 'Soldier';
-    return { text, tone, anchor: s.pos, clearM: 1 };
+    const team = state.teams.get(s.teamId);
+    const def = team ? TEAM_DEFS[team.defId] : undefined;
+    const crewGun = team?.crewWeapon && WEAPONS[team.crewWeapon.weaponId];
+    const type = def?.name ?? (crewGun ? `${crewGun.name} ${TYPE_NAMES[team!.type]}` : team ? TYPE_NAMES[team.type] : 'Soldier');
+    return { text, unitTypeText: `Type: ${type}`, tone, anchor: s.pos, clearM: 1 };
   };
   if (live) return manInfo(live.s);
   // a vehicle hull (wrecks included)
@@ -176,6 +188,7 @@ export function hoverInfoAt(state: BattleState, viewer: Side, p: Vec2, pxPerTile
     const dead = veh.state === 'knockedOut' || veh.state === 'burning' || veh.state === 'abandoned';
     return {
       text: vehicleLabel(veh, viewer), tone: dead ? 'dead' : veh.side === viewer ? 'own' : 'enemy',
+      unitTypeText: `Type: ${TYPE_NAMES[state.teams.get(veh.teamId)?.type ?? 'transport']}`,
       anchor: veh.pos, clearM: def ? Math.max(def.lengthM, def.widthM) / 2 : 3,
     };
   }
