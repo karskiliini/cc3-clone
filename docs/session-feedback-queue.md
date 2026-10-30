@@ -40,6 +40,7 @@ Reconciled 2026-10-29. This session is not complete. Process these requests in a
 | S24 | Blast throws weapon separately; recovering soldier can retrieve it or another gun; weapons can be damaged. | Pending audit/implementation. |
 | S25 | MG fires as LMG while mount arrives, then deploys to HMG at belt exhaustion/reload. | Pending audit/implementation. |
 | S26 | Slight visibility shroud wherever no friendly unit has line of sight. | Pending audit/implementation. |
+| S27 | Mud fields need small elevation variations and visible plough furrows/ridges instead of flat mud. | Queued 2026-10-30: field-scale furrow patterns and modest physical surface relief must agree visually and in the height model; blend field edges naturally and avoid creating artificial tank-blocking slopes. Preserve FIFO order; next outstanding item remains S10. |
 
 ## Verification limits
 
