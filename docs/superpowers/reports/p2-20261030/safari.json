@@ -1,0 +1,5 @@
+{
+  "name": "safari",
+  "status": "unfulfilled",
+  "error": "Error: Could not create a session: You must enable 'Allow remote automation' in the Developer section of Safari Settings to control Safari via WebDriver.\n    at request (file:///Users/marski/work/cc3-clone-p2w.noindex/runs/task11-20261030-p/inputs/tools/runDeterminismEngines.mjs:51:50)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async runSafari (file:///Users/marski/work/cc3-clone-p2w.noindex/runs/task11-20261030-p/inputs/tools/runDeterminismEngines.mjs:61:21)\n    at async file:///Users/marski/work/cc3-clone-p2w.noindex/runs/task11-20261030-p/inputs/tools/runDeterminismEngines.mjs:84:22"
+}

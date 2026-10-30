@@ -1,0 +1,59 @@
+[
+  {
+    "mapId": "border_1941",
+    "seed": 5,
+    "rngXYAndOrientationUnchanged": true,
+    "correctedVehicles": [
+      {
+        "vehicle": 131,
+        "type": "kv1",
+        "liftM": 0.02062808577284514,
+        "oldSolidOverlapM": 0,
+        "newSolidOverlapM": 0,
+        "oldSuspensionExcessM": 0.020428140685574026,
+        "newSuspensionExcessM": 1.1102230246251565e-16
+      }
+    ]
+  },
+  {
+    "mapId": "moscow_1941",
+    "seed": 1,
+    "rngXYAndOrientationUnchanged": true,
+    "correctedVehicles": [
+      {
+        "vehicle": 76,
+        "type": "sdkfz251",
+        "liftM": 0.20841440486812424,
+        "oldSolidOverlapM": 0.14193187697534526,
+        "newSolidOverlapM": 0,
+        "oldSuspensionExcessM": 0.14226808720630651,
+        "newSuspensionExcessM": 0
+      }
+    ]
+  },
+  {
+    "mapId": "berlin_1945",
+    "seed": 1,
+    "rngXYAndOrientationUnchanged": true,
+    "correctedVehicles": [
+      {
+        "vehicle": 46,
+        "type": "tiger",
+        "liftM": 0.14956172918255461,
+        "oldSolidOverlapM": 0,
+        "newSolidOverlapM": 0,
+        "oldSuspensionExcessM": 0.14054607173699118,
+        "newSuspensionExcessM": 1.7763568394002505e-15
+      },
+      {
+        "vehicle": 53,
+        "type": "panther",
+        "liftM": 0.061599765405375706,
+        "oldSolidOverlapM": 0,
+        "newSolidOverlapM": 0,
+        "oldSuspensionExcessM": 0.06033880158828858,
+        "newSuspensionExcessM": 0
+      }
+    ]
+  }
+]

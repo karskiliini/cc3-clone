@@ -1,0 +1,59 @@
+{
+  "productionCommits": [
+    "c97788a",
+    "8d74ea4"
+  ],
+  "sourceInputProof": {
+    "files": 449,
+    "sha256": "bafa52a4afca41f03503bebbed5a89254f5ddb95deef6fac23826b11e53714db",
+    "match": true
+  },
+  "fullSuite": {
+    "files": 189,
+    "passed": 1772,
+    "failed": 0,
+    "skipped": 2,
+    "typesExit": 0,
+    "buildExit": 0
+  },
+  "crossEngine": {
+    "node": "node v26.7.0",
+    "browserVersions": {
+      "webkit": "26.5",
+      "chromium": "149.0.7827.55",
+      "chrome": "156.0.8078.74"
+    },
+    "casesPerEngine": 20,
+    "actualTicksPerEngine": 111979,
+    "stateCheckpointsPerEngine": 1119,
+    "surfaceCheckpointsPerEngine": 600,
+    "allComparisonsPassed": true,
+    "installedSafari": "unfulfilled: remote automation needs local administrator enablement"
+  },
+  "bodyNumerics": {
+    "exactBeforeAfterBodyRecords": 4800,
+    "crossHost216FrameSampleSha256": "e1d462c7f776881383e4a88350d61b68656d437e33089d3a5a63ba044f4c129a"
+  },
+  "benchmark": {
+    "count": 40,
+    "warmup": 1000,
+    "batches": 10,
+    "ticksPerBatch": 1000,
+    "bundler": "esbuild 0.25.12",
+    "nativeAndViteNodeFinalProductionHashesMatch": true,
+    "targetMsPerTick": 0.5,
+    "targetMet": false
+  },
+  "battleHarness": {
+    "currentPassedCases": 90,
+    "baselineSuccessfulCases": 89,
+    "baselineFailedCases": [
+      {
+        "map": "berlin_1945",
+        "seed": 2,
+        "cause": "preexisting initial overlap and infinite sampled sweep"
+      }
+    ],
+    "attackerWinTargetMet": false
+  }
+}
