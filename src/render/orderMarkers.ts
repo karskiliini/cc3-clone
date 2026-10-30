@@ -1,17 +1,17 @@
 // ============================================================================
 // orderMarkers.ts — order markers for the player's teams on the battle map.
 //
-// Every friendly team with an active Move / Move Fast / Sneak / Fire / Smoke
+// Every friendly team with a Move / Move Fast / Sneak / Fire / Smoke
 // order shows its endpoint as the original's glossy navy ball — one per
 // remaining waypoint and one at the final target, no connecting line, no
 // labels. While a marker is dragged its ball follows the cursor. Defend /
 // Ambush show their arc at the team. Enemy orders are never shown.
 // ============================================================================
 import type { BattleState, Camera, Side, Team, Vec2 } from '@/shared/types';
-import { ORDER_DOT_COLOR, TILE_PX } from '@/shared/types';
+import { ORDER_DOT_COLOR, TILE_PX, VIEW_W, VIEW_H } from '@/shared/types';
 import { facingAngle } from '@/shared/math';
 import { worldToScreen } from '@/engine/camera';
-import { attackPhase, isOrderActive } from '@/sim/orders';
+import { attackPhase } from '@/sim/orders';
 
 export interface OrderMarkerHit { teamId: number; kind: 'target' | 'waypoint'; index: number }
 
@@ -25,12 +25,12 @@ function isMoveType(t: string): boolean {
   return t === 'move' || t === 'moveFast' || t === 'sneak';
 }
 
-/** Teams whose order endpoints can be shown: the viewer's own, in action, with an active order. */
+/** Keep the last issued endpoint editable until that order is replaced, even after arrival. */
 function hasEndpoint(state: BattleState, team: Team, playerSide: Side): boolean {
   if (team.side !== playerSide || team.outOfAction || !team.order) return false;
   const t = team.order.type;
   if (t !== 'fire' && t !== 'smoke' && !isMoveType(t)) return false;
-  return isOrderActive(state, team);
+  return true;
 }
 
 /** Order dot colour: Move blue, Move Fast purple, Sneak yellow, Smoke gray, Fire red (attack unit)
@@ -89,6 +89,19 @@ export function drawOrderBall(ctx: CanvasRenderingContext2D, p: Vec2, r: number)
   ctx.beginPath();
   ctx.arc(p.x, p.y, r - 0.4, Math.PI * 1.05, Math.PI * 1.85);
   ctx.stroke();
+  ctx.restore();
+}
+
+/** Editing feedback stays visible independently of selection, hover and the LOS-line option. */
+export function drawOrderDragLine(ctx: CanvasRenderingContext2D, cam: Camera, team: Team, pointer: Vec2): void {
+  const gun = team.crewWeapon && !team.crewWeapon.abandoned ? team.crewWeapon : null;
+  const from = worldToScreen(cam, gun?.pos ?? team.pos);
+  ctx.save(); ctx.beginPath(); ctx.rect(0, 0, VIEW_W, VIEW_H); ctx.clip();
+  ctx.globalAlpha = 1; ctx.setLineDash([]);
+  ctx.beginPath(); ctx.moveTo(from.x, from.y); ctx.lineTo(pointer.x, pointer.y);
+  ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.lineWidth = 4; ctx.stroke();
+  ctx.strokeStyle = orderMarkerColor(team); ctx.lineWidth = 1.5; ctx.stroke();
+  drawOrderBall(ctx, pointer, 3.2 * 1.4);
   ctx.restore();
 }
 

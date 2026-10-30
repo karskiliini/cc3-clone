@@ -1,4 +1,4 @@
-import type { CursorKind, GameSettings, InputState, BattleState, OrderType, Rect, Screen, Side, Team, Vec2, Camera } from '@/shared/types';
+import type { CursorKind, GameSettings, InputState, BattleState, Order, OrderType, Rect, Screen, Side, Team, Vec2, Camera } from '@/shared/types';
 import { ORDER_DOT_COLOR, ORDER_HOTKEYS, ORDER_TYPES, TILE_PX, VIEW_H, VIEW_W, otherSide } from '@/shared/types';
 import { COMMAND_RADIUS_TILES } from '@/sim/command';
 import { game } from '@/game';
@@ -15,7 +15,7 @@ import { drawUnits, vehiclesWithGrass3d } from '@/render/unitRender';
 import { drawEffects } from '@/render/effects';
 import { VisibilityOverlay } from '@/render/visibilityOverlay';
 import { DepthOverlay } from '@/render/depthOverlay';
-import { pickOrderMarker, drawOrderBall } from '@/render/orderMarkers';
+import { pickOrderMarker, drawOrderDragLine } from '@/render/orderMarkers';
 import { GAME_SPEEDS, cycleTeamKey, handleDepthMapKey, handleSpeedKey, offsetOrderPoints, reissueOrderOnMarkerDrag } from './viewKeys';
 import { hitRect, setHudFont } from '@/ui/hud/hudChrome';
 import { drawLOSLine } from '@/ui/losTool';
@@ -97,14 +97,14 @@ interface LeftDrag {
   moved: number;
 }
 
-/** Press on an order endpoint marker starts dragging that marker; on release the
- * marker's order is re-issued at the drop point (waypoints cleared — a drag
- * redefines the endpoint, keeping the order type). */
+/** A marker edit is committed on release; retain identity while the sim consumes earlier legs. */
 interface MarkerDrag {
   teamId: number;
   kind: 'target' | 'waypoint';
   index: number;
   orderType: OrderType;
+  originalOrder: Order;
+  point?: Vec2;
   startX: number;
   startY: number;
   moved: number;
@@ -366,6 +366,7 @@ export class BattleScreen implements Screen {
     // cancels the aiming line instead of opening the menu or panning.
     for (const c of input.clicks) {
       if (c.button !== 2) continue;
+      if (this.markerDrag) { this.markerDrag = null; this.leftDrag.active = false; continue; }
       if (this.commandMenu.isOpen) {
         this.commandMenu.close();
         continue;
@@ -431,7 +432,8 @@ export class BattleScreen implements Screen {
     }
 
     if (input.keysPressed.has('escape')) {
-      if (this.quitConfirm) { this.quitConfirm = null; }
+      if (this.markerDrag) { this.markerDrag = null; this.leftDrag.active = false; }
+      else if (this.quitConfirm) { this.quitConfirm = null; }
       else if (this.commandMenu.isOpen) this.commandMenu.close();
       else if (this.pendingOrder) { this.pendingOrder = null; this.pendingWaypoints = []; }
       // deploy/running both count as "the battle" (manual: ESC quits the current
@@ -446,18 +448,28 @@ export class BattleScreen implements Screen {
     this.hoveredOrderMarker = (!this.overHud(input.mouse) && !this.commandMenu.isOpen && input.pointerInside)
       ? pickOrderMarker(state, cam, input.mouse, battle.playerSide())
       : null;
+    if (this.markerDrag) {
+      const team = state.teams.get(this.markerDrag.teamId);
+      if (!input.pointerInside || team?.outOfAction || team?.order !== this.markerDrag.originalOrder
+        || (this.markerDrag.point && !team.order?.waypoints?.includes(this.markerDrag.point))) this.markerDrag = null;
+    }
     for (const c of input.clicks) {
       if (c.button === 0 && !this.overHud({ x: c.x, y: c.y }) && !this.commandMenu.isOpen && !menuWasOpen && !modernPanning) {
-        const marker = !this.pendingOrder ? pickOrderMarker(state, cam, { x: c.x, y: c.y }, battle.playerSide()) : null;
+        const marker = pickOrderMarker(state, cam, { x: c.x, y: c.y }, battle.playerSide());
         if (marker) {
           // press on a marker: drag it (user request — drag-n-drop the bubble), also select the team
           const team = state.teams.get(marker.teamId);
           const orderType = team?.order?.type;
           if (team && orderType) {
-            this.markerDrag = { teamId: marker.teamId, kind: marker.kind, index: marker.index, orderType, startX: c.x, startY: c.y, moved: 0 };
+            this.leftDrag.active = false;
+            this.markerDrag = { teamId: marker.teamId, kind: marker.kind, index: marker.index, orderType,
+              originalOrder: team.order!, point: marker.kind === 'waypoint' ? team.order!.waypoints?.[marker.index] : undefined,
+              startX: c.x, startY: c.y, moved: 0 };
           }
           // clicking a marker selects its team (Shift adds) — no deselect, no marquee
-          if (input.keysDown.has('shift')) this.addToSelection([marker.teamId]); else this.setSelection([marker.teamId]);
+          if (!this.pendingOrder) {
+            if (input.keysDown.has('shift')) this.addToSelection([marker.teamId]); else this.setSelection([marker.teamId]);
+          }
           continue;
         }
         this.leftDrag = { active: true, startX: c.x, startY: c.y, moved: 0 };
@@ -468,6 +480,10 @@ export class BattleScreen implements Screen {
     }
     if (this.markerDrag && input.buttons.left && !modernPanning) {
       this.markerDrag.moved = Math.max(this.markerDrag.moved, Math.hypot(input.mouse.x - this.markerDrag.startX, input.mouse.y - this.markerDrag.startY));
+      if (this.markerDrag.moved >= DRAG_THRESHOLD_PX) {
+        this.pendingOrder = null; this.pendingWaypoints = [];
+        if (input.keysDown.has('shift')) this.addToSelection([this.markerDrag.teamId]); else this.setSelection([this.markerDrag.teamId]);
+      }
     }
     for (const r of input.releases) {
       if (r.button !== 0) continue;
@@ -475,13 +491,25 @@ export class BattleScreen implements Screen {
       if (this.markerDrag) {
         const drag = this.markerDrag;
         this.markerDrag = null;
-        if (!this.overHud({ x: r.x, y: r.y }) && drag.moved >= DRAG_THRESHOLD_PX) {
-          const world = screenToWorld(cam, { x: r.x, y: r.y });
+        const moved = Math.max(drag.moved, Math.hypot(r.x - drag.startX, r.y - drag.startY));
+        // A plain click still places the pending command, even on top of an old marker.
+        if (moved < DRAG_THRESHOLD_PX && this.pendingOrder && input.pointerInside && !modernPanning && !this.overHud(r)) {
+          const world = screenToWorld(cam, r);
+          if (MOVE_TYPES.includes(this.pendingOrder) && (r.shift ?? input.keysDown.has('shift'))) this.pendingWaypoints.push(world);
+          else this.issueOrderToSelection(input, world);
+          continue;
+        }
+        if (input.pointerInside && !modernPanning && r.x >= 0 && r.y >= 0 && r.x < VIEW_W && r.y < VIEW_H
+          && !this.overHud({ x: r.x, y: r.y }) && moved >= DRAG_THRESHOLD_PX) {
+          const drop = screenToWorld(cam, { x: r.x, y: r.y });
+          const world = { x: clamp(drop.x, 0, state.map.width - 0.001), y: clamp(drop.y, 0, state.map.height - 0.001) };
           const team = state.teams.get(drag.teamId);
           // Item 017: dragging the ENDPOINT edits only the final leg — earlier Shift-click
           // waypoints survive. Dragging a WAYPOINT dot rewrites that point in place.
-          const reissue = team ? reissueOrderOnMarkerDrag(team.order, drag, world) : null;
+          const reissue = team && !team.outOfAction ? reissueOrderOnMarkerDrag(team.order, drag, world) : null;
           if (reissue) {
+            this.pendingOrder = null; this.pendingWaypoints = [];
+            if (input.keysDown.has('shift')) this.addToSelection([drag.teamId]); else this.setSelection([drag.teamId]);
             this.command({ type: 'order', teamId: drag.teamId, order: { ...reissue, issuedAt: state.time } });
             game.audio?.play('click');
           }
@@ -846,11 +874,13 @@ export class BattleScreen implements Screen {
     this.grassFx.update(state, battle.playerSide());
     if (!game.settings.showDepthMap) this.grassFx.drawTrails(ctx, cam);
     drawUnits(ctx, cam, state, battle.playerSide(), this.selectedTeamIds, game.settings, this.showDead, this.hoveredOrderMarker, this.hoverTeamId, this.soldierMonitor.watchedSoldierId());
-    // The original's drag feel: the dragged marker's ball follows the cursor while held.
-    if (this.markerDrag) drawOrderBall(ctx, game.input.state.mouse, 3.2 * 1.4);
     this.grassFx.drawStanding(ctx, cam, state, battle.playerSide(), vehiclesWithGrass3d());
     drawEffects(ctx, cam, state);
     this.blastFx.draw(ctx, cam, state.time);
+    if (this.markerDrag) {
+      const team = state.teams.get(this.markerDrag.teamId);
+      if (team) drawOrderDragLine(ctx, cam, team, game.input.state.mouse);
+    }
 
     const selTeam = this.selectedTeamId != null ? state.teams.get(this.selectedTeamId) ?? null : null;
     const aimingFire = this.pendingOrder === 'fire' || this.pendingOrder === 'smoke';

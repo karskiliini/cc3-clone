@@ -45,15 +45,20 @@ export function offsetOrderPoints(target: Vec2, waypoints: readonly Vec2[], offs
  * or null when the marker no longer matches the team's order (stale drag). */
 export function reissueOrderOnMarkerDrag(
   current: Order | null,
-  drag: { kind: 'target' | 'waypoint'; index: number; orderType: OrderType },
+  drag: { kind: 'target' | 'waypoint'; index: number; orderType: OrderType; originalOrder?: Order; point?: Vec2 },
   dropPoint: Vec2,
 ): Order | null {
-  if (!current || current.type !== drag.orderType) return null;
+  if (!current || current.type !== drag.orderType || (drag.originalOrder && current !== drag.originalOrder)) return null;
   if (drag.kind === 'waypoint') {
     if (current.type !== 'move' && current.type !== 'moveFast' && current.type !== 'sneak') return null;
     const wps = current.waypoints;
-    if (!wps || drag.index >= wps.length) return null;
-    return { ...current, waypoints: wps.map((w, i) => (i === drag.index ? dropPoint : w)) };
+    const index = drag.point ? wps?.indexOf(drag.point) ?? -1 : drag.index;
+    if (!wps || index < 0 || index >= wps.length) return null;
+    return { ...current, waypoints: wps.map((w, i) => (i === index ? { ...dropPoint } : w)) };
   }
-  return { ...current, target: dropPoint };
+  const out = { ...current, target: { ...dropPoint } };
+  // Moving a marker chooses a map position, ending enemy tracking or boarding of the old hull.
+  delete out.targetTeamId; delete out.targetVehicleId; delete out.lastSeenAt; delete out.lastKnownPos;
+  delete out.mountVehicleId; delete out.gunBlockReported;
+  return out;
 }

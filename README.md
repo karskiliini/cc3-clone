@@ -23,7 +23,7 @@ order first (hotkey, order bar, or right-click menu), then click the target.
 - Orders: press **Z** Move, **X** Move Fast, **C** Sneak, **V** Fire, **B** Smoke, **N** Defend,
   **M** Ambush (or click the order bar in the bottom strip, or right-click for the classic menu),
   then click the target. Shift-click adds waypoints (visited in click order before the final click). Esc cancels.
-  Order endpoints stay marked on the map; hover one to see its line to the team, click it to select that team.
+  Order endpoints stay marked on the map, including after arrival. Drag any existing waypoint or fire/move target to edit it; earlier waypoints remain intact. A line from the unit to the marker stays visible throughout the drag, even with LOS lines off. Esc or right-click cancels the edit.
 - Scroll: two-finger scroll / mouse wheel pans; pinch or Ctrl+wheel zooms around the pointer;
   middle-drag or Space+drag pans; screen edges and the arrow keys scroll too.
 - Fire order over an enemy: when the pointer is on a spotted enemy team that one of the selected teams can
