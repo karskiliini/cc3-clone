@@ -241,7 +241,16 @@ export function completeVehicleMovement(state: BattleState, rng: Rng, dt: number
     // At entry this is the complete accepted pose from the preceding substep.
     recordPose();
     acceptedSpeedMs = 0;
+    // Reject invalid or out-of-map endpoints before sizing a sampled sweep.
+    // Squaring huge finite deltas can overflow hypot to Infinity; dividing each
+    // sample by an infinite count then repeats the start forever.
+    if (!Number.isFinite(from.x) || !Number.isFinite(from.y) || !Number.isFinite(to.x) || !Number.isFinite(to.y)
+      || from.x < 0 || from.y < 0 || from.x >= state.map.width * TILE_M || from.y >= state.map.height * TILE_M
+      || to.x < 0 || to.y < 0 || to.x >= state.map.width * TILE_M || to.y >= state.map.height * TILE_M) {
+      terrainBlocked = true; terrainRejects++; return false;
+    }
     const length = dm.hypot(to.x - from.x, to.y - from.y);
+    if (!Number.isFinite(length)) { terrainBlocked = true; terrainRejects++; return false; }
     if (length === 0) return true;
     const count = Math.max(1, Math.ceil(length / 0.25));
     let previous = { x: from.x / TILE_M, y: from.y / TILE_M };

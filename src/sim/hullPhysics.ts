@@ -42,10 +42,27 @@ export function createHullBody(def: VehicleDef, posTiles: Vec2, heading: number,
   const rearAngle = dm.atan2(sy, 1), rightAngle = dm.atan2(-sx, Math.sqrt(1 + sy * sy));
   const pitch = { x: dm.sin(rearAngle / 2), y: 0, z: 0, w: dm.cos(rearAngle / 2) };
   const roll = { x: 0, y: dm.sin(rightAngle / 2), z: 0, w: dm.cos(rightAngle / 2) };
-  return { position: { x, y, z: height + p.cgHeightM }, orientation: normalize(multiply(yaw, multiply(pitch, roll))),
+  const body: HullBody = { position: { x, y, z: height + p.cgHeightM }, orientation: normalize(multiply(yaw, multiply(pitch, roll))),
     velocity: zero(), angularVelocity: zero(), suspensionTravel: p.contacts.map(() => 0),
     asleep: false, hungUp: false, overturned: false, quietS: 0, tippedS: 0, hungS: 0,
     rockPhaseS: 0, rockTries: 0, groundVersion: 0 };
+  // A fitted plane can cut through a nonplanar roof/ground boundary. Placement
+  // must resolve that overlap before springs turn it into stored launch energy.
+  // Keep the fitted rotation and lift only enough to clear the solid hull and
+  // keep every suspension point within its travel. Ordinary plane poses stay exact.
+  let lift = 0;
+  for (const local of solidPoints(p)) {
+    const point = add(body.position, rotate(body.orientation, local));
+    lift = Math.max(lift, probe(point.x, point.y).heightM + SOLID_SKIN_M - point.z);
+  }
+  for (const contact of p.contacts) {
+    const point = add(body.position, rotate(body.orientation, contact.local));
+    const ground = probe(point.x, point.y);
+    if (ground.normal.z > 0) lift = Math.max(lift,
+      ground.heightM - point.z - p.suspension.travelM / ground.normal.z);
+  }
+  body.position.z += lift;
+  return body;
 }
 
 /** Reset canonical sleep state after input, collision displacement or terrain changes. */
