@@ -1,4 +1,3 @@
-import { getHeightField, setTileProfile } from '@/sim/heightField';
 import { takeHullDrive } from '@/sim/hullDrive';
 import { describe, expect, it } from 'vitest';
 import { SIM_DT, TILE_M } from '@/shared/types';
@@ -82,11 +81,10 @@ describe('a tank drives into cover instead of sliding', () => {
 
   it('settles in cover and resumes the existing order after the threat memory clears without snapping', () => {
     const state = makeState();
-    const { v } = addTank(state, 'pz4gh', { x: 200.5, y: 200.5 }, -Math.PI / 4, 60);
+    const { v } = addTank(state, 'pz4gh', { x: 200.5, y: 200.5 }, 0, 60);
     state.map.tiles[200 * state.map.width + 202] = 'buildingStone';
     const threat = { x: 200.5, y: 192.5 };
     onVehicleNearMiss(state, v, WEAPONS.pak40, threat);
-    // Start aligned for this hold/resume fixture; north-start flight-budget limitation is in the Task 5B report.
     const orderedRoute = [{ x: 190.5, y: 210.5 }];
     v.path = orderedRoute;
     const rng = new Rng(3);
@@ -128,12 +126,6 @@ describe('a tank drives into cover instead of sliding', () => {
       if (x !== 202 || y !== 201) state.map.tiles[y * state.map.width + x] = 'water';
     }
     state.map.tiles[200 * state.map.width + 202] = 'buildingStone';
-    // Navigation fixture only: retain water blocking and building LOS, flatten bank contact geometry.
-    // Original bank contact failure is recorded for the Task 10 acceptance gate.
-    const field = getHeightField(state.map);
-    for (let y = 200; y <= 202; y++) for (let x = 201; x <= 203; x++) {
-      if (state.map.tiles[y * state.map.width + x] === 'water') setTileProfile(field, x, y, 0);
-    }
     const threat = { x: 200.5, y: 192.5 };
     onVehicleNearMiss(state, v, WEAPONS.pak40, threat);
     const rng = new Rng(3);

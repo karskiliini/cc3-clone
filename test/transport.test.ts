@@ -155,9 +155,13 @@ describe('riding', () => {
     const { state, v, men } = loaded();
     const rng = new Rng(22);
     const heights = new Float32Array(W * H);
-    for (let y = 70; y < 95; y++) for (let x = 85; x < 115; x++) heights[y * W + x] = 6;
+    for (let y = 70; y < 99; y++) for (let x = 85; x < 115; x++) heights[y * W + x] = 6;
     state.map.ground = heights;
-    for (let i = 0; i < 200; i++) resolveVehicleHit(state, rng, v, { weapon: WEAPONS.mosin, shooterPos: { x: 100, y: 80 }, shooterSide: 'soviet', distM: 40 });
+    // Use a close, steep downward ray: the P2 armor proxy correctly blocks
+    // the former shallow ray at the front plate before it reaches the open top.
+    // The loaded fixture has already built the flat map's physical surface.
+    state.map.heightField = undefined;
+    for (let i = 0; i < 200; i++) resolveVehicleHit(state, rng, v, { weapon: WEAPONS.mosin, shooterPos: { x: 100, y: 96 }, shooterSide: 'soviet', distM: 8 });
     expect(men.some((m) => m.health !== 'healthy')).toBe(true);
   });
 

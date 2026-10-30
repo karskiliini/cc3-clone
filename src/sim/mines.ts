@@ -1,3 +1,4 @@
+import { localDriverOwner } from './localDriver';
 import type { BattleState, GameMap, Soldier, Vehicle, Vec2 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
@@ -104,5 +105,6 @@ export function vehicleMineCheck(state: BattleState, v: Vehicle, rng: Rng, at: V
   addMessage(state, `${v.defId}: hit a mine!`, 'bad', v.side);
   // immobilise the hull outright (track damage), crew shaken
   v.state = 'immobilized';
+  localDriverOwner(v, 0);
   v.hits += AT_MINE_DAMAGE;
 }

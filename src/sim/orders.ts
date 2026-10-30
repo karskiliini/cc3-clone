@@ -7,12 +7,13 @@ import { addMessage } from './messages';
 import type { Rng } from '@/shared/rng';
 import { angleTo, clamp, dist, facingFromAngle, facingTo, vadd, vnorm, vscale, vsub } from '@/shared/math';
 import { teamInCommand } from './command';
-import { findPath, isPassable, type TileCostFn } from './path';
+import { findPath, isPassable, type TileCostFn, type VehiclePathProfile } from './path';
 import { fireHazards, nearFireHazard } from './vehicleExplosion';
 import { teamHasSmoke } from './team';
 import { isFirstFireFrozen, isLeaderless } from './mind';
 import { formationBaseHeading, rotateOffset } from './spawn';
 import { settleTile } from './coverSeek';
+import { buildingDestination, buildingTiles } from './buildingShelter';
 import { isDazed } from './daze';
 import { onCrewOrder } from './crewWeapon';
 import { RADIO_OUT_ORDER_DELAY_S, radioOut } from './vehicleDamage';
@@ -112,8 +113,7 @@ const DRIFT_MAX = 1.8;
 /** Direction of travel for each move order, fixed when the order is first applied so hesitant
  * soldiers who obey later rotate the formation the same way. */
 const orderHeading = new WeakMap<Order, number>();
-/** Destination tiles already claimed under an order (soldier id -> tile index): no two teammates
- * settle onto the same tile. */
+/** Destination tiles already claimed under an order (soldier id -> tile index): ordinary ground keeps separate tiles; building shelter can share a tile. */
 const orderClaims = new WeakMap<Order, Map<number, number>>();
 
 function headingFor(state: BattleState, team: Team, order: Order): number {
@@ -164,10 +164,10 @@ export function fireHazardCost(state: BattleState, mover: 'infantry' | 'vehicle'
  * (`fireHazardCost`; `softVehicle`: an open-topped vehicle, which avoids them like infantry).
  * skipped (the route goes on to the next one). Records per-point leg headings for followers, and
  * records a failed leg's point so `stepOrderWaypoints` can drop the waypoint no one will visit. */
-export function routeVia(state: BattleState, from: Vec2, points: readonly Vec2[], mover: 'infantry' | 'vehicle', softVehicle = false): Vec2[] {
+export function routeVia(state: BattleState, from: Vec2, points: readonly Vec2[], mover: 'infantry' | 'vehicle', softVehicle = false, vehicleProfile?: VehiclePathProfile): Vec2[] {
   const hazardCost = fireHazardCost(state, mover, softVehicle);
   if (points.length === 1) {
-    const path = findPath(state.map, from, points[0], mover, undefined, hazardCost);
+    const path = findPath(state.map, from, points[0], mover, undefined, hazardCost, vehicleProfile);
     if (path.length > 0) pathLegHeadings.set(path, new Array(path.length).fill(dist(from, points[0]) > 1e-6 ? angleTo(from, points[0]) : 0));
     return path;
   }
@@ -177,7 +177,7 @@ export function routeVia(state: BattleState, from: Vec2, points: readonly Vec2[]
   let skipped = skippedLegs.get(state);
   for (let pi = 0; pi < points.length; pi++) {
     const p = points[pi];
-    const leg = findPath(state.map, cur, p, mover, undefined, hazardCost);
+    const leg = findPath(state.map, cur, p, mover, undefined, hazardCost, vehicleProfile);
     const reached = leg.length > 0 && dist(leg[leg.length - 1], p) <= 1;
     if (!reached) {
       if (pi < points.length - 1) {
@@ -278,6 +278,8 @@ function destinationFor(state: BattleState, team: Team, s: Soldier, order: Order
     const o = state.soldiers.get(id);
     if (o && o.health !== 'dead' && o.health !== 'incapacitated') taken.add(tile);
   }
+  const shelter = buildingDestination(state, s, order.target, slot);
+  if (shelter) return shelter;
   const dest = settleTile(state, s, slot, headingFor(state, team, order), SETTLE_RADIUS, (tx, ty) => taken.has(ty * map.width + tx)) ?? slot;
   return dest;
 }
@@ -292,7 +294,7 @@ function claim(state: BattleState, order: Order, s: Soldier, p: Vec2): void {
 function withArrivalHop(state: BattleState, from: Vec2, path: Vec2[], dest: Vec2): { path: Vec2[]; end: Vec2 } {
   const end = path.length > 0 ? path[path.length - 1] : from;
   if (tileEq(end, dest)) {
-    if (path.length === 0) return { path, end: from };
+    if (path.length === 0) return dist(from, dest) < 1e-4 ? { path, end: from } : { path: [{ ...dest }], end: dest };
     const out = path.slice(0, -1);
     out.push({ x: dest.x, y: dest.y });
     return { path: out, end: dest };
@@ -381,9 +383,11 @@ export function applyOrderToSoldier(state: BattleState, team: Team, s: Soldier, 
     }
     const offset = orderSlotOffset(state, team, s, order);
     const dest = destinationFor(state, team, s, order, offset);
+    const intoBuilding = buildingTiles(state.map, order.target).length > 0;
     let path: Vec2[] | null = null;
     const wps = order.waypoints && order.waypoints.length > 0 ? order.waypoints : null;
-      if (s.id === team.leaderId) {
+      if (intoBuilding && !wps && dist(s.pos, dest) < 1e-4) { path = []; }
+      else if (s.id === team.leaderId) {
         path = leaderPath ?? routeVia(state, s.pos, orderRoutePoints(order), 'infantry');
       } else {
         if (leaderPath) {
@@ -391,7 +395,7 @@ export function applyOrderToSoldier(state: BattleState, team: Team, s: Soldier, 
           const legs = wps ? pathLegHeadings.get(leaderPath) : undefined;
           const base = formationBaseHeading(state.map, team.side);
           const shift = legs ? (i: number) => rotateOffset(s.formationOffset, (legs[i] ?? headingFor(state, team, order)) - base) : offset;
-          path = followerPathFromLeader(state, s, leaderPath, shift, rng) ?? followLeaderRoute(state, s, leaderPath, dest);
+          path = (intoBuilding ? null : followerPathFromLeader(state, s, leaderPath, shift, rng)) ?? followLeaderRoute(state, s, leaderPath, dest);
         }
         if (!path) {
           path = wps ? routeVia(state, s.pos, [...wps, dest], 'infantry') : findPath(state.map, s.pos, dest, 'infantry', undefined, fireHazardCost(state, 'infantry'));
@@ -531,6 +535,7 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
     else delete order.waypoints;
   }
   team.order = order;
+  if (team.vehicleId != null) { const v = state.vehicles.get(team.vehicleId); if (v) delete v.localDriver; }
   // G31 camouflage nets: an ambush order deploys the nets — they take effect immediately while
   // the team stays still (spotting.ts), and are shed by any later movement order here.
   const type = effectiveType(team, order);
@@ -553,7 +558,7 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
 
   if (type === 'move' || type === 'moveFast' || type === 'sneak') {
     if (isVehicleTeam) {
-      if (vehicle) vehicle.path = routeVia(state, vehicle.pos, orderRoutePoints(order), 'vehicle', VEHICLE_DEFS[vehicle.defId]?.layout?.openTop === true);
+      if (vehicle) vehicle.path = routeVia(state, vehicle.pos, orderRoutePoints(order), 'vehicle', VEHICLE_DEFS[vehicle.defId]?.layout?.openTop === true, { def: VEHICLE_DEFS[vehicle.defId] });
     } else {
       const leader = state.soldiers.get(team.leaderId);
       leaderPath = leader ? routeVia(state, leader.pos, orderRoutePoints(order), 'infantry') : [];

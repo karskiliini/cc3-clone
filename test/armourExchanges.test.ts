@@ -9,7 +9,10 @@
 import { describe, it, expect } from 'vitest';
 import { makeState, addTank } from './vehicleDamageHelpers';
 import { stepCombat, pickVehicleTarget, vehicleAreaTarget } from '@/sim/combat';
-import { stepVehicles } from '@/sim/vehicle';
+import { VEHICLE_DEFS } from '@/data/units';
+import { gunTarget, vehicleGunRay } from '@/sim/hullAim';
+import { groundProbe } from '@/sim/hullGround';
+import { placeVehicleBody, stepVehicles } from '@/sim/vehicle';
 import { hasLOS, hasLineOfFire, EYE_VEHICLE_M, VEHICLE_GUN_M } from '@/sim/los';
 import { Battle } from '@/sim/battle';
 import { DEFAULT_FORCES } from '@/data/operation';
@@ -22,17 +25,15 @@ const W = 400, H = 400;
  * (0.4 = grade 0.2, climbable; 0.8 = grade 0.4, steeper than the 25% vehicle limit); 'cliff'
  * drops 2 m on both faces so the tank can never mount the crest. Computes `groundSteep` so
  * vehicle movement honours the grade. */
-function withCrest(state: BattleState, shape: 'slope' | 'cliff', slope = 0.4): void {
+function withCrest(state: BattleState, shape: 'slope' | 'cliff', slope = 0.4, ridgeX = 20, height = 2): void {
   const ground = new Float32Array(W * H);
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       let h = 0;
       if (shape === 'cliff') {
-        if (x === 20 || x === 21) h = 2.0;
+        if (x === ridgeX || x === ridgeX + 1) h = height;
       } else {
-        if (x >= 20 && x <= 21) h = 2.0;
-        else if (x >= 22 && x <= 25) h = 2.0 - (x - 21) * slope;
-        else if (x >= 16 && x <= 19) h = (x - 15) * slope;
+        h = Math.min(height, height - (ridgeX - x) * slope, height - (x - ridgeX - 1) * slope);
       }
       ground[y * W + x] = Math.max(0, h);
     }
@@ -55,11 +56,11 @@ function withCrest(state: BattleState, shape: 'slope' | 'cliff', slope = 0.4): v
 }
 
 /** A T-34 west of a 2.0 m crest, a Pz III J east of it; both have fresh beliefs and spots. */
-function hullDownScene(shape: 'slope' | 'cliff' = 'slope', slope = 0.4): { state: BattleState; own: Vehicle; enemy: Vehicle } {
+function hullDownScene(shape: 'slope' | 'cliff' = 'slope', slope = 0.4, broad = false): { state: BattleState; own: Vehicle; enemy: Vehicle } {
   const state = makeState(1941);
-  withCrest(state, shape, slope);
-  const own = addTank(state, 't34_76', { x: 12.5, y: 200.5 });
-  const enemy = addTank(state, 'pz3j', { x: 30.5, y: 200.5 }, 180, 50, 'german');
+  withCrest(state, shape, slope, broad ? 33 : 20, broad ? 1.8 : 2);
+  const own = addTank(state, 't34_76', { x: broad ? 14.5 : 12.5, y: 200.5 }, broad ? Math.PI / 2 : 0);
+  const enemy = addTank(state, 'pz3j', { x: broad ? 80.5 : 30.5, y: 200.5 }, -Math.PI / 2, 50, 'german');
   own.crew[0].mind.beliefs.push({ pos: { ...enemy.v.pos }, kind: 'seen', confidence: 1, count: 3, time: state.time, deadSeen: 0 });
   enemy.crew[0].mind.beliefs.push({ pos: { ...own.v.pos }, kind: 'seen', confidence: 1, count: 3, time: state.time, deadSeen: 0 });
   state.spottedVehicles.soviet.add(enemy.v.id);
@@ -77,7 +78,16 @@ describe('item 038 — hull-down: eye over the crest, gun line below it', () => 
   });
 
   it('a hull-down tank lays on the visible target but holds fire, creeps out, then fires', () => {
-    const { state, own } = hullDownScene();
+    // A 5% approach keeps the physical T-34 within its 5-degree gun depression.
+    // The old 20% ramp pitched it 11 degrees toward a low, nearby target,
+    // so no amount of waiting could make that shot geometrically possible.
+    const { state, own, enemy } = hullDownScene('slope', 0.1, true);
+    placeVehicleBody(own, VEHICLE_DEFS[own.defId], own.pos, own.hullFacing, groundProbe(state.map));
+    const actualRay = () => vehicleGunRay(state, own, VEHICLE_DEFS[own.defId], gunTarget(state, enemy.pos, enemy));
+    const initial = actualRay();
+    expect(initial.canBear, 'initial target is within actual gun elevation limits').toBe(true);
+    expect(hasLOS(state.map, own.pos, enemy.pos, { eyeM: EYE_VEHICLE_M, targetZ: initial.target.heightM })).toBe(true);
+    expect(hasLineOfFire(state.map, initial.from, initial.target.posTiles, initial.heights)).toBe(false);
     const rng = new Rng(4);
     let firedAt = -1;
     let creptAt = -1;
@@ -88,7 +98,12 @@ describe('item 038 — hull-down: eye over the crest, gun line below it', () => 
       state.time += 0.1;
       if (creptAt < 0 && own.creepForGun) creptAt = state.time;
       const shot = state.events.find((e) => e.kind === 'shot' && (e as { weaponId?: string }).weaponId === 'f34_76' && (e as { side?: string }).side === 'soviet');
-      if (shot && firedAt < 0) firedAt = state.time;
+      if (shot && firedAt < 0) {
+        firedAt = state.time;
+        const ray = actualRay();
+        expect(ray.canBear).toBe(true);
+        expect(hasLineOfFire(state.map, ray.from, ray.target.posTiles, ray.heights)).toBe(true);
+      }
       state.events.length = 0;
       if (firedAt > 0) break;
     }

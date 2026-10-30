@@ -97,6 +97,27 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
       h.num(b.quietS); h.num(b.tippedS); h.num(b.hungS); h.num(b.rockPhaseS);
       h.int(b.rockTries); h.int(b.groundVersion);
     }
+    const local = v.localDriver; h.bool(Object.hasOwn(v, 'localDriver')); h.bool(!!local);
+    if (local) {
+      const field = (o: any, k: string, integer = false) => { h.bool(o != null && Object.hasOwn(o, k)); integer ? h.int(o?.[k]) : h.num(o?.[k]); };
+      // Work budgets are safe integers, not restricted to32bits: serialize both words.
+      const count = (o: any, k: string) => { field(o,k,true); h.int(Math.floor(o?.[k] / 4294967296)); };
+      field(local,'owner',true);
+      const e = local.episode; h.bool(Object.hasOwn(local,'episode')); h.bool(!!e);
+      if (e) { h.num(e.anchorM.x); h.num(e.anchorM.y); h.int(e.attempts); h.int(e.limit); h.bool(e.exhausted); }
+      const p = local.recovery; h.bool(Object.hasOwn(local,'recovery')); h.bool(!!p);
+      if (p) {
+        field(p,'gear',true); field(p,'capMs'); field(p.anchorM,'x'); field(p.anchorM,'y'); field(p.axis,'x'); field(p.axis,'y'); field(p,'entryMaxProjection');
+        h.bool(Object.hasOwn(p,'phase')); h.int(p.phase==='pending'?1:p.phase==='braking'?2:p.phase==='retreat'?3:0);
+        h.bool(p.turning);
+        count(p,'budgetTicks'); count(p,'elapsedTicks');
+      }
+      const w = local.window; h.bool(Object.hasOwn(local,'window')); h.bool(!!w);
+      if (w) {
+        field(w.goal,'x'); field(w.goal,'y'); field(w,'gear',true); field(w,'onlyDir',true); field(w,'direction',true); field(w,'ticks',true);
+        field(w,'startDistanceM'); field(w,'startAbsError'); field(w,'startRate'); field(w.axis,'x'); field(w.axis,'y'); field(w,'startFlow'); field(w,'minimumYaw'); field(w,'minimumSpeed');
+      }
+    }
     h.num(v.gunElevationRad ?? 0);
     h.int(v.path.length);
     if (v.damage) for (const k of Object.keys(v.damage).sort()) { h.str(k); h.str(v.damage[k as keyof typeof v.damage]); }

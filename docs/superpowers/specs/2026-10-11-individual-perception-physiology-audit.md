@@ -77,3 +77,11 @@ Make all newly introduced future-affecting perception, queued reports, condition
 9. **Explainability and regression:** inspect a selected individual's last decision with its observation/report, age/confidence, order and capability reason. Debug inspection leaves hash/RNG unchanged. Physical unseen hits, suppression at a believed area and legitimate communicated indirect fire still work.
 
 Audit limit: focused code paths were inspected, not every decision caller. `vehicle.ts`, cover-seeking callers, detailed crew communication, full order tracking, hasty-fire paths, all private caches and all UI consumers require a complete implementation-time consumer inventory. There is no whole-project no-omniscience claim and no passing verification claim in this memo.
+
+## 2026-10-12: keskeneräisen P2-reititysprototyypin tietoraja
+
+Task10:n hyväksymätön `prepareHullTraversal(map, def)` arvioi kokeessa A*-reitin reunojen nykyistä composite-pintaa `groundProbe`-kutsuilla. Sen rajapinta ei sisällä yksilön maastohavaintoja tai karttatiedon lähdettä. Fysiikan oikea kosketuspinta ja kuljettajan ennakointiin käytettävä tieto on erotettava: kaukaisen, näkemättömän kraatterin tai muuttuneen profiilin lukeminen voi muuttaa käyttäytymistä globaalin tilan perusteella. Pelkkä uusien viholliskoordinaattien puuttuminen ei osoita tätä tietorajaa oikeaksi.
+
+Tämä on uuden suunnittelusopimuksen tarve, ei näyttö pelaajan kameran aiheuttamasta vuodosta eikä P2-prototyypin hyväksyntä. Hyväksytty fyysisen kosketuksen murskaus ja oman toteutuneen liikkeen/kuormituksen mittaus käyttävät edelleen todellista maastoa. Ennakoivan tuotantoreitityksen pitää määritellä, mikä maasto perustuu aiempaan karttaan/käskyyn tai henkilön havaintoihin ja miten dynaamiset, näkemättömät muutokset käsitellään. Varsinaisen yksilöllisen havaintomallin toteutus kuuluu edelleen jonossa olevaan 056:een.
+
+Prototyypin composite-riskikustannus poistettiin 2026-10-12 tuotantoreitityksestä ja reitin oikaisuista. Tämä poistaa kyseisen uuden kaukaiseen dynaamiseen pintaan perustuvan ennakoinnin. Alkuperäiset kartta- ja maastosyötteet sekä fysiikan omat kosketushavainnot säilyvät; muutos ei osoita kaikkia aiempia 056:ssa lueteltuja tietovuotoja korjatuiksi. Prototyyppi ja kokeiden tulokset säilytettiin auditointia varten.

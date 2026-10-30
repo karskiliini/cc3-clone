@@ -1,8 +1,11 @@
+import * as dm from '@/shared/dmath';
+import { VEHICLE_DEFS } from '@/data/units';
+import { getHeightField, setTileProfile } from '@/sim/heightField';
 import { describe, it, expect } from 'vitest';
 import type { MapDef, Terrain } from '@/shared/types';
 import { buildMap } from '@/sim/map';
 import { MapPainter } from '@/sim/mapdsl';
-import { findPath, isPassable } from '@/sim/path';
+import { findPath, isPassable, vehicleSlopeCost } from '@/sim/path';
 
 function makeDef(paint: (tiles: Terrain[], w: number, h: number) => void, w = 30, h = 30): MapDef {
   return {
@@ -100,5 +103,37 @@ describe('path', () => {
     const elapsed = performance.now() - start;
     expect(path.length).toBeGreaterThan(0);
     expect(elapsed).toBeLessThan(250);
+  });
+});
+
+describe('directional vehicle slopes', () => {
+  function slopeMap(grade: number) {
+    const map = buildMap(makeDef((tiles, w, h) => new MapPainter(tiles, w, h, 1).fill('open')));
+    map.ground = new Float32Array(map.width * map.height);
+    for (let y = 0; y < map.height; y++) for (let x = 0; x < map.width; x++) map.ground[y * map.width + x] = (x + 0.5) * 2 * grade;
+    map.groundSteep = new Float32Array(map.width * map.height).fill(Math.abs(grade));
+    return map;
+  }
+  it('charges across-slope motion independently of the forward climb cap', () => {
+    const map = slopeMap(0.24), def = { ...VEHICLE_DEFS.sdkfz251, slopeComfortDeg: 5, slopeTipDeg: 30 };
+    expect(vehicleSlopeCost(map, { x: 10.5, y: 10.5 }, { x: 11.5, y: 10.5 }, def)).toBe(1);
+    expect(vehicleSlopeCost(map, { x: 10.5, y: 10.5 }, { x: 10.5, y: 11.5 }, def)).toBeGreaterThan(1);
+    expect(vehicleSlopeCost(slopeMap(0.26), { x: 10.5, y: 10.5 }, { x: 11.5, y: 10.5 }, def)).toBe(Infinity);
+  });
+  it('allows a safe contour beyond the old global cutoff and forbids a tipping contour', () => {
+    const map = slopeMap((dm.sin(35 * Math.PI / 180) / dm.cos(35 * Math.PI / 180)));
+    const from = { x: 10.5, y: 10.5 }, to = { x: 10.5, y: 18.5 };
+    expect(isPassable(map, 10, 10, 'vehicle')).toBe(false);
+    expect(isPassable(map, 10, 10, 'vehicle', VEHICLE_DEFS.kv1)).toBe(true);
+    expect(vehicleSlopeCost(map, from, to, VEHICLE_DEFS.sdkfz251)).toBe(Infinity);
+    expect(vehicleSlopeCost(map, from, to, VEHICLE_DEFS.kv1)).toBeGreaterThan(1);
+    expect(findPath(map, from, to, 'vehicle', undefined, undefined, { def: VEHICLE_DEFS.kv1 }).at(-1)).toEqual(to);
+    expect(findPath(map, from, to, 'vehicle', undefined, undefined, { def: VEHICLE_DEFS.sdkfz251 })).toEqual([]);
+    expect(findPath(map, from, to, 'infantry')).toEqual(findPath(slopeMap(0), from, to, 'infantry'));
+  });
+  it('does not interpret a composite feature as a bare-ground slope', () => {
+    const map = slopeMap(0);
+    setTileProfile(getHeightField(map), 10, 11, 3);
+    expect(vehicleSlopeCost(map, { x: 10.5, y: 10.5 }, { x: 10.5, y: 11.5 }, VEHICLE_DEFS.sdkfz251)).toBe(1);
   });
 });

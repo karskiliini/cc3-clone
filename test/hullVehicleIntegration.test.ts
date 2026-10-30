@@ -1,3 +1,4 @@
+import { hullParams } from '@/data/vehiclePhysics';
 import { getHeightField, setTileProfile } from '@/sim/heightField';
 import { expect, it, vi } from 'vitest';
 import * as hullPhysics from '@/sim/hullPhysics';
@@ -513,4 +514,65 @@ it('crushes eligible accepted-start terrain during standing gun-assist and froze
     expect(takeHullDrive(v).speedMs).toBe(0); expect(takeHullDrive(v).yawRateRadS).toBeGreaterThan(0);
     expect(state.map.tiles[19 * state.map.width + 21]).toBe('open'); expect(draws).toBe(0);
   }
+});
+
+it('scales ordinary signed speed once by actual roll but retains the pure recovery override', () => {
+  const spy = vi.spyOn(hullPhysics, 'stepHullBody').mockImplementation(() => {});
+  try {
+    for (const branch of ['forward', 'reverse', 'creep', 'recovery']) {
+      const speeds: number[] = [];
+      for (const roll of [0, 0.2]) {
+        const state = makeState(), { v, team } = addTank(state, 't34_76', { x: 20, y: 20 });
+        v.body = hullPhysics.createHullBody(VEHICLE_DEFS[v.defId], v.pos, 0, groundProbe(state.map));
+        v.body.orientation = { x: 0, y: -Math.sin(roll / 2), z: 0, w: Math.cos(roll / 2) };
+        const target = { x: 20, y: branch === 'reverse' ? 30 : 10 };
+        team.order = { type: 'move', target, issuedAt: 0 }; v.path = [target];
+        if (branch === 'creep') { v.creepForGun = true; v.creepAim = target; }
+        if (branch === 'recovery') v.body.hungUp = true;
+        stepVehicles(state, new Rng(1), SIM_DT);
+        const call = spy.mock.calls.at(-1)!;
+        speeds.push(call[2].speedMs);
+      }
+      if (branch === 'recovery') expect(speeds).toEqual([-1, -1]);
+      else {
+        expect(Math.abs(speeds[0])).toBeGreaterThan(0);
+        const tip = hullParams(VEHICLE_DEFS.t34_76).slopeTipDeg * Math.PI / 180;
+        expect(speeds[1]).toBeCloseTo(speeds[0] * (1 - 0.6 * 0.2 / tip), 12);
+      }
+    }
+  } finally { spy.mockRestore(); }
+});
+
+it('converts exactly one private raw input while keeping desired requests and original signed speed', () => {
+  const spy = vi.spyOn(hullPhysics, 'stepHullBody');
+  try {
+    for (const gear of [-1, 1]) for (const damage of [false, true]) {
+      const state = makeState(), {v, team} = addTank(state, 'pz4gh', {x:20,y:20});
+      const target = {x:20-gear*.2,y:20-gear*10}; v.path=[target]; team.order={type:'move',target,issuedAt:0};
+      if(damage) ensureDamage(v).trackL='damaged';
+      spy.mockClear(); stepVehicles(state,new Rng(3),SIM_DT);
+      expect(spy).toHaveBeenCalledTimes(1);
+      const desired=takeHullDrive(v),raw=spy.mock.calls[0][2],p=hullParams(VEHICLE_DEFS.pz4gh);
+      const regular=p.contacts.filter(c=>!c.horn), gain=regular.reduce((s,c)=>s+c.local.x*c.side*.42*p.widthM,0)/regular.reduce((s,c)=>s+c.local.x**2+c.local.y**2,0);
+      expect(raw.yawRateRadS).toBeCloseTo(desired.yawRateRadS/gain,12);
+      expect(raw.speedMs).toBe(desired.speedMs); expect(Math.sign(raw.speedMs)).toBe(gear);
+      expect(raw).not.toBe(desired); // public request is never converted or mutated
+    }
+  } finally {spy.mockRestore();}
+});
+
+it('keeps full brake, disabled and wheel-steered requests raw through one integration', () => {
+  const spy=vi.spyOn(hullPhysics,'stepHullBody');
+  try {
+    for(const mode of ['brake','dead','crew','wheel','recovery']){
+      const state=makeState(),{v,team,crew}=addTank(state,mode==='wheel'?'sdkfz251':'pz4gh',{x:20,y:20});
+      placeVehicleBody(v,VEHICLE_DEFS[v.defId],v.pos,0,groundProbe(state.map));
+      const target={x:21,y:10};if(mode!=='brake'){v.path=[target];team.order={type:'move',target,issuedAt:0};}
+      if(mode==='dead')v.state='knockedOut';if(mode==='crew')for(const c of crew)c.health='dead';
+      if(mode==='recovery'){v.body!.hungUp=true;v.body!.hungS=2;}
+      spy.mockClear();stepVehicles(state,new Rng(3),SIM_DT);expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy.mock.calls[0][2]).toEqual(takeHullDrive(v));
+      if(mode==='recovery')expect(Math.abs(takeHullDrive(v).speedMs)).toBe(1);
+    }
+  }finally{spy.mockRestore();}
 });

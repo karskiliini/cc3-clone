@@ -1,3 +1,4 @@
+import { localDriverOwner } from './localDriver';
 // Locational vehicle damage: hit zones from the shot geometry, what sits behind each zone, what a
 // penetration (or a hit that does not get through) does to the crew and the equipment there, and
 // what the damage then means for the vehicle. The ONE damage model for every hit on a vehicle:
@@ -250,7 +251,7 @@ export function worsen(v: Vehicle, sys: VehicleSystem, to: EquipState): boolean 
   const d = ensureDamage(v);
   if (RANK[to] <= RANK[d[sys]]) return false;
   d[sys] = to;
-  if (isImmobile(v) && v.state === 'ok') { v.state = 'immobilized'; v.path = []; }
+  if (isImmobile(v) && v.state === 'ok') { v.state = 'immobilized'; v.path = []; localDriverOwner(v, 0); }
   return true;
 }
 
@@ -568,6 +569,7 @@ export function rollDeathOutcome(rng: { next(): number }, v: Vehicle, def: Vehic
 export function bailOut(state: BattleState, v: Vehicle, team: Team, to: 'abandoned' | 'knockedOut' | 'burning', message: string | null = 'Crew bails out!', opts: BailOpts = {}): void {
   if (to === 'abandoned' && (v.state === 'immobilized' || isImmobile(v))) v.wasImmobile = true;
   v.state = to;
+  delete v.localDriver;
   v.path = [];
   v.speed = 0;
   v.bailBy = undefined;
@@ -690,6 +692,7 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
       const rackExposure = loc.startsWith('turret') ? 1 : loc === 'hullSide' ? 0.7 : 0.4;
       if (rng.next() < rackP * rackExposure) {
         v.state = 'burning';
+        delete v.localDriver;
         v.fire = { t0: state.time };
         v.cookOff = { checkedS: 0, pops: 0, rackFire: true };
         state.events.push({ kind: 'explosion', pos: { ...v.pos }, side: input.shooterSide, weaponId: weapon.id });
@@ -752,6 +755,7 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
     }
     v.fire = { t0: state.time };
     v.state = 'burning';
+    delete v.localDriver;
     v.path = []; v.speed = 0;
     v.cookOff = { checkedS: 0, pops: 0, rackFire: true };
     startFireBail(state, v, team);
@@ -808,6 +812,7 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
     } else {
       v.fire = { t0: state.time };
       v.state = 'burning';
+      delete v.localDriver;
       v.path = []; v.speed = 0;
       startFireBail(state, v, team);
       state.events.push({ kind: 'vehicleKO', pos: { ...v.pos }, side: input.shooterSide });
@@ -849,6 +854,7 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
     }
   } else if (v.state === 'abandoned') {
     v.state = 'knockedOut';
+    delete v.localDriver;
     // the crew already left (or is dead): the wreck's end is drawn from the outcome set
     rollDeathOutcome(rng, v, def, false);
     if (v.deathOutcome === 'fire') startFireBail(state, v, undefined);

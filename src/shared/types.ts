@@ -38,6 +38,7 @@ export interface HullBody {
   rockPhaseS: number; rockTries: number;
   groundVersion: number;
 }
+/** Producer requests use desired hull output; low-level stepHullBody accepts an explicitly converted raw yaw. */
 export interface HullDrive { speedMs: number; yawRateRadS: number; brake: boolean }
 export interface HullGroundSample { heightM: number; normal: Vec3 }
 export type HullGroundProbe = (xM: number, yM: number) => HullGroundSample;
@@ -719,6 +720,17 @@ export interface GunLay {
   lostAt?: number;
 }
 
+/** Finite, canonical local contact-response history; no external cache owns later decisions. */
+export interface LocalDriverReflex {
+  owner: 0 | 1 | 2;
+  episode: null | { anchorM: Vec2; attempts: number; limit: number; exhausted: boolean };
+  recovery: null | { gear: -1 | 1; capMs: number; anchorM: Vec2; axis: Vec2; entryMaxProjection: number;
+    turning: boolean; phase: 'pending' | 'braking' | 'retreat'; budgetTicks: number; elapsedTicks: number };
+  window: null | { goal: Vec2; gear: -1 | 1; onlyDir: -1 | 0 | 1; direction: -1 | 0 | 1; ticks: number;
+    startDistanceM: number; startAbsError: number; startRate: number; axis: Vec2; startFlow: number;
+    minimumYaw: number; minimumSpeed: number };
+}
+
 export interface Vehicle {
   id: number;
   teamId: number;
@@ -727,6 +739,7 @@ export interface Vehicle {
   pos: Vec2;                  // tile coords
   hullFacing: number;         // radians, 0 = north, clockwise
   body?: HullBody;
+  localDriver?: LocalDriverReflex;
   gunElevationRad?: number;
   turretFacing: number;       // radians absolute
   state: VehicleState;

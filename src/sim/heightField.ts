@@ -18,6 +18,7 @@
 // ============================================================================
 import type { GameMap, HeightField, MapVectorFeature, Terrain, Vec2 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
+import { TERRAIN_PROPS } from './terrain';
 import { hash2 } from '@/shared/rng';
 import * as dm from '@/shared/dmath';
 
@@ -207,7 +208,8 @@ function lineHeight(t: Terrain, dM: number): number {
 }
 
 /** Writes the 16 base samples of tile (tx,ty) from its current terrain into `out` (row-major). */
-function computeTileBase(ctx: FieldCtx, tx: number, ty: number, out: Float32Array): void {
+function computeTileBase(ctx: FieldCtx, tx: number, ty: number, out: Float32Array, owners?: Int32Array): void {
+  owners?.fill(-1);
   const map = ctx.map;
   const R = HF_RES;
   const ti = ty * map.width + tx;
@@ -262,43 +264,53 @@ function computeTileBase(ctx: FieldCtx, tx: number, ty: number, out: Float32Arra
     }
     case 'water': out.fill(H_WATER); return;
     case 'bridge': out.fill(0.3); return;
-    default: out.fill(0); addLineFeatures(ctx, tx, ty, out); return;
+    default: out.fill(0); addLineFeatures(ctx, tx, ty, out, owners); return;
   }
 }
 
 const LINE_FEATURES = new Set<Terrain>(['hedge', 'fence', 'stonewall']);
+
+/** Exact source neighborhood shared by height writes and conservative owner broadphase. */
+function* lineSourceTiles(ctx: FieldCtx, tx: number, ty: number): Generator<{ x: number; y: number; terrain: Terrain }> {
+  const map = ctx.map;
+  for (let y = ty - 1; y <= ty + 1; y++) {
+    if (y < 0 || y >= map.height) continue;
+    for (let x = tx - 1; x <= tx + 1; x++) {
+      if (x < 0 || x >= map.width) continue;
+      const terrain = map.tiles[y * map.width + x];
+      if (LINE_FEATURES.has(terrain)) yield { x, y, terrain };
+    }
+  }
+}
 
 /** Raises the samples of tile (tx,ty) that lie on a hedge/fence/wall line passing through this
  * tile or a neighbouring one. A sample is only raised by the part of a line whose nearest point
  * lies inside a tile that still has that terrain, so the band is continuous across tile corners
  * (the rasterised line tiles don't cover a thin diagonal band exactly) and a flattened or
  * breached tile loses exactly its own piece. */
-function addLineFeatures(ctx: FieldCtx, tx: number, ty: number, out: Float32Array): void {
+function addLineFeatures(ctx: FieldCtx, tx: number, ty: number, out: Float32Array, owners?: Int32Array): void {
   const map = ctx.map;
   const R = HF_RES;
-  for (let ny = ty - 1; ny <= ty + 1; ny++) {
-    if (ny < 0 || ny >= map.height) continue;
-    for (let nx = tx - 1; nx <= tx + 1; nx++) {
-      if (nx < 0 || nx >= map.width) continue;
-      const nt = map.tiles[ny * map.width + nx];
-      if (!LINE_FEATURES.has(nt)) continue;
-      const segs = segmentsForTile(ctx, nt, nx, ny);
-      for (let sy = 0; sy < R; sy++) {
-        for (let sx = 0; sx < R; sx++) {
-          const px = tx + (sx + 0.5) / R, py = ty + (sy + 0.5) / R;
-          let d = Infinity;
-          for (const sg of segs) {
-            const abx = sg.bx - sg.ax, aby = sg.by - sg.ay;
-            const len2 = abx * abx + aby * aby;
-            const u = len2 > 0 ? clamp01(((px - sg.ax) * abx + (py - sg.ay) * aby) / len2) : 0;
-            const qx = sg.ax + abx * u, qy = sg.ay + aby * u;
-            if (qx < nx - 0.02 || qx > nx + 1.02 || qy < ny - 0.02 || qy > ny + 1.02) continue;
-            const dd = dm.hypot(px - qx, py - qy);
-            if (dd < d) d = dd;
-          }
-          if (d === Infinity) continue;
-          const h = lineHeight(nt, d * TILE_M);
-          if (h > out[sy * R + sx]) out[sy * R + sx] = h;
+  for (const { x: nx, y: ny, terrain: nt } of lineSourceTiles(ctx, tx, ty)) {
+    const segs = segmentsForTile(ctx, nt, nx, ny);
+    for (let sy = 0; sy < R; sy++) {
+      for (let sx = 0; sx < R; sx++) {
+        const px = tx + (sx + 0.5) / R, py = ty + (sy + 0.5) / R;
+        let d = Infinity;
+        for (const sg of segs) {
+          const abx = sg.bx - sg.ax, aby = sg.by - sg.ay;
+          const len2 = abx * abx + aby * aby;
+          const u = len2 > 0 ? clamp01(((px - sg.ax) * abx + (py - sg.ay) * aby) / len2) : 0;
+          const qx = sg.ax + abx * u, qy = sg.ay + aby * u;
+          if (qx < nx - 0.02 || qx > nx + 1.02 || qy < ny - 0.02 || qy > ny + 1.02) continue;
+          const dd = dm.hypot(px - qx, py - qy);
+          if (dd < d) d = dd;
+        }
+        if (d === Infinity) continue;
+        const h = lineHeight(nt, d * TILE_M);
+        if (h > out[sy * R + sx]) {
+          out[sy * R + sx] = h;
+          if (owners) owners[sy * R + sx] = ny * map.width + nx;
         }
       }
     }
@@ -620,13 +632,84 @@ export function canopyAt(field: HeightField, x: number, y: number): number {
   return sampleBilinear(field, field.canopy, x, y);
 }
 
-function sampleBilinear(field: HeightField, arr: Float32Array, x: number, y: number): number {
+function sampleBilinear(field: HeightField, arr: Float32Array, x: number, y: number,
+  visit?: (sample: number, weight: number) => void): number {
   const fx = x * field.res - 0.5, fy = y * field.res - 0.5;
   const x0 = Math.max(0, Math.min(field.w - 1, Math.floor(fx))), y0 = Math.max(0, Math.min(field.h - 1, Math.floor(fy)));
   const x1 = Math.min(field.w - 1, x0 + 1), y1 = Math.min(field.h - 1, y0 + 1);
   const ax = clamp01(fx - x0), ay = clamp01(fy - y0);
+  if (visit) {
+    visit(y0 * field.w + x0, (1 - ax) * (1 - ay));
+    visit(y0 * field.w + x1, ax * (1 - ay));
+    visit(y1 * field.w + x0, (1 - ax) * ay);
+    visit(y1 * field.w + x1, ax * ay);
+  }
   const a = arr[y0 * field.w + x0], b = arr[y0 * field.w + x1], c = arr[y1 * field.w + x0], d = arr[y1 * field.w + x1];
   return (a + (b - a) * ax) + ((c + (d - c) * ax) - (a + (b - a) * ax)) * ay;
+}
+
+/** Exact negative proof only: an owner can be emitted only by this shared source set. */
+function hasCrushableLineSource(ctx: FieldCtx, tx: number, ty: number): boolean {
+  for (const source of lineSourceTiles(ctx, tx, ty)) {
+    if (TERRAIN_PROPS[source.terrain].crushable) return true;
+  }
+  return false;
+}
+
+/** Scope to one physical completion, before accepted effects mutate terrain. A positive
+ * result is only eligibility; winning owner/profile checks still follow actual contact.
+ * Refresh/rebuild invalidates the per-completion memo, never retained across completions. */
+export function prepareCrushableLineInterest(map: GameMap): (x: number, y: number) => boolean {
+  let field = getHeightField(map), version = field.version, ctx = ctxByField.get(field)!;
+  const tiles = new Map<number, boolean>();
+  let possible = false;
+  const visit = (sample: number, weight: number) => {
+    if (possible || weight <= 0) return;
+    const tx = Math.floor((sample % field.w) / field.res);
+    const ty = Math.floor(Math.floor(sample / field.w) / field.res), key = ty * map.width + tx;
+    let eligible = tiles.get(key);
+    if (eligible === undefined) { eligible = hasCrushableLineSource(ctx, tx, ty); tiles.set(key, eligible); }
+    possible = eligible;
+  };
+  return (x, y) => {
+    const current = getHeightField(map);
+    if (current !== field || current.version !== version) {
+      field = current; version = field.version; ctx = ctxByField.get(field)!; tiles.clear();
+    }
+    possible = false;
+    sampleBilinear(field, field.base, x, y, visit);
+    return possible;
+  };
+}
+
+/** Crushable line pieces that actually win positively weighted surface samples.
+ * Points are accepted physical contacts in tile coordinates. Ownership is rebuilt from
+ * the same source/max/float32 writes as terrain, once per touched tile in this pass.
+ * A changed explicit profile is conservatively unattributed unless its entire base
+ * equals the reconstructed profile. No historical contact or ownership state survives. */
+export function crushableLineSourcesAt(map: GameMap, points: readonly Vec2[]): number[] {
+  if (points.length === 0) return [];
+  const field = getHeightField(map), ctx = ctxByField.get(field)!, R = field.res;
+  const tiles = new Map<number, Int32Array | null>(), sources = new Set<number>();
+  const visit = (sample: number, weight: number) => {
+    if (weight <= 0) return;
+    const sx = sample % field.w, sy = Math.floor(sample / field.w);
+    const tx = Math.floor(sx / R), ty = Math.floor(sy / R), ti = ty * map.width + tx;
+    if (!tiles.has(ti)) {
+      if (!hasCrushableLineSource(ctx, tx, ty)) { tiles.set(ti, null); return; }
+      const base = new Float32Array(R * R), owners = new Int32Array(R * R);
+      computeTileBase(ctx, tx, ty, base, owners);
+      let matches = true;
+      for (let y = 0; y < R; y++) for (let x = 0; x < R; x++) {
+        if (base[y * R + x] !== field.base[(ty * R + y) * field.w + tx * R + x]) matches = false;
+      }
+      tiles.set(ti, matches ? owners : null);
+    }
+    const owner = tiles.get(ti)?.[(sy % R) * R + sx % R] ?? -1;
+    if (owner >= 0 && TERRAIN_PROPS[map.tiles[owner]].crushable) sources.add(owner);
+  };
+  for (const point of points) sampleBilinear(field, field.base, point.x, point.y, visit);
+  return [...sources].sort((a, b) => a - b);
 }
 
 /** Sets a tile's base profile explicitly (flat height or HF_RES*HF_RES samples). The value is

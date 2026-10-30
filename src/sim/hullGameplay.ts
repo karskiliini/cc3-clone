@@ -49,7 +49,7 @@ export function stepHullGameplay(state: BattleState, rng: Rng, v: Vehicle, dt: n
       }
     }
     if (team) bailOut(state, v, team, 'knockedOut', def.name + ' overturned');
-    else v.state = 'knockedOut';
+    else { v.state = 'knockedOut'; delete v.localDriver; }
     if (passengersAboard(state, v).length > 0) startUnload(state, v, true);
     return;
   }

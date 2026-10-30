@@ -1,6 +1,11 @@
-import type { GameMap, Vec2 } from '@/shared/types';
+import type { GameMap, Vec2, VehicleDef } from '@/shared/types';
 import { TERRAIN_PROPS } from './terrain';
-import { idx, inBounds } from './map';
+import { groundHeightAt, idx, inBounds } from './map';
+import { TILE_M } from '@/shared/types';
+import * as dm from '@/shared/dmath';
+import { resolveVehiclePhysics } from '@/data/vehiclePhysics';
+import { crossedCells } from './vehicleCorridor';
+import { prepareTrenchApproaches } from './vehicleTrenchApproach';
 
 type Mover = 'infantry' | 'vehicle';
 
@@ -9,7 +14,7 @@ type Mover = 'infantry' | 'vehicle';
  * built to stay well under this except at deliberate river banks and railway cuttings. */
 export const VEHICLE_MAX_GRADE = 0.25;
 
-export function isPassable(map: GameMap, x: number, y: number, mover: Mover): boolean {
+export function isPassable(map: GameMap, x: number, y: number, mover: Mover, vehicleDef?: VehicleDef): boolean {
   if (!inBounds(map, x, y)) return false;
   const i = idx(map, x, y);
   const t = map.tiles[i];
@@ -17,17 +22,38 @@ export function isPassable(map: GameMap, x: number, y: number, mover: Mover): bo
   if (!Number.isFinite(cost)) return false;
   if (mover === 'vehicle') {
     const steep = map.groundSteep;
-    if (steep && steep[i] > VEHICLE_MAX_GRADE) return false;
+    if (!vehicleDef && steep && steep[i] > VEHICLE_MAX_GRADE) return false;
     if (map.bunkerId && map.bunkerId[i] >= 0) return false; // a pillbox is a solid obstacle to tracks
   }
   return true;
 }
 
-/** Step cost is terrain only — deliberately NOT slope-weighted. Adding a slope term to A* was
- * tried and reverted: it inflates every step above the octile heuristic's 1-per-step assumption,
- * which weakens the heuristic and cost 40-120% more node expansions across the maps for a
- * marginal routing improvement. Slope is modelled where it belongs — in how fast you actually
- * move (movement.ts's gradeSpeedMul) and in what a vehicle can climb at all (isPassable). */
+export interface VehiclePathProfile { def: VehicleDef }
+
+/** Bare-ground directional grade; finite comfort cost preserves the terrain preference. */
+export function vehicleSlopeCost(map: GameMap, from: Vec2, to: Vec2, def: VehicleDef): number {
+  const dx = to.x - from.x, dy = to.y - from.y, length = Math.sqrt(dx * dx + dy * dy);
+  if (length === 0 || !map.ground) return 1;
+  const ux = dx / length, uy = dy / length;
+  const p = resolveVehiclePhysics(def), rad = Math.PI / 180;
+  let cost = 1;
+  // Endpoints and midpoint keep short/diagonal shortcuts under the same rule as A* edges.
+  for (const t of [0, 0.5, 1]) {
+    const x = from.x + dx * t, y = from.y + dy * t;
+    const gx = (groundHeightAt(map, { x: x + 0.5, y }) - groundHeightAt(map, { x: x - 0.5, y })) / TILE_M;
+    const gy = (groundHeightAt(map, { x, y: y + 0.5 }) - groundHeightAt(map, { x, y: y - 0.5 })) / TILE_M;
+    // Keep the former climb cap independently from side stability; a safe contour can
+    // traverse a steep hillside without pretending that driving up it is possible.
+    if (Math.abs(gx * ux + gy * uy) > VEHICLE_MAX_GRADE) return Infinity;
+    const angle = dm.atan2(Math.abs(-gx * uy + gy * ux), 1);
+    if (angle > p.slopeTipDeg * rad) return Infinity;
+    cost = Math.max(cost, 1 + 2 * Math.max(0, (angle - p.slopeComfortDeg * rad)
+      / Math.max(1e-9, (p.slopeTipDeg - p.slopeComfortDeg) * rad)));
+  }
+  return cost;
+}
+
+/** Terrain base cost remains unchanged for infantry and generic callers. */
 function costOf(map: GameMap, x: number, y: number, mover: Mover): number {
   const t = map.tiles[idx(map, x, y)];
   return mover === 'infantry' ? TERRAIN_PROPS[t].infantryCost : TERRAIN_PROPS[t].vehicleCost;
@@ -124,7 +150,8 @@ function nextGen(): number {
  * admissible): a danger to go round where there is a way round, never a block. */
 export type TileCostFn = (x: number, y: number) => number;
 
-export function findPath(map: GameMap, from: Vec2, to: Vec2, mover: Mover, maxNodes = 20000, extraCost?: TileCostFn): Vec2[] {
+export function findPath(map: GameMap, from: Vec2, to: Vec2, mover: Mover, maxNodes = 20000, extraCost?: TileCostFn, vehicleProfile?: VehiclePathProfile): Vec2[] {
+  const vehicleDef = mover === 'vehicle' ? vehicleProfile?.def : undefined;
   const sx = Math.floor(from.x), sy = Math.floor(from.y);
   let tx = Math.floor(to.x), ty = Math.floor(to.y);
 
@@ -150,7 +177,7 @@ export function findPath(map: GameMap, from: Vec2, to: Vec2, mover: Mover, maxNo
   let bestNode = key(sx, sy);
   let bestNodeDist = octile(tx - sx, ty - sy);
 
-  const targetPassable = isPassable(map, tx, ty, mover);
+  const targetPassable = isPassable(map, tx, ty, mover, vehicleDef);
 
   while (heap.size > 0 && nodesExpanded < maxNodes) {
     const cur = heap.pop()!;
@@ -175,15 +202,18 @@ export function findPath(map: GameMap, from: Vec2, to: Vec2, mover: Mover, maxNo
         if (dx === 0 && dy === 0) continue;
         const nx = cur.x + dx, ny = cur.y + dy;
         if (!inBounds(map, nx, ny)) continue;
-        if (!isPassable(map, nx, ny, mover)) continue;
+        if (!isPassable(map, nx, ny, mover, vehicleDef)) continue;
         // no corner cutting: for diagonal moves both orthogonal neighbours must be passable
         if (dx !== 0 && dy !== 0) {
-          if (!isPassable(map, cur.x + dx, cur.y, mover)) continue;
-          if (!isPassable(map, cur.x, cur.y + dy, mover)) continue;
+          if (!isPassable(map, cur.x + dx, cur.y, mover, vehicleDef)) continue;
+          if (!isPassable(map, cur.x, cur.y + dy, mover, vehicleDef)) continue;
         }
         const ni = key(nx, ny);
         if (closedStamp[ni] === gen) continue;
-        const stepCost = (dx !== 0 && dy !== 0 ? Math.SQRT2 : 1) * (extraCost ? costOf(map, nx, ny, mover) + extraCost(nx, ny) : costOf(map, nx, ny, mover));
+        const slope = vehicleDef ? vehicleSlopeCost(map,
+          { x: cur.x + 0.5, y: cur.y + 0.5 }, { x: nx + 0.5, y: ny + 0.5 }, vehicleDef) : 1;
+        if (!Number.isFinite(slope)) continue;
+        const stepCost = slope * (dx !== 0 && dy !== 0 ? Math.SQRT2 : 1) * (extraCost ? costOf(map, nx, ny, mover) + extraCost(nx, ny) : costOf(map, nx, ny, mover));
         const tentativeG = cur.g + stepCost;
         if (tentativeG < gOf(ni)) {
           setG(ni, tentativeG, ci);
@@ -204,5 +234,19 @@ export function findPath(map: GameMap, from: Vec2, to: Vec2, mover: Mover, maxNo
     node = cameOf(node);
   }
   chain.reverse();
-  return chain;
+  if (!vehicleDef) return chain;
+  const budgets = new Map<readonly Vec2[], number>();
+  const routeCost = (x: number, y: number): number => costOf(map, x, y, 'vehicle') + (extraCost?.(x, y) ?? 0);
+  return prepareTrenchApproaches(map, vehicleDef, from, chain, (a, b, originalSpan) => {
+    let budget = budgets.get(originalSpan);
+    if (budget == null) {
+      budget = 0;
+      for (let i = 1; i < originalSpan.length; i++) crossedCells(originalSpan[i - 1], originalSpan[i], (x, y) => {
+        budget = Math.max(budget!, routeCost(x, y)); return true;
+      });
+      budgets.set(originalSpan, budget);
+    }
+    return crossedCells(a, b, (x, y) => isPassable(map, x, y, 'vehicle', vehicleDef)
+      && routeCost(x, y) <= budget!) && Number.isFinite(vehicleSlopeCost(map, a, b, vehicleDef));
+  });
 }

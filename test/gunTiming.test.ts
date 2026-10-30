@@ -2,7 +2,8 @@ import { hullSettled } from '@/sim/hullAim';
 import { angleTo, wrapAngle } from '@/shared/math';
 import { groundProbe } from '@/sim/hullGround';
 // Loading and laying phases of tank / SPG main guns and AT guns (req_gun_timing, main part).
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import * as gunTiming from '@/sim/gunTiming';
 import type { BattleState, Soldier, Vehicle } from '@/shared/types';
 import { SIM_DT } from '@/shared/types';
 import { Rng } from '@/shared/rng';
@@ -12,7 +13,7 @@ import { stepCombat } from '@/sim/combat';
 import { placeVehicleBody, stepVehicles } from '@/sim/vehicle';
 import {
   BRACKET_LOST_M, bracketMul, designateS, fineLayBaseS, fineLayS, followUpLayS, laySkillMul, loadSkillMul, timeToFirstShotS,
-  followUpS, hullAssistMinS, missCorrectionS, recoilAimFloor, recoilSettleS,
+  followUpS, hullAssistMinS, LAY_TOLERANCE_RAD, missCorrectionS, recoilAimFloor, recoilSettleS,
   vehicleLoadS, weaponLoadS,
 } from '@/sim/gunTiming';
 import { crewEffects, ensureDamage } from '@/sim/vehicleDamage';
@@ -32,7 +33,15 @@ function duel(defId: string, experience: number, distM: number, bearingDeg: numb
   return { state, v: t.v, crew: t.crew, e };
 }
 
-interface RunOpts { move?: boolean; each?: (shot: boolean) => void; stopAfterShots?: number }
+/** Read the accepted state immediately before the one real combat step. */
+function loadSnapshot(v: Vehicle) {
+  const lay = v.gunLay;
+  return { round: v.loadedRound, timer: v.mainFireTimer, total: v.loadTotalS,
+    fine: lay?.fineLeftS, designate: lay?.designateLeftS, sway: lay?.swayLeftS ?? 0,
+    settled: hullSettled(v), speed: v.speed,
+    facingError: lay ? Math.abs(wrapAngle(angleTo(v.pos, lay.aim) - v.turretFacing)) : Infinity };
+}
+interface RunOpts { move?: boolean; beforeCombat?: () => void; each?: (shot: boolean) => void; stopAfterShots?: number }
 /** Steps the sim; returns the battle times of the main-gun shots of `sc.v`. The enemy hull is kept alive. */
 function run(sc: Scene, rng: Rng, seconds: number, opts: RunOpts = {}): number[] {
   const { state, v, e } = sc;
@@ -41,6 +50,7 @@ function run(sc: Scene, rng: Rng, seconds: number, opts: RunOpts = {}): number[]
   for (let i = 0; i < Math.round(seconds / SIM_DT); i++) {
     state.time += SIM_DT;
     if (opts.move !== false) stepVehicles(state, rng, SIM_DT);
+    opts.beforeCombat?.();
     stepCombat(state, rng, SIM_DT);
     let shot = false;
     for (const ev of state.events) if (ev.kind === 'shot' && ev.weaponId === weaponId && ev.side === v.side) { shots.push(state.time); shot = true; }
@@ -151,8 +161,67 @@ describe('first shot and follow-up shots', () => {
     // Task 12 must assess this measured 13.1 s unassisted / 20.5 s assisted behavior in the harness.
   });
 
-  it('follow-up shots on the same target are limited by the loading time: 7.5 cm, regular crew, about 6.5 s', () => {
+  it('reactive follow-ups complete actual round replacement loads and fire on the first ready tick', () => {
+    // Preserve the original seed, inventory and reacting target. Its changing aspect can
+    // legitimately replace an in-flight AP/APCR load, including the two-second unload.
     const sc = duel('pz4gh', 50, 400, 0);
+    const pace = vi.spyOn(gunTiming, 'loadPaceMul'); // observe the real return, never call it twice
+    let before: ReturnType<typeof loadSnapshot>;
+    let replacements = 0, replacementShots = 0, replacing = false;
+    let shots: number[];
+    try {
+      shots = run(sc, new Rng(2), 40, {
+        beforeCombat: () => { before = loadSnapshot(sc.v); pace.mockClear(); },
+        each: shot => {
+          const after = loadSnapshot(sc.v);
+          // The actual normal loading pace in this fixture must remain one. Observe
+          // combat's evaluation rather than re-running crew or ammunition decisions.
+          if (before.timer > 0) {
+            const calls = pace.mock.calls.flatMap((args, i) => args[1] === sc.v ? [i] : []);
+            expect(calls).toHaveLength(1);
+            expect(pace.mock.results[calls[0]].value).toBe(1);
+          }
+          const replaced = !shot && before.round != null && after.round !== before.round;
+          if (replaced) {
+            expect(after.round).toBeDefined();
+            expect(after.total).toBe(2 + 6.5);
+            expect(after.timer).toBe(2 + 6.5);
+            replacements++; replacing = true;
+          } else if (before.round != null && before.timer > 0) {
+            const remaining = Math.max(0, before.timer - SIM_DT);
+            if (remaining > 0) {
+              expect(shot).toBe(false);
+              expect(after.timer).toBe(remaining);
+              expect(after.total).toBe(before.total);
+            } else {
+              // All these independently observed prerequisites are already clear at
+              // load completion. Require the actual shot now, not an enlarged gap cap.
+              expect(before.fine).toBe(0); expect(before.designate).toBe(0);
+              expect(before.sway).toBe(0); expect(before.settled).toBe(true);
+              expect(Math.abs(before.speed)).toBeLessThanOrEqual(0.1);
+              expect(before.facingError).toBeLessThanOrEqual(LAY_TOLERANCE_RAD);
+              expect(shot).toBe(true);
+            }
+          }
+          if (shot) {
+            // Firing starts the next normal load; do not confuse that reset with a
+            // failed countdown or with replacement of an unfired round.
+            expect(after.total).toBe(6.5); expect(after.timer).toBe(6.5);
+            if (replacing) { replacementShots++; replacing = false; }
+          }
+        },
+      });
+    } finally { pace.mockRestore(); }
+    const gaps = intervals(shots);
+    expect(gaps.length).toBeGreaterThanOrEqual(3);
+    for (const g of gaps) expect(g).toBeGreaterThanOrEqual(6.5 - 1e-6);
+    expect(replacements).toBeGreaterThanOrEqual(1);
+    expect(replacementShots).toBeGreaterThanOrEqual(1);
+  });
+
+  it('single-AP follow-ups against the same reacting target retain the strict 6.5-second loading window', () => {
+    const sc = duel('pz4gh', 50, 400, 0);
+    sc.v.rounds = { ap: sc.v.mainAmmo, apcr: 0, he: 0, smoke: 0 };
     const gaps = intervals(run(sc, new Rng(2), 40));
     expect(gaps.length).toBeGreaterThanOrEqual(3);
     for (const g of gaps) { expect(g).toBeGreaterThanOrEqual(6.5 - 1e-6); expect(g).toBeLessThan(6.5 + 0.35); }

@@ -36,7 +36,15 @@ describe('vehicle models', () => {
       for (const variant of [m.summer, m.winter].filter(Boolean)) {
         expect(fs.statSync(path.join(DIR, variant.file)).size).toBeLessThanOrEqual(1.5 * 1024 * 1024);
         const g = glbJson(variant.file);
-        for (const n of variant.nodes) expect(nodeTris(g, n)).toBeLessThanOrEqual(BUDGET_OVERRIDE[id]?.[n.split('_')[0]] ?? BUDGET[n.split('_')[0]]);
+        for (const n of variant.nodes) {
+          // P2 articulates the gun and individual wheels separately. The exporter
+          // applies the owning assembly's budget to each extracted node.
+          const part = n.startsWith('gun_') ? (m.hasTurret ? 'turret' : 'hull')
+            : n.startsWith('wheels_') ? 'hull' : n.split('_')[0];
+          const budget = BUDGET_OVERRIDE[id]?.[part] ?? BUDGET[part];
+          expect(budget, `unrecognized exported assembly: ${n}`).toBeTypeOf('number');
+          expect(nodeTris(g, n)).toBeLessThanOrEqual(budget);
+        }
       }
       if (m.winter) expect(m.winter.nodes).toContain('hull_ok');
     });

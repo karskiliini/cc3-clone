@@ -11,7 +11,7 @@ function wreck(mainAmmo: number): { state: any; v: Vehicle } {
     targetVehicleId: null, targetSoldierId: null, targetPoint: null,
     mainFireTimer: 0, coaxFireTimer: 0, bowFireTimer: 0, burnTimer: 0, hits: 0,
   } as Vehicle;
-  const state: any = { time: 10, teams: new Map(), map: { width: 24, height: 24, tiles: new Array(576).fill('open'), buildingId: new Int16Array(576).fill(-1), windows: new Uint8Array(576), smoke: new Float32Array(576), craters: [], ground: undefined }, vehicles: new Map([[1, v]]), events: [] };
+  const state: any = { time: 10, teams: new Map(), map: { def: { id: 'wreck-ammo', vectors: [] }, width: 24, height: 24, tiles: new Array(576).fill('open'), buildingId: new Int16Array(576).fill(-1), windows: new Uint8Array(576), smoke: new Float32Array(576), craters: [], ground: undefined }, vehicles: new Map([[1, v]]), events: [] };
   return { state, v };
 }
 const apGun: WeaponDef = { id: 'kwk40_75', name: '7.5 cm KwK 40', cls: 'tankgun', rangeM: 1500, rate: 0.2, burst: 1, accuracy: 0.7, lethality: 0.8, suppression: 0.4, penetrationMm: 120, heRadiusM: 3, ammo: 0, reloadS: 6, rounds: { ap: 12, he: 6 } };

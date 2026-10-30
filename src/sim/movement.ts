@@ -14,6 +14,7 @@ import { isDazed, stepDazed } from './daze';
 import { INFANTRY_PACE, infantrySpeedMs } from './infantryPace';
 import { stepHitTheDirt } from './hitTheDirt';
 import * as dm from '@/shared/dmath';
+import { canStepAside, inSameBuilding, SOLDIER_MIN_SPACE_TILES } from './buildingShelter';
 
 const SPEEDS: Record<string, number> = {
   moving: INFANTRY_PACE.walk,
@@ -156,18 +157,19 @@ function resolveSoldierOverlap(state: BattleState, s: Soldier, rng: Rng): void {
     if (o.health === 'dead') continue; // bodies can be crawled over freely
     if (o.path.length > 0) continue; // the other man is walking: he will move off himself
     const d = dist(s.pos, o.pos);
-    if (d >= SOLDIER_BODY_RADIUS_TILES * 2) continue;
+    const spacing = inSameBuilding(state.map, s.pos, o.pos) ? SOLDIER_MIN_SPACE_TILES : SOLDIER_BODY_RADIUS_TILES * 2;
+    if (d >= spacing) continue;
     // nudge the resting mover sideways off the man he stopped on: perpendicular to the direction
     // he was travelling (his facing), so he steps ASIDE rather than back the way he came
     const side = rng.chance(0.5) ? 1 : -1;
     const travelRad = facingAngle(s.facing);
     const perp = { x: -dm.cos(travelRad) * side, y: -dm.sin(travelRad) * side };
-    let spot = vadd(s.pos, vscale(perp, SOLDIER_BODY_RADIUS_TILES * 2));
+    let spot = vadd(s.pos, vscale(perp, spacing));
     const tx = Math.floor(spot.x), ty = Math.floor(spot.y);
-    if (!inBounds(state.map, tx, ty) || !isPassable(state.map, tx, ty, 'infantry')) {
-      spot = vadd(s.pos, vscale(perp, -SOLDIER_BODY_RADIUS_TILES * 2));
+    if (!canStepAside(state, s, spot)) {
+      spot = vadd(s.pos, vscale(perp, -spacing));
     }
-    s.pos = spot;
+    if (canStepAside(state, s, spot)) s.pos = spot;
     return; // one resolution per step: the next tick sorts any further pair
   }
 }
@@ -305,15 +307,15 @@ function separateSoldiers(state: BattleState, dt: number): void {
       for (let j = i + 1; j < arr.length; j++) {
         const a = arr[i], b = arr[j];
         const d = dist(a.pos, b.pos);
-        if (d < 0.3) {
+        if (d < SOLDIER_MIN_SPACE_TILES) {
           const dir = d > 1e-4 ? vnorm(vsub(b.pos, a.pos)) : { x: 1, y: 0 };
           const aLeft = budgets.get(a.id)!, bLeft = budgets.get(b.id)!;
           const total = aLeft + bLeft;
           if (total <= 0) continue;
-          const correction = Math.min(0.3 - d, total);
+          const correction = Math.min(SOLDIER_MIN_SPACE_TILES - d, total);
           const aStep = correction * aLeft / total, bStep = correction * bLeft / total;
-          if (aStep) a.pos = clampToMap(state, vsub(a.pos, vscale(dir, aStep)));
-          if (bStep) b.pos = clampToMap(state, vadd(b.pos, vscale(dir, bStep)));
+          if (aStep) { const to = clampToMap(state, vsub(a.pos, vscale(dir, aStep))); if (canStepAside(state, a, to)) a.pos = to; }
+          if (bStep) { const to = clampToMap(state, vadd(b.pos, vscale(dir, bStep))); if (canStepAside(state, b, to)) b.pos = to; }
           budgets.set(a.id, Math.max(0, aLeft - aStep));
           budgets.set(b.id, Math.max(0, bLeft - bStep));
         }

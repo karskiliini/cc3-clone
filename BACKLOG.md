@@ -113,7 +113,19 @@ Done when:
 - Exact future-state mutation, replay/resync and cross-engine checks cover perception, reports, condition and timers. Legitimate unseen physical hits, area fire and communicated indirect fire still function.
 No implementation or passing acceptance is claimed by this audit. Queue after the active request; numeric physiological calibration is a documented gameplay assumption, not a clinical claim.
 
-The next request receives ID 057.
+**057 — Feature / feasibility study: JEV “kärpäsaivot” as a soldier or tank-driver controller.**
+Request (2026-10-12, user's words): "voiko JEV kärpäsaivot laittaa pelaamaan sotilaita tai tankin ohjaajaa niin että ne osaavat reagoida tilanteisiin nopeasti ja järkeväsit".
+Investigate whether the JEV system the user calls “kärpäsaivot” can drive individual soldiers or a tank driver with fast, sensible situation-dependent reactions. Identify the intended JEV implementation and its actual capabilities before choosing an integration; do not assume the name identifies a particular model or that fly-like behavior transfers to human tactical judgment.
+Relates to 056: inputs must be the individual's own visual/acoustic observations, delivered reports, orders, disposition and physical condition/capabilities. No global battlefield, hidden live enemy state or player-camera knowledge. A tank driver commands the existing physical actuators; a soldier uses existing movement/weapon/action constraints.
+Done when:
+- The intended JEV implementation, runtime, interface, availability and licensing are identified, with a clear account of what it can and cannot control.
+- A bounded experiment compares it with the existing controller for both a soldier and a tank driver, using the same permitted observations and orders. Scenarios include sudden threats, loss of sight, cover/blockers, conflicting orders, fatigue/pain/shock and recovery; distinguish quick reactions from useful decisions and task completion.
+- Measure reaction latency, decision quality and CPU/memory cost at representative unit counts; define the acceptable latency/cost budget before testing. Offload suitable heavy experiments to the Mac mini after checking capacity.
+- Determine how controller state, randomness and timing can support deterministic simulation, replay/resync and multiplayer; document limitations rather than assuming compatibility.
+- Record a reasoned go/no-go recommendation, expected benefit, integration scope and remaining risks. A live-game integration requires a separate approved specification; this ticket does not schedule training or replace the current controller.
+Queued after 056; does not interrupt the active 050 P2 work.
+
+The next request receives ID 058.
 
 ## Completed
 

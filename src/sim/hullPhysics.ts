@@ -5,7 +5,7 @@ import { clamp } from '@/shared/math';
 import { hullParams, type HullParams } from '@/data/vehiclePhysics';
 import { add, cross, dot, inverseRotate, multiply, normalize, rotate, yawQuat, hullAngles } from './hullMath';
 
-const SUBSTEPS = 10;
+import { HULL_SUBSTEPS as SUBSTEPS, HULL_CONTACT_RESPONSE_S } from './hullActuationConstants';
 const H = SIM_DT / SUBSTEPS;
 const GRAVITY = 9.81;
 const SOLID_SKIN_M = 1e-9;
@@ -68,9 +68,15 @@ export function applyHullImpulse(body: HullBody, impulse: Vec3, point: Vec3, def
   wakeHull(body);
 }
 
-/** One production tick, always ten 10 ms semi-implicit steps. */
+/** Ephemeral observation of contact at an accepted pose. Never mutates the solver. */
+export interface HullContactObservation { point: Vec3; kind: 'suspension' | 'solid' }
+
+/** One production tick, always ten 10 ms semi-implicit steps.
+ * drive.yawRateRadS is the raw differential tread target here, not desired hull output. */
 export function stepHullBody(body: HullBody, def: VehicleDef, drive: HullDrive, probe: HullGroundProbe, dt: number, going = 1,
-  acceptTranslation?: (from: Vec3, to: Vec3) => boolean): void {
+  acceptTranslation?: (from: Vec3, to: Vec3) => boolean,
+  observeContact?: (contact: HullContactObservation) => void,
+  observeInterest?: (acceptedPoint: Vec3) => boolean): void {
   if (dt !== SIM_DT) throw new Error('Hull physics dt must equal SIM_DT');
   const hasInput = drive.speedMs !== 0 || drive.yawRateRadS !== 0;
   if (hasInput) wakeHull(body);
@@ -117,12 +123,13 @@ export function stepHullBody(body: HullBody, def: VehicleDef, drive: HullDrive, 
       const longitudinal = scale(tangent, 1 / tangentLength), lateral = cross(longitudinal, sample.normal);
       const velocity = add(body.velocity, cross(body.angularVelocity, offset));
       const target = p.driveKind === 'tracked' ? speed - contact.side * yawRate * 0.42 * p.widthM : speed;
-      const along = contact.driven || drive.brake ? (target - dot(velocity, longitudinal)) * controllerMass / 0.4 : 0;
-      const across = -dot(velocity, lateral) * controllerMass / 0.4;
+      const along = contact.driven || drive.brake ? (target - dot(velocity, longitudinal)) * controllerMass / HULL_CONTACT_RESPONSE_S : 0;
+      const across = -dot(velocity, lateral) * controllerMass / HULL_CONTACT_RESPONSE_S;
       let traction = add(scale(longitudinal, along), scale(lateral, across));
-      // At rest static friction balances the tangential gravity load. Both its
-      // support and slip correction still share the same Coulomb friction circle.
-      if (speed === 0 && yawRate === 0) {
+      // Loaded tracks support the tangential gravity load while driving as well
+      // as at rest; otherwise the velocity controller has a permanent downhill
+      // error. Support and slip correction share the same Coulomb friction circle.
+      if ((p.driveKind === 'tracked' && contact.driven) || (speed === 0 && yawRate === 0)) {
         const gravity = { x: 0, y: 0, z: -GRAVITY * controllerMass };
         traction = add(traction, add(scale(gravity, -1), scale(sample.normal, dot(gravity, sample.normal))));
       }
@@ -142,7 +149,7 @@ export function stepHullBody(body: HullBody, def: VehicleDef, drive: HullDrive, 
       const n = sample.normal, a = cross(r, n), localA = inverseRotate(body.orientation, a);
       const u = rotate(body.orientation, { x: localA.x / inertia.x, y: localA.y / inertia.y, z: localA.z / inertia.z });
       const gap = (point.z - sample.heightM) * n.z;
-      return { local, supported: false, r, n, u, inverseMass: 1 / massKg + dot(a, u), target: -Math.max(gap - SOLID_SKIN_M * n.z, 0) / H };
+      return { local, supported: false, penetration: 0, r, n, u, inverseMass: 1 / massKg + dot(a, u), target: -Math.max(gap - SOLID_SKIN_M * n.z, 0) / H };
     });
     // Frictionless, zero-restitution support. Allow only the closing speed that
     // reaches contact this substep; never add separating bias or stored impulses.
@@ -167,30 +174,47 @@ export function stepHullBody(body: HullBody, def: VehicleDef, drive: HullDrive, 
     // Height-field nonpenetration at final XY. Translation only: a lift must not
     // bypass later movement blockers, impart a bounce, or alter kinetic energy.
     let lift = 0, bottomLift = 0;
-    for (const local of solidLocals) {
+    for (const contact of solids) {
+      const local = contact.local;
       const point = add(body.position, rotate(body.orientation, local));
       const penetration = probe(point.x, point.y).heightM + SOLID_SKIN_M - point.z;
+      contact.penetration = penetration;
       lift = Math.max(lift, penetration);
       if (local.z === p.solidBox.min.z) bottomLift = Math.max(bottomLift, penetration);
     }
     body.position.z += lift;
     // Only support still touching at the accepted final XY/rotation counts. Roof
     // impulses cannot masquerade as belly support, including after blocker rejection.
-    bottomSupported = solids.some(contact => {
-      if (contact.local.z !== p.solidBox.min.z || (!contact.supported && bottomLift <= 0)) return false;
+    bottomSupported = false;
+    for (const contact of solids) {
+      const bottomCandidate = contact.local.z === p.solidBox.min.z && (contact.supported || bottomLift > 0);
+      let observedCandidate = observeContact && (contact.supported || contact.penetration > 0);
+      if (!bottomCandidate && !observedCandidate) continue;
       const offset = rotate(body.orientation, contact.local), point = add(body.position, offset);
-      // Quaternion integration rotates a point slightly differently from the
-      // linear contact velocity used by the impulse. Admit only that measured
-      // truncation residual for an impulse-supported point, not a tuned gap.
+      if (observedCandidate && observeInterest && !observeInterest(point)) observedCandidate = false;
+      if (!bottomCandidate && !observedCandidate) continue;
+      // Use the same accepted-pose support classification for gameplay and observations.
       const sample = probe(point.x, point.y);
-      if (sample.normal.z <= 0) return false;
+      if (sample.normal.z <= 0) continue;
       const rotationStep = scale(cross(body.angularVelocity, contact.r), H);
       const delta = add(offset, scale(add(contact.r, rotationStep), -1));
       const rotationResidual = contact.supported ? Math.max(0, dot(delta, sample.normal) / sample.normal.z) : 0;
-      // Projection keeps its 1 nm skin; classification adds a 1 nm
-      // comparison margin, without moving the hull or widening projection.
-      return point.z <= sample.heightM + 2 * SOLID_SKIN_M + rotationResidual;
-    });
+      if (point.z > sample.heightM + 2 * SOLID_SKIN_M + rotationResidual) continue;
+      if (bottomCandidate) bottomSupported = true;
+      if (observedCandidate) observeContact!({ point, kind: 'solid' });
+    }
+    // A pre-integration spring load cannot justify effects at a rejected candidate.
+    // Re-evaluate actual positive load after blocking, rotation and projection.
+    if (observeContact) for (const contact of p.contacts) {
+      const offset = rotate(body.orientation, contact.local), point = add(body.position, offset);
+      if (observeInterest && !observeInterest(point)) continue;
+      const sample = probe(point.x, point.y), separation = (sample.heightM - point.z) * sample.normal.z;
+      if (separation <= 0) continue;
+      const vn = dot(add(body.velocity, cross(body.angularVelocity, offset)), sample.normal);
+      const magnitude = Math.max(0, k * clamp(separation, 0, suspension.travelM)
+        + 10 * k * Math.max(0, separation - suspension.travelM) - c * vn);
+      if (magnitude > 0) observeContact({ point, kind: 'suspension' });
+    }
     const angles = hullAngles(body.orientation), levelLimit = 2 * Math.PI / 180;
     const quiet = !hasInput && loaded && stableSuspension
       && dot(body.velocity, body.velocity) < 0.005 * 0.005

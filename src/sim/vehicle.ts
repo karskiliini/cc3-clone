@@ -11,7 +11,7 @@ import { VEHICLE_DEFS } from '@/data/units';
 import { WEAPONS } from '@/data/weapons';
 import { EYE_VEHICLE_M, hasLOS, hasLineOfFire, losTrace } from './los';
 import { gradeSpeedMul, GRADE_UPHILL_VEHICLE } from './movement';
-import { findPath, isPassable } from './path';
+import { findPath, isPassable, vehicleSlopeCost } from './path';
 import { addStress, addOrMergeBelief } from './mind';
 import { bestRoundAgainst } from './ballistics';
 import { crewServedClass } from './crewWeapon';
@@ -34,13 +34,38 @@ import { beginHullDrive, requestHullDrive, takeHullDrive } from './hullDrive';
 import { createHullBody, stepHullBody, syncHullGroundVersion, wakeHull } from './hullPhysics';
 import { hullRecoveryDrive, stepHullGameplay } from './hullGameplay';
 import { groundProbe, groundVersion } from './hullGround';
+import { crushableLineSourcesAt, prepareCrushableLineInterest } from './heightField';
 import { hullAngles, rotate } from './hullMath';
 import { hullParams } from '@/data/vehiclePhysics';
+import { deriveTrackedYawModel, projectedRate, trackedActuation, trackedMovementYaw, turnIntent, type TrackedYawModel, type YawEnvelope } from './hullActuation';
+import { crossedCells, prepareRoutePrefix, selectRoutePrefix } from './vehicleCorridor';
+import { bankCoverApproach, bankTurningRoom } from './vehicleBankApproach';
+import { isTrenchApproachEntry, isTrenchApproachPoint, TRENCH_APPROACH_REACH } from './vehicleTrenchApproach';
+import { hasFlatTrackedSupport, reserveStoppingYaw } from './trackedYawReserve';
+import { finishLocalDriver, initLocalRecovery, limitMovingTwist, localDriverOwner, terminalSpeed, type LocalDriverSample, type LimitedTwist } from './localDriver';
 
 /** Driver previews and consequence metadata live for this tick only. They never own pose. */
-interface VehicleDriverTick { heading: number; movement?: AcceptedVehicleMovement }
+interface VehicleDriverTick { heading: number; appliedTrackPullRadS: number; yawModel?: TrackedYawModel | null; movement?: AcceptedVehicleMovement; local?: LocalDriverSample; twistStatus?: LimitedTwist['status'] }
 const driverTicks = new WeakMap<Vehicle, VehicleDriverTick>();
 function driverHeading(v: Vehicle): number { return driverTicks.get(v)?.heading ?? v.hullFacing; }
+// Validate supported catalogue definitions at initialization, never fail unexpectedly during a battle.
+for (const def of Object.values(VEHICLE_DEFS)) {
+  const p = hullParams(def);
+  if (p.driveKind === 'tracked' && def.turnRadiusM == null && !deriveTrackedYawModel(p))
+    throw new Error(`${def.id}: unsupported catalogue tracked actuation geometry`);
+}
+function tickYawModel(v: Vehicle, def: VehicleDef): TrackedYawModel | null {
+  const tick = driverTicks.get(v);
+  if (!tick) return null;
+  if (tick.yawModel === undefined) tick.yawModel = deriveTrackedYawModel(hullParams(def));
+  return tick.yawModel;
+}
+function appendTrackPull(v: Vehicle, dt: number): void {
+  const pull = trackPullRad(v), tick = driverTicks.get(v);
+  if (tick) tick.appliedTrackPullRadS += pull;
+  driveVehicle(v, { yawRateRadS: pull }, dt);
+}
+
 
 function driveVehicle(v: Vehicle, patch: Partial<HullDrive>, dt: number, facing?: number): void {
   const current = takeHullDrive(v);
@@ -63,6 +88,7 @@ export function syncVehicleFromBody(v: Vehicle): void {
 
 /** Explicit spawn/deploy relocation resets the body and public pose atomically. */
 export function placeVehicleBody(v: Vehicle, def: VehicleDef, pos: Vec2, heading: number, probe: HullGroundProbe): void {
+  delete v.localDriver;
   v.body = createHullBody(def, pos, heading, probe);
   syncVehicleFromBody(v);
 }
@@ -134,7 +160,7 @@ function footprintTiles(state: BattleState, def: VehicleDef, poses: AcceptedHull
 /** Effects use the accepted polyline in each branch's original relative order. */
 function processAcceptedVehicleMovement(
   state: BattleState, rng: Rng, v: Vehicle, def: VehicleDef, movement: AcceptedVehicleMovement | undefined,
-  sweep: AcceptedHullPoint[], poses: AcceptedHullPose[],
+  sweep: AcceptedHullPoint[], poses: AcceptedHullPose[], contacts: Vec2[],
 ): void {
   if (!movement) return;
   const moved = sweep.some(p => p.pos.x !== sweep[0].pos.x || p.pos.y !== sweep[0].pos.y);
@@ -142,10 +168,15 @@ function processAcceptedVehicleMovement(
     if (moved && movement.overrunDir != null) stepOverrun(state, rng, v, movement.overrunDir, sweep);
   };
   if (movement.overrunFirst) overrun();
-  if (movement.crushAt) for (const key of footprintTiles(state, def, poses)) {
-    const x = key % state.map.width, y = Math.floor(key / state.map.width);
-    if (TERRAIN_PROPS[tileAt(state.map, x, y)].crushable) crushTile(state.map, x, y);
-    treeCrushByVehicle(state.map, x, y, def.lengthM);
+  if (movement.crushAt) {
+    const footprint = footprintTiles(state, def, poses);
+    const crushSources = new Set([...footprint, ...crushableLineSourcesAt(state.map, contacts)]);
+    for (const key of [...crushSources].sort((a, b) => a - b)) {
+      const x = key % state.map.width, y = Math.floor(key / state.map.width);
+      if (TERRAIN_PROPS[tileAt(state.map, x, y)].crushable) crushTile(state.map, x, y);
+    }
+    // Trees retain their accepted-box ownership; line support observations do not enlarge it.
+    for (const key of footprint) treeCrushByVehicle(state.map, key % state.map.width, Math.floor(key / state.map.width), def.lengthM);
   }
   // Mines retain the centre sweep, independently of hull footprint or accepted rotation.
   const tiles = new Set<number>();
@@ -172,7 +203,7 @@ function completeVehicleMovement(state: BattleState, rng: Rng, dt: number, v: Ve
   movement: AcceptedVehicleMovement | undefined, recoveryApplied = false): void {
   const body = v.body!, heading = v.hullFacing, relativeTurret = wrapAngle(v.turretFacing - heading);
   const sweep: AcceptedHullPoint[] = [{ pos: { ...v.pos }, heading, speedMs: 0 }];
-  const poses: AcceptedHullPose[] = [];
+  const poses: AcceptedHullPose[] = [], contacts: Vec2[] = [];
   let acceptedSpeedMs = 0;
   const recordPose = () => {
     poses.push({ position: { ...body.position }, orientation: { ...body.orientation } });
@@ -183,10 +214,23 @@ function completeVehicleMovement(state: BattleState, rng: Rng, dt: number, v: Ve
   };
   const wasCoasting = dm.hypot(body.velocity.x, body.velocity.y) > 0.005;
   let blocker: Vehicle | null = null;
-  let terrainBlocked = false;
+  let terrainBlocked = false, terrainRejects = 0;
   const props = TERRAIN_PROPS[tileAt(state.map, Math.floor(v.pos.x), Math.floor(v.pos.y))];
   syncHullGroundVersion(body, groundVersion(state.map));
-  stepHullBody(body, def, takeHullDrive(v), groundProbe(state.map), dt, props.speedMul, (from, to) => {
+  if (!recoveryApplied) {
+    const tipRad = Math.max(1e-9, hullParams(def).slopeTipDeg * Math.PI / 180);
+    const factor = Math.max(0.25, 1 - 0.6 * Math.abs(hullAngles(body.orientation).roll) / tipRad);
+    requestHullDrive(v, { speedMs: takeHullDrive(v).speedMs * factor });
+  }
+  const requested = takeHullDrive(v);
+  if (driverTicks.get(v)?.local?.recovery && v.localDriver?.recovery) initLocalRecovery(v,requested.speedMs);
+  const model = !recoveryApplied && !requested.brake ? tickYawModel(v, def) : null;
+  const turn = model ? hullTurnNow(state, v, def) : null;
+  const actuation = model && turn ? trackedActuation(requested, { turnCapRadS: turn.rate, onlyDir: turn.onlyDir,
+    appliedPullRadS: driverTicks.get(v)?.appliedTrackPullRadS ?? 0 }, model) : null;
+  const rawDrive = actuation ? { speedMs: actuation.speedMs, yawRateRadS: actuation.differentialYawRadS, brake: actuation.brake } : requested;
+  const contactInterest = prepareCrushableLineInterest(state.map);
+  stepHullBody(body, def, rawDrive, groundProbe(state.map), dt, props.speedMul, (from, to) => {
     // At entry this is the complete accepted pose from the preceding substep.
     recordPose();
     acceptedSpeedMs = 0;
@@ -204,8 +248,8 @@ function completeVehicleMovement(state: BattleState, rng: Rng, dt: number, v: Ve
       const pos = { x: (from.x + (to.x - from.x) * i / count) / TILE_M,
         y: (from.y + (to.y - from.y) * i / count) / TILE_M };
       const x = Math.floor(pos.x), y = Math.floor(pos.y);
-      if (!inBounds(state.map, x, y) || !isPassable(state.map, x, y, 'vehicle')) {
-        terrainBlocked = true; return false;
+      if (!inBounds(state.map, x, y) || !isPassable(state.map, x, y, 'vehicle', VEHICLE_DEFS[v.defId])) {
+        terrainBlocked = true; terrainRejects++; return false;
       }
       const hit = vehicleBlockingAt(state, v, pos, previous, actualHeading);
       if (hit) { blocker ??= hit; return false; }
@@ -215,7 +259,8 @@ function completeVehicleMovement(state: BattleState, rng: Rng, dt: number, v: Ve
     sweep.push(...points);
     acceptedSpeedMs = speedMs;
     return true;
-  });
+  }, contact => { contacts.push({ x: contact.point.x / TILE_M, y: contact.point.y / TILE_M }); },
+  point => contactInterest(point.x / TILE_M, point.y / TILE_M));
   recordPose();
   syncVehicleFromBody(v);
   // Hull carry precedes actual traversal; frozen guns retain their pre-step relative angle.
@@ -234,9 +279,17 @@ function completeVehicleMovement(state: BattleState, rng: Rng, dt: number, v: Ve
     crushAt: sweep[0].pos, overrunDir: v.speed < 0 ? wrapAngle(v.hullFacing + Math.PI) : v.hullFacing,
     overrunFirst: def.turnRadiusM != null, checkMines: def.turnRadiusM == null,
   } : undefined);
-  processAcceptedVehicleMovement(state, rng, v, def, live ? profile : undefined, sweep, poses);
+  processAcceptedVehicleMovement(state, rng, v, def, live ? profile : undefined, sweep, poses, contacts);
   syncVehicleOccupants(state, v);
   stepHullGameplay(state, rng, v, dt, recoveryApplied);
+  const sample = driverTicks.get(v)?.local;
+  if (v.state === 'knockedOut' || v.state === 'burning' || v.state === 'abandoned' || body.overturned) delete v.localDriver;
+  else {
+    if (sample && blocker) sample.eligible = false;
+    finishLocalDriver(v, isImmobile(v) || body.hungUp ? undefined : sample, { position: body.position, velocity: body.velocity, heading: v.hullFacing, length: def.lengthM,
+      experience: state.teams.get(v.teamId)?.experience ?? 0, terrainRejects, finalRate: projectedRate(body),
+      effectiveYaw: model ? model.gain * rawDrive.yawRateRadS : 0, straightRad: TRACK_STRAIGHT_RAD });
+  }
   driverTicks.delete(v);
 }
 
@@ -451,6 +504,8 @@ interface ReverseTrack {
   target: Vec2 | null;
   route: Vec2[];
   backing: boolean;
+  bankStaging?: Vec2;
+  bankApproach?: boolean;
   fleeingSince: number | null;
   cooldownUntil: number;
   searchAfter?: number;
@@ -472,7 +527,7 @@ function getReverseTrack(state: BattleState, vehicleId: number): ReverseTrack {
 /** Cover for a vehicle (spec §10): a tile within 12 tiles whose LOS toward the threat is blocked,
  * within 4 tiles, by a building/stonewall/woods. */
 const BLOCKING_TERRAIN = new Set(['buildingStone', 'buildingWood', 'stonewall', 'woods']);
-function findVehicleCoverRoute(state: BattleState, v: Vehicle, threatPos: Vec2): { target: Vec2; route: Vec2[] } | null {
+function findVehicleCoverRoute(state: BattleState, v: Vehicle, threatPos: Vec2): { target: Vec2; route: Vec2[]; staging?: Vec2 } | null {
   const map = state.map;
   const cx = Math.floor(v.pos.x), cy = Math.floor(v.pos.y);
   const candidates: { target: Vec2; distance: number }[] = [];
@@ -489,7 +544,7 @@ function findVehicleCoverRoute(state: BattleState, v: Vehicle, threatPos: Vec2):
       if (dx * dx + dy * dy > 144) continue;
       const tx = cx + dx, ty = cy + dy;
       if (!inBounds(map, tx, ty)) continue;
-      if (!isPassable(map, tx, ty, 'vehicle')) continue;
+      if (!isPassable(map, tx, ty, 'vehicle', VEHICLE_DEFS[v.defId])) continue;
       const tile = { x: tx + 0.5, y: ty + 0.5 };
       if (tooClose(tile)) continue;
       const trace = losTrace(map, tile, threatPos);
@@ -504,9 +559,18 @@ function findVehicleCoverRoute(state: BattleState, v: Vehicle, threatPos: Vec2):
   for (const { target, distance } of candidates) {
     if (distance < 0.5) return { target, route: [] };
     // Cover is local: bound route work, and reject partial A* paths into unreachable pockets.
-    const route = findPath(map, v.pos, target, 'vehicle', 2000);
+    const route = findPath(map, v.pos, target, 'vehicle', 2000, undefined, { def: VEHICLE_DEFS[v.defId] });
     const end = route.at(-1);
-    if (end && dist(end, target) < 0.5) return { target, route };
+    if (end && dist(end, target) < 0.5) {
+      const approach = VEHICLE_DEFS[v.defId].turnRadiusM != null ? undefined : bankCoverApproach(map, VEHICLE_DEFS[v.defId], v.pos, route, p => {
+        if (!isPassable(map, Math.floor(p.x), Math.floor(p.y), 'vehicle', VEHICLE_DEFS[v.defId]) || tooClose(p)) return false;
+        const trace = losTrace(map, p, threatPos);
+        return !trace.clear && !!trace.blockedAt && dist(p, trace.blockedAt) <= 4
+          && BLOCKING_TERRAIN.has(tileAt(map, Math.floor(trace.blockedAt.x), Math.floor(trace.blockedAt.y)));
+      });
+      if (approach === null) continue;
+      return approach ?? { target, route };
+    }
   }
   return null;
 }
@@ -648,6 +712,8 @@ function stepOneVehicleMind(state: BattleState, rng: Rng, dt: number, v: Vehicle
     const found = findVehicleCoverRoute(state, v, top.pos);
     track.target = found?.target ?? null;
     track.route = found?.route ?? [];
+    track.bankStaging = found?.staging;
+    track.bankApproach = found?.staging != null;
     if (track.target) {
       // The FRONT stays toward the threat: cover on the far side of the tank from the threat
       // (more than 90 deg off the threat bearing) is reached in reverse, the hull brought round to
@@ -688,7 +754,7 @@ export function driveReversingProbe(state: BattleState, v: Vehicle, speedMs: num
   if (!def) return;
   v.body ??= createHullBody(def, v.pos, v.hullFacing, groundProbe(state.map));
   syncVehicleFromBody(v);
-  driverTicks.set(v, { heading: v.hullFacing });
+  driverTicks.set(v, { heading: v.hullFacing, appliedTrackPullRadS: 0 });
   const movement = driveReversing(state, dt, v, speedMs, threatPos, dest);
   completeVehicleMovement(state, NO_RNG, dt, v, def, movement);
 }
@@ -738,42 +804,80 @@ function driveToCover(state: BattleState, rng: Rng, dt: number, v: Vehicle, def:
     crushAt: { x: tx, y: ty }, crushTerrain: props.crushable, overrunDir: v.hullFacing,
   };
   const route = track.route;
-  while (route.length > 0 && dist(v.pos, route[0]) < (route.length > 1 ? 0.55 : 0.25)) route.shift();
-  const wp = route[0];
+  if (track.bankStaging && dist(v.pos, track.bankStaging) < 0.25 && bankTurningRoom(state.map, def, v.pos)) {
+    const at = route.indexOf(track.bankStaging);
+    if (at >= 0) route.splice(0, at + 1);
+    track.bankStaging = undefined;
+    // A staged turn starts a new approach leg: choose the armour-preserving gear once.
+    track.backing = Math.abs(wrapAngle(angleTo(v.pos, track.target!) - angleTo(v.pos, threatPos))) > Math.PI / 2;
+  }
+  if (!v.localDriver?.recovery) {
+    const start = { x: v.pos.x, y: v.pos.y };
+    const skip = selectRoutePrefix(route,start,props.vehicleCost,LOOKAHEAD_TILES,
+      (a,b)=>vehicleSlopeCost(state.map,a,b,def),
+      p=>TERRAIN_PROPS[tileAt(state.map,Math.floor(p.x),Math.floor(p.y))].vehicleCost,
+      (p,ceiling)=>(!track.bankStaging || route.indexOf(p) <= route.indexOf(track.bankStaging))
+        && straightDrivable(state,v,p,ceiling),p=>p !== track.bankStaging && dist(start,p)<0.55,p=>p === track.bankStaging);
+    if(skip>0)route.splice(0,skip);
+    if(route.length===1&&dist(start,route[0])<0.25)route.length=0;
+  }
+  const wheeled = def.turnRadiusM != null;
+  const wp = route[0] ?? (!wheeled ? track.target : null);
   if (!wp || transportHolds(state, v)) { driveVehicle(v, { speedMs: 0 }, dt); return movement; }
+  if (!wheeled && v.holdUntil != null) {
+    stepHeldFriendly(state, v);
+    if (v.holdUntil != null && state.time < v.holdUntil) { driveVehicle(v, { speedMs: 0 }, dt); return movement; }
+  }
+  if (!wheeled && !hasLOS(state.map, v.pos, threatPos)) { driveVehicle(v, { speedMs: 0 }, dt); return movement; }
   const desired = angleTo(v.pos, wp);
   const rearFacing = wrapAngle(desired + Math.PI);
   // front toward the threat (see the backing decision in stepOneVehicleMind): the driving
   // direction flips only when the route swings well past square to the threat (hysteresis, so a
   // tile-by-tile route never has a slow hull pivoting end for end every few metres)
   const offThreat = Math.abs(wrapAngle(angleTo(v.pos, coverLookahead(v, route, track.target ?? wp)) - angleTo(v.pos, threatPos)));
-  if (track.backing && offThreat < Math.PI / 2 - COVER_FLIP_HYST_RAD) track.backing = false;
-  else if (!track.backing && offThreat > Math.PI / 2 + COVER_FLIP_HYST_RAD) track.backing = true;
+  if (!v.localDriver?.recovery && (!track.bankApproach || track.bankStaging)) {
+    if (track.backing && offThreat < Math.PI / 2 - COVER_FLIP_HYST_RAD) track.backing = false;
+    else if (!track.backing && offThreat > Math.PI / 2 + COVER_FLIP_HYST_RAD) track.backing = true;
+  }
   const desiredHull = track.backing ? rearFacing : desired;
   const road = tile === 'dirtroad' || tile === 'pavedroad' || tile === 'bridge';
-  let speed = (road ? def.speedRoadMs : def.speedOffroadMs * props.speedMul)
-    * damageSpeedMul(v) * gradeSpeedMul(state.map, v.pos, wp, GRADE_UPHILL_VEHICLE)
-    * (track.backing ? 0.6 : 1);
-  const wheeled = def.turnRadiusM != null;
-  turnHull(state, v, def, desiredHull, dt, wheeled ? speed : undefined);
-  const error = Math.abs(wrapAngle(desiredHull - driverHeading(v)));
-  if (!wheeled && error > PIVOT_RAD) {
-    driveVehicle(v, { speedMs: 0 }, dt);
-    return movement;
-  }
+  const fullBase = (road ? def.speedRoadMs : def.speedOffroadMs * props.speedMul)
+    * damageSpeedMul(v) * gradeSpeedMul(state.map, v.pos, wp, GRADE_UPHILL_VEHICLE);
+  let speed = fullBase * (track.backing ? 0.6 : 1);
+  const plan = wheeled ? null : planMovementHull(state, v, def, desiredHull, dt);
+  if (wheeled) turnHull(state, v, def, desiredHull, dt, speed);
+  const error = Math.abs(wrapAngle(desiredHull - (wheeled ? driverHeading(v) : plan?.preview ?? driverHeading(v))));
+  // The dry bank corridor is valid for its aligned hull, not for a cutting approach arc.
+  const pivot = !wheeled && error > (track.bankApproach && !track.bankStaging ? TRACK_STRAIGHT_RAD : PIVOT_RAD);
   speed *= error > SHARP_TURN_RAD ? SHARP_TURN_SPEED_MUL : error > HEADING_ALIGN_RAD ? 0.7 : 1;
-  if (!wheeled && error > TRACK_STRAIGHT_RAD) {
+  if (!wheeled && !pivot && error > TRACK_STRAIGHT_RAD) {
     speed = Math.min(speed, Math.max(0.15, hullTurnNow(state, v, def).rate * dist(v.pos, wp) * TILE_M * 0.6));
   }
-  driveVehicle(v, { yawRateRadS: trackPullRad(v) }, dt);
-  const direction = track.backing ? wrapAngle(driverHeading(v) + Math.PI) : driverHeading(v);
+  let effectiveGear: -1 | 1 = track.backing ? -1 : 1;
+  let recovery = false;
+  if (wheeled) appendTrackPull(v, dt);
+  else {
+    const selected = applyTrackedPlan(v, 2, wp, effectiveGear, fullBase, 0.6,
+      pivot ? 0 : effectiveGear * speed, plan, !pivot, route.length <= 1 || wp === track.bankStaging,
+      Math.abs(wrapAngle(v.hullFacing - angleTo(v.pos, threatPos))) <= Math.PI / 2);
+    effectiveGear = selected.gear; recovery = selected.recovery; speed = Math.abs(takeHullDrive(v).speedMs);
+    if (!plan || (pivot && !recovery)) return movement;
+  }
+  const direction = effectiveGear < 0 ? wrapAngle(driverHeading(v) + Math.PI) : driverHeading(v);
   const advance = Math.min(dist(v.pos, wp), speed * dt / TILE_M);
   const lookahead = { x: v.pos.x + dm.sin(direction) * advance, y: v.pos.y - dm.cos(direction) * advance };
   // Preserve the driver's corner/traffic speed gate; the solver still decides actual acceptance.
-  if (!isPassable(state.map, Math.floor(lookahead.x), Math.floor(lookahead.y), 'vehicle')
-    || vehicleBlockingAt(state, v, lookahead)) { driveVehicle(v, { speedMs: 0 }, dt); return movement; }
-  driveVehicle(v, { speedMs: track.backing ? -speed : speed }, dt);
-  if (v.holdUntil != null) {
+  let requestedBlocker: Vehicle | null = null;
+  if (!isPassable(state.map, Math.floor(lookahead.x), Math.floor(lookahead.y), 'vehicle', VEHICLE_DEFS[v.defId])
+    || !Number.isFinite(vehicleSlopeCost(state.map, v.pos, lookahead, def))
+    || (requestedBlocker = vehicleBlockingAt(state, v, lookahead))) {
+    // Preserve the original query short-circuit; actual vehicle blocking also interrupts observation.
+    driveVehicle(v, { speedMs: 0 }, dt);
+    if (requestedBlocker) { const sample = driverTicks.get(v)?.local; if (sample) sample.eligible = false; }
+    return movement;
+  }
+  if (wheeled) driveVehicle(v, { speedMs: track.backing ? -speed : speed }, dt);
+  if (wheeled && v.holdUntil != null) {
     stepHeldFriendly(state, v);
     if (v.holdUntil != null && state.time < v.holdUntil) { driveVehicle(v, { speedMs: 0 }, dt); return movement; }
   }
@@ -832,7 +936,7 @@ function onHullBlocked(state: BattleState, v: Vehicle, blocker: Vehicle): void {
     const c = { x: x + 0.5, y: y + 0.5 };
     return others.some((o) => dist(o.pos, c) < r + hullRadiusTiles(o)) ? 40 : 0;
   };
-  const route = findPath(state.map, v.pos, goal, 'vehicle', 6000, aroundHulls);
+  const route = findPath(state.map, v.pos, goal, 'vehicle', 6000, aroundHulls, { def: VEHICLE_DEFS[v.defId] });
   if (route.length > 0) v.path = route;
 }
 
@@ -862,7 +966,7 @@ function seekFiringSpot(state: BattleState, v: Vehicle, def: VehicleDef): void {
     for (let k = 0; k < n; k++) {
       const a = (k / n) * Math.PI * 2;
       const c = { x: Math.floor(v.pos.x + dm.sin(a) * r) + 0.5, y: Math.floor(v.pos.y - dm.cos(a) * r) + 0.5 };
-      if (!isPassable(state.map, Math.floor(c.x), Math.floor(c.y), 'vehicle')) continue;
+      if (!isPassable(state.map, Math.floor(c.x), Math.floor(c.y), 'vehicle', VEHICLE_DEFS[v.defId])) continue;
       const toTarget = dist(c, target);
       if (toTarget > rangeTiles || vehicleBlockingAt(state, v, c)) continue;
       const score = toTarget;
@@ -870,7 +974,7 @@ function seekFiringSpot(state: BattleState, v: Vehicle, def: VehicleDef): void {
       best = c; bestScore = score;
     }
     if (best) {
-      const route = findPath(state.map, v.pos, best, 'vehicle', 4000);
+      const route = findPath(state.map, v.pos, best, 'vehicle', 4000, undefined, { def });
       if (route.length > 0 && dist(route[route.length - 1], best) <= 1) { v.path = route; return; }
     }
   }
@@ -891,15 +995,20 @@ const ARRIVED_OFF_BOW = Math.PI / 3;
  * and it passes clear of every other hull (nor through the vehicle its route went round). */
 function straightDrivable(state: BattleState, v: Vehicle, b: Vec2, maxCost: number): boolean {
   const a = v.pos;
+  if (!crossedCells(a,b,(x,y)=>isPassable(state.map,x,y,'vehicle',VEHICLE_DEFS[v.defId])
+    &&TERRAIN_PROPS[tileAt(state.map,x,y)].vehicleCost<=maxCost)) return false;
   const d = dist(a, b);
+  const travelHeading = d > 0 ? angleTo(a, b) : v.hullFacing;
   const n = Math.max(1, Math.ceil(d / 0.3));
   const others = [...state.vehicles.values()].filter((o) => o !== v && dist(o.pos, a) < d + hullRadiusTiles(v) + hullRadiusTiles(o) + 2);
   for (let i = 1; i <= n; i++) {
     const p = { x: a.x + ((b.x - a.x) * i) / n, y: a.y + ((b.y - a.y) * i) / n };
     const x = Math.floor(p.x), y = Math.floor(p.y);
-    if (!isPassable(state.map, x, y, 'vehicle')) return false;
-    if (TERRAIN_PROPS[tileAt(state.map, x, y)].vehicleCost > maxCost) return false;
-    for (const o of others) if (hullsOverlap(v, p, o) && dist(o.pos, p) < dist(o.pos, a)) return false;
+    const previous = { x: a.x + (b.x - a.x) * (i - 1) / n, y: a.y + (b.y - a.y) * (i - 1) / n };
+    const slope = vehicleSlopeCost(state.map, previous, p, VEHICLE_DEFS[v.defId]);
+    if (!Number.isFinite(slope) || TERRAIN_PROPS[tileAt(state.map, x, y)].vehicleCost * slope > maxCost) return false;
+    for (const o of others) if ((hullsOverlap(v, p, o) || hullsOverlap(v, p, o, travelHeading))
+      && dist(o.pos, p) < dist(o.pos, a)) return false;
   }
   return true;
 }
@@ -908,23 +1017,37 @@ function straightDrivable(state: BattleState, v: Vehicle, b: Vec2, maxCost: numb
  * of turned back for, he steers for the farthest point ahead he can reach in a straight line, and
  * the last couple of metres to a point off his bow count as arrived. A shortcut never cuts past a
  * waypoint the player set (the route goes where it was told to). */
-function pursuePath(state: BattleState, v: Vehicle, def: VehicleDef, travelFacing = v.hullFacing): void {
+function pursuePath(state: BattleState, v: Vehicle, def: VehicleDef, travelFacing = v.hullFacing): () => boolean {
   const path = v.path;
   const offBow = (p: Vec2): number => Math.abs(wrapAngle(angleTo(v.pos, p) - travelFacing));
   const pinned = state.teams.get(v.teamId)?.order?.waypoints ?? [];
-  const isPinned = (p: Vec2): boolean => pinned.some((w) => dist(w, p) <= 1);
-  // a waypoint under the hull is reached (its bearing is meaningless that close: chasing it only
-  // spins the tank on the spot); one fallen behind is passed
-  while (path.length > 1 && (dist(v.pos, path[0]) < WAYPOINT_REACH_TILES
-    || (dist(v.pos, path[0]) < PASSED_TILES && offBow(path[0]) > Math.PI / 2 && !isPinned(path[0])))) path.shift();
-  let skip = 0, maxCost = TERRAIN_PROPS[tileAt(state.map, Math.floor(v.pos.x), Math.floor(v.pos.y))].vehicleCost;
-  for (let i = 0; i < path.length && dist(v.pos, path[i]) <= LOOKAHEAD_TILES; i++) {
-    maxCost = Math.max(maxCost, TERRAIN_PROPS[tileAt(state.map, Math.floor(path[i].x), Math.floor(path[i].y))].vehicleCost);
-    if (i > 0 && straightDrivable(state, v, path[i], maxCost)) skip = i;
-    if (isPinned(path[i])) break; // the player's waypoint: steer for it, never past it
-  }
-  if (skip > 0) path.splice(0, skip);
+  const isApproach = (p: Vec2): boolean => isTrenchApproachPoint(state.map, def, p);
+  const isPinned = (p: Vec2): boolean => isApproach(p) || pinned.some((w) => dist(w, p) <= 1);
+  if (v.localDriver?.recovery) return () => false;
+  const start = { x:v.pos.x, y:v.pos.y };
+  const prefixSlope = (a: Vec2, b: Vec2): number => {
+    const slope = vehicleSlopeCost(state.map, a, b, def);
+    const endCost = TERRAIN_PROPS[tileAt(state.map, Math.floor(b.x), Math.floor(b.y))].vehicleCost;
+    let crossingCost = endCost;
+    crossedCells(a, b, (x, y) => {
+      crossingCost = Math.max(crossingCost, TERRAIN_PROPS[tileAt(state.map, x, y)].vehicleCost);
+      return true;
+    });
+    // Retain every cell in the original edge, including orthogonal corner cells
+    // omitted by diagonal grid nodes and terrain omitted by sparse crossing pairs.
+    return slope * crossingCost / endCost;
+  };
+  const pursuit = prepareRoutePrefix(path,start,
+    TERRAIN_PROPS[tileAt(state.map,Math.floor(start.x),Math.floor(start.y))].vehicleCost,
+    path[1] && (isApproach(path[0]) || dist(start, path[0]) <= WAYPOINT_REACH_TILES)
+      ? Math.max(LOOKAHEAD_TILES, dist(start, path[1])) : LOOKAHEAD_TILES,
+    prefixSlope,
+    p=>TERRAIN_PROPS[tileAt(state.map,Math.floor(p.x),Math.floor(p.y))].vehicleCost,
+    (p,ceiling)=>straightDrivable(state,v,p,ceiling),
+    p=>dist(start,p)<=(isApproach(p) ? TRENCH_APPROACH_REACH : WAYPOINT_REACH_TILES)||(dist(start,p)<PASSED_TILES&&offBow(p)>Math.PI/2&&!isPinned(p)),isPinned);
+  if(pursuit.index>0)path.splice(0,pursuit.index);
   if (def.turnRadiusM == null && path.length === 1 && dist(v.pos, path[0]) < ARRIVED_TILES && offBow(path[0]) > ARRIVED_OFF_BOW) path.length = 0;
+  return pursuit.successorDrivable;
 }
 
 // ------------------------------------------------------------------ backing on a plain Move
@@ -949,6 +1072,9 @@ function backsOnMove(state: BattleState, v: Vehicle): boolean {
     len += dist(prev, p); prev = p;
     if (len >= 3 && probe === v.path[v.path.length - 1]) probe = p;
   }
+  const def = VEHICLE_DEFS[v.defId];
+  if (isTrenchApproachPoint(state.map, def, v.path[0])
+    && !isTrenchApproachEntry(state.map, def, v.path[0], v.path[1])) probe = v.path[0];
   const off = Math.abs(wrapAngle(angleTo(v.pos, probe) - v.hullFacing));
   const was = backingOnMove.has(v);
   const back = was ? off > BACK_STOP_RAD : off > BACK_START_RAD && len <= BACK_MAX_TILES;
@@ -975,12 +1101,88 @@ export function hullTurnNow(state: BattleState, v: Vehicle, def: VehicleDef, spe
 export function turnHull(state: BattleState, v: Vehicle, def: VehicleDef, desired: number, dt: number, speedMs?: number): void {
   const { rate, onlyDir } = hullTurnNow(state, v, def, speedMs);
   if (rate <= 0) return;
-  let diff = wrapAngle(desired - driverHeading(v));
-  if (onlyDir !== 0 && Math.abs(diff) > 0.02 && Math.sign(diff) !== onlyDir) diff -= Math.sign(diff) * Math.PI * 2;
-  const step = Math.max(-rate * dt, Math.min(rate * dt, diff));
+  const { step } = turnIntent(desired, driverHeading(v), rate, onlyDir, dt);
   driveVehicle(v, { yawRateRadS: dt > 0 ? step / dt : 0 }, dt, wrapAngle(driverHeading(v) + step));
 }
 
+
+/** Idle hull assistance uses the accepted heading and carried angular rate.
+ * Leave creep, route, cover and independent steering owners on their own contracts. */
+function turnIdleHull(state: BattleState, v: Vehicle, def: VehicleDef, desired: number, dt: number): void {
+  const model = tickYawModel(v, def), actualRate = v.body ? projectedRate(v.body) : null;
+  const request = takeHullDrive(v);
+  if (!model || actualRate == null || request.yawRateRadS !== 0 || request.speedMs !== 0) {
+    turnHull(state, v, def, desired, dt);
+    return;
+  }
+  const { rate, onlyDir } = hullTurnNow(state, v, def);
+  const accepted = turnIntent(desired, v.hullFacing, rate, onlyDir, dt);
+  const preview = turnIntent(desired, driverHeading(v), rate, onlyDir, dt);
+  const yaw = trackedMovementYaw(accepted.error, actualRate, model,
+    { turnCapRadS: rate, onlyDir, appliedPullRadS: 0 });
+  driveVehicle(v, { yawRateRadS: yaw }, dt, wrapAngle(driverHeading(v) + preview.step));
+}
+
+
+interface TrackedPlanYaw {
+  flatSupport: boolean;
+  model: TrackedYawModel; envelope: YawEnvelope; rate: number; error: number;
+  yaw: number; preview: number; priorYaw: number; priorPreview: number; priorPull: number;
+}
+/** Calculate legacy feedback/preview without appending this movement owner yet. */
+function planMovementHull(state: BattleState, v: Vehicle, def: VehicleDef, desired: number, dt: number): TrackedPlanYaw | null {
+  const model = tickYawModel(v, def), actualRate = projectedRate(v.body!);
+  if (!model || actualRate == null) return null;
+  const { rate, onlyDir } = hullTurnNow(state, v, def), priorPreview = driverHeading(v);
+  const intent = turnIntent(desired, priorPreview, rate, onlyDir, dt);
+  const { error } = turnIntent(desired, v.hullFacing, rate, onlyDir, dt);
+  const envelope = { turnCapRadS: rate, onlyDir, appliedPullRadS: 0 };
+  return { model, envelope, flatSupport: hasFlatTrackedSupport(v.body!, hullParams(def), groundProbe(state.map)), rate: actualRate, error, yaw: rate > 0 ? trackedMovementYaw(error, actualRate, model, envelope) : 0,
+    preview: rate > 0 ? wrapAngle(priorPreview + intent.step) : priorPreview, priorPreview,
+    priorYaw: takeHullDrive(v).yawRateRadS, priorPull: driverTicks.get(v)?.appliedTrackPullRadS ?? 0 };
+}
+
+/** Select this owner's one contribution; the final raw mapper remains the sole inverse. */
+function applyTrackedPlan(v: Vehicle, owner: 1 | 2, goal: Vec2, gear: -1 | 1, fullBase: number, reverseFactor: number,
+  speed: number, plan: TrackedPlanYaw | null, appendPull: boolean, terminal: boolean, frontOkay = true): { gear: -1 | 1; recovery: boolean } {
+  const tick = driverTicks.get(v)!, serviced = !!v.localDriver?.recovery;
+  localDriverOwner(v, owner);
+  if (!plan || ![speed, fullBase, plan.error, plan.yaw, plan.preview].every(Number.isFinite)) {
+    driveVehicle(v, { speedMs: 0 }, SIM_DT); localDriverOwner(v, 0); return { gear, recovery: false };
+  }
+  const state = v.localDriver!;
+  const eligible = plan.priorYaw === 0 && plan.priorPull === 0 && !v.body!.hungUp && !v.body!.overturned;
+  if (!eligible || !frontOkay) { state.recovery = null; state.window = null; }
+  if (terminal) speed = terminalSpeed(speed, v.body!.position, v.body!.velocity, v.hullFacing,
+    { x: goal.x * TILE_M, y: goal.y * TILE_M }, gear);
+  const signedDemand = speed, recovery = state.recovery;
+  let yaw = plan.yaw, preview = plan.preview, effectiveGear = gear;
+  if (recovery) {
+    effectiveGear = recovery.gear;
+    const cap = fullBase * (effectiveGear < 0 ? reverseFactor : 1);
+    speed = effectiveGear * Math.min(recovery.capMs, cap);
+    appendPull = Math.abs(speed) > 0;
+  }
+  {
+    const vx = v.body!.velocity.x, vy = v.body!.velocity.y, sin = dm.sin(v.hullFacing), cos = dm.cos(v.hullFacing);
+    const input = { speed, yaw, forward: vx * sin - vy * cos, lateral: vx * cos + vy * sin,
+      rate: plan.rate, priorYaw: plan.priorYaw, priorPull: plan.priorPull, pull: appendPull ? trackPullRad(v) : 0,
+      model: plan.model, envelope: plan.envelope };
+    if (plan.flatSupport) input.yaw = reserveStoppingYaw(input);
+    const limited = limitMovingTwist(input);
+    speed = limited.speed; yaw = limited.yaw; tick.twistStatus = limited.status;
+    if (limited.status === 'unsupported') { appendPull = false; preview = plan.priorPreview; }
+  }
+  speed = speed === 0 ? 0 : speed;
+  driveVehicle(v, { speedMs: speed, yawRateRadS: yaw }, SIM_DT, preview);
+  if (appendPull) appendTrackPull(v, SIM_DT);
+  tick.local = { owner, goal: { x:goal.x, y:goal.y }, gear, fullSpeed: fullBase * (gear < 0 ? reverseFactor : 1),
+    position:{x:v.body!.position.x,y:v.body!.position.y},velocity:{x:v.body!.velocity.x,y:v.body!.velocity.y},
+    heading:v.hullFacing,initialRate:plan.rate,error:plan.error,ownYaw:yaw,legacyYaw:plan.yaw,signedDemand,
+    onlyDir:plan.envelope.onlyDir,frontAvailable:frontOkay,priorYaw:plan.priorYaw,priorPull:plan.priorPull,
+    recovery:serviced||!!recovery,eligible:eligible&&tick.twistStatus!=='unsupported',translationIntent:signedDemand!==0,model:plan.model };
+  return { gear:effectiveGear,recovery:!!recovery };
+}
 
 const kTurning = new WeakSet<Vehicle>();
 const DEG = Math.PI / 180;
@@ -1012,8 +1214,9 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
       v.body ??= createHullBody(def, v.pos, v.hullFacing, groundProbe(state.map));
       syncVehicleFromBody(v);
     }
+    if (v.state === 'knockedOut' || v.state === 'burning' || v.state === 'abandoned') delete v.localDriver;
     beginHullDrive(v);
-    driverTicks.set(v, { heading: v.hullFacing });
+    driverTicks.set(v, { heading: v.hullFacing, appliedTrackPullRadS: 0 });
   }
   stepVehicleMinds(state, rng, dt);
   stepTransport(state, dt); // passengers boarding and leaving
@@ -1026,7 +1229,7 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
       v.burnTimer += dt;
       stepCookOff(state, rng, v); // rounds popping, then perhaps the rest (or the fuel tank)
       // the fire lasts as long as something aboard may still blow up
-      if (v.burnTimer >= BURN_TO_KO_S && !cookOffLive(v)) v.state = 'knockedOut';
+      if (v.burnTimer >= BURN_TO_KO_S && !cookOffLive(v)) { v.state = 'knockedOut'; delete v.localDriver; }
     } else if (v.engineOnFire && v.state !== 'knockedOut') {
       // engine-deck fire (vehicleDamage.ts): burns hot for a while, then either dies out
       // (the crew saved the tank) or escalates to the full 'burning' state.
@@ -1036,6 +1239,7 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
         v.engineFireTimer = 0;
         v.fire = { t0: state.time };
         v.state = 'burning';
+        delete v.localDriver;
         v.burnTimer = 0;
         v.path = []; v.speed = 0;
         startFireBail(state, v, state.teams.get(v.teamId));
@@ -1050,13 +1254,14 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     if (!def) { driverTicks.delete(v); continue; }
     const dead = v.state === 'knockedOut' || v.state === 'burning' || v.state === 'abandoned';
     let movement = driverTicks.get(v)?.movement;
-    if (dead) v.path = [];
+    if (dead) { v.path = []; delete v.localDriver; }
     else movement = stepVehicleDriver(state, rng, dt, v, def) ?? movement;
     // Minds run before crew/damage. A request from a now-disabled driver cannot survive.
     const disabled = dead || isImmobile(v) || !crewEffects(state, v).canDrive;
     const recovery = disabled ? null : hullRecoveryDrive(v, state.teams.get(v.teamId)?.experience ?? 0);
     if (disabled) beginHullDrive(v);
     else if (recovery) requestHullDrive(v, recovery);
+    if (disabled || recovery) driverTicks.get(v)!.local = undefined;
     completeVehicleMovement(state, rng, dt, v, def, movement, recovery != null && !recovery.brake);
   }
 }
@@ -1139,7 +1344,7 @@ function stepVehicleDriver(state: BattleState, rng: Rng, dt: number, v: Vehicle,
       // swing the hull to catch it — sooner the more experienced he is (gunTiming.hullAssistMinS)
       // — unless an armour threat elsewhere wants the front plate
       const catchTarget = layPos != null && (armourThreat || !mind || mind.threatLevel < 0.7);
-      if (bearing != null && (worthHull || ((threat || casemate || catchTarget) && wantsHullTurn(def, { ...v, turretFacing: turretPreview }, bearing, gunnerExp, cmdr?.experience)))) turnHull(state, v, def, bearing, dt);
+      if (bearing != null && (worthHull || ((threat || casemate || catchTarget) && wantsHullTurn(def, { ...v, turretFacing: turretPreview }, bearing, gunnerExp, cmdr?.experience)))) turnIdleHull(state, v, def, bearing, dt);
     }
     return;
   }
@@ -1154,9 +1359,9 @@ function stepVehicleDriver(state: BattleState, rng: Rng, dt: number, v: Vehicle,
   // early dodge: a man in the path AHEAD of the hull steps aside before the hull-local test
   stepOverrunLookahead(state, rng, v, def);
 
-  const backing = def.turnRadiusM == null && backsOnMove(state, v);
+  const backing = def.turnRadiusM == null && (v.localDriver?.recovery ? backingOnMove.has(v) : backsOnMove(state, v));
   const travel = backing ? wrapAngle(v.hullFacing + Math.PI) : v.hullFacing;
-  pursuePath(state, v, def, travel);
+  const consumeWheeledNext = pursuePath(state, v, def, travel);
   if (v.path.length === 0) { driveVehicle(v, { speedMs: 0 }, dt); return; }
   const wp = v.path[0];
   // G7: intact wire blocks the tracks; tracks can force through (consuming it)
@@ -1171,8 +1376,16 @@ function stepVehicleDriver(state: BattleState, rng: Rng, dt: number, v: Vehicle,
   if (v.giveWayUntil != null) {
     if (state.time < v.giveWayUntil) {
       const spd = def.speedOffroadMs * 0.5;
-      driveVehicle(v, { speedMs: -spd }, dt);
-      return { overrunDir: wrapAngle(v.hullFacing + Math.PI) };
+      const heading = wrapAngle(v.hullFacing + Math.PI);
+      const distance = spd * (v.giveWayUntil - state.time) / TILE_M;
+      const end = { x: v.pos.x + dm.sin(heading) * distance,
+        y: v.pos.y - dm.cos(heading) * distance };
+      // A blocked reverse must yield back to the route planner, rather than spending
+      // the whole give-way interval pushing into another hull or the bank behind it.
+      if (straightDrivable(state, v, end, Infinity)) {
+        driveVehicle(v, { speedMs: -spd }, dt);
+        return { overrunDir: heading };
+      }
     }
     v.giveWayUntil = undefined;
     v.blockedSince = undefined;
@@ -1190,20 +1403,21 @@ function stepVehicleDriver(state: BattleState, rng: Rng, dt: number, v: Vehicle,
 
   if (def.turnRadiusM != null) {
     // wheel-steered halftrack: it cannot pivot; it drives an arc, or backs up in a K-turn
-    const movement = stepWheeledDrive(state, dt, v, def, wp, desired, fullSpeedMs);
+    const movement = stepWheeledDrive(state, dt, v, def, wp, desired, fullSpeedMs, consumeWheeledNext);
     return movement ? { ...movement, crushAt: { x: tx, y: ty }, crushTerrain: props.crushable } : undefined;
   }
 
   // reversing (a plain Move to a point behind): the tail is steered at the waypoint
   const aim = backing ? wrapAngle(desired + Math.PI) : desired;
-  turnHull(state, v, def, aim, dt);
-  const headingErr = Math.abs(wrapAngle(aim - driverHeading(v)));
+  const priorYaw = takeHullDrive(v).yawRateRadS, priorPreview = driverHeading(v);
+  const priorPull = driverTicks.get(v)?.appliedTrackPullRadS ?? 0;
+  const plan = planMovementHull(state, v, def, aim, dt);
+  const headingErr = Math.abs(wrapAngle(aim - (plan?.preview ?? driverHeading(v))));
   // tracked: a big heading error is turned out on the spot; a sharp turn under way costs speed
   // (<= 40% of the current maximum beyond 30 deg)
-  if (headingErr > PIVOT_RAD) {
-    driveVehicle(v, { speedMs: 0 }, dt);
-    return { crushAt: { x: tx, y: ty }, crushTerrain: props.crushable, overrunDir: v.hullFacing, checkMines: true };
-  }
+  const trenchApproach = isTrenchApproachPoint(map, def, wp);
+  const crossingTrench = trenchApproach && !isTrenchApproachEntry(map, def, wp, v.path[1]);
+  const pivot = headingErr > (crossingTrench ? TRACK_STRAIGHT_RAD : PIVOT_RAD);
   let speedMs = fullSpeedMs * (backing ? REVERSE_SPEED_MUL : 1)
     * (headingErr > SHARP_TURN_RAD ? SHARP_TURN_SPEED_MUL : headingErr > HEADING_ALIGN_RAD ? 0.7 : 1);
   // A tracked vehicle only ever travels along its own hull heading: it drives forward while it
@@ -1211,22 +1425,31 @@ function stepVehicleDriver(state: BattleState, rng: Rng, dt: number, v: Vehicle,
   // waypoint instead of orbiting it, the speed is held to what the hull can turn inside the
   // remaining distance (turning radius = speed / turn rate <= 60% of the distance).
   const d = dist(v.pos, wp);
-  if (headingErr > TRACK_STRAIGHT_RAD) {
+  if (!pivot && headingErr > TRACK_STRAIGHT_RAD) {
     const rate = hullTurnNow(state, v, def).rate;
     speedMs = Math.min(speedMs, Math.max(0.3, rate * d * TILE_M * 0.6));
   }
-  driveVehicle(v, { speedMs: backing ? -speedMs : speedMs }, dt);
-  // one damaged track drags the hull to that side; the driver keeps correcting
-  driveVehicle(v, { yawRateRadS: trackPullRad(v) }, dt);
-  const travelNow = backing ? wrapAngle(driverHeading(v) + Math.PI) : driverHeading(v);
+  const selected = applyTrackedPlan(v, 1, wp, backing ? -1 : 1, fullSpeedMs, REVERSE_SPEED_MUL,
+    pivot ? 0 : backing ? -speedMs : speedMs, plan, !pivot, v.path.length === 1 || trenchApproach);
+  if (!plan || (pivot && !selected.recovery))
+    return { crushAt: { x: tx, y: ty }, crushTerrain: props.crushable, overrunDir: v.hullFacing, checkMines: true };
+  speedMs = Math.abs(takeHullDrive(v).speedMs);
+  const travelNow = selected.gear < 0 ? wrapAngle(driverHeading(v) + Math.PI) : driverHeading(v);
   const lookahead = { x: v.pos.x + dm.sin(travelNow) * speedMs * dt / TILE_M,
     y: v.pos.y - dm.cos(travelNow) * speedMs * dt / TILE_M };
-  if (!isPassable(map, Math.floor(lookahead.x), Math.floor(lookahead.y), 'vehicle')) driveVehicle(v, { speedMs: 0 }, dt);
+  if (!isPassable(map, Math.floor(lookahead.x), Math.floor(lookahead.y), 'vehicle', VEHICLE_DEFS[v.defId])
+    || !Number.isFinite(vehicleSlopeCost(map, v.pos, lookahead, def))) driveVehicle(v, { speedMs: 0 }, dt);
   // Completion reads the preceding accepted position, never requested speed * dt.
   const reach = v.path.length > 1 ? WAYPOINT_REACH_TILES : 0.25;
-  if (d <= reach) v.path.shift();
+  if (!v.localDriver?.recovery && v.path.length === 1 && d <= reach) {
+    v.path.length = 0;
+    // Cancel this movement only; independent prior yaw/preview/pull retain authority.
+    requestHullDrive(v, { speedMs: 0, yawRateRadS: priorYaw, brake: priorYaw === 0 });
+    const tick = driverTicks.get(v);
+    if (tick) { tick.heading = priorPreview; tick.appliedTrackPullRadS = priorPull; tick.local = undefined; }
+  }
 
-  return { crushAt: { x: tx, y: ty }, crushTerrain: props.crushable, overrunDir: angleTo(v.pos, wp), checkMines: true };
+  return { crushAt: { x: tx, y: ty }, crushTerrain: props.crushable, overrunDir: selected.recovery ? travelNow : angleTo(v.pos, wp), checkMines: true };
 }
 
 /** One step of a wheel-steered vehicle along its route. It cannot pivot: heading changes only at
@@ -1234,7 +1457,7 @@ function stepVehicleDriver(state: BattleState, rng: Rng, dt: number, v: Vehicle,
  * drives an arc along its own heading at 40% speed; facing the wrong way: it backs up with the
  * wheels locked over (K-turn) until roughly lined up. Returns the accepted movement
  * profile for physical completion. */
-function stepWheeledDrive(state: BattleState, dt: number, v: Vehicle, def: VehicleDef, wp: Vec2, desired: number, fullSpeedMs: number): AcceptedVehicleMovement | undefined {
+function stepWheeledDrive(state: BattleState, dt: number, v: Vehicle, def: VehicleDef, wp: Vec2, desired: number, fullSpeedMs: number, consumeNext: () => boolean): AcceptedVehicleMovement | undefined {
   const map = state.map;
   const err = wrapAngle(desired - v.hullFacing);
   const absErr = Math.abs(err);
@@ -1244,10 +1467,10 @@ function stepWheeledDrive(state: BattleState, dt: number, v: Vehicle, def: Vehic
   const speedMs = fullSpeedMs * (backing ? K_TURN_SPEED_MUL : absErr > HEADING_ALIGN_RAD ? SHARP_TURN_SPEED_MUL : 1);
   if (speedMs <= 0) { driveVehicle(v, { speedMs: 0 }, dt); return; }
   turnHull(state, v, def, desired, dt, speedMs);
-  driveVehicle(v, { yawRateRadS: trackPullRad(v) }, dt);
+  appendTrackPull(v, dt);
   const d = dist(v.pos, wp);
   const reach = v.path.length > 1 ? 1.5 : 0.25;
-  if (!backing && d <= reach) {
+  if (!backing && d <= reach && (v.path.length === 1 || consumeNext())) {
     v.path.shift();
     driveVehicle(v, { speedMs: v.path.length ? speedMs : 0 }, dt);
     return { overrunDir: driverHeading(v), overrunFirst: true };
@@ -1341,7 +1564,7 @@ function separateHulls(state: BattleState, a: Vehicle, b: Vehicle): void {
       if (dist({ x: nx, y: ny }, partner.pos) <= d0) continue;
       // third hulls: the landing must clear their footprint outright
       const fx = Math.floor(nx), fy = Math.floor(ny);
-      if (!inBounds(state.map, fx, fy) || !isPassable(state.map, fx, fy, 'vehicle')) continue;
+      if (!inBounds(state.map, fx, fy) || !isPassable(state.map, fx, fy, 'vehicle', VEHICLE_DEFS[v.defId])) continue;
       if (hullBlocker(state, v, { x: nx, y: ny }, partner) != null) continue;
       v.body ??= createHullBody(VEHICLE_DEFS[v.defId], v.pos, v.hullFacing, groundProbe(state.map));
       v.body.position.x = nx * TILE_M; v.body.position.y = ny * TILE_M;

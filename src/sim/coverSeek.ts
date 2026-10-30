@@ -4,36 +4,21 @@
 // at most once every 2 s per soldier via mind.lastCoverSeekAt.
 // ============================================================================
 import type { BattleState, Soldier, Team, Vec2 } from '@/shared/types';
-import { TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
-import { dist, facingAngle } from '@/shared/math';
-import { coverScore, omniCoverAt, type ThreatWeighted } from './cover';
+import { dist } from '@/shared/math';
+import { coverScore, omniCoverAt, buildThreatSet, type ThreatWeighted } from './cover';
 import { findPath } from './path';
 import { isPassable } from './path';
 import { inBounds } from './map';
 import { addMessage } from './messages';
 import { isDazed } from './daze';
 import { fireHazards, nearFireHazard } from './vehicleExplosion';
-import * as dm from '@/shared/dmath';
+import { buildingDestination, buildingTiles, inSameBuilding } from './buildingShelter';
 
 const SEEK_INTERVAL_S = 2;
 /** Search radius (tiles) for a spot clear of a burning vehicle: 15 m plus room to choose. */
 const HAZARD_SEARCH_TILES = 12;
 
-function buildThreatSet(state: BattleState, s: Soldier, team: Team | undefined): ThreatWeighted[] {
-  const threats: ThreatWeighted[] = [];
-  for (const b of s.mind.beliefs) {
-    if (b.confidence <= 0.3) continue;
-    threats.push({ dirRad: dm.atan2(b.pos.x - s.pos.x, -(b.pos.y - s.pos.y)), weight: b.confidence });
-  }
-  if (s.mind.threatDir != null && s.mind.threatLevel > 0) {
-    threats.push({ dirRad: s.mind.threatDir, weight: s.mind.threatLevel });
-  }
-  if (team && (team.order?.type === 'defend' || team.order?.type === 'ambush')) {
-    threats.push({ dirRad: facingAngle(team.facing), weight: 0.5 });
-  }
-  return threats;
-}
 
 function tilesWithinRadius(centre: Vec2, radius: number): Vec2[] {
   const out: Vec2[] = [];
@@ -86,7 +71,12 @@ function bestCoverTile(
 
 function moveTo(state: BattleState, s: Soldier, tile: Vec2): void {
   const path = findPath(state.map, s.pos, tile, 'infantry');
-  if (path.length > 0) s.path = path;
+  if (path.length > 0) {
+    const end = path[path.length - 1];
+    if (Math.floor(end.x) === Math.floor(tile.x) && Math.floor(end.y) === Math.floor(tile.y)) path[path.length - 1] = { ...tile };
+    s.path = path;
+  }
+  else if (Math.floor(s.pos.x) === Math.floor(tile.x) && Math.floor(s.pos.y) === Math.floor(tile.y) && dist(s.pos, tile) > 0.05) s.path = [{ ...tile }];
 }
 
 const lookCoverMsgAt = new WeakMap<BattleState, Map<number, number>>();
@@ -138,6 +128,18 @@ function seekForSoldier(state: BattleState, rng: Rng, s: Soldier): void {
       }
       return;
     }
+  }
+  const orderedHouse = team?.order && ['move', 'moveFast', 'sneak', 'assault'].includes(team.order.type)
+    && buildingTiles(state.map, team.order.target).length > 0;
+  if (orderedHouse && s.path.length === 0 && ['idle', 'defending', 'ambushing', 'hiding'].includes(s.activity)) {
+    mind.lastCoverSeekAt = state.time;
+    const destination = buildingDestination(state, s, team!.order!.target, mind.anchor ?? team!.order!.target);
+    if (destination && dist(s.pos, destination) > 0.05 && (!inSameBuilding(state.map, s.pos, destination)
+      || coverScore(state.map, destination, threats) - coverScore(state.map, s.pos, threats) >= (mind.trait === 'cautious' ? 0.05 : mind.trait === 'reckless' ? 0.3 : 0.15))) {
+      moveTo(state, s, destination);
+      if (s.path.length) { mind.anchor = { ...destination }; s.activity = 'moving'; }
+    }
+    return;
   }
   if (threats.length === 0) {
     // No contact yet: settled men still occupy the best nearby omni-cover (foxhole/trench/

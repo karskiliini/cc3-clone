@@ -13,3 +13,6 @@ test-results/
 __pycache__/
 tools/blender/.cache/
 cc3-clone-vs-origin-main.zip
+
+# Private local diagnostic runs and large evidence archives
+/.superpowers/

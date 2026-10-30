@@ -222,6 +222,7 @@ export function detonateVehicle(state: BattleState, rng: Rng, v: Vehicle, killer
   const team = state.teams.get(v.teamId);
   v.fire = { t0: state.time };
   v.state = 'burning';
+  delete v.localDriver;
   v.path = []; v.speed = 0;
   v.exiting = undefined; v.unloading = undefined; v.remount = undefined; v.bailBy = undefined; v.seatSwap = undefined;
   (v.cookOff ??= { checkedS: 0, pops: 0 }).ended = 'detonated';

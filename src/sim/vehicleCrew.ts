@@ -1,3 +1,4 @@
+import { localDriverOwner } from './localDriver';
 // Leaving and re-entering vehicles (spec 2026-09-17 §10): the crew climbs out one man per hatch at
 // a time and is exposed while it does; a serviceable vehicle stays where it was left, with its
 // damage and ammunition, and its OWN crew goes back once every survivor has his nerve again, the
@@ -449,6 +450,7 @@ export function assignSeatsForWhatWorks(state: BattleState, v: Vehicle): void {
 }
 
 function goLive(state: BattleState, v: Vehicle, team: Team): void {
+  localDriverOwner(v, 0);
   const def = VEHICLE_DEFS[v.defId];
   v.state = v.wasImmobile || isImmobile(v) ? 'immobilized' : 'ok';
   v.wasImmobile = undefined;

@@ -4,7 +4,8 @@
 // terrain cover (trench/crater/building interior/rubble/woods) plus linear
 // cover from a wall/hedge/fence/wreck on the threat side.
 // ============================================================================
-import type { GameMap, Terrain, Vec2 } from '@/shared/types';
+import type { BattleState, Soldier, Team, GameMap, Terrain, Vec2 } from '@/shared/types';
+import { facingAngle } from '@/shared/math';
 import { inBounds, tileAt } from './map';
 import { TERRAIN_PROPS } from './terrain';
 import * as dm from '@/shared/dmath';
@@ -116,4 +117,19 @@ export function coverScore(map: GameMap, tile: Vec2, threats: ThreatWeighted[], 
   let score = 0;
   for (const th of capped) score += (th.weight / totalW) * coverFrom(map, tile, th.dirRad, ctx);
   return score;
+}
+
+export function buildThreatSet(state: BattleState, s: Soldier, team: Team | undefined): ThreatWeighted[] {
+  const threats: ThreatWeighted[] = [];
+  for (const b of s.mind.beliefs) {
+    if (b.confidence <= 0.3) continue;
+    threats.push({ dirRad: dm.atan2(b.pos.x - s.pos.x, -(b.pos.y - s.pos.y)), weight: b.confidence });
+  }
+  if (s.mind.threatDir != null && s.mind.threatLevel > 0) {
+    threats.push({ dirRad: s.mind.threatDir, weight: s.mind.threatLevel });
+  }
+  if (team && (team.order?.type === 'defend' || team.order?.type === 'ambush')) {
+    threats.push({ dirRad: facingAngle(team.facing), weight: 0.5 });
+  }
+  return threats;
 }
