@@ -205,6 +205,11 @@ export interface GameMap {
   /** visual blast marks left by explosions this battle (sub-tile position, size by weapon); the
    * renderer stamps them into its baked terrain. Render-only: never read by the sim. */
   craterMarks?: CraterMark[];
+  /** Persistent cosmetic fragment scars; glass damage does not create new wall openings. */
+  shatteredWindows?: Set<number>;
+  fragmentMarks?: { pos: Vec2; angle: number; material: 'dust' | 'wood' | 'stone' | 'brick'; glass?: boolean }[];
+  /** Short fragment flights, independent of small-arms tracer visibility. */
+  fragmentFlights?: { from: Vec2; to: Vec2; at: number }[];
   /** tile indexes changed since last render bake (e.g. vehicle crushing terrain); renderer clears this */
   dirtyTiles?: number[];
   /** Felled trunks remain physical low cover; direction/time also drive the falling animation. */
@@ -686,7 +691,13 @@ export interface GunLay {
   lostAt?: number;
 }
 
+export interface VehicleStrikeMark {
+  x: number; y: number; part: 'hull' | 'turret'; sizeM: number; penetrated: boolean;
+}
 export interface Vehicle {
+  /** Cosmetic battle damage in hull/turret-local metres, independent of combat RNG. */
+  strikeMarks?: VehicleStrikeMark[];
+  strikeSerial?: number;
   id: number;
   teamId: number;
   side: Side;

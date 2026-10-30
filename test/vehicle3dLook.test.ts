@@ -7,15 +7,15 @@ function look(over: Partial<VehicleLook> = {}): VehicleLook {
     turretBlown: false, brokenTrack: null, turretLanding: null, season: 'summer', recoil: 0, ...over,
   };
 }
-const ALL = new Set(['hull_ok', 'hull_ko', 'hull_blown', 'hull_trackL', 'hull_trackR', 'turret_ok', 'turret_ko', 'turret_blown']);
+const ALL = new Set(['hull_ok', 'hull_ko', 'hull_blown', 'hull_trackL', 'hull_trackR', 'hull_trackBoth', 'turret_ok', 'turret_ko', 'turret_blown']);
 
 describe('modelNodes mirrors the sprite entry choice', () => {
   it('live', () => expect(modelNodes(look(), ALL, true)).toEqual({ hull: 'hull_ok', turret: 'turret_ok', winterHull: false, winterTurret: false }));
   it('knocked out', () => expect(modelNodes(look({ ko: true }), ALL, true)).toMatchObject({ hull: 'hull_ko', turret: 'turret_ko' }));
   it('blown turret wins over everything', () => expect(modelNodes(look({ ko: true, turretBlown: true, brokenTrack: 'R' }), ALL, true)).toMatchObject({ hull: 'hull_blown', turret: 'turret_blown' }));
-  it('thrown tracks only on a live hull; both = L', () => {
+  it('thrown tracks independently, including both on a live hull', () => {
     expect(modelNodes(look({ brokenTrack: 'R' }), ALL, true).hull).toBe('hull_trackR');
-    expect(modelNodes(look({ brokenTrack: 'both' }), ALL, true).hull).toBe('hull_trackL');
+    expect(modelNodes(look({ brokenTrack: 'both' }), ALL, true).hull).toBe('hull_trackBoth');
     expect(modelNodes(look({ brokenTrack: 'L', ko: true }), ALL, true).hull).toBe('hull_ko');
   });
   it('wheeled vehicles without track nodes fall back to the ok hull', () => {

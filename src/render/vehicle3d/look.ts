@@ -76,7 +76,7 @@ export interface ModelNodes { hull: string; turret: string | null; winterHull: b
 export function modelNodes(look: VehicleLook, available: ReadonlySet<string>, hasWinter: boolean): ModelNodes {
   const want = look.turretBlown ? 'hull_blown'
     : look.ko ? 'hull_ko'
-    : look.brokenTrack ? (look.brokenTrack === 'R' ? 'hull_trackR' : 'hull_trackL')
+    : look.brokenTrack ? (look.brokenTrack === 'both' ? 'hull_trackBoth' : look.brokenTrack === 'R' ? 'hull_trackR' : 'hull_trackL')
     : 'hull_ok';
   const hull = available.has(want) ? want : look.ko ? 'hull_ko' : 'hull_ok';
   const turret = available.has('turret_ok')

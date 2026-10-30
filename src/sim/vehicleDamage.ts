@@ -1,3 +1,4 @@
+import { markVehicleStrike } from './impactMarks';
 // Locational vehicle damage: hit zones from the shot geometry, what sits behind each zone, what a
 // penetration (or a hit that does not get through) does to the crew and the equipment there, and
 // what the damage then means for the vehicle. The ONE damage model for every hit on a vehicle:
@@ -701,6 +702,8 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
   const location = input.location ?? (def
     ? locateHit(rng, v, def, input.shooterPos, { aimPoint: input.aimPoint, hullDown, fromAbove: input.fromAbove || looksIn })
     : { zone: 'hullSide' as VehicleZone, face: 'side' as ArmorFace });
+  markVehicleStrike(v, input.shooterPos, TURRET_ZONES.has(location.zone), false, isBigRound(weapon) ? 0.22 : 0.07);
+  const strike = v.strikeMarks?.at(-1);
   const armorMm = def ? locationArmorMm(def, location) : 9999;
   const res: VehicleHitResult = { location, armorMm, penetrated: false, ko: false, outcome: 'bounced' };
   const team = state.teams.get(v.teamId);
@@ -714,6 +717,7 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
     // off the dead hull. HE does not penetrate — excluded.
     if (mainLeft > 0 && pen > 0 && penetrates(weapon, input.distM, armorMm, rng, round)) {
       res.penetrated = true;
+      if (strike) strike.penetrated = true;
       // rack hit probability scales with the fraction of the ready rack still loaded
       const rackP = Math.min(0.5, 0.08 + 0.34 * (mainLeft / Math.max(1, def.readyRack ?? 10)));
       const loc = location.zone;
@@ -750,6 +754,7 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
     return res;
   }
 
+  if (strike) strike.penetrated = true;
   v.hits++;
   if (isGear) {
     worsen(v, trackSys, rng.next() < 0.7 ? 'destroyed' : 'damaged');

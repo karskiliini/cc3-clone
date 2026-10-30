@@ -1,3 +1,4 @@
+import { drawVehicleScars, drawFragmentScars } from './impactFx';
 import { drawFallenTrees } from './treeFx';
 // ============================================================================
 // unitRender.ts — draws soldiers, vehicles, selection rings, VL flags, team
@@ -459,7 +460,17 @@ export function drawVehicleSprite(
   // damage looks: `hull.blown` (open turret ring) with `turret.blown` lying beside it,
   // `hull.trackL|R` for a thrown track (a live hull only; wrecks keep their burnt look)
   const hullVariant = turretBlown ? 'blown' : state === 'ok' && brokenTrack ? (brokenTrack === 'R' ? 'trackR' : 'trackL') : undefined;
+  if (state === 'ok' && brokenTrack === 'both' && !turretBlown) {
+    for (const side of [-1, 1]) {
+      ctx.save(); ctx.translate(cx, cy); ctx.rotate(hullRad);
+      ctx.beginPath(); ctx.rect(side < 0 ? -500 : 0, -500, 500, 1000); ctx.clip();
+      ctx.rotate(-hullRad); ctx.translate(-cx, -cy);
+      drawVehiclePart(ctx, defId, 'hull', state, hullRad, hullRad, cx, cy, zoom, side < 0 ? 'trackL' : 'trackR', season);
+      ctx.restore();
+    }
+  } else {
   drawVehiclePart(ctx, defId, 'hull', state, hullRad, hullRad, cx, cy, zoom, hullVariant, season);
+  }
   if (vdef?.hasTurret) drawVehiclePart(ctx, defId, 'turret', state, turretRad, hullRad, tcx, tcy, zoom, turretBlown ? 'blown' : undefined, season);
 }
 
@@ -655,6 +666,7 @@ function drawVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
   for (const { veh, look } of shown) {
     const p = worldToScreen(cam, veh.pos);
     const dmg = vehicleDamageView(veh);
+    drawVehicleScars(ctx, cam, veh, dmg.brokenTrack);
     // a serviceable hull whose crew is outside keeps its live look, hatches open (spec §10)
     if ((look.liveButLeft || veh.exiting) && cam.zoom > 0.5) drawOpenHatches(ctx, cam, state, veh);
     // item 011: a dead hull whose hatches blew shows fire spewing from the open hatches
@@ -1161,6 +1173,7 @@ export function drawUnits(
   ctx.imageSmoothingEnabled = false;
 
   ensureAtlases(state);
+  drawFragmentScars(ctx, cam, state);
   drawFallenTrees(ctx, cam, state);
   ragdollBeginFrame(state.time);
   drawCorpses(ctx, cam, state, playerSide, showDead);

@@ -5,7 +5,7 @@
 // Each battle keeps only its own vehicles on the GPU: the previous battle's
 // models are disposed when the next one asks for its set.
 // ============================================================================
-import { Mesh, MeshLambertMaterial, SRGBColorSpace, type Texture } from 'three';
+import { BufferAttribute, BufferGeometry, Mesh, MeshLambertMaterial, SRGBColorSpace, type Texture } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { Season } from '@/shared/types';
 
@@ -28,10 +28,14 @@ interface Entry { info: ManifestEntry | null; requested: boolean; summer: Varian
 
 function disposeNodes(v: Variant | null): void {
   if (!(v instanceof Map)) return;
+  const textures = new Set<Texture>(), materials = new Set<MeshLambertMaterial>(), geometries = new Set<BufferGeometry>();
   for (const m of v.values()) {
-    const mat = m.material as MeshLambertMaterial;
-    mat.map?.dispose(); mat.dispose(); m.geometry.dispose();
+    for (const mat of (Array.isArray(m.material) ? m.material : [m.material]) as MeshLambertMaterial[]) {
+      if (mat.map) textures.add(mat.map); materials.add(mat);
+    }
+    geometries.add(m.geometry);
   }
+  textures.forEach(t => t.dispose()); materials.forEach(m => m.dispose()); geometries.forEach(g => g.dispose());
 }
 
 /** The battle's vehicle models. `load` names the battle's vehicle set and season: models outside it
@@ -120,6 +124,41 @@ export function nodeMaterial(name: string, map: Texture | null): MeshLambertMate
  * 1.4 lands them at ~0.98x (1.6 read lighter and browner than the sprite wrecks in battle). */
 export const BURNT_GAIN = 1.4;
 
+
+/** Join the damaged half of each authored hull, retaining its UVs and normals. */
+export function bothTracksGeometry(left: BufferGeometry, right: BufferGeometry): BufferGeometry {
+  const out = new BufferGeometry(), names = ['position', ...Object.keys(left.attributes).filter(n => n !== 'position')];
+  const data = new Map(names.map(name => [name, [] as number[]]));
+  let count = 0;
+  for (const [side, g] of [left, right].entries()) {
+    const start = count, pos = g.getAttribute('position'), total = g.index?.count ?? pos.count;
+    for (let i = 0; i < total; i += 3) {
+      // Clip triangles exactly on the centre plane, interpolating UVs and normals at the seam.
+      let polygon = [0, 1, 2].map(k => {
+        const v = g.index ? g.index.getX(i + k) : i + k;
+        return names.flatMap(name => { const attr = g.getAttribute(name); return Array.from({length: attr.itemSize}, (_,c) => attr.getComponent(v, c)); });
+      });
+      const clipped: number[][] = [];
+      const inside = (v: number[]) => side === 0 ? v[0] <= 0 : v[0] >= 0;
+      for (let j = 0; j < polygon.length; j++) {
+        const a = polygon[j], b = polygon[(j + 1) % polygon.length], ai = inside(a), bi = inside(b);
+        if (ai) clipped.push(a);
+        if (ai !== bi && a[0] !== 0 && b[0] !== 0) { const t = a[0] / (a[0] - b[0]); clipped.push(a.map((v,c) => v + (b[c] - v) * t)); }
+      }
+      polygon = clipped;
+      for (let j = 1; j + 1 < polygon.length; j++) for (const v of [polygon[0], polygon[j], polygon[j + 1]]) {
+        let offset = 0;
+        for (const name of names) { const size = g.getAttribute(name).itemSize; data.get(name)!.push(...v.slice(offset, offset + size)); offset += size; }
+        count++;
+      }
+    }
+    out.addGroup(start, count - start, side);
+  }
+  for (const name of names) out.setAttribute(name, new BufferAttribute(new Float32Array(data.get(name)!), left.getAttribute(name).itemSize));
+  if (out.hasAttribute('normal')) out.normalizeNormals();
+  out.computeBoundingSphere(); return out;
+}
+
 async function loadVariant(v: ManifestVariant): Promise<Map<string, Mesh>> {
   const gltf = await new GLTFLoader().loadAsync(`${base()}${v.file}`);
   const out = new Map<string, Mesh>();
@@ -133,6 +172,8 @@ async function loadVariant(v: ManifestVariant): Promise<Map<string, Mesh>> {
     m.position.set(0, 0, 0); m.rotation.set(0, 0, 0); m.scale.set(1, 1, 1);
     out.set(name, m);
   }
+  const left = out.get('hull_trackL'), right = out.get('hull_trackR');
+  if (left && right) out.set('hull_trackBoth', new Mesh(bothTracksGeometry(left.geometry, right.geometry), [(left.material as MeshLambertMaterial).clone(), (right.material as MeshLambertMaterial).clone()]));
   return out;
 }
 

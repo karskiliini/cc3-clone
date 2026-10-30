@@ -1,3 +1,4 @@
+import { grenadeFragments } from './impactMarks';
 import { syncVehicleCrewDuties } from './vehicleCrewDuty';
 import { PASSENGER_FIRE_MUL } from './transport';
 import type {
@@ -696,6 +697,9 @@ export function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: W
   const kind = weapon.heRadiusM >= 3 ? 'he' : 'small';
   state.explosions.push({ pos: { ...pos }, radiusM: weapon.heRadiusM, t: 0, kind, weaponId: weapon.id });
   state.events.push({ kind: 'explosion', pos: { ...pos }, side: shooterSide, weaponId: weapon.id });
+  grenadeFragments(state, pos, weapon, (man, fragmentRng) => {
+    applyHit(state, man, { ...weapon, lethality: weapon.lethality * 0.45 }, fragmentRng, shooterSide, blastOptions.killer);
+  });
   leaveCrater(state, pos, weapon);
   treesInBlast(state, rng, pos, weapon);
   applyBlastDamage(state, pos, weapon, { side: shooterSide, from });

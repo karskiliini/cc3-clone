@@ -2288,7 +2288,7 @@ function paintEaveNotches(ctx: CanvasRenderingContext2D, map: GameMap, wx: numbe
   // A window seen from above is a DARK RECESS in the eave line with a thin lit sill/lintel on the
   // sunward side of it — three thin strips, never a filled pale square.
   const OPENING = 'rgba(14,12,10,0.86)';
-  const SILL_LIT = 'rgba(214,198,158,0.55)';
+  const SILL_LIT = map.shatteredWindows?.has(i) ? 'rgba(135,172,180,0.65)' : 'rgba(214,198,158,0.55)';
   const SILL_DARK = 'rgba(40,34,26,0.7)';
   const HALF = Math.floor(TILE_PX / 2);
   for (const [dx, dy, side] of dirs) {
