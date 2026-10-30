@@ -70,6 +70,10 @@ interface SideReport {
 }
 
 interface RunReport {
+  vehicleDistanceM: number;
+  meanVehicleSpeedMps: number;
+  meanPathNodes: number;
+  maxPathNodes: number;
   mapId: string;
   seed: number;
   durationS: number;
@@ -188,11 +192,23 @@ function runOne(mapId: string, seed: number, battleSeconds = BATTLE_SECONDS): Ru
   let diagMs = 0;
   const t0 = performance.now();
   let stepsTaken = 0;
+  let vehicleDistanceM = 0, vehicleSpeedSum = 0, vehicleSpeedSamples = 0, pathNodesSum = 0, pathNodeTicks = 0, maxPathNodes = 0;
+  const priorVehiclePositions = new Map([...battle.state.vehicles.values()].map(v => [v.id, { ...v.pos }]));
   while (battle.state.phase === 'running' && battle.state.time < battleSeconds) {
     battle.step(1.0);
     stepsTaken++;
     const evs = battle.drainEvents(); // mirrors real usage (renderer drains each frame); avoids unbounded growth
     const diagT0 = performance.now(); // the diagnosis bookkeeping below is not part of the sim's cost
+    // Passive one-second samples; accounted as diagnosis time, not simulation cost.
+    let nodes = 0;
+    for (const v of st.vehicles.values()) {
+      const prior = priorVehiclePositions.get(v.id);
+      if (prior) vehicleDistanceM += Math.hypot(v.pos.x - prior.x, v.pos.y - prior.y) * 2;
+      priorVehiclePositions.set(v.id, { ...v.pos });
+      vehicleSpeedSum += Math.abs(v.speed); vehicleSpeedSamples++; nodes += v.path.length;
+    }
+    for (const soldier of st.soldiers.values()) nodes += soldier.path.length;
+    pathNodesSum += nodes; pathNodeTicks++; maxPathNodes = Math.max(maxPathNodes, nodes);
     const blasts = evs.filter((e) => e.kind === 'explosion' && e.pos && e.weaponId);
     for (const e of evs) {
       if (e.kind !== 'shot' || !e.side || !e.weaponId) continue;
@@ -339,6 +355,8 @@ function runOne(mapId: string, seed: number, battleSeconds = BATTLE_SECONDS): Ru
   }
 
   return {
+    vehicleDistanceM, meanVehicleSpeedMps: vehicleSpeedSamples ? vehicleSpeedSum / vehicleSpeedSamples : 0,
+    meanPathNodes: pathNodeTicks ? pathNodesSum / pathNodeTicks : 0, maxPathNodes,
     mapId,
     seed,
     durationS: battle.state.time,
@@ -451,8 +469,14 @@ describe('harness smoke', () => {
 });
 
 describe.skipIf(!(globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.HARNESS)('AI-vs-AI balance harness', () => {
-  it(`runs every map at seeds 1..${SEED_COUNT} and prints a balance report`, () => {
+  it(`runs every map at seeds 1..${SEED_COUNT} and prints a balance report`, async () => {
+    expect(HARNESS_MAP_DEFS.length, 'HARNESS_MAPS must select at least one real map').toBeGreaterThan(0);
+    for (const id of MAP_FILTER) expect(MAPS.some(m => m.id === id), `unknown HARNESS_MAPS id: ${id}`).toBe(true);
+    expect(SEEDS.length, 'seed range must not be empty').toBeGreaterThan(0);
     const reports: RunReport[] = [];
+    const fs = ENV.HARNESS_JSON ? await import('node:fs') : null;
+    const record = (complete: boolean) => fs?.writeFileSync(ENV.HARNESS_JSON!, JSON.stringify({ complete,
+      expectedCases: HARNESS_MAP_DEFS.length * SEEDS.length, reports }, null, 2));
     for (const mapDef of HARNESS_MAP_DEFS) {
       for (const seed of SEEDS) {
         const r = runOne(mapDef.id, seed);
@@ -464,10 +488,12 @@ describe.skipIf(!(globalThis as { process?: { env?: Record<string, string | unde
         expect(r.sides.soviet.losses).toBeGreaterThanOrEqual(0);
         expect(r.msPerSimSecond).toBeLessThan(2000); // generous CI-machine ceiling; target is <15ms
         expect(r.outOfBounds).toBe(0);
+        record(false);
       }
     }
     printReport(reports);
     expect(reports.length).toBe(HARNESS_MAP_DEFS.length * SEEDS.length);
+    record(true);
   }, 600_000 * Math.max(1, SEED_COUNT / 3) * 2);
 });
 

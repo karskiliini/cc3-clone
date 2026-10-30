@@ -1,3 +1,4 @@
+import { makePureSolverScene } from '../tools/hullPhysicsScenarios';
 import { expect, it } from 'vitest';
 import { VEHICLE_DEFS } from '@/data/units';
 import { hullParams } from '@/data/vehiclePhysics';
@@ -293,4 +294,17 @@ it('checks complete normal-impulse translation, rejecting only XY before final s
     const offset = rotate(r.body.orientation, { x, y, z });
     expect(r.body.position.z + offset.z).toBeGreaterThanOrEqual(slope(r.body.position.x + offset.x).heightM - 1e-8);
   }
+});
+
+
+it('keeps 40 bodies finite for 1000 production ticks without changing definitions', () => {
+  const before = JSON.stringify(VEHICLE_DEFS), scene = makePureSolverScene(40);
+  for (let tick = 0; tick < 1000; tick++) scene.step();
+  expect(scene.rigs).toHaveLength(40);
+  for (const { body } of scene.rigs) {
+    for (const p of [body.position, body.velocity, body.angularVelocity, body.orientation])
+      expect(Object.values(p).every(Number.isFinite)).toBe(true);
+    expect(body.suspensionTravel.every(Number.isFinite)).toBe(true);
+  }
+  expect(JSON.stringify(VEHICLE_DEFS)).toBe(before);
 });

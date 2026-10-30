@@ -198,6 +198,11 @@ export interface MapDef {
   coa?: MapCOA;
 }
 
+export interface HeightBuildingInfo {
+  id: number; minX: number; minY: number; maxX: number; maxY: number;
+  stone: boolean; big: boolean; eave: number; ridge: number; ridgeHoriz: boolean;
+}
+
 export interface GameMap {
   def: MapDef;
   width: number;
@@ -228,6 +233,12 @@ export interface GameMap {
   dirtyTiles?: number[];
   /** surface height model (sim/heightField.ts), built at map load and updated by blasts/damage */
   heightField?: HeightField;
+  /** Persistent breached-wall base overrides; height-field contexts are derived caches. */
+  heightOverrides?: Map<number, number>;
+  /** Original physical building envelope, retained when walls change material. */
+  physicalBuildings?: Map<number, HeightBuildingInfo>;
+  /** Exact temporary API profiles; native terrain refresh replaces these samples. */
+  heightProfiles?: Map<number, Float32Array>;
   /** Per-tile GROUND elevation in metres (row-major, width*height) — the landform under every
    * feature. Undefined on a map with no `elevation()` (perfectly flat, height 0 everywhere).
    * This is the array the sim's hot paths (LOS, movement, spotting) read directly. */
@@ -254,6 +265,8 @@ export interface HeightField {
   version: number;
   /** craterMarks already stamped into `dig` */
   marksApplied: number;
+  /** Direct API craters not sourced from map.craterMarks, in application order. */
+  directCraterEdits?: { x: number; y: number; sizeM: number; marksApplied: number; revision: number }[];
 }
 
 /** A blast mark from one explosion: centre in tile coords, rim diameter in metres. */
@@ -432,6 +445,9 @@ export interface Soldier {
   /** gun gunners: rounds left by type (sum = ammo + ammoReserve); sim/aimPoint.ts `soldierRounds` */
   rounds?: RoundCounts;
   id: number;
+  /** Own vehicle-blocking stress/dodge observation times, retained at tick boundaries. */
+  vehicleWaitSince?: number;
+  vehicleDodgeRollAt?: number;
   teamId: number;
   side: Side;
   name: string;               // surname only, e.g. "Müller"; display as `${rank}. ${name}`
@@ -731,6 +747,20 @@ export interface LocalDriverReflex {
     minimumYaw: number; minimumSpeed: number };
 }
 
+/** Persistent driver observations and hysteresis; tick-local actuator requests stay ephemeral. */
+export interface VehicleNavigationMemory {
+  nearMiss?: { pos: Vec2; weapon: WeaponDef; at: number };
+  cover?: {
+    target: Vec2 | null; route: Vec2[]; backing: boolean;
+    bankStaging?: Vec2; bankApproach?: boolean;
+    fleeingSince: number | null; cooldownUntil: number; searchAfter?: number; fleeAnchor?: Vec2;
+  };
+  blockedSince?: number;
+  firingSpotLook?: { at: number; target: Vec2 };
+  backingOnMove?: boolean;
+  kTurning?: boolean;
+}
+
 export interface Vehicle {
   id: number;
   teamId: number;
@@ -740,6 +770,7 @@ export interface Vehicle {
   hullFacing: number;         // radians, 0 = north, clockwise
   body?: HullBody;
   localDriver?: LocalDriverReflex;
+  navigation?: VehicleNavigationMemory;
   gunElevationRad?: number;
   turretFacing: number;       // radians absolute
   state: VehicleState;

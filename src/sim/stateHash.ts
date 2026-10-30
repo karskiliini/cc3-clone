@@ -1,3 +1,4 @@
+import { computePhysicalBuildings } from './heightField';
 // ============================================================================
 // stateHash.ts — a 32-bit fingerprint of the battle (multiplayer plan §3 "Desync detection",
 // §7 P4). Two machines running the same config and command log must produce the same hash after
@@ -43,6 +44,24 @@ class Fnv {
     this.int(s.length);
     for (let i = 0; i < s.length; i++) this.int(s.charCodeAt(i));
   }
+  /** Stable plain-data fields, including optional presence and exact numbers.
+   * Used for small canonical driver records, never render caches or whole maps. */
+  data(value: unknown): void {
+    if (value === undefined) { this.int(0); return; }
+    if (value === null) { this.int(1); return; }
+    if (typeof value === 'number') { this.int(2); this.num(value); return; }
+    if (typeof value === 'boolean') { this.int(3); this.bool(value); return; }
+    if (typeof value === 'string') { this.int(4); this.str(value); return; }
+    if (Array.isArray(value)) {
+      this.int(5); this.int(value.length); for (const item of value) this.data(item); return;
+    }
+    if (typeof value === 'object') {
+      const record = value as Record<string, unknown>, keys = Object.keys(record).sort();
+      this.int(6); this.int(keys.length); for (const key of keys) { this.str(key); this.data(record[key]); }
+      return;
+    }
+    throw new Error('Non-data value in canonical driver state');
+  }
   vec(p: Vec2 | null | undefined): void {
     if (!p) { this.int(-1); return; }
     this.num(p.x);
@@ -71,7 +90,8 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
     h.num(s.morale);
     h.num(s.suppression);
     h.int(s.facing);
-    h.int(s.path.length);
+    h.int(s.path.length); for (const point of s.path) h.vec(point);
+    h.data(s.vehicleWaitSince); h.data(s.vehicleDodgeRollAt);
     h.int(s.targetSoldierId ?? -1);
     h.int(s.targetVehicleId ?? -1);
     h.str(s.mind.state);
@@ -95,7 +115,7 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
       h.int(b.suspensionTravel.length); for (const x of b.suspensionTravel) h.num(x);
       h.bool(b.asleep); h.bool(b.hungUp); h.bool(b.overturned);
       h.num(b.quietS); h.num(b.tippedS); h.num(b.hungS); h.num(b.rockPhaseS);
-      h.int(b.rockTries); h.int(b.groundVersion);
+      h.num(b.rockTries); h.num(b.groundVersion);
     }
     const local = v.localDriver; h.bool(Object.hasOwn(v, 'localDriver')); h.bool(!!local);
     if (local) {
@@ -119,7 +139,12 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
       }
     }
     h.num(v.gunElevationRad ?? 0);
-    h.int(v.path.length);
+    h.data(v.navigation);
+    h.int(v.path.length); for (const point of v.path) h.vec(point);
+    // Physical driver and gun ownership gates affect the next accepted pose.
+    for (const key of ['targetVehicleId', 'targetSoldierId', 'targetPoint', 'holdUntil', 'blockedSince',
+      'giveWayUntil', 'creepForGun', 'creepAim', 'creepUntil', 'fireHaltUntil', 'fireHaltSince',
+      'noFireHaltUntil', 'mineTileSeen', 'gunLay', 'loadedRound', 'mainFireTimer', 'loadTotalS'] as const) h.data(v[key]);
     if (v.damage) for (const k of Object.keys(v.damage).sort()) { h.str(k); h.str(v.damage[k as keyof typeof v.damage]); }
     else h.int(-1);
   }
@@ -127,6 +152,9 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
     h.int(t.id);
     h.vec(t.pos);
     h.str(t.status);
+    h.bool(!!t.order);
+    if (t.order) for (const key of ['type', 'target', 'targetTeamId', 'targetVehicleId', 'lastSeenAt',
+      'lastKnownPos', 'issuedAt', 'mountVehicleId', 'dismount', 'waypoints'] as const) h.data(t.order[key]);
   }
   for (const vl of state.map.victoryLocations) {
     h.int(vl.id);
@@ -157,9 +185,20 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
   }
   // terrain the sim changed: crater marks and how many the height field has stamped (D1)
   h.int(state.map.craterMarks?.length ?? 0);
+  h.data(state.map.craterMarks?.filter(mark => mark.kind !== 'track'));
   // (a field not built yet stamps every mark when it is, so it counts as in step)
   const field = state.map.heightField;
   h.int(field ? field.marksApplied : state.map.craterMarks?.length ?? 0);
+  h.num(field?.version ?? 1); h.data(field?.directCraterEdits);
+  const buildings = state.map.physicalBuildings ?? computePhysicalBuildings(state.map);
+  h.int(buildings.size);
+  for (const [id, info] of [...buildings].sort((a, b) => a[0] - b[0])) { h.int(id); h.data(info); }
+  const overrides = state.map.heightOverrides;
+  h.int(overrides?.size ?? 0);
+  if (overrides) for (const [tile, height] of [...overrides].sort((a, b) => a[0] - b[0])) { h.int(tile); h.data(height); }
+  const profiles = state.map.heightProfiles;
+  h.int(profiles?.size ?? 0);
+  if (profiles) for (const [tile, samples] of [...profiles].sort((a, b) => a[0] - b[0])) { h.int(tile); h.data([...samples]); }
   h.int(state.map.craters.length);
   // both sides' results, not state.result (that one is the viewer's and differs per client)
   h.str(state.results?.german);

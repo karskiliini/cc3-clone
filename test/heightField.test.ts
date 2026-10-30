@@ -5,7 +5,7 @@ import { MapPainter } from '@/sim/mapdsl';
 import { buildMap, idx } from '@/sim/map';
 import { MAPS } from '@/data/maps';
 import { WEAPONS } from '@/data/weapons';
-import { applyCrater, buildHeightField, canopyAt, craterDepthM, getHeightField, heightAt } from '@/sim/heightField';
+import { applyCrater, buildHeightField, canopyAt, craterDepthM, getHeightField, heightAt, groundAt, refreshTiles } from '@/sim/heightField';
 import { applyBlastDamage, buildingStatus, structureHp } from '@/sim/structures';
 import { applyHESplash } from '@/sim/combat';
 import { hasLOS } from '@/sim/los';
@@ -317,4 +317,34 @@ describe('view keys', () => {
     const r = offsetOrderPoints({ x: 10, y: 10 }, [{ x: 2, y: 2 }, { x: 5, y: 6 }], { x: 1, y: -1 });
     expect(r).toEqual({ target: { x: 11, y: 9 }, waypoints: [{ x: 3, y: 1 }, { x: 6, y: 5 }] });
   });
+});
+
+it('specialized surface sampling matches the generic interpolant including signed zero and edges', () => {
+  const field = getHeightField(mapFrom(() => {}, 8, 8)), rng = new Rng(145);
+  for (const value of [-0, 0, -0.5, 0.1, 1234.5]) {
+    field.height.fill(value); field.ground.set(field.height);
+    for (let i = 0; i < 1000; i++) {
+      const x = rng.range(-1, 9), y = rng.range(-1, 9);
+      expect(Object.is(heightAt(field, x, y), groundAt(field, x, y))).toBe(true);
+    }
+  }
+  for (let i = 0; i < field.height.length; i++) field.height[i] = i % 5 ? rng.range(-2, 4) : -0;
+  field.ground.set(field.height);
+  for (let i = 0; i < 2000; i++) {
+    const x = rng.range(-1, 9), y = rng.range(-1, 9);
+    expect(Object.is(heightAt(field, x, y), groundAt(field, x, y))).toBe(true);
+  }
+});
+
+it('restores original stone-building geometry after its wall materials have changed', () => {
+  const map = mapFrom(p => p.building(10, 10, 8, 6, 'stone'));
+  const changed: number[] = [];
+  for (let i = 0; i < map.tiles.length; i++) if (map.tiles[i] === 'buildingStone') { map.tiles[i] = 'floor'; changed.push(i); }
+  refreshTiles(map, changed);
+  const def = map.def, data = structuredClone({ ...map, def: undefined });
+  const restored: GameMap = { ...data, def };
+  expect(getHeightField(restored)).toBe(restored.heightField);
+  refreshTiles(map, [idx(map, 13, 12)]); refreshTiles(restored, [idx(restored, 13, 12)]);
+  expect(heightAt(getHeightField(restored), 13.5, 12.5)).toBeGreaterThan(7);
+  expect(getHeightField(restored).height).toEqual(getHeightField(map).height);
 });

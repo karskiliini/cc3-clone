@@ -18,7 +18,7 @@ const minutes = Number(params.get('minutes') ?? 10);
 const out = document.getElementById('out')!;
 const report = params.get('report');
 const result = {
-  engine: navigator.userAgent, minutes, runs: [] as DeterminismRun[], done: false,
+  engine: navigator.userAgent, minutes, cases: { maps, seeds }, runs: [] as DeterminismRun[], done: false,
   error: null as string | null, replay: null as ReplayLog | null,
 };
 (window as unknown as { __determinism: typeof result }).__determinism = result;
@@ -45,6 +45,7 @@ async function send(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  if (params.has('list')) { result.done = true; return; }
   if (params.get('record') === '1') {
     result.replay = recordReplay();
     out.textContent += `replay recorded: final tick ${result.replay.final?.tick} hash ${result.replay.final?.hash}\n\n`;

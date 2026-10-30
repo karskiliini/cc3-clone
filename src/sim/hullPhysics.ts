@@ -76,12 +76,13 @@ export interface HullContactObservation { point: Vec3; kind: 'suspension' | 'sol
 export function stepHullBody(body: HullBody, def: VehicleDef, drive: HullDrive, probe: HullGroundProbe, dt: number, going = 1,
   acceptTranslation?: (from: Vec3, to: Vec3) => boolean,
   observeContact?: (contact: HullContactObservation) => void,
-  observeInterest?: (acceptedPoint: Vec3) => boolean): void {
+  observeInterest?: (acceptedPoint: Vec3) => boolean,
+  normalized?: HullParams): void {
   if (dt !== SIM_DT) throw new Error('Hull physics dt must equal SIM_DT');
   const hasInput = drive.speedMs !== 0 || drive.yawRateRadS !== 0;
   if (hasInput) wakeHull(body);
   if (body.asleep) return;
-  const p = hullParams(def), { massKg, inertia, suspension } = p;
+  const p = normalized ?? hullParams(def), { massKg, inertia, suspension } = p;
   const loadedContactCount = p.contacts.filter(c => !c.horn).length, solidLocals = solidPoints(p);
   const drivenContactCount = p.contacts.filter(c => !c.horn && c.driven).length;
   let bottomSupported = false;
@@ -96,6 +97,9 @@ export function stepHullBody(body: HullBody, def: VehicleDef, drive: HullDrive, 
   const c = 2 * suspension.damping * Math.sqrt(k * massKg / loadedContactCount);
   for (let substep = 0; substep < SUBSTEPS; substep++) {
     let stableSuspension = true, loaded = false;
+    let straightHeading: Vec3 | undefined, steeredHeading: Vec3 | undefined;
+    let straightBasis: { nx: number; ny: number; nz: number; longitudinal: Vec3; lateral: Vec3 } | undefined;
+    let steeredBasis: typeof straightBasis;
     let force: Vec3 = { x: 0, y: 0, z: -massKg * GRAVITY }, torque = zero();
     for (let i = 0; i < p.contacts.length; i++) {
       const contact = p.contacts[i], offset = rotate(body.orientation, contact.local), point = add(body.position, offset);
@@ -115,12 +119,20 @@ export function stepHullBody(body: HullBody, def: VehicleDef, drive: HullDrive, 
       if (magnitude === 0 || mu === 0) continue;
       // Only loaded suspension points have tyre/track friction; solid box support
       // remains frictionless. Project the running gear direction into this plane.
-      const angle = contact.steer ? steer : 0;
-      const heading = rotate(body.orientation, { x: dm.sin(angle), y: -dm.cos(angle), z: 0 });
-      const tangent = add(heading, scale(sample.normal, -dot(heading, sample.normal)));
-      const tangentLength = Math.sqrt(dot(tangent, tangent));
-      if (tangentLength === 0) continue;
-      const longitudinal = scale(tangent, 1 / tangentLength), lateral = cross(longitudinal, sample.normal);
+      let basis = contact.steer ? steeredBasis : straightBasis;
+      const normal = sample.normal;
+      if (!basis || !Object.is(basis.nx, normal.x) || !Object.is(basis.ny, normal.y) || !Object.is(basis.nz, normal.z)) {
+        const heading = contact.steer
+          ? steeredHeading ??= rotate(body.orientation, { x: dm.sin(steer), y: -dm.cos(steer), z: 0 })
+          : straightHeading ??= rotate(body.orientation, { x: 0, y: -1, z: 0 });
+        const tangent = add(heading, scale(normal, -dot(heading, normal)));
+        const tangentLength = Math.sqrt(dot(tangent, tangent));
+        if (tangentLength === 0) continue;
+        const longitudinal = scale(tangent, 1 / tangentLength), lateral = cross(longitudinal, normal);
+        basis = { nx: normal.x, ny: normal.y, nz: normal.z, longitudinal, lateral };
+        if (contact.steer) steeredBasis = basis; else straightBasis = basis;
+      }
+      const { longitudinal, lateral } = basis;
       const velocity = add(body.velocity, cross(body.angularVelocity, offset));
       const target = p.driveKind === 'tracked' ? speed - contact.side * yawRate * 0.42 * p.widthM : speed;
       const along = contact.driven || drive.brake ? (target - dot(velocity, longitudinal)) * controllerMass / HULL_CONTACT_RESPONSE_S : 0;
@@ -154,11 +166,21 @@ export function stepHullBody(body: HullBody, def: VehicleDef, drive: HullDrive, 
     // Frictionless, zero-restitution support. Allow only the closing speed that
     // reaches contact this substep; never add separating bias or stored impulses.
     for (let pass = 0; pass < 4; pass++) for (const contact of solids) {
-      const vn = dot(add(body.velocity, cross(body.angularVelocity, contact.r)), contact.n);
+      // Same cross/add/dot arithmetic and contact order, without six temporary vectors.
+      const w = body.angularVelocity, r = contact.r, n = contact.n, velocity = body.velocity;
+      const px = velocity.x + (w.y * r.z - w.z * r.y);
+      const py = velocity.y + (w.z * r.x - w.x * r.z);
+      const pz = velocity.z + (w.x * r.y - w.y * r.x);
+      const vn = px * n.x + py * n.y + pz * n.z;
       const impulse = Math.max(0, (contact.target - vn) / contact.inverseMass);
       if (impulse > 0) contact.supported = true;
-      body.velocity = add(body.velocity, scale(contact.n, impulse / massKg));
-      body.angularVelocity = add(body.angularVelocity, scale(contact.u, impulse));
+      const dv = impulse / massKg;
+      velocity.x = velocity.x + n.x * dv;
+      velocity.y = velocity.y + n.y * dv;
+      velocity.z = velocity.z + n.z * dv;
+      w.x = w.x + contact.u.x * impulse;
+      w.y = w.y + contact.u.y * impulse;
+      w.z = w.z + contact.u.z * impulse;
     }
     const candidate = add(body.position, scale(body.velocity, H));
     if (acceptTranslation && !acceptTranslation(body.position, candidate)) {
@@ -215,11 +237,11 @@ export function stepHullBody(body: HullBody, def: VehicleDef, drive: HullDrive, 
         + 10 * k * Math.max(0, separation - suspension.travelM) - c * vn);
       if (magnitude > 0) observeContact({ point, kind: 'suspension' });
     }
-    const angles = hullAngles(body.orientation), levelLimit = 2 * Math.PI / 180;
-    const quiet = !hasInput && loaded && stableSuspension
+    const quietCandidate = !hasInput && loaded && stableSuspension
       && dot(body.velocity, body.velocity) < 0.005 * 0.005
-      && dot(body.angularVelocity, body.angularVelocity) < 0.005 * 0.005
-      && Math.abs(angles.pitch) < levelLimit && Math.abs(angles.roll) < levelLimit;
+      && dot(body.angularVelocity, body.angularVelocity) < 0.005 * 0.005;
+    const angles = quietCandidate ? hullAngles(body.orientation) : null, levelLimit = 2 * Math.PI / 180;
+    const quiet = angles != null && Math.abs(angles.pitch) < levelLimit && Math.abs(angles.roll) < levelLimit;
     body.quietS = quiet ? body.quietS + H : 0;
   }
   // Recompute current driven loads at the final accepted pose, rather than using

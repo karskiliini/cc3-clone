@@ -13,10 +13,10 @@
 //           enemy), trenches (-1.5 m along the zig-zag with a low parapet).
 // height = ground + (base >= 1 (a standing structure) ? base : base + dig).
 // Tree crowns live in `canopy` (woods 8-12 m) so a view can draw them over the ground.
-// Vehicles are not part of the field. Render-only consumers (the depth view) read it; nothing
-// in the sim's combat/LOS rules depends on it, so it never affects determinism.
+// Vehicles are not part of the field. Physical contacts and gun geometry read this surface;
+// API mutation inputs survive restoration, while module-local contexts are derived caches.
 // ============================================================================
-import type { GameMap, HeightField, MapVectorFeature, Terrain, Vec2 } from '@/shared/types';
+import type { GameMap, HeightField, HeightBuildingInfo as BuildingInfo, MapVectorFeature, Terrain, Vec2 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import { TERRAIN_PROPS } from './terrain';
 import { hash2 } from '@/shared/rng';
@@ -46,15 +46,6 @@ export const H_CRATER_RIM = 0.2;
 /** A per-tile base profile: one flat height, or HF_RES*HF_RES samples (row-major). */
 export type TileProfile = number | ArrayLike<number>;
 
-interface BuildingInfo {
-  id: number;
-  minX: number; minY: number; maxX: number; maxY: number;
-  stone: boolean;
-  big: boolean;
-  eave: number;
-  ridge: number;
-  ridgeHoriz: boolean;
-}
 
 interface Seg { ax: number; ay: number; bx: number; by: number }
 
@@ -83,7 +74,7 @@ function distSeg(px: number, py: number, s: Seg): number {
 }
 
 // ------------------------------------------------------------------ building/context setup
-function computeBuildings(map: GameMap): Map<number, BuildingInfo> {
+export function computePhysicalBuildings(map: GameMap): Map<number, BuildingInfo> {
   const out = new Map<number, BuildingInfo>();
   const w = map.width;
   for (let i = 0; i < map.tiles.length; i++) {
@@ -411,9 +402,16 @@ function stampBowl(field: HeightField, cx: number, cy: number, radiusM: number, 
 }
 
 /** Stamps a shell/grenade crater of rim diameter `sizeM` centred at `pos` (tile coords). */
-export function applyCrater(field: HeightField, pos: Vec2, sizeM: number): void {
+function stampDynamicCrater(field: HeightField, pos: Vec2, sizeM: number): void {
   stampBowl(field, pos.x, pos.y, Math.max(0.4, sizeM / 2), craterDepthM(sizeM), H_CRATER_RIM);
   field.version++;
+}
+
+/** A direct engineering/API stamp is part of the canonical physical mutation input. */
+export function applyCrater(field: HeightField, pos: Vec2, sizeM: number): void {
+  stampDynamicCrater(field, pos, sizeM);
+  (field.directCraterEdits ??= []).push({ x: pos.x, y: pos.y, sizeM,
+    marksApplied: field.marksApplied, revision: field.version });
 }
 
 /** Foxhole pit (-1.2 m) with a spoil mound on the side facing `angle` (radians, 0 = east). */
@@ -541,6 +539,7 @@ function writeTile(field: HeightField, tx: number, ty: number, samples: ArrayLik
 }
 
 export function buildHeightField(map: GameMap): HeightField {
+  map.heightProfiles?.clear();
   // Rebuilding this map changes its geometry and must invalidate sleeping hulls.
   const version = map.heightField ? map.heightField.version + 1 : 1;
   const R = HF_RES;
@@ -552,7 +551,7 @@ export function buildHeightField(map: GameMap): HeightField {
     height: new Float32Array(w * h), canopy: new Float32Array(w * h),
     version, marksApplied: 0,
   };
-  const ctx: FieldCtx = { map, buildings: computeBuildings(map), lineSegs: computeLineSegs(map), overrides: new Map() };
+  const ctx: FieldCtx = { map, buildings: map.physicalBuildings = computePhysicalBuildings(map), lineSegs: computeLineSegs(map), overrides: map.heightOverrides ??= new Map() };
   ctxByField.set(field, ctx);
   fillGround(map, field);
 
@@ -597,7 +596,13 @@ export function buildHeightField(map: GameMap): HeightField {
 
 /** The map's height field, building it on first use (test maps built by hand have none). */
 export function getHeightField(map: GameMap): HeightField {
-  if (!map.heightField || !ctxByField.has(map.heightField)) map.heightField = buildHeightField(map);
+  if (!map.heightField) map.heightField = buildHeightField(map);
+  else if (!ctxByField.has(map.heightField)) {
+    // A restored physical surface is authoritative. Reattach only derived context;
+    // rebuilding here discarded stamped terrain and spuriously advanced its revision.
+    ctxByField.set(map.heightField, { map, buildings: map.physicalBuildings ??= computePhysicalBuildings(map), lineSegs: computeLineSegs(map),
+      overrides: map.heightOverrides ??= new Map() });
+  }
   return map.heightField;
 }
 
@@ -607,14 +612,23 @@ export function syncCraterMarks(map: GameMap, field: HeightField): void {
   const marks = map.craterMarks;
   if (!marks) return;
   // a vehicle's 'track' rut is a growth/decal mark, not a bowl (stepGrowth skips it the same way)
-  for (let k = field.marksApplied; k < marks.length; k++) if (marks[k].kind !== 'track') applyCrater(field, marks[k], marks[k].sizeM);
+  for (let k = field.marksApplied; k < marks.length; k++) if (marks[k].kind !== 'track') stampDynamicCrater(field, marks[k], marks[k].sizeM);
   field.marksApplied = marks.length;
 }
 
 /** Composite surface height (m) at tile coords (x,y), bilinear between samples: ground landform
  * plus whatever structure/earthwork stands on it. */
 export function heightAt(field: HeightField, x: number, y: number): number {
-  return sampleBilinear(field, field.height, x, y);
+  // Scalar-only hot path; keep the exact arithmetic of sampleBilinear. The generic
+  // sampler also supports ownership callbacks and several arrays, inhibiting inlining.
+  const fx = x * field.res - 0.5, fy = y * field.res - 0.5;
+  const x0 = Math.max(0, Math.min(field.w - 1, Math.floor(fx))), y0 = Math.max(0, Math.min(field.h - 1, Math.floor(fy)));
+  const x1 = Math.min(field.w - 1, x0 + 1), y1 = Math.min(field.h - 1, y0 + 1);
+  const ax = clamp01(fx - x0), ay = clamp01(fy - y0), arr = field.height;
+  const a = arr[y0 * field.w + x0], b = arr[y0 * field.w + x1], c = arr[y1 * field.w + x0], d = arr[y1 * field.w + x1];
+  // The exact interpolant of four equal finite samples is a+0 (including signed zero).
+  if (a === b && a === c && a === d && Number.isFinite(a)) return a + 0;
+  return (a + (b - a) * ax) + ((c + (d - c) * ax) - (a + (b - a) * ax)) * ay;
 }
 
 /** Ground (landform) height (m) at tile coords, without any feature on top of it. */
@@ -718,7 +732,11 @@ export function setTileProfile(field: HeightField, tileX: number, tileY: number,
   const ctx = ctxByField.get(field);
   const R = field.res;
   if (tileX < 0 || tileY < 0 || tileX * R >= field.w || tileY * R >= field.h) return;
-  if (ctx && typeof profile === 'number') ctx.overrides.set(tileY * (field.w / R) + tileX, profile);
+  if (ctx) {
+    const tile = tileY * (field.w / R) + tileX;
+    if (typeof profile === 'number') { ctx.overrides.set(tile, profile); ctx.map.heightProfiles?.delete(tile); }
+    else (ctx.map.heightProfiles ??= new Map()).set(tile, Float32Array.from(profile));
+  }
   writeTile(field, tileX, tileY, profile);
   field.version++;
 }
@@ -746,6 +764,7 @@ export function refreshTiles(map: GameMap, tileIdxs: Iterable<number>): void {
   }
   const tmp = new Float32Array(HF_RES * HF_RES), can = new Float32Array(HF_RES * HF_RES);
   for (const ti of todo) {
+    map.heightProfiles?.delete(ti);
     const tx = ti % map.width, ty = (ti / map.width) | 0;
     computeTileBase(ctx, tx, ty, tmp);
     tileCanopy(map, tx, ty, can);

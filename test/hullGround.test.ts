@@ -116,12 +116,13 @@ it('initial fields have deterministic revision one even with authored crater mar
   }
 });
 
-it('replacing an unrecognized cached field advances its serialized revision', () => {
+it('reattaches a restored physical field without losing its profile or changing its revision', () => {
   const map = makeState().map;
   setTileProfile(getHeightField(map), 10, 10, 0.4);
-  const before = groundVersion(map);
-  // A copied field has no module-local terrain context, so getHeightField must rebuild it.
-  map.heightField = { ...getHeightField(map) };
-  expect(groundVersion(map)).toBeGreaterThan(before);
-  expect(groundProbe(map)(21, 21).heightM).toBe(0);
+  const before = groundVersion(map), copy = structuredClone(getHeightField(map));
+  // Restoring changes object identity, not geometry: keep the serialized surface.
+  map.heightField = copy;
+  expect(getHeightField(map)).toBe(copy);
+  expect(groundVersion(map)).toBe(before);
+  expect(groundProbe(map)(21, 21).heightM).toBeCloseTo(0.4);
 });
