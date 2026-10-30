@@ -36,7 +36,7 @@ import { ragdollSample, metresToPx } from '@/render/soldierAnim';
 import type { Debris, GroundItem, Season } from '@/shared/types';
 import { drawRagdollFlight, drawRagdollLanded, ragdollBeginFrame, ragdollPhase } from '@/render/ragdoll';
 import { snapToMuzzle } from '@/render/muzzleSnap';
-import { RECOIL_M, vehicleLook, type VehicleLook } from '@/render/vehicle3d/look';
+import { RECOIL_M, thrownTurretPose, vehicleLook, type VehicleLook } from '@/render/vehicle3d/look';
 import { vehicles3d, loadVehicleModels } from '@/render/vehicle3d';
 import { bladesFor, grassHandOver, type HullPatch } from '@/render/vehicle3d/grassField';
 import { crushMapFor } from '@/render/grassCrush';
@@ -600,9 +600,11 @@ function drawHatchFire(
 /** One vehicle body from its sprite atlas, as its look says. */
 function drawVehicleLookSprite(ctx: CanvasRenderingContext2D, cam: Camera, look: VehicleLook): void {
   const p = worldToScreen(cam, look.posTiles);
-  const tl = look.turretLanding ? worldToScreen(cam, look.turretLanding.posTiles) : null;
+  const thrown = thrownTurretPose(look);
+  const tl = thrown ? worldToScreen(cam, thrown.posTiles) : null;
+  if (tl && thrown) tl.y -= thrown.heightM * Math.sin(12 * Math.PI / 180) * 10 * cam.zoom;
   drawVehicleSprite(ctx, look.defId, look.ko ? 'knockedOut' : 'ok', p.x, p.y, look.hullRad, look.turretRad, cam.zoom,
-    look.turretBlown, look.brokenTrack, tl ? { x: tl.x, y: tl.y, dirRad: look.turretLanding!.dirRad } : undefined,
+    look.turretBlown, look.brokenTrack, tl ? { x: tl.x, y: tl.y, dirRad: thrown!.dirRad } : undefined,
     look.season, look.recoil);
 }
 

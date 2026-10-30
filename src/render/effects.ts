@@ -1,3 +1,4 @@
+import { drawShellTrace } from './shellTrace';
 // ============================================================================
 // effects.ts — everything short-lived on the battlefield: bursts (pre-rendered flipbooks from
 // tools/blender/fx.py via fxSprites.ts), impact sparks, rounds in flight, tracers, muzzle flashes,
@@ -72,6 +73,7 @@ function drawTracers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     const from = worldToScreen(cam, muzzleSnap(t)?.pos ?? t.from);
     from.y -= (t.fromHeightM ?? 0) * MUZZLE_HEIGHT_PX_PER_M * cam.zoom;
     const to = worldToScreen(cam, t.to);
+    if (t.kind === 'shell') { drawShellTrace(ctx, from, to, t.t, cam.zoom, t.deflected); continue; }
     const dx = to.x - from.x, dy = to.y - from.y;
     const segLen = Math.hypot(dx, dy) || 1;
     const ux = dx / segLen, uy = dy / segLen;
@@ -93,7 +95,6 @@ function drawTracers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleSt
     let coreColor: string | null = null;
     if (t.kind === 'flame') { color = '#ff9030'; width = 5; coreColor = '#ffe8a0'; }
     else if (t.kind === 'mg') { color = '#ffd070'; width = 2.5; }
-    else if (t.kind === 'shell') { color = '#ffb060'; width = 3; coreColor = '#fff6d0'; }
     else if (t.kind === 'rocket') { color = '#cfc9bb'; width = 5; coreColor = '#ffb060'; }
     if (t.deflected) { color = '#ff9850'; width = 1.5; coreColor = null; }
     // vision review round6: the original's small-arms tracers are thin RED-ORANGE dotted arcs,

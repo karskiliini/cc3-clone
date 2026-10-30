@@ -89,7 +89,8 @@ export function drawFires(ctx: CanvasRenderingContext2D, cam: Camera, state: Bat
       continue;
     }
     const age = t - fireT0;
-    const st = burnStage(age, veh.state === 'burning', veh.burnTimer);
+    // Rack detonation already engulfed the hull: no smoke-only delay after the fireball.
+    const st = burnStage(age + (veh.cookOff?.ended === 'detonated' ? 4 : 0), veh.state === 'burning', veh.burnTimer);
     // the fire sits on the engine deck, toward the rear of the hull
     const bx = p.x - Math.sin(veh.hullFacing) * 12 * z, by = p.y + Math.cos(veh.hullFacing) * 12 * z;
     if (st.flame > 0.02) {

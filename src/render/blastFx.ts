@@ -9,7 +9,7 @@ import type { BattleEvent, Camera, Vec2 } from '@/shared/types';
 import { TILE_PX, VIEW_H, VIEW_W } from '@/shared/types';
 import { worldToScreen } from '@/engine/camera';
 import { hash2 } from '@/shared/rng';
-import { drawGlow } from '@/render/fxSprites';
+import { drawGlow, drawFxFrame } from '@/render/fxSprites';
 
 export const SHAKE_LIFE_S = 0.9;
 interface Blast { pos: Vec2; radiusM: number; t0: number; seed: number; small: boolean }
@@ -38,7 +38,7 @@ export class BlastFx {
 
   private prune(time: number): void {
     if (this.blasts.length && time < this.blasts[0].t0 - 1) this.blasts = []; // a new battle
-    this.blasts = this.blasts.filter((b) => time - b.t0 < 1.2);
+    this.blasts = this.blasts.filter((b) => time - b.t0 < (b.small ? 1.2 : 3.5));
   }
 
   /** Camera offset in screen px for this frame. */
@@ -79,11 +79,30 @@ export class BlastFx {
       }
       if (p.x < -300 || p.y < -500 || p.x > VIEW_W + 300 || p.y > VIEW_H + 300) continue;
       // white-out flash over the whole view, then a bright ground glow
-      if (age < 0.18) {
+      if (age < 0.1) {
         ctx.save();
-        ctx.globalAlpha = 0.35 * (1 - age / 0.18);
+        ctx.globalAlpha = 0.13 * (1 - age / 0.1);
         ctx.fillStyle = '#fff4d0';
         ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+        ctx.restore();
+      }
+      // An uneven ground-hugging pressure front rolls into dust, rather than a perfect ring.
+      const spread = 1 - Math.exp(-age * 2.5), fade = Math.max(0, 1 - age / 3.5);
+      for (let i = 0; i < 14; i++) {
+        const a = hash2(i, b.seed, 21) * Math.PI * 2;
+        const radius = b.radiusM * 6 * z * spread * (0.3 + hash2(i, b.seed, 22) * 0.8);
+        const x = p.x + Math.cos(a) * radius + age * 3 * z;
+        const y = p.y + Math.sin(a) * radius * 0.7 - age * 4 * z;
+        drawFxFrame(ctx, 'puff.light', i % 6, x, y, z * (0.6 + age * 0.8), fade * 0.32 * Math.min(1, age * 8));
+      }
+      if (age < 0.9) {
+        ctx.save(); ctx.lineCap = 'round'; ctx.lineWidth = Math.max(1, z);
+        for (let i = 0; i < 11; i++) {
+          const a = hash2(i, b.seed, 23) * Math.PI * 2, speed = (35 + hash2(i, b.seed, 24) * 65) * z;
+          const x = p.x + Math.cos(a) * speed * age, y = p.y + Math.sin(a) * speed * age * 0.5 - 60 * z * age + 65 * z * age * age;
+          ctx.globalAlpha = (1 - age / 0.9) ** 1.5; ctx.strokeStyle = age < 0.25 ? '#fff4cf' : '#dd8b3c';
+          ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - Math.cos(a) * 5 * z, y - Math.sin(a) * 3 * z); ctx.stroke();
+        }
         ctx.restore();
       }
       // the fireball lights the ground around it (the burst itself is the he.big flipbook, the

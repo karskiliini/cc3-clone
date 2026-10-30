@@ -5,6 +5,7 @@
 // Render-side only; never read by the sim.
 // ============================================================================
 import type { BattleState, Season, Vec2, Vehicle } from '@/shared/types';
+import { clamp, wrapAngle } from '@/shared/math';
 import { TILE_M } from '@/shared/types';
 import { vehicleDamageView } from '@/sim/vehicleDamage';
 import { isServiceable } from '@/sim/vehicleCrew';
@@ -33,6 +34,7 @@ export interface VehicleLook {
   brokenTrack: 'L' | 'R' | 'both' | null;
   /** where the sim threw the blown-off turret and how it lies */
   turretLanding: { posTiles: Vec2; dirRad: number } | null;
+  turretFlightAgeS?: number;
   season: Season;
   /** 0..1 main-gun recoil (1 = the instant of the shot) */
   recoil: number;
@@ -46,8 +48,25 @@ export function vehicleLook(veh: Vehicle, state: BattleState): VehicleLook {
     id: veh.id, defId: veh.defId, posTiles: veh.pos, hullRad: veh.hullFacing, turretRad: veh.turretFacing,
     ko, liveButLeft, turretBlown: dmg.turretBlown, brokenTrack: dmg.brokenTrack,
     turretLanding: veh.turretLanding ? { posTiles: veh.turretLanding, dirRad: veh.turretLandingDir ?? veh.turretFacing + 2.3 } : null,
+    turretFlightAgeS: veh.turretBlownAt == null ? undefined : state.time - veh.turretBlownAt,
     season: state.map.def.season, recoil: ko ? 0 : recoilOf(veh, state.time),
   };
+}
+
+export const TURRET_FLIGHT_S = 1.9;
+/** Shared by sprite and mesh rendering: launch, ballistic arc, spin and a small settling bounce. */
+export function thrownTurretPose(look: VehicleLook): { posTiles: Vec2; heightM: number; dirRad: number; tilt: number } | null {
+  if (!look.turretBlown) return null;
+  const c = Math.cos(look.hullRad), sn = Math.sin(look.hullRad);
+  const landing = look.turretLanding ?? { posTiles: { x: look.posTiles.x + (2.2 * c + sn) * 0.9 / TILE_M,
+    y: look.posTiles.y + (2.2 * sn - c) * 0.9 / TILE_M }, dirRad: look.turretRad + 2.3 };
+  const age = look.turretFlightAgeS ?? Infinity, f = clamp(age / TURRET_FLIGHT_S, 0, 1);
+  const bounce = age >= TURRET_FLIGHT_S && age < TURRET_FLIGHT_S + 0.35 ? Math.sin((age - TURRET_FLIGHT_S) / 0.35 * Math.PI) * 0.22 : 0;
+  return { posTiles: { x: look.posTiles.x + (landing.posTiles.x - look.posTiles.x) * f,
+    y: look.posTiles.y + (landing.posTiles.y - look.posTiles.y) * f },
+    heightM: 4 * 4.5 * f * (1 - f) + bounce,
+    dirRad: f >= 1 ? landing.dirRad : look.turretRad + (wrapAngle(landing.dirRad - look.turretRad) + Math.PI * 2 * (look.id % 2 ? 1 : -1)) * f,
+    tilt: Math.sin(f * Math.PI) * 0.6 };
 }
 
 export interface ModelNodes { hull: string; turret: string | null; winterHull: boolean; winterTurret: boolean }
@@ -74,6 +93,7 @@ export interface VehiclePose {
   hullYaw: number;
   turretPivot: [number, number, number] | null;
   turretYaw: number;
+  turretTilt?: number;
 }
 
 export function vehiclePose(look: VehicleLook, hasTurret: boolean, turretPivotM: { x: number; y: number } | null): VehiclePose {
@@ -86,16 +106,10 @@ export function vehiclePose(look: VehicleLook, hasTurret: boolean, turretPivotM:
   }
   const pose: VehiclePose = { hullPos: [e, 0, s], hullYaw: -look.hullRad, turretPivot: null, turretYaw: -look.turretRad };
   if (!hasTurret || !turretPivotM) return pose;
-  if (look.turretBlown && look.turretLanding) {
-    pose.turretPivot = [look.turretLanding.posTiles.x * TILE_M, 0, look.turretLanding.posTiles.y * TILE_M];
-    pose.turretYaw = -look.turretLanding.dirRad;
-    return pose;
-  }
-  if (look.turretBlown) {
-    // no landing recorded: beside the hull centre (not the ring), as drawVehicleSprite does
-    const c = Math.cos(look.hullRad), sn = Math.sin(look.hullRad);
-    pose.turretPivot = [e + (2.2 * c + 1.0 * sn) * 0.9, 0, s + (2.2 * sn - 1.0 * c) * 0.9];
-    pose.turretYaw = -(look.turretRad + 2.3);
+  const thrown = thrownTurretPose(look);
+  if (thrown) {
+    pose.turretPivot = [thrown.posTiles.x * TILE_M, thrown.heightM, thrown.posTiles.y * TILE_M];
+    pose.turretYaw = -thrown.dirRad; pose.turretTilt = thrown.tilt;
     return pose;
   }
   const [pe, ps] = localToWorldXZ(turretPivotM.x, turretPivotM.y, look.hullRad);

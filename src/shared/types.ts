@@ -768,6 +768,8 @@ export interface Vehicle {
    * clockwise); absent = the renderer's default spot beside the hull */
   turretLanding?: Vec2;
   turretLandingDir?: number;
+  /** Battle-clock launch time for the visual turret flight; landing remains the sim position. */
+  turretBlownAt?: number;
   /** how this vehicle died (drawn at the KO moment, item 011): 'stopped' — the crew is dead,
    * the tank just halts; 'fire' — it caught fire (may cook off later); 'explosion' — immediate
    * ammunition blast; 'hatchBlown' — hatches burst open, fire spews from the fighting

@@ -571,7 +571,7 @@ export function hurtPassenger(state: BattleState, v: Vehicle, s: Soldier, to: 'd
 /** Item 011: how a hull that has just become a final wreck died. Drawn once, consumed by the
  * renderer and the aftermath (fire may cook off, hatches stay open). Weights favour visible
  * catastrophe: most kills show fire or an explosion, a minority just stop. */
-export function rollDeathOutcome(rng: { next(): number }, v: Vehicle, def: VehicleDef, crewAboard: boolean): void {
+export function rollDeathOutcome(rng: { next(): number }, v: Vehicle, def: VehicleDef, crewAboard: boolean, time?: number): void {
   const r = rng.next();
   if (crewAboard) {
     // the crew is still climbing out: the kill shows through the hatches
@@ -589,6 +589,7 @@ export function rollDeathOutcome(rng: { next(): number }, v: Vehicle, def: Vehic
     else if (r < 0.85) { v.deathOutcome = 'hatchBlown'; v.hatchesBlown = true; }
     else { v.deathOutcome = 'fire'; v.engineOnFire = true; }
   }
+  if (v.turretBlown && v.turretBlownAt == null && time != null) v.turretBlownAt = time;
 }
 
 export function bailOut(state: BattleState, v: Vehicle, team: Team, to: 'abandoned' | 'knockedOut' | 'burning', message: string | null = 'Crew bails out!', opts: BailOpts = {}): void {
@@ -864,7 +865,7 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
       bailOut(state, v, team, stays ? 'abandoned' : 'knockedOut', left.length > 0 ? 'Crew bails out!' : null, { cause: casualties > 0 ? 'heavy' : 'penetration', panicked: exp < 60 || casualties > 0 });
       if (!stays) {
         // item 011: the kill shows its face — most deaths burn or blow, a few just stop
-        rollDeathOutcome(rng, v, def, true);
+        rollDeathOutcome(rng, v, def, true, state.time);
         // item 015: the blast strikes the men still aboard before they can climb out — an
         // ammunition explosion kills or knocks out nearly everyone; a turret burst hits the
         // turret crew hardest; hatch/hatch-fire crews are wounded by the flash
@@ -879,7 +880,7 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
   } else if (v.state === 'abandoned') {
     v.state = 'knockedOut';
     // the crew already left (or is dead): the wreck's end is drawn from the outcome set
-    rollDeathOutcome(rng, v, def, false);
+    rollDeathOutcome(rng, v, def, false, state.time);
     if (v.deathOutcome === 'fire') startFireBail(state, v, undefined);
     state.events.push({ kind: 'vehicleKO', pos: { ...v.pos }, side: input.shooterSide });
     res.ko = true; res.outcome = 'knockedOut';

@@ -91,6 +91,7 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
     h.int(v.mainAmmo);
     h.int(v.coaxAmmo);
     h.int(v.hits);
+    if (v.turretBlownAt != null) { h.str('turretBlownAt'); h.num(v.turretBlownAt); }
     h.num(v.speed);
     h.int(v.path.length);
     if (v.damage) for (const k of Object.keys(v.damage).sort()) { h.str(k); h.str(v.damage[k as keyof typeof v.damage]); }

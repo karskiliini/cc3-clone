@@ -155,7 +155,8 @@ const FRAGMENT_WEAPON = blastWeapon('vehicle_fragment', 'Wreckage', 0, 0.55);
 const POP_WEAPON = blastWeapon('cookoff_pop', 'Cook-off', 0, 0.2);
 
 function throwTurret(state: BattleState, rng: Rng, v: Vehicle, def: VehicleDef, load: number): void {
-  v.turretBlown = true;
+  if (v.turretBlown) return;
+  v.turretBlown = true; v.turretBlownAt = state.time;
   // heavier turrets less far: armour thickness stands in for the turret's weight
   const heavy = clamp((def.armor.front + def.armor.side) / 200, 0.15, 1.1);
   const m = clamp((8.5 - 5.5 * heavy) * (0.6 + 0.4 * load) + rng.range(-0.8, 0.8), 2, 8);

@@ -85,11 +85,12 @@ export class VehicleScene {
     if (names.turret && pose.turretPivot && model.turretPivotM) {
       this.show(it.turret, model, names.turret, names.winterTurret);
       it.turret.group.position.fromArray(pose.turretPivot);
-      it.turret.group.rotation.set(0, pose.turretYaw, 0);
+      it.turret.group.rotation.set(pose.turretTilt ?? 0, pose.turretYaw, (pose.turretTilt ?? 0) * 0.6);
     } else this.show(it.turret, model, null, false);
     for (const p of [it.hull, it.turret]) {
       p.shadowGroup.position.copy(p.group.position);
-      p.shadowGroup.rotation.copy(p.group.rotation);
+      p.shadowGroup.position.y = 0;
+      p.shadowGroup.rotation.set(0, p.group.rotation.y, 0);
     }
     it.used = true;
     return true;
