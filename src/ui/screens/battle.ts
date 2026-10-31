@@ -1,3 +1,4 @@
+import { appendDrawnPoint } from '@/ui/drawnRoute';
 import type { CursorKind, GameSettings, InputState, BattleState, OrderType, Rect, Screen, Side, Team, Vec2, Camera } from '@/shared/types';
 import { ORDER_DOT_COLOR, ORDER_HOTKEYS, ORDER_TYPES, TILE_PX, VIEW_H, VIEW_W, otherSide } from '@/shared/types';
 import { COMMAND_RADIUS_TILES } from '@/sim/command';
@@ -133,6 +134,19 @@ export class BattleScreen implements Screen {
    * teach lesson 1's "select your rifle team" step). */
   get selectionCount(): number { return this.selectedTeamIds.length; }
   private pendingOrder: OrderType | null = null;
+  private drawingRoute = false;
+  private routeStroke: Vec2[] | null = null;
+  private routeTooLong = false;
+
+  private startDrawnRoute(): void {
+    const team = this.selectedTeamId != null ? this.battle.state.teams.get(this.selectedTeamId) : null;
+    if (this.selectedTeamIds.length !== 1 || team?.vehicleId == null) {
+      this.notice('Select one vehicle to draw its route.'); return;
+    }
+    this.pendingOrder = 'move'; this.pendingWaypoints = [];
+    this.drawingRoute = true; this.routeStroke = null; this.routeTooLong = false;
+    this.notice('DRAW ROUTE: hold left mouse and draw. Release to drive. Esc / right-click cancels.');
+  }
   /** Fire order pending and the pointer is over an enemy team that can be targeted right now. */
   private targetHover: TargetHover | null = null;
   /** what the pointer is over on the map, named in the pointer readout */
@@ -235,6 +249,7 @@ export class BattleScreen implements Screen {
   }
 
   private setSelection(ids: number[]): void {
+    if (this.drawingRoute) { this.pendingOrder = null; this.drawingRoute = false; this.routeStroke = null; this.leftDrag.active = false; }
     this.selectedTeamIds = ids;
     this.selectedTeamId = ids.length > 0 ? ids[0] : null;
   }
@@ -338,15 +353,16 @@ export class BattleScreen implements Screen {
       }
     }
 
-    updateCameraEdgeScrollAndKeys(cam, input, dt, state.map.width, state.map.height, this.edgeScroll);
+    const routeGesture = this.drawingRoute && (this.routeStroke != null || input.clicks.some(c => c.button === 0));
+    if (!routeGesture) updateCameraEdgeScrollAndKeys(cam, input, dt, state.map.width, state.map.height, this.edgeScroll);
 
     // Ctrl/Cmd+wheel = trackpad pinch = zoom around the pointer. Plain wheel
     // (two-finger scroll) pans instead — modern-app trackpad conventions.
-    if (input.wheel !== 0) {
+    if (!routeGesture && input.wheel !== 0) {
       if (input.wheel < 0) zoomIn(cam, state.map.width, state.map.height, input.mouse);
       else zoomOut(cam, state.map.width, state.map.height, input.mouse);
     }
-    if (input.wheelDX !== 0 || input.wheelDY !== 0) {
+    if (!routeGesture && (input.wheelDX !== 0 || input.wheelDY !== 0)) {
       panCamera(cam, input.wheelDX, input.wheelDY);
       clampCamera(cam, state.map.width, state.map.height);
     }
@@ -383,6 +399,7 @@ export class BattleScreen implements Screen {
         // unselected team re-targets the menu. Pressing a selected member keeps the group intact.
         if (!this.selectedTeamIds.includes(hitTeam.id)) this.setSelection([hitTeam.id]);
         this.commandMenu.open({ x: c.x, y: c.y }, hitTeam, {
+          canDrawRoute: hitTeam.vehicleId != null && this.selectedTeamIds.length === 1,
           canSmoke: teamHasSmoke(state, hitTeam),
           canFire: teamCanFire(state, hitTeam),
         });
@@ -409,6 +426,7 @@ export class BattleScreen implements Screen {
         const team = state.teams.get(this.selectedTeamId);
         if (team) {
           this.commandMenu.open({ x: r.x, y: r.y }, team, {
+            canDrawRoute: team.vehicleId != null && this.selectedTeamIds.length === 1,
             canSmoke: teamHasSmoke(state, team),
             canFire: teamCanFire(state, team),
           });
@@ -424,7 +442,8 @@ export class BattleScreen implements Screen {
       if (r === 'cancel') {
         this.commandMenu.close();
       } else if (r) {
-        this.pendingOrder = r;
+        if (r === 'drawRoute') this.startDrawnRoute();
+        else { this.pendingOrder = r; this.drawingRoute = false; this.routeStroke = null; }
         this.pendingWaypoints = [];
         this.commandMenu.close();
       }
@@ -439,6 +458,13 @@ export class BattleScreen implements Screen {
       else if (state.phase !== 'ended') this.quitConfirm = 'no';
     }
 
+    if (!this.pendingOrder) {
+      if (this.drawingRoute) this.leftDrag.active = false;
+      this.drawingRoute = false; this.routeStroke = null;
+    }
+    if (this.routeStroke && (!input.pointerInside || modernPanning)) {
+      this.routeStroke = null; this.leftDrag.active = false;
+    }
     // left mouse: press starts a potential drag (box-select), release decides
     // whether it was a simple click (select/issue order) or a drag (box-select).
     // Suppressed while Space/middle-drag panning is active.
@@ -460,7 +486,23 @@ export class BattleScreen implements Screen {
           if (input.keysDown.has('shift')) this.addToSelection([marker.teamId]); else this.setSelection([marker.teamId]);
           continue;
         }
+        if (this.drawingRoute) {
+          this.routeStroke = []; this.routeTooLong = false;
+          appendDrawnPoint(this.routeStroke, screenToWorld(cam, c));
+        }
         this.leftDrag = { active: true, startX: c.x, startY: c.y, moved: 0 };
+      }
+    }
+    if (this.drawingRoute && this.routeStroke) {
+      for (const p of input.dragSamples ?? [input.mouse]) {
+        const world = screenToWorld(cam, p);
+        if (this.overHud(p) || world.x < 0 || world.y < 0 || world.x >= state.map.width || world.y >= state.map.height) {
+          this.routeTooLong = true; break;
+        }
+        if (!appendDrawnPoint(this.routeStroke, world)) this.routeTooLong = true;
+      }
+      if (!input.buttons.left && !input.releases.some(r => r.button === 0)) {
+        this.routeStroke = null; this.leftDrag.active = false;
       }
     }
     if (this.leftDrag.active && input.buttons.left && !modernPanning) {
@@ -471,6 +513,24 @@ export class BattleScreen implements Screen {
     }
     for (const r of input.releases) {
       if (r.button !== 0) continue;
+      if (this.drawingRoute && this.routeStroke) {
+        const points = this.routeStroke; this.routeStroke = null; this.leftDrag.active = false;
+        // The final mouse-up position is exact, even for a sub-spacing final sample.
+        const end = screenToWorld(cam, r);
+        if (points.length && Math.hypot(end.x - points[points.length - 1].x, end.y - points[points.length - 1].y) > 0) {
+          if (points.length < 512) points.push(end); else this.routeTooLong = true;
+        }
+        if (this.overHud(r) || this.routeTooLong || points.length < 2) {
+          this.notice('Route cancelled: draw inside the map, using fewer than 512 bends.');
+          continue;
+        }
+        this.command({ type: 'order', teamId: this.selectedTeamId!, order: {
+          type: 'move', routeMode: 'drawn', target: { ...points[points.length - 1] },
+          waypoints: points.slice(0, -1), issuedAt: state.time,
+        } });
+        this.pendingOrder = null; this.drawingRoute = false; this.pendingWaypoints = [];
+        game.audio?.play('click'); continue;
+      }
       // Marker drag-n-drop: release re-issues the dragged order at the drop point.
       if (this.markerDrag) {
         const drag = this.markerDrag;
@@ -581,9 +641,10 @@ export class BattleScreen implements Screen {
     }
 
     if (this.selectedTeamId != null && !this.commandMenu.isOpen && !input.keysDown.has('control') && !input.keysDown.has('meta')) {
+      if (input.keysPressed.has('r')) this.startDrawnRoute();
       for (const ot of ORDER_TYPES) {
         const key = ORDER_HOTKEYS[ot];
-        if (input.keysPressed.has(key) && !input.keysPressed.has(`mod+${key}`)) { this.pendingOrder = ot; this.pendingWaypoints = []; }
+        if (input.keysPressed.has(key) && !input.keysPressed.has(`mod+${key}`)) { this.pendingOrder = ot; this.pendingWaypoints = []; this.drawingRoute = false; this.routeStroke = null; }
       }
     }
 
@@ -853,7 +914,7 @@ export class BattleScreen implements Screen {
     if (this.pendingOrder && selTeam && !(aimingFire && (game.settings.losLines ?? true))) {
       // Rubber band: team -> Shift-click waypoints so far -> cursor. Use the order's own color from
       // the very first aiming frame (before commit), matching the line once the order is issued.
-      const chain = [selTeam.pos, ...(MOVE_TYPES.includes(this.pendingOrder) ? this.pendingWaypoints : []), screenToWorld(cam, game.input.state.mouse)]
+      const chain = [selTeam.pos, ...(this.drawingRoute ? this.routeStroke ?? [] : MOVE_TYPES.includes(this.pendingOrder) ? this.pendingWaypoints : []), screenToWorld(cam, game.input.state.mouse)]
         .map((p) => worldToScreen(cam, p));
       ctx.strokeStyle = ORDER_DOT_COLOR[this.pendingOrder];
       ctx.lineWidth = 1;
@@ -992,6 +1053,10 @@ export class BattleScreen implements Screen {
     const mouse = game.input.state.mouse;
     if (!this.overHud(mouse) && !this.commandMenu.isOpen) {
       const lines: ReadoutLine[] = [];
+      if (this.drawingRoute) lines.push({
+        text: this.routeStroke ? 'DRAW ROUTE — release to drive; Esc cancels' : 'DRAW ROUTE — hold left mouse and draw',
+        color: ORDER_DOT_COLOR.move,
+      });
       if (this.hoverInfo) lines.push({ text: this.hoverInfo.text, color: HOVER_TONE_COLOR[this.hoverInfo.tone] });
       const status = this.targetHover ? targetStatusText(this.targetHover) : null;
       if (status && !this.hoverInfo?.text.includes(`(${status})`)) lines.push({ text: status, color: this.targetHover?.dead ? '#b8b8b0' : '#ff9070' });

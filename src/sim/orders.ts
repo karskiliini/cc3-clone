@@ -210,6 +210,13 @@ export function stepOrderWaypoints(state: BattleState): void {
     const wps = order?.waypoints;
     if (!order || !wps || wps.length === 0) continue;
     if (order.type !== 'move' && order.type !== 'moveFast' && order.type !== 'sneak') continue;
+    if (order.routeMode === 'drawn' && team.vehicleId != null) {
+      const v = state.vehicles.get(team.vehicleId);
+      if (v && wps.length !== Math.max(0, v.path.length - 1)) {
+        order.waypoints = v.path.slice(0, -1).map(p => ({ ...p }));
+      }
+      continue;
+    }
     let ref: Vec2 = team.pos;
     let route: Vec2[] | null = null;
     if (team.vehicleId != null) {
@@ -494,6 +501,16 @@ function releaseDelayedOrders(state: BattleState, rng: Rng): void {
 }
 
 export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rng, own = false): void {
+  // Reject malformed/manual orders before transport hooks or delayed-order queues mutate state.
+  if (order.routeMode != null) {
+    const points = [...(order.waypoints ?? []), order.target];
+    if (order.routeMode !== 'drawn' || order.type !== 'move' || team.vehicleId == null
+      || points.length > 512 || points.some(p => !p || !Number.isFinite(p.x) || !Number.isFinite(p.y)
+        || p.x < 0 || p.y < 0 || p.x >= state.map.width || p.y >= state.map.height)) {
+      addMessage(state, 'Drawn route refused: select a vehicle and draw up to 512 points inside the map.', 'warn', team.side);
+      return;
+    }
+  }
   // C4: a Move Fast whose target lands on/near a spotted enemy is an ASSAULT — the team
   // charges at moveFast pace with weapons ready; grenades free-throw once in range.
   if (order.type === 'moveFast' && team.vehicleId == null) {
@@ -558,7 +575,9 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
 
   if (type === 'move' || type === 'moveFast' || type === 'sneak') {
     if (isVehicleTeam) {
-      if (vehicle) vehicle.path = routeVia(state, vehicle.pos, orderRoutePoints(order), 'vehicle', VEHICLE_DEFS[vehicle.defId]?.layout?.openTop === true, { def: VEHICLE_DEFS[vehicle.defId] });
+      if (vehicle) vehicle.path = order.routeMode === 'drawn'
+        ? orderRoutePoints(order).map(p => ({ ...p }))
+        : routeVia(state, vehicle.pos, orderRoutePoints(order), 'vehicle', VEHICLE_DEFS[vehicle.defId]?.layout?.openTop === true, { def: VEHICLE_DEFS[vehicle.defId] });
     } else {
       const leader = state.soldiers.get(team.leaderId);
       leaderPath = leader ? routeVia(state, leader.pos, orderRoutePoints(order), 'infantry') : [];

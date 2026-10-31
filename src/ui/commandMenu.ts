@@ -11,12 +11,13 @@ import { HUD } from '@/render/palette';
 import { drawHudBevel, hitRect, setHudFont } from '@/ui/hud/hudChrome';
 
 // Manual's three named categories: Movement, Targeting, Dig-in.
-const MENU_GROUPS: OrderType[][] = [
-  ['sneak', 'move', 'moveFast'],
+export type CommandChoice = OrderType | 'drawRoute';
+const MENU_GROUPS: CommandChoice[][] = [
+  ['sneak', 'move', 'moveFast', 'drawRoute'],
   ['fire', 'smoke'],
   ['defend', 'ambush'],
 ];
-const MENU_ORDER: OrderType[] = MENU_GROUPS.flat();
+const MENU_ORDER: CommandChoice[] = MENU_GROUPS.flat();
 
 const ROW_W = 104;
 const ROW_H = 18; // taller rows = a bigger, easier target (native-feel hit area)
@@ -29,6 +30,7 @@ const PANEL_H = ROW_H * MENU_ORDER.length + GROUP_GAP * (MENU_GROUPS.length - 1)
 export interface CommandMenuOpts {
   canSmoke: boolean;
   canFire: boolean;
+  canDrawRoute?: boolean;
 }
 
 function titleCase(s: string): string {
@@ -37,7 +39,7 @@ function titleCase(s: string): string {
 
 /** Row layout: (groupIndex, rowWithinGroup, orderType) for every visible row,
  * precomputed once since the grouping never changes at runtime. */
-interface RowLayout { type: OrderType; y: number }
+interface RowLayout { type: CommandChoice; y: number }
 function buildLayout(): RowLayout[] {
   const rows: RowLayout[] = [];
   let y = BORDER;
@@ -56,7 +58,7 @@ export class CommandMenu {
   isOpen = false;
   rect: Rect = { x: 0, y: 0, w: PANEL_W, h: PANEL_H };
   private team: Team | null = null;
-  private disabled: Partial<Record<OrderType, boolean>> = {};
+  private disabled: Partial<Record<CommandChoice, boolean>> = {};
   private hoverIndex = -1;
 
   open(at: Vec2, team: Team, opts?: CommandMenuOpts): void {
@@ -65,6 +67,7 @@ export class CommandMenu {
     this.rect = { x, y, w: PANEL_W, h: PANEL_H };
     this.team = team;
     this.disabled = {
+      drawRoute: !opts?.canDrawRoute,
       fire: opts ? !opts.canFire : false,
       smoke: opts ? !opts.canSmoke : false,
     };
@@ -89,7 +92,7 @@ export class CommandMenu {
     return null;
   }
 
-  update(input: InputState): OrderType | 'cancel' | null {
+  update(input: InputState): CommandChoice | 'cancel' | null {
     if (!this.isOpen) return null;
 
     const hoverIdx = this.rowIndexAt(input.mouse);
@@ -101,7 +104,7 @@ export class CommandMenu {
     }
 
     for (const type of MENU_ORDER) {
-      if (input.keysPressed.has(ORDER_HOTKEYS[type]) && !this.disabled[type]) {
+      if (input.keysPressed.has((type === 'drawRoute' ? 'r' : ORDER_HOTKEYS[type])) && !this.disabled[type]) {
         this.close();
         return type;
       }
@@ -162,7 +165,7 @@ export class CommandMenu {
       }
 
       // Order-colour swatch (manual's exact per-order colour table).
-      const swatchColor = ORDER_DOT_COLOR[type];
+      const swatchColor = ORDER_DOT_COLOR[type === 'drawRoute' ? 'move' : type];
       const sy = Math.round(r.y + (r.h - SWATCH_SIZE) / 2);
       ctx.fillStyle = disabled ? HUD.dim : swatchColor;
       ctx.fillRect(Math.round(r.x + 3), sy, SWATCH_SIZE, SWATCH_SIZE);
@@ -170,7 +173,7 @@ export class CommandMenu {
       ctx.lineWidth = 1;
       ctx.strokeRect(Math.round(r.x + 3) + 0.5, sy + 0.5, SWATCH_SIZE - 1, SWATCH_SIZE - 1);
 
-      const label = titleCase(ORDER_LABELS[type]);
+      const label = (type === 'drawRoute' ? 'Draw Route' : titleCase(ORDER_LABELS[type]));
       setHudFont(ctx, 'small');
       const color = disabled ? HUD.dim : HUD.text;
       const tx = Math.round(r.x + 3 + SWATCH_SIZE + 5);
@@ -178,7 +181,7 @@ export class CommandMenu {
       ctx.fillStyle = color;
       ctx.fillText(label, tx, ty);
 
-      const hotkey = ORDER_HOTKEYS[type];
+      const hotkey = (type === 'drawRoute' ? 'r' : ORDER_HOTKEYS[type]);
       const idx = label.toLowerCase().indexOf(hotkey.toLowerCase());
       if (idx >= 0) {
         const before = label.slice(0, idx);

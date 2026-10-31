@@ -948,9 +948,10 @@ export interface Order {
   mountVehicleId?: number;
   /** a transport's team: unload the passengers here and now */
   dismount?: boolean;
-  /** Move/MoveFast/Sneak only: additional waypoints after `target`, placed by
-   * holding Shift while clicking (HUD-side chain; sim support may follow). */
+  /** Intermediate points visited before target, in order. */
   waypoints?: Vec2[];
+  /** Vehicle Move: follow the supplied polyline, without A* or route shortcuts. */
+  routeMode?: 'drawn';
   /** Fire orders on a vehicle's main gun: the reason last reported that it cannot fire (sim/gunBlock.ts) */
   gunBlockReported?: string;
 }
@@ -1329,6 +1330,8 @@ export type CursorKind = 'arrow' | 'crosshair' | 'hand' | 'no' | 'move' | 'wait'
 
 export interface InputState {
   mouse: Vec2;                // logical 800x600 coords
+  /** Left-drag samples in event order, cleared each frame (including press/release). */
+  dragSamples?: Vec2[];
   buttons: { left: boolean; right: boolean; middle: boolean };
   /** edge-triggered, cleared each frame by the engine */
   clicks: { x: number; y: number; button: 0 | 1 | 2 }[];
