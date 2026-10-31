@@ -156,8 +156,6 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
     if (t.order) for (const key of ['type', 'target', 'targetTeamId', 'targetVehicleId', 'lastSeenAt',
       'lastKnownPos', 'issuedAt', 'mountVehicleId', 'dismount', 'waypoints'] as const) h.data(t.order[key]);
   }
-  // Optional command extension: leave historical automatic-route hashes unchanged.
-  for (const t of state.teams.values()) if (t.order?.routeMode) { h.int(t.id); h.str(t.order.routeMode); }
   for (const vl of state.map.victoryLocations) {
     h.int(vl.id);
     h.str(vl.owner);

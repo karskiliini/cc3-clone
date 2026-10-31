@@ -33,7 +33,6 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
     mouse: { x: 0, y: 0 },
     buttons: { left: false, right: false, middle: false },
     clicks: [],
-    dragSamples: [],
     releases: [],
     keysDown: new Set(),
     keysPressed: new Set(),
@@ -77,7 +76,6 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
     state.mouse.x = p.x;
     state.mouse.y = p.y;
     state.pointerInside = true;
-    if (state.buttons.left) state.dragSamples!.push({ x: p.x, y: p.y });
   });
 
   // Edge-scroll and drag gestures must stop dead the instant the pointer
@@ -103,7 +101,7 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
     const p = clientToLogical(e.clientX, e.clientY);
     state.mouse.x = p.x; state.mouse.y = p.y;
     const button = buttonOf(e.button);
-    if (button === 0) { state.buttons.left = true; state.dragSamples!.push({ x: p.x, y: p.y }); }
+    if (button === 0) state.buttons.left = true;
     else if (button === 1) state.buttons.middle = true;
     else if (button === 2) state.buttons.right = true;
     state.clicks.push({ x: p.x, y: p.y, button });
@@ -112,7 +110,7 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
   window.addEventListener('mouseup', (e: MouseEvent) => {
     const p = clientToLogical(e.clientX, e.clientY);
     const button = buttonOf(e.button);
-    if (button === 0) { state.buttons.left = false; state.dragSamples!.push({ x: p.x, y: p.y }); }
+    if (button === 0) state.buttons.left = false;
     else if (button === 1) state.buttons.middle = false;
     else if (button === 2) state.buttons.right = false;
     // Keep the modifier at mouse-up even if Shift is released before the next frame.
@@ -241,7 +239,6 @@ export function createInput(canvas: HTMLCanvasElement): { state: InputState; end
   }, { passive: false });
 
   function endFrame(): void {
-    state.dragSamples!.length = 0;
     state.clicks.length = 0;
     state.releases.length = 0;
     state.keysPressed.clear();

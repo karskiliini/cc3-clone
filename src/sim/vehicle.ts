@@ -917,8 +917,6 @@ const HULL_WAIT_MOVING_S = 2.5;
  * moment, `v` routes round every other hull to where it was going. */
 function onHullBlocked(state: BattleState, v: Vehicle, blocker: Vehicle): void {
   driveVehicle(v, { speedMs: 0 }, 0);
-  // An explicit route never becomes a detour or an early arrival at another hull.
-  if (state.teams.get(v.teamId)?.order?.routeMode === 'drawn') return;
   const goal = v.path[v.path.length - 1];
   if (!goal) return;
   const gap = hullRadiusTiles(v) + hullRadiusTiles(blocker);
@@ -1020,14 +1018,6 @@ function straightDrivable(state: BattleState, v: Vehicle, b: Vec2, maxCost: numb
  * waypoint the player set (the route goes where it was told to). */
 function pursuePath(state: BattleState, v: Vehicle, def: VehicleDef, travelFacing = v.hullFacing): () => boolean {
   const path = v.path;
-  if (state.teams.get(v.teamId)?.order?.routeMode === 'drawn') {
-    // Every sampled bend is mandatory. Do not skip off-bow or unreachable points.
-    // The last point uses the driver's normal final-arrival radius.
-    if (!v.localDriver?.recovery) {
-      while (path.length > 1 && dist(v.pos, path[0]) <= 0.35) path.shift();
-    }
-    return () => false;
-  }
   const offBow = (p: Vec2): number => Math.abs(wrapAngle(angleTo(v.pos, p) - travelFacing));
   const pinned = state.teams.get(v.teamId)?.order?.waypoints ?? [];
   const isApproach = (p: Vec2): boolean => isTrenchApproachPoint(state.map, def, p);
@@ -1084,7 +1074,6 @@ function backsOnMove(state: BattleState, v: Vehicle): boolean {
   const def = VEHICLE_DEFS[v.defId];
   if (isTrenchApproachPoint(state.map, def, v.path[0])
     && !isTrenchApproachEntry(state.map, def, v.path[0], v.path[1])) probe = v.path[0];
-  if (order.routeMode === 'drawn') probe = v.path[0];
   const off = Math.abs(wrapAngle(angleTo(v.pos, probe) - v.hullFacing));
   const was = !!v.navigation?.backingOnMove;
   const back = was ? off > BACK_STOP_RAD : off > BACK_START_RAD && len <= BACK_MAX_TILES;
@@ -1410,9 +1399,7 @@ function stepVehicleDriver(state: BattleState, rng: Rng, dt: number, v: Vehicle,
   const onRoad = tile === 'dirtroad' || tile === 'pavedroad' || tile === 'bridge';
   const baseSpeed = onRoad ? def.speedRoadMs : def.speedOffroadMs;
   // slope: tracks lose far more than legs do on a climb (GRADE_UPHILL_VEHICLE)
-  const drawnRoute = state.teams.get(v.teamId)?.order?.routeMode === 'drawn';
-  const routeSpeed = drawnRoute ? Math.min(baseSpeed, Math.max(0.5, dist(v.pos, wp) * TILE_M * 0.8)) : baseSpeed;
-  const fullSpeedMs = (onRoad ? routeSpeed : routeSpeed * props.speedMul)
+  const fullSpeedMs = (onRoad ? baseSpeed : baseSpeed * props.speedMul)
     * gradeSpeedMul(map, v.pos, wp, GRADE_UPHILL_VEHICLE) * damageSpeedMul(v);
 
   if (def.turnRadiusM != null) {
@@ -1444,7 +1431,7 @@ function stepVehicleDriver(state: BattleState, rng: Rng, dt: number, v: Vehicle,
     speedMs = Math.min(speedMs, Math.max(0.3, rate * d * TILE_M * 0.6));
   }
   const selected = applyTrackedPlan(v, 1, wp, backing ? -1 : 1, fullSpeedMs, REVERSE_SPEED_MUL,
-    pivot ? 0 : backing ? -speedMs : speedMs, plan, !pivot, v.path.length === 1 || trenchApproach || drawnRoute);
+    pivot ? 0 : backing ? -speedMs : speedMs, plan, !pivot, v.path.length === 1 || trenchApproach);
   if (!plan || (pivot && !selected.recovery))
     return { crushAt: { x: tx, y: ty }, crushTerrain: props.crushable, overrunDir: v.hullFacing, checkMines: true };
   speedMs = Math.abs(takeHullDrive(v).speedMs);

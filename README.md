@@ -15,12 +15,6 @@ npm run build
 
 ## Controls
 
-- **Draw a vehicle route:** select one vehicle, press **R** (or right-click → **Draw Route**),
-  hold the left mouse button and draw the route, then release to drive. The displayed line
-  connects the vehicle to the start of your stroke. **Esc** or right-click cancels. The driver
-  visits the drawn bends in order without A* detours; allow room for the hull and turning radius.
-  A blocked route stays pending. Redraw it or issue a normal Move order to change it.
-
 Classic (as in the original) and modern controls coexist. There is never a default order: pick the
 order first (hotkey, order bar, or right-click menu), then click the target.
 

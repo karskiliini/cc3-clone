@@ -27,10 +27,10 @@ function event(type: string, props: Record<string, unknown> = {}) {
   events.dispatchEvent(e);
 }
 
-function setup(unit = 'ger_rifle_41') {
+function setup() {
   const battle = new Battle({
     mapId: 'border_1941', playerSide: 'german', year: 1941, seed: 1, durationS: 600,
-    difficulty: 'normal', forces: { german: [unit], soviet: ['sov_rifle_41'] },
+    difficulty: 'normal', forces: { german: ['ger_rifle_41'], soviet: ['sov_rifle_41'] },
   });
   const screen = new BattleScreen(battle);
   const canvas = Object.assign(new EventTarget(), {
@@ -116,65 +116,5 @@ describe('finishing movement waypoints by releasing Shift', () => {
     event('blur'); frame();
     expect(team.order?.type).toBe('defend');
     expect(screen.cursor()).toBe('crosshair');
-  });
-});
-
-
-describe('drawn vehicle route input', () => {
-  it('retains an entire stroke and its corners even between two render frames', () => {
-    const { team, press, frame } = setup('ger_pz3j');
-    press('r');
-    event('mousedown', { clientX: 300, clientY: 220, button: 0 });
-    event('mousemove', { clientX: 340, clientY: 220 });
-    event('mousemove', { clientX: 420, clientY: 220 });
-    event('mousemove', { clientX: 420, clientY: 300 });
-    event('mouseup', { clientX: 480, clientY: 300, button: 0 }); frame();
-    expect(team.order).toMatchObject({ type: 'move', routeMode: 'drawn',
-      waypoints: [{ x: 15, y: 11 }, { x: 21, y: 11 }, { x: 21, y: 15 }],
-      target: { x: 24, y: 15 } });
-  });
-  it.each(['escape', 'right', 'blur'])('cancels an unfinished stroke on %s', cancel => {
-    const { team, press, frame, screen } = setup('ger_pz3j');
-    const old = team.order;
-    press('r'); event('mousedown', { clientX: 300, clientY: 220, button: 0 }); frame();
-    event('mousemove', { clientX: 420, clientY: 300 });
-    if (cancel === 'escape') press('escape');
-    else if (cancel === 'right') { event('mousedown', { clientX: 420, clientY: 300, button: 2 }); frame(); }
-    else { event('blur'); frame(); }
-    event('mouseup', { clientX: 480, clientY: 300, button: 0 }); frame();
-    expect(team.order).toBe(old);
-    expect((screen as unknown as { selectedTeamIds: number[] }).selectedTeamIds).toEqual([team.id]);
-  });
-  it('does not turn an infantry movement order into a drawn route', () => {
-    const { team, press, click } = setup();
-    const old = team.order; press('r'); click(420, 300);
-    expect(team.order).toBe(old);
-  });
-});
-
-
-describe('drawn route camera and menu', () => {
-  it('freezes pan and zoom on the initial stroke frame', () => {
-    const { team, press, frame, input } = setup('ger_pz3j');
-    press('r');
-    const cam = { ...game.cam };
-    event('mousedown', { clientX: 300, clientY: 220, button: 0 });
-    event('mousemove', { clientX: 420, clientY: 300 });
-    event('mouseup', { clientX: 480, clientY: 300, button: 0 });
-    input.state.wheel = -120; input.state.wheelDX = 150; frame();
-    expect(game.cam).toEqual(cam);
-    expect(team.order?.target).toEqual({ x: 24, y: 15 });
-  });
-  it('activates drawing from the vehicle command menu', () => {
-    const { team, frame, click, screen } = setup('ger_pz3j');
-    event('mousedown', { clientX: 300, clientY: 220, button: 2 });
-    event('mouseup', { clientX: 300, clientY: 220, button: 2 }); frame();
-    // The fourth movement row is Draw Route.
-    click(330, 220 + 2 + 3 * 18 + 6);
-    expect(screen.cursor()).toBe('crosshair');
-    event('mousedown', { clientX: 300, clientY: 220, button: 0 });
-    event('mousemove', { clientX: 420, clientY: 300 });
-    event('mouseup', { clientX: 480, clientY: 300, button: 0 }); frame();
-    expect(team.order?.routeMode).toBe('drawn');
   });
 });
