@@ -119,25 +119,34 @@ export function stepHullBody(body: HullBody, def: VehicleDef, drive: HullDrive, 
     let steeredBasis: typeof straightBasis;
     let force: Vec3 = { x: 0, y: 0, z: -massKg * GRAVITY }, torque = zero();
     for (let i = 0; i < p.contacts.length; i++) {
-      const contact = p.contacts[i], offset = rotate(body.orientation, contact.local), point = add(body.position, offset);
-      const sample = probe(point.x, point.y), separation = (sample.heightM - point.z) * sample.normal.z;
+      const contact = p.contacts[i], offset = rotate(body.orientation, contact.local);
+      const px = body.position.x + offset.x, py = body.position.y + offset.y, pz = body.position.z + offset.z;
+      const sample = probe(px, py), separation = (sample.heightM - pz) * sample.normal.z;
       const compression = clamp(separation, 0, suspension.travelM);
       if (Math.abs(compression - body.suspensionTravel[i]) > 1e-5) stableSuspension = false;
       body.suspensionTravel[i] = compression;
       // An unloaded point has neither spring nor damping force. Above-ground damper
       // forces would create an invisible contact and remove genuine free fall.
       if (separation <= 0) continue;
-      const vn = dot(add(body.velocity, cross(body.angularVelocity, offset)), sample.normal);
+      // Keep the original cross/add/dot and normal-then-traction accumulation
+      // order, without allocating intermediate velocity, force and torque vectors.
+      const w = body.angularVelocity, v = body.velocity, normal = sample.normal;
+      const vx = v.x + (w.y * offset.z - w.z * offset.y);
+      const vy = v.y + (w.z * offset.x - w.x * offset.z);
+      const vz = v.z + (w.x * offset.y - w.y * offset.x);
+      const vn = vx * normal.x + vy * normal.y + vz * normal.z;
       const bump = Math.max(0, separation - suspension.travelM);
       const magnitude = Math.max(0, k * compression + 10 * k * bump - c * vn);
       if (magnitude > 0) loaded = true;
-      const f = scale(sample.normal, magnitude);
-      force = add(force, f); torque = add(torque, cross(offset, f));
+      const fx = normal.x * magnitude, fy = normal.y * magnitude, fz = normal.z * magnitude;
+      force.x = force.x + fx; force.y = force.y + fy; force.z = force.z + fz;
+      torque.x = torque.x + (offset.y * fz - offset.z * fy);
+      torque.y = torque.y + (offset.z * fx - offset.x * fz);
+      torque.z = torque.z + (offset.x * fy - offset.y * fx);
       if (magnitude === 0 || mu === 0) continue;
       // Only loaded suspension points have tyre/track friction; solid box support
       // remains frictionless. Project the running gear direction into this plane.
       let basis = contact.steer ? steeredBasis : straightBasis;
-      const normal = sample.normal;
       if (!basis || !Object.is(basis.nx, normal.x) || !Object.is(basis.ny, normal.y) || !Object.is(basis.nz, normal.z)) {
         const heading = contact.steer
           ? steeredHeading ??= rotate(body.orientation, { x: dm.sin(steer), y: -dm.cos(steer), z: 0 })
@@ -150,21 +159,30 @@ export function stepHullBody(body: HullBody, def: VehicleDef, drive: HullDrive, 
         if (contact.steer) steeredBasis = basis; else straightBasis = basis;
       }
       const { longitudinal, lateral } = basis;
-      const velocity = add(body.velocity, cross(body.angularVelocity, offset));
       const target = p.driveKind === 'tracked' ? speed - contact.side * yawRate * 0.42 * p.widthM : speed;
-      const along = contact.driven || drive.brake ? (target - dot(velocity, longitudinal)) * controllerMass / HULL_CONTACT_RESPONSE_S : 0;
-      const across = -dot(velocity, lateral) * controllerMass / HULL_CONTACT_RESPONSE_S;
-      let traction = add(scale(longitudinal, along), scale(lateral, across));
+      const along = contact.driven || drive.brake ? (target - (vx * longitudinal.x + vy * longitudinal.y + vz * longitudinal.z)) * controllerMass / HULL_CONTACT_RESPONSE_S : 0;
+      const across = -(vx * lateral.x + vy * lateral.y + vz * lateral.z) * controllerMass / HULL_CONTACT_RESPONSE_S;
+      let tx = longitudinal.x * along + lateral.x * across;
+      let ty = longitudinal.y * along + lateral.y * across;
+      let tz = longitudinal.z * along + lateral.z * across;
       // Loaded tracks support the tangential gravity load while driving as well
       // as at rest; otherwise the velocity controller has a permanent downhill
       // error. Support and slip correction share the same Coulomb friction circle.
       if ((p.driveKind === 'tracked' && contact.driven) || (speed === 0 && yawRate === 0)) {
-        const gravity = { x: 0, y: 0, z: -GRAVITY * controllerMass };
-        traction = add(traction, add(scale(gravity, -1), scale(sample.normal, dot(gravity, sample.normal))));
+        const gz = -GRAVITY * controllerMass;
+        // Retain zero products and both additions: signed zeros are observable
+        // in exact state comparisons, even when a term is mathematically zero.
+        const projected = 0 * normal.x + 0 * normal.y + gz * normal.z;
+        tx = tx + (0 * -1 + normal.x * projected);
+        ty = ty + (0 * -1 + normal.y * projected);
+        tz = tz + (gz * -1 + normal.z * projected);
       }
-      const wanted = Math.sqrt(dot(traction, traction)), limit = mu * magnitude;
-      if (wanted > limit) traction = scale(traction, limit / wanted);
-      force = add(force, traction); torque = add(torque, cross(offset, traction));
+      const wanted = Math.sqrt(tx * tx + ty * ty + tz * tz), limit = mu * magnitude;
+      if (wanted > limit) { const ratio = limit / wanted; tx = tx * ratio; ty = ty * ratio; tz = tz * ratio; }
+      force.x = force.x + tx; force.y = force.y + ty; force.z = force.z + tz;
+      torque.x = torque.x + (offset.y * tz - offset.z * ty);
+      torque.y = torque.y + (offset.z * tx - offset.x * tz);
+      torque.z = torque.z + (offset.x * ty - offset.y * tx);
     }
     body.velocity = add(body.velocity, scale(force, H / massKg));
     const omega = inverseRotate(body.orientation, body.angularVelocity), t = inverseRotate(body.orientation, torque);

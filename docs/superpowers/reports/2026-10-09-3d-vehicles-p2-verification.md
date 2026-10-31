@@ -1,5 +1,7 @@
 # P2 physical determinism and performance verification — 2026-10-30
 
+Local follow-up on 2026-10-31: see [M5 Pro profiling and exact optimizations](2026-10-31-p2-local-performance.md). The measurements below remain the original Mac mini results.
+
 Status: this verification pass is complete; P2 acceptance remains open for the explicit unmet gates below. Branch `codex/vehicles-3d-p2`, starting revision `345fe3038805a001f99bd3ff727f5f61c4fd7f6b`. Implementation commits: `c97788a` (canonical state/hash and numerical optimizations), `8d74ea4` (initial overlap and sweep robustness).
 
 ## Implementation

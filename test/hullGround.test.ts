@@ -126,3 +126,34 @@ it('reattaches a restored physical field without losing its profile or changing 
   expect(groundVersion(map)).toBe(before);
   expect(groundProbe(map)(21, 21).heightM).toBeCloseTo(0.4);
 });
+
+
+it('tick-local uniform proofs match live five-point probes exactly across edges and mixed surfaces', () => {
+  const map = makeState().map, field = getHeightField(map);
+  for (const base of [0, -0, 7.25]) {
+    field.height.fill(base);
+    for (let y = 12; y < 45; y++) for (let x = 9; x < 39; x++)
+      field.height[y * field.w + x] = (x - 18) * 0.125 + y * 0.03125;
+    for (const [i, value] of [NaN, Infinity, -Infinity].entries()) field.height[(60 + i) * field.w + 50] = value;
+    const live = groundProbe(map), tick = groundProbe(map, 'tick');
+    let seed = 982451653;
+    const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+    const points = [[0, 0], [-0, -0], [-1, -1], [map.width * 2, map.height * 2],
+      [map.width * 2 + 1, map.height * 2 + 1], [0.5, 0.5], [1.9999999999999998, 2], [2, 2], [2.0000000000000004, 2],
+      [25, 30], [25, 30.5], [25, 31], [NaN, 1], [Infinity, -Infinity]];
+    for (let i = 0; i < 5000; i++) points.push([random() * (map.width * 2 + 2) - 1, random() * (map.height * 2 + 2) - 1]);
+    for (const [x, y] of points) {
+      const a = live(x, y), b = tick(x, y);
+      expect(Object.is(a.heightM, b.heightM)).toBe(true);
+      for (const axis of ['x', 'y', 'z'] as const) expect(Object.is(a.normal[axis], b.normal[axis])).toBe(true);
+    }
+  }
+});
+
+it('a fresh completion probe sees terrain changes after a previous flat proof', () => {
+  const map = makeState().map;
+  expect(groundProbe(map, 'tick')(21, 21).heightM).toBe(0);
+  setTileProfile(getHeightField(map), 10, 10, 0.4);
+  expect(groundProbe(map, 'tick')(21, 21)).toEqual(groundProbe(map)(21, 21));
+  expect(groundProbe(map, 'tick')(21, 21).heightM).toBeCloseTo(0.4);
+});

@@ -676,23 +676,29 @@ function hasCrushableLineSource(ctx: FieldCtx, tx: number, ty: number): boolean 
 export function prepareCrushableLineInterest(map: GameMap): (x: number, y: number) => boolean {
   let field = getHeightField(map), version = field.version, ctx = ctxByField.get(field)!;
   const tiles = new Map<number, boolean>();
-  let possible = false;
-  const visit = (sample: number, weight: number) => {
-    if (possible || weight <= 0) return;
+  const eligibleSample = (sample: number, weight: number): boolean => {
+    if (weight <= 0) return false;
     const tx = Math.floor((sample % field.w) / field.res);
     const ty = Math.floor(Math.floor(sample / field.w) / field.res), key = ty * map.width + tx;
     let eligible = tiles.get(key);
     if (eligible === undefined) { eligible = hasCrushableLineSource(ctx, tx, ty); tiles.set(key, eligible); }
-    possible = eligible;
+    return eligible;
   };
   return (x, y) => {
     const current = getHeightField(map);
     if (current !== field || current.version !== version) {
       field = current; version = field.version; ctx = ctxByField.get(field)!; tiles.clear();
     }
-    possible = false;
-    sampleBilinear(field, field.base, x, y, visit);
-    return possible;
+    // Only positively weighted sample owners matter here. Do not read/interpolate
+    // base heights whose value the observer discards; retain all four exact weights.
+    const fx = x * field.res - 0.5, fy = y * field.res - 0.5;
+    const x0 = Math.max(0, Math.min(field.w - 1, Math.floor(fx))), y0 = Math.max(0, Math.min(field.h - 1, Math.floor(fy)));
+    const x1 = Math.min(field.w - 1, x0 + 1), y1 = Math.min(field.h - 1, y0 + 1);
+    const ax = clamp01(fx - x0), ay = clamp01(fy - y0);
+    return eligibleSample(y0 * field.w + x0, (1 - ax) * (1 - ay))
+      || eligibleSample(y0 * field.w + x1, ax * (1 - ay))
+      || eligibleSample(y1 * field.w + x0, (1 - ax) * ay)
+      || eligibleSample(y1 * field.w + x1, ax * ay);
   };
 }
 

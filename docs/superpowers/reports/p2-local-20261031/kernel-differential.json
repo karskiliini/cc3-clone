@@ -1,0 +1,12 @@
+{
+  "definitions": 36,
+  "surfaces": [
+    "flat",
+    "slope",
+    "wave",
+    "step"
+  ],
+  "comparedBodyFrames": 18432,
+  "comparedContactObservations": 1370915,
+  "exact": true
+}
