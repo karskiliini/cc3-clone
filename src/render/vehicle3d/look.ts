@@ -33,6 +33,7 @@ export interface LightTransportVisuals {
 }
 export interface VehicleLook {
   lightTransport?: LightTransportVisuals;
+  trackChains?: { points: Vec3[]; tears: number[] }[];
   id: number;
   defId: string;
   posTiles: Vec2;
@@ -93,6 +94,7 @@ export function vehicleLook(veh: Vehicle, state: BattleState): VehicleLook {
     groundM: cachedGround(state, veh.pos),
     turretLandingGroundM: veh.turretLanding ? cachedGround(state, veh.turretLanding) : undefined,
     gunElevationRad: veh.gunElevationRad ?? 0, wheelDistanceM: veh.speed * state.time,
+    ...(veh.trackChains ? { trackChains: [veh.trackChains.L, veh.trackChains.R].flatMap(c => c ? [{ points: c.points.map(p => ({ ...p.position })), tears: [...c.tears] }] : []) } : {}),
     id: veh.id, defId: veh.defId, posTiles: { ...veh.pos }, hullRad: veh.hullFacing, turretRad: veh.turretFacing,
     ko, liveButLeft, turretBlown: dmg.turretBlown, brokenTrack: dmg.brokenTrack,
     turretLanding: veh.turretLanding ? { posTiles: { ...veh.turretLanding }, dirRad: veh.turretLandingDir ?? veh.turretFacing + 2.3 } : null,

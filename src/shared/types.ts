@@ -785,7 +785,24 @@ export interface VehicleNavigationMemory {
   kTurning?: boolean;
 }
 
+export interface TrackChainState {
+  side: -1 | 1;
+  cutLink: number;
+  pitchM: number;
+  radiusM: number;
+  trackX: number;
+  frontY: number;
+  rearY: number;
+  wheelZ: number;
+  driveAt: 'front' | 'rear';
+  engaged: boolean;
+  /** Further torn joints, indexed between successive points; the closing joint is already cut. */
+  tears: number[];
+  points: { index: number; position: Vec3; velocity: Vec3 }[];
+}
+
 export interface Vehicle {
+  trackChains?: { L?: TrackChainState; R?: TrackChainState };
   id: number;
   teamId: number;
   side: Side;

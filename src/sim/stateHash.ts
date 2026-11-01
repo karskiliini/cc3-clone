@@ -102,6 +102,7 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
   }
   for (const v of state.vehicles.values()) {
     h.int(v.id);
+    if (v.trackChains) { h.str('trackChains'); h.data(v.trackChains); }
     h.vec(v.pos);
     h.num(v.hullFacing);
     h.num(v.turretFacing);

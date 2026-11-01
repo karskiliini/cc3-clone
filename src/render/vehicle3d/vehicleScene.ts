@@ -5,6 +5,8 @@
 // shadow root with a flat black material. Pure scene graph: tested in Node.
 // ============================================================================
 import { BackSide, DirectionalLight, DoubleSide, Group, HemisphereLight, Matrix4, Quaternion, Vector3, Mesh, MeshBasicMaterial, Scene } from 'three';
+import { withoutBrokenRuns } from './trackGeometry';
+import { TrackScene } from './trackScene';
 import { LightTransportScene } from './lightTransportScene';
 import type { ModelSource, VehicleModel } from './models';
 import { CENTRELINE_WHEEL_EPS_M, RECOIL_M, modelNodes, vehiclePose, type VehicleLook } from './look';
@@ -35,10 +37,12 @@ export class VehicleScene {
   readonly shadowScene = new Scene();
   private readonly shadowRoot = new Group();
   private readonly inst = new Map<number, Instance>();
+  private readonly chainHulls = new Map<VehicleModel, Map<string, Mesh>>();
   /** casts the self-shadows (turret on deck, open compartments) the sprites have baked in */
   readonly sun = new DirectionalLight(0xfff5e0, SUN_INTENSITY);
   /** the 3D tall grass round the hulls standing in growth (grassField.bladesFor fills it each frame) */
   readonly grass = new GrassLayer();
+  readonly tracks = new TrackScene();
 
   constructor(private readonly models: ModelSource) {
     const sun = this.sun;
@@ -48,7 +52,7 @@ export class VehicleScene {
     sun.shadow.normalBias = 0.02;
     this.fitSun(0, 0, 50);
     this.scene.add(sun, sun.target, new HemisphereLight(FILL_SKY, FILL_GROUND, FILL_INTENSITY));
-    this.scene.add(this.grass.grass, this.grass.wheat);
+    this.scene.add(this.grass.grass, this.grass.wheat, this.tracks.group);
     this.shadowRoot.matrixAutoUpdate = false;
     this.shadowRoot.matrix.identity();
     this.shadowScene.add(this.shadowRoot);
@@ -66,7 +70,7 @@ export class VehicleScene {
     this.sun.target.updateMatrixWorld();
   }
 
-  begin(): void { for (const i of this.inst.values()) i.used = false; }
+  begin(): void { this.tracks.begin(); for (const i of this.inst.values()) i.used = false; }
 
   /** Poses one vehicle for this frame; false = no model yet (the caller draws the sprite). */
   add(look: VehicleLook): boolean {
@@ -79,10 +83,28 @@ export class VehicleScene {
       this.inst.set(look.id, it);
       it.hull.group.add(it.transport.group);
     }
+    this.tracks.add(look);
     it.transport.update(look.lightTransport);
     const names = modelNodes(look, new Set(model.nodes.keys()), model.winterNodes !== null);
     const pose = vehiclePose(look, model.hasTurret, model.turretPivotM, model.turretPivot3M);
-    this.show(it.hull, model, names.hull, names.winterHull);
+    // Damage atlases contain a static thrown chain. Dynamic runs use the intact
+    // node clipped to geometry shared with each broken-side node instead.
+    let hullName=names.hull;
+    let dynamicHull: Mesh | undefined;
+    if (look.trackChains?.length) {
+      const sides=look.brokenTrack==='both'?['L','R']:[look.brokenTrack??'L'];
+      const source=names.winterHull&&model.winterNodes?.has('hull_ok')?model.winterNodes:model.nodes;
+      const key=`dynamic_${names.hull}_${names.winterHull?'winter_':''}${sides.join('')}`;
+      let cache=this.chainHulls.get(model);if(!cache){cache=new Map();this.chainHulls.set(model,cache);}
+      let mesh=cache.get(key);
+      const variants=sides.flatMap(side=>{const m=source!.get(`hull_track${side}`);return m?[m]:[];});
+      if(!mesh&&source!.has('hull_ok')&&variants.length===sides.length){
+        const base=look.ko||look.turretBlown?model.nodes.get(names.hull)??source!.get('hull_ok')!:source!.get('hull_ok')!;
+        mesh=withoutBrokenRuns(base,variants,source!.get('hull_ok')!);cache.set(key,mesh);
+      }
+      if(mesh){hullName=key;dynamicHull=mesh;}
+    }
+    this.show(it.hull, model, hullName, names.winterHull, dynamicHull);
     it.hull.group.position.fromArray(pose.hullPos);
     it.hull.group.quaternion.fromArray(pose.hullQuaternion);
     if (names.turret && pose.turretPivot && (model.turretPivotM || model.turretPivot3M)) {
@@ -151,6 +173,7 @@ export class VehicleScene {
   }
 
   end(): void {
+    this.tracks.end();
     for (const it of this.inst.values()) {
       for (const p of [it.hull, it.turret, it.gun, it.wheelsL, it.wheelsR]) { p.group.visible = it.used; p.shadowGroup.visible = it.used; }
     }
@@ -161,7 +184,10 @@ export class VehicleScene {
   reset(): void {
     for (const it of this.inst.values()) this.dispose(it);
     this.inst.clear();
+    for(const cache of this.chainHulls.values())for(const mesh of cache.values())mesh.geometry.dispose();
+    this.chainHulls.clear();
     this.grass.clear();
+    this.tracks.reset();
   }
 
   visibleCount(): number { let n = 0; for (const i of this.inst.values()) if (i.used) n++; return n; }
@@ -176,11 +202,11 @@ export class VehicleScene {
   /** Shows one node (winter variant if asked and present) in the part, hides the rest. Hull nodes
    * are built about the hull centre and turret nodes about their ring centre, so both sit at the
    * origin of their group. */
-  private show(p: Part, model: VehicleModel, name: string | null, winter: boolean): void {
+  private show(p: Part, model: VehicleModel, name: string | null, winter: boolean, override?: Mesh): void {
     const useWinter = winter && !!model.winterNodes?.has(name ?? '');
     const key = name ? `${useWinter ? 'w:' : ''}${name}` : null;
     if (name && key && !p.meshes.has(key)) {
-      const srcMesh = (useWinter ? model.winterNodes!.get(name) : model.nodes.get(name))!;
+      const srcMesh = override ?? (useWinter ? model.winterNodes!.get(name) : model.nodes.get(name))!;
       const m = srcMesh.clone();
       m.castShadow = true; m.receiveShadow = true;
       const s = new Mesh(srcMesh.geometry, SHADOW_MAT);

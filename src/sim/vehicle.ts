@@ -1,3 +1,4 @@
+import { stepTrackPhysics, trackHasDrive, trackHullParams } from './trackPhysics';
 import { stepPassengerPhysics } from './passengerPhysics';
 import { stepMotorizedCrews, motorizedHold } from './motorizedCrew';
 import { createTowStep, towingMassKg } from './vehicleTow';
@@ -232,7 +233,7 @@ export function completeVehicleMovement(state: BattleState, rng: Rng, dt: number
     acceptedSpeedMs = speedMs;
     return true;
   }, contact => { contacts.push({ x: contact.point.x / TILE_M, y: contact.point.y / TILE_M }); },
-  point => contactInterest(point.x / TILE_M, point.y / TILE_M), params);
+  point => contactInterest(point.x / TILE_M, point.y / TILE_M), trackHullParams(v, params));
   if (towStep) {
     if (towStep.accept(body.position, body.orientation)) towStep.commit();
     else {
@@ -1229,6 +1230,12 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     else if (recovery) requestHullDrive(v, recovery);
     if (disabled || recovery) driverTicks.get(v)!.local = undefined;
     completeVehicleMovement(state, rng, dt, v, def, movement, recovery != null && !recovery.brake);
+  }
+  for (const v of state.vehicles.values()) if (v.trackChains) {
+    stepTrackPhysics(state, v, dt);
+    if (!trackHasDrive(v, -1) && !trackHasDrive(v, 1) && v.state === 'ok') {
+      v.state = 'immobilized'; v.path = []; localDriverOwner(v, 0);
+    }
   }
   stepPassengerPhysics(state, dt);
 }

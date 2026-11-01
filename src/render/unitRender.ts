@@ -651,7 +651,8 @@ function drawVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
   gl?.scene.begin();
   for (const veh of state.vehicles.values()) {
     if (!isEnemyVisible(state, playerSide, veh.side, veh.id, true)) continue;
-    if (!visible(veh.pos, cam)) continue;
+    if (!visible(veh.pos, cam) && ![veh.trackChains?.L, veh.trackChains?.R].some(c =>
+      c?.points.some(p => visible({ x: p.position.x / TILE_M, y: p.position.y / TILE_M }, cam)))) continue;
     const look = vehicleLook(veh, state);
     if (gl && gl.scene.add(look)) {
       in3d.push(look);
@@ -677,6 +678,16 @@ function drawVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
   }
   for (const { veh, look } of shown) {
     if (look.lightTransport && !carriersIn3d.has(veh.id)) drawCarrierFallback(ctx, cam, look);
+    if (look.trackChains && !carriersIn3d.has(veh.id)) {
+      ctx.save(); ctx.strokeStyle = '#393932'; ctx.lineWidth = Math.max(1, cam.zoom * 2);
+      for (const c of look.trackChains) for (let i=0;i<c.points.length-1;i++) {
+        if (c.tears.includes(i)) continue;
+        const a=c.points[i], b=c.points[i+1];
+        const pa=projectVehicleWorldPoint(cam,[a.x,a.z,a.y]), pb=projectVehicleWorldPoint(cam,[b.x,b.z,b.y]);
+        ctx.beginPath(); ctx.moveTo(pa.x,pa.y); ctx.lineTo(pb.x,pb.y); ctx.stroke();
+      }
+      ctx.restore();
+    }
     const p = vehicleScreenPoint(cam, look);
     const dmg = vehicleDamageView(veh);
     // a serviceable hull whose crew is outside keeps its live look, hatches open (spec §10)

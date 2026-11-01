@@ -1,3 +1,4 @@
+import { severTrack, trackHasDrive } from './trackPhysics';
 import { onPassengerCasualty } from './passengerPhysics';
 import { localDriverOwner } from './localDriver';
 // Locational vehicle damage: hit zones from the shot geometry, what sits behind each zone, what a
@@ -249,10 +250,11 @@ export function systemState(v: Vehicle, sys: VehicleSystem): EquipState { return
 
 const RANK: Record<EquipState, number> = { ok: 0, damaged: 1, destroyed: 2 };
 /** Damage only ever gets worse. Returns true when the state changed. */
-export function worsen(v: Vehicle, sys: VehicleSystem, to: EquipState): boolean {
+export function worsen(v: Vehicle, sys: VehicleSystem, to: EquipState, hitPoint?: Vec3): boolean {
   const d = ensureDamage(v);
   if (RANK[to] <= RANK[d[sys]]) return false;
   d[sys] = to;
+  if ((sys === 'trackL' || sys === 'trackR') && to === 'destroyed') severTrack(v, sys === 'trackL' ? -1 : 1, hitPoint);
   if (isImmobile(v) && v.state === 'ok') { v.state = 'immobilized'; v.path = []; localDriverOwner(v, 0); }
   return true;
 }
@@ -260,7 +262,8 @@ export function worsen(v: Vehicle, sys: VehicleSystem, to: EquipState): boolean 
 export function isImmobile(v: Vehicle): boolean {
   const d = v.damage;
   if (!d) return v.state === 'immobilized';
-  return v.state === 'immobilized' || d.trackL === 'destroyed' || d.trackR === 'destroyed' || d.engine === 'destroyed' || d.transmission === 'destroyed';
+  const left = !trackHasDrive(v, -1), right = !trackHasDrive(v, 1);
+  return v.state === 'immobilized' || (v.trackChains ? left && right : left || right) || d.engine === 'destroyed' || d.transmission === 'destroyed';
 }
 /** Speed multiplier from damage: engine damaged x0.5, a damaged track x0.6, transmission x0.6. */
 export function damageSpeedMul(v: Vehicle): number {
@@ -728,8 +731,12 @@ export function resolveVehicleHit(state: BattleState, rng: Rng, v: Vehicle, inpu
 
   v.hits++;
   if (isGear) {
-    worsen(v, trackSys, rng.next() < 0.7 ? 'destroyed' : 'damaged');
+    worsen(v, trackSys, rng.next() < 0.7 ? 'destroyed' : 'damaged', ray ? intersectVehicle(v, def, ray, hullDown)?.point : undefined);
     res.outcome = isImmobile(v) ? 'immobilised' : 'damaged';
+    if (systemState(v, trackSys) === 'destroyed' && v.trackChains) {
+      shooterMsg(state, input, `Track broken — ${name} is running over the loose chain.`);
+      if (team) addMessage(state, `${team.name}\n${trackSys === 'trackL' ? 'Left' : 'Right'} track broken.`, 'bad', team.side);
+    }
     if (!wasImmobile && isImmobile(v)) {
       shooterMsg(state, input, `Hit the tracks — ${name} immobilised.`);
       if (team) addMessage(state, `${team.name}\n${location.zone === 'runningGearL' ? 'Left' : 'Right'} track broken.`, 'bad', team.side);

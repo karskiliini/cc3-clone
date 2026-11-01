@@ -10,7 +10,7 @@ export interface NormalizedVehiclePhysics {
 }
 export type HullParams = VehicleDef & NormalizedVehiclePhysics & {
   massKg: number; inertia: Vec3; clearanceM: number;
-  contacts: { local: Vec3; side: -1 | 1; steer: boolean; driven: boolean; horn: boolean }[];
+  contacts: { local: Vec3; side: -1 | 1; steer: boolean; driven: boolean; horn: boolean; brake?: boolean }[];
   modelOriginLocal: Vec3;
   solidBox: { min: Vec3; max: Vec3 };
   armor: VehicleDef['armor'] & { belly: number };

@@ -1,9 +1,12 @@
+import { worsen } from './vehicleDamage';
+import { inverseRotate, yawQuat } from './hullMath';
+import { VEHICLE_DEFS } from '@/data/units';
 import { localDriverOwner } from './localDriver';
 import type { BattleState, GameMap, Soldier, Vehicle, Vec2 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { addMessage } from './messages';
-import { getHeightField, syncCraterMarks } from './heightField';
+import { getHeightField, heightAt, syncCraterMarks } from './heightField';
 import { applyHit } from './combat';
 import { WEAPONS } from '@/data/weapons';
 
@@ -103,8 +106,13 @@ export function vehicleMineCheck(state: BattleState, v: Vehicle, rng: Rng, at: V
   if (!rng.chance(0.8)) return;
   consumeMine(state.map, idx);
   addMessage(state, `${v.defId}: hit a mine!`, 'bad', v.side);
-  // immobilise the hull outright (track damage), crew shaken
-  v.state = 'immobilized';
+  // The struck run breaks at the mine; it can carry the hull until it leaves
+  // the sprocket. Wheeled vehicles retain their immediate running-gear failure.
+  const point = { x: (x + 0.5) * TILE_M, y: (y + 0.5) * TILE_M, z: heightAt(getHeightField(state.map), x + 0.5, y + 0.5) };
+  const q = v.body?.orientation ?? yawQuat(v.hullFacing);
+  const local = inverseRotate(q, { x: point.x - v.pos.x * TILE_M, y: point.y - v.pos.y * TILE_M, z: 0 });
+  worsen(v, local.x <= 0 ? 'trackL' : 'trackR', 'destroyed', point);
+  if (!v.trackChains || !VEHICLE_DEFS[v.defId]) v.state = 'immobilized';
   localDriverOwner(v, 0);
   v.hits += AT_MINE_DAMAGE;
 }

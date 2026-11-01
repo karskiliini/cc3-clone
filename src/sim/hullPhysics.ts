@@ -160,7 +160,7 @@ export function stepHullBody(body: HullBody, def: VehicleDef, drive: HullDrive, 
       }
       const { longitudinal, lateral } = basis;
       const target = p.driveKind === 'tracked' ? speed - contact.side * yawRate * 0.42 * p.widthM : speed;
-      const along = contact.driven || drive.brake ? (target - (vx * longitudinal.x + vy * longitudinal.y + vz * longitudinal.z)) * controllerMass / HULL_CONTACT_RESPONSE_S : 0;
+      const along = contact.driven || (drive.brake && contact.brake !== false) ? (target - (vx * longitudinal.x + vy * longitudinal.y + vz * longitudinal.z)) * controllerMass / HULL_CONTACT_RESPONSE_S : 0;
       const across = -(vx * lateral.x + vy * lateral.y + vz * lateral.z) * controllerMass / HULL_CONTACT_RESPONSE_S;
       let tx = longitudinal.x * along + lateral.x * across;
       let ty = longitudinal.y * along + lateral.y * across;
@@ -168,7 +168,7 @@ export function stepHullBody(body: HullBody, def: VehicleDef, drive: HullDrive, 
       // Loaded tracks support the tangential gravity load while driving as well
       // as at rest; otherwise the velocity controller has a permanent downhill
       // error. Support and slip correction share the same Coulomb friction circle.
-      if ((p.driveKind === 'tracked' && contact.driven) || (speed === 0 && yawRate === 0)) {
+      if (contact.brake !== false && ((p.driveKind === 'tracked' && contact.driven) || (speed === 0 && yawRate === 0))) {
         const gz = -GRAVITY * controllerMass;
         // Retain zero products and both additions: signed zeros are observable
         // in exact state comparisons, even when a term is mathematically zero.
