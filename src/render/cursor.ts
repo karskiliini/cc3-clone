@@ -1,31 +1,13 @@
 import type { Vec2, CursorKind } from '@/shared/types';
-import { getCursorSprite } from '@/render/sprites';
-
-// ============================================================================
-// Native-cursor CSS strings — built once per CursorKind (not per frame) so
-// the OS cursor tracks the real pointer with zero lag, instead of drawing a
-// canvas sprite one frame behind the hardware pointer. Sprites are 16x16;
-// we scale to 32x32 (2x) for crisp rendering on hi-DPI displays and encode
-// as a data-URL PNG so no extra network request is needed.
-// ============================================================================
-const SCALE = 2;
-
-// Hotspot in *source* (16x16) pixels; scaled by SCALE below.
-const HOTSPOT: Record<CursorKind, [number, number]> = {
-  arrow: [0, 0],
-  crosshair: [8, 8],
-  hand: [4, 2],
-  no: [8, 8],
-  move: [8, 8],
-  wait: [8, 8],
-  target: [0, 0], // the four target kinds are built separately, see buildTargetCursor
-  targetNone: [0, 0],
-  targetMaybe: [0, 0],
-  targetLikely: [0, 0],
-  targetNoneBlocked: [0, 0],
-  targetMaybeBlocked: [0, 0],
-  targetLikelyBlocked: [0, 0],
-  targetDead: [0, 0],
+// Use the platform's familiar, accessible pointer shapes for ordinary UI.
+// Only aiming reticles need custom artwork to communicate firing/armour status.
+const NATIVE_CURSORS: Partial<Record<CursorKind, string>> = {
+  arrow: 'default',
+  hand: 'pointer',
+  crosshair: 'crosshair',
+  no: 'not-allowed',
+  move: 'move',
+  wait: 'wait',
 };
 
 const cssCache = new Map<CursorKind, string>();
@@ -106,16 +88,7 @@ function buildTargetCursor(kind: CursorKind): string {
 
 function buildCssCursor(kind: CursorKind): string {
   if (TARGET_COLORS[kind]) return buildTargetCursor(kind);
-  const src = getCursorSprite(kind);
-  const c = document.createElement('canvas');
-  c.width = src.width * SCALE;
-  c.height = src.height * SCALE;
-  const ctx = c.getContext('2d')!;
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(src, 0, 0, c.width, c.height);
-  const url = c.toDataURL('image/png');
-  const [hx, hy] = HOTSPOT[kind];
-  return `url(${url}) ${hx * SCALE} ${hy * SCALE}, auto`;
+  return NATIVE_CURSORS[kind] ?? 'default';
 }
 
 /** Returns (and caches) the `cursor:` CSS value for a given cursor kind. */
