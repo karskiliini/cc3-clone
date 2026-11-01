@@ -125,7 +125,17 @@ Done when:
 - Record a reasoned go/no-go recommendation, expected benefit, integration scope and remaining risks. A live-game integration requires a separate approved specification; this ticket does not schedule training or replace the current controller.
 Queued after 056; does not interrupt the active 050 P2 work.
 
-The next request receives ID 058.
+**058 — Feature: Close Combat-style air support (Ju 87 / Ju 87G / IL-2).**
+Request (2026-11-01): callable Stuka support, later cannon-armed Ju 87G for armour, and IL-2 conventional bombs or anti-armour bomblets; research and imitate later Close Combat air-support mechanics.
+Requirements and sources: `docs/reference/plans/air-support-and-night-combat.md`, section 058. Assigned, delayed, usually single-use support; icon plus map targeting; one aircraft attack pass; dated aircraft/load availability; animated delivery and real damage. The target-dependent load is chosen from reported target class and available assets, never hidden enemy counts. Pilot perception follows 056; canonical state/commands replay deterministically. Done when the full call-to-departure flow works in battle with correct ordnance, damage, availability, feedback, replay and an in-game visual check.
+Queued after 057; does not interrupt active 050 P2.
+
+**059 — Feature: Night fog of war and descending mortar illumination with dynamic shadows.**
+Request (2026-11-01): clearly readable night fog of war; mortar illumination rounds that light a localized area for a long time; a nearly ray-traced-looking effect with continuously lengthening shadows as the flare descends.
+Requirements: `docs/reference/plans/air-support-and-night-combat.md`, section 059. Distinct finite mortar illumination stock and real crew/flight constraints; parachute descent, sustained localized light, occlusion, moving/lengthening shadows from terrain/buildings/trees/vehicles and gradual burnout. Shared canonical lighting affects both sides' individual acquisition through ordinary LOS, not automatic enemy revelation. Camera/render quality never changes simulation. Done when an actual in-game mortar mission demonstrates the full effect through extinction, hidden-unit behavior stays correct, replay/cross-engine checks pass and representative rendering performance is measured. A flat radial glow alone does not meet the request.
+Queued after 058; does not interrupt active 050 P2.
+
+The next request receives ID 060.
 
 ## Completed
 
