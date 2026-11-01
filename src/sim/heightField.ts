@@ -16,7 +16,7 @@
 // Vehicles are not part of the field. Physical contacts and gun geometry read this surface;
 // API mutation inputs survive restoration, while module-local contexts are derived caches.
 // ============================================================================
-import type { GameMap, HeightField, HeightBuildingInfo as BuildingInfo, MapVectorFeature, Terrain, Vec2 } from '@/shared/types';
+import type { GameMap, HeightField, HeightBuildingInfo as BuildingInfo, MapVectorFeature, Terrain, Vec2, Vec3 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import { TERRAIN_PROPS } from './terrain';
 import { hash2 } from '@/shared/rng';
@@ -398,6 +398,11 @@ function stampBowl(field: HeightField, cx: number, cy: number, radiusM: number, 
       }
     }
   }
+  if (field.earthworkEdits) for(let sy=Math.max(0,sy0);sy<=Math.min(field.h-1,sy1);sy++)
+    for(let sx=Math.max(0,sx0);sx<=Math.min(field.w-1,sx1);sx++) {
+      const i=sy*field.w+sx,e=field.earthworkEdits.get(i);
+      if(e){e.dig=field.dig[i];e.original=Math.min(e.original,e.dig);}
+    }
   recomposeRect(field, sx0, sy0, sx1, sy1);
 }
 
@@ -541,6 +546,7 @@ function writeTile(field: HeightField, tx: number, ty: number, samples: ArrayLik
 export function buildHeightField(map: GameMap): HeightField {
   map.heightProfiles?.clear();
   // Rebuilding this map changes its geometry and must invalidate sleeping hulls.
+  const priorEdits = map.heightField?.earthworkEdits;
   const version = map.heightField ? map.heightField.version + 1 : 1;
   const R = HF_RES;
   const w = map.width * R, h = map.height * R;
@@ -589,6 +595,10 @@ export function buildHeightField(map: GameMap): HeightField {
   stampTrenchSegs(field, vecSegs);
   stampMapCraters(map, field);
   syncCraterMarks(map, field);
+  if (priorEdits?.size) {
+    field.earthworkEdits = new Map([...priorEdits].map(([i,e])=>[i,{...e}]));
+    for (const [i,e] of field.earthworkEdits) { field.dig[i]=e.dig; compose(field,i); }
+  }
   // Initial crater stamping is part of this build, not a separate revision.
   field.version = version;
   return field;
@@ -833,4 +843,71 @@ export function buildingEaveM(map: GameMap, bid: number): number {
 export function buildingIsBig(map: GameMap, bid: number): boolean {
   const field = getHeightField(map);
   return ctxByField.get(field)?.buildings.get(bid)?.big ?? false;
+}
+
+
+export interface EarthworkLoad { point: Vec3; loadNs: number }
+/** Only accepted loaded suspension contacts enter here, after towing/block rollback.
+ * Relax loose soil toward the local landform: spoil collapses faster than the pit
+ * fills. 120 kNs/sample is a gameplay soil-strength scale, not a geotechnical model. */
+export function compressEarthworks(map: GameMap, loads: readonly EarthworkLoad[]): number {
+  if (!loads.length) return 0;
+  const field=getHeightField(map), exposure=new Map<number,number>(), radiusM=1;
+  for(const {point,loadNs} of loads) {
+    if (!(loadNs>0) || !Number.isFinite(loadNs)) continue;
+    const cx=point.x/TILE_M*field.res-.5, cy=point.y/TILE_M*field.res-.5;
+    const reach=radiusM/HF_STEP_M;
+    for(let y=Math.max(0,Math.floor(cy-reach));y<=Math.min(field.h-1,Math.ceil(cy+reach));y++)
+      for(let x=Math.max(0,Math.floor(cx-reach));x<=Math.min(field.w-1,Math.ceil(cx+reach));x++) {
+        const i=y*field.w+x;if(field.base[i]>=1||field.dig[i]===0)continue;
+        const d2=((x-cx)*(x-cx)+(y-cy)*(y-cy))*HF_STEP_M*HF_STEP_M;
+        if(d2>=radiusM*radiusM)continue;
+        exposure.set(i,(exposure.get(i)??0)+loadNs*(1-d2/(radiusM*radiusM)));
+      }
+  }
+  let changed=0;const dirty=new Set<number>();
+  for(const [i,impulse] of [...exposure].sort((a,b)=>a[0]-b[0])) {
+    const before=field.dig[i],fraction=Math.min(.25,impulse/120000)*(before<0?.65:1);
+    const after=Math.fround(before*(1-fraction));if(after===before)continue;
+    const edits=field.earthworkEdits??=new Map();
+    edits.set(i,{original:edits.get(i)?.original??before,dig:after});field.dig[i]=after;compose(field,i);changed++;
+    dirty.add(Math.floor(Math.floor(i/field.w)/field.res)*map.width+Math.floor((i%field.w)/field.res));
+  }
+  if(changed){field.version++;(map.dirtyTiles??=[]).push(...dirty);}
+  return changed;
+}
+
+/** Tick-scoped interest; empty ordinary ground never records contact loads. */
+export function prepareEarthworkInterest(map:GameMap):(x:number,y:number)=>boolean {
+  const field=getHeightField(map), tiles=new Map<number,boolean>();
+  return (x,y)=>{
+    const tx=Math.floor(x),ty=Math.floor(y),key=ty*map.width+tx,known=tiles.get(key);if(known!==undefined)return known;
+    for(let sy=Math.max(0,ty*field.res-2);sy<Math.min(field.h,(ty+1)*field.res+2);sy++)
+      for(let sx=Math.max(0,tx*field.res-2);sx<Math.min(field.w,(tx+1)*field.res+2);sx++)
+        if(field.dig[sy*field.w+sx]!==0){tiles.set(key,true);return true;}
+    tiles.set(key,false);return false;
+  };
+}
+
+/** Render-only sampling: original procedural detail survives outside changed cells. */
+export function editedEarthworkHeight(field:HeightField,x:number,y:number,fallback:number):number {
+  if(!field.earthworkEdits?.size)return fallback;
+  let factor=0, edited=false;
+  sampleBilinear(field,field.dig,x,y,(i,w)=>{
+    const e=field.earthworkEdits!.get(i);if(e&&w>0)edited=true;
+    factor+=w*(e&&Math.abs(e.original)>1e-6?clamp01(e.dig/e.original):1);
+  });
+  // Interpolate local remaining fractions, not a ratio across pit/rim sign
+  // changes. Preserve the authored sub-sample outline instead of grid squares.
+  return edited?fallback*factor:fallback;
+}
+/** Cover scales with remaining pit depth; fully collapsed holes provide ordinary ground cover. */
+export function earthworkCoverScale(map:GameMap,tx:number,ty:number):number {
+  const f=map.heightField;if(!f?.earthworkEdits?.size)return 1;
+  let depth=0,original=0,edited=false;
+  for(let y=ty*f.res;y<(ty+1)*f.res;y++)for(let x=tx*f.res;x<(tx+1)*f.res;x++) {
+    const i=y*f.w+x,e=f.earthworkEdits.get(i);if(e)edited=true;
+    depth=Math.max(depth,-f.dig[i]);original=Math.max(original,-(e?.original??f.dig[i]));
+  }
+  return edited&&original>0?clamp01(depth/original):1;
 }

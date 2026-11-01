@@ -1,3 +1,4 @@
+import { editedEarthworkHeight } from '@/sim/heightField';
 // ============================================================================
 // terrainRender.ts — bakes the painted CC3-style terrain into offscreen chunk
 // canvases and blits them each frame. Also draws craters/blood/smoke overlays.
@@ -2911,18 +2912,23 @@ export class TerrainRenderer {
 
   /** Draws every earthwork touching the chunk whose zoom-1 world px origin is (ox, oy). Craters
    * first (under trenches), then trenches, foxholes, and this battle's fresh blast marks. */
+  private earthworkSurface() {
+    const field=this.map.heightField;
+    return field?.earthworkEdits?.size ? (x:number,y:number,h:number)=>editedEarthworkHeight(field,x,y,h) : undefined;
+  }
+
   private paintEarthworks(ctx: CanvasRenderingContext2D, ox: number, oy: number, zoom: number, marksUpTo: number): void {
     const season = this.map.def.season;
     const span = CHUNK_PX;
     for (const c of this.oldCraters) {
       if (c.x + c.r < ox || c.x - c.r > ox + span || c.y + c.r < oy || c.y - c.r > oy + span) continue;
-      paintCrater(ctx, c, season, ox, oy, zoom);
+      paintCrater(ctx, c, season, ox, oy, zoom, this.earthworkSurface());
     }
-    paintTrenches(ctx, this.trenches, season, ox, oy, zoom);
+    paintTrenches(ctx, this.trenches, season, ox, oy, zoom, this.earthworkSurface());
     const fr = foxholeExtentPx();
     for (const f of this.foxholes) {
       if (f.x + fr < ox || f.x - fr > ox + span || f.y + fr < oy || f.y - fr > oy + span) continue;
-      paintFoxhole(ctx, f, season, ox, oy, zoom);
+      paintFoxhole(ctx, f, season, ox, oy, zoom, this.earthworkSurface());
     }
     const marks = this.map.craterMarks;
     if (marks) for (let k = 0; k < marksUpTo && k < marks.length; k++) this.paintMark(ctx, k, ox, oy, zoom);
@@ -2937,7 +2943,7 @@ export class TerrainRenderer {
     const c = this.markDraw(k);
     const r = craterExtentPx(c);
     if (c.x + r < ox || c.x - r > ox + CHUNK_PX || c.y + r < oy || c.y - r > oy + CHUNK_PX) return;
-    paintCrater(ctx, c, this.map.def.season, ox, oy, zoom);
+    paintCrater(ctx, c, this.map.def.season, ox, oy, zoom, this.earthworkSurface());
   }
 
   /** Stamps blast marks added since the last frame straight into every cached chunk they touch

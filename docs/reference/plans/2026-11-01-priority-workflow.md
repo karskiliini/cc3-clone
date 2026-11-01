@@ -19,8 +19,8 @@ capacity and preserve other jobs. Use immutable isolated inputs for long tests.
 |---|---|---|---|
 | 1 | 051 physical APC passengers | Complete; spec `docs/superpowers/specs/2026-11-01-physical-apc-passengers.md` | Full squad boards/rides/crouches/fires/jumps out; killed riders remain constrained by walls/benches under pitch/roll; deterministic physical state; in-game recording |
 | 2 | 052 physical broken tracks | Complete; physical cut/drive/render integration | Hit/mine breaks a particular link; loose chain moves over wheels/ground, can be dragged, loses that side's drive after sprocket disengagement; visible links and exact deterministic tests |
-| 3 | 054 terrain compression | Active: canonical height/cover mutation | Loaded accepted track/wheel contacts progressively compress holes/rims by vehicle weight and passes; height, cover and visuals agree; rejected movement creates no deformation |
-| 4 | 055 infantry digging | Pending | Eligible idle men dig visibly over time; orders/threats interrupt; persistent site depth/cover evolves deterministically and interacts with stage 3 |
+| 3 | 054 terrain compression | Complete; accepted load/height/cover/art integration | Loaded accepted track/wheel contacts progressively compress holes/rims by vehicle weight and passes; height, cover and visuals agree; rejected movement creates no deformation |
+| 4 | 055 infantry digging | Active: persistent personal sites and interruption | Eligible idle men dig visibly over time; orders/threats interrupt; persistent site depth/cover evolves deterministically and interacts with stage 3 |
 | 5 | 044 + 047b online multiplayer and recovery | Pending | Relay/browser transport, room join and forces/deployment, game UI, speed/pause policy, disconnect takeover/forfeit/rejoin, visible desync rebuild/failure/report flow, two browser/host verification |
 | 6 | 056 individual perception and human condition | Pending | Personal visual/acoustic contacts and delivered reports replace omniscient decisions; integrated pain/exertion/shock/exhaustion/sweat/tremor affect capability; hidden-state/viewer independence and exact replay tests |
 
@@ -76,3 +76,9 @@ valid substitute for compartment occlusion. Render or model fixes belong to 051.
   behind, no page errors. Exact M5/M2 180-tick SHA
   `2c7d39fdbb147e3baace920819ccae215d6d97d5ae73c9959c5a33f1472ff62e`.
   M2 one 47-link chain: 0.191 ms/tick over 1000 ticks under current load.
+
+- Stage 054 completed: real KV-1 versus T-70 crossing, nine dedicated tests,
+  39 height/cover/contact and 43 crater/terrain/hull checks; final types/build.
+  Exact M5/M2 160-tick SHA `3ec8df680c5767736367fa8a105d6dd977ae62183e4c44b3c3ba582ed22546e8`.
+  Actual Chromium crossing changed 25 dig samples; final art preserves round outlines;
+  no page errors and own server stopped.

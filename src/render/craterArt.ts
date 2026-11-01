@@ -95,6 +95,15 @@ export class EarthField {
     }
   }
 }
+/** Read-only physical dig height at tile coordinates; procedural art is the fallback. */
+export type EarthworkSurface = (x:number,y:number,original:number)=>number;
+export function applyEarthworkSurface(f:EarthField,surface?:EarthworkSurface):void {
+  if(!surface)return;
+  for(let y=0;y<f.h;y++)for(let x=0;x<f.w;x++) {
+    const i=y*f.w+x;
+    if(f.soil[i]>0||f.H[i]!==0)f.H[i]=surface((f.ox+(x+.5)/f.zoom)/20,(f.oy+(y+.5)/f.zoom)/20,f.H[i]);
+  }
+}
 const FIELD = new EarthField();
 let horizon = new Float32Array(0);
 
@@ -408,7 +417,7 @@ function fillShellCrater(
 
 /** Draws a crater onto `ctx` (whose pixels map to world px via originX/originY and `zoom`,
  * i.e. canvas px = (world - origin) * zoom; any current transform is ignored). */
-export function paintCrater(ctx: CanvasRenderingContext2D, c: CraterDraw, season: Season, originX: number, originY: number, zoom: number): void {
+export function paintCrater(ctx: CanvasRenderingContext2D, c: CraterDraw, season: Season, originX: number, originY: number, zoom: number, surface?: EarthworkSurface): void {
   if (c.kind === 'track') { paintTrackRut(ctx, c, season, originX, originY, zoom); return; }
   const ext = craterExtentPx(c);
   const px0 = Math.floor((c.x - ext - originX) * zoom), py0 = Math.floor((c.y - ext - originY) * zoom);
@@ -417,6 +426,7 @@ export function paintCrater(ctx: CanvasRenderingContext2D, c: CraterDraw, season
   if (px1 <= 0 || py1 <= 0 || px0 >= cw || py0 >= ch) return;
   FIELD.reset(px1 - px0, py1 - py0, zoom, originX + px0 / zoom, originY + py0 / zoom);
   const o = fillCrater(FIELD, c, season);
+  applyEarthworkSurface(FIELD,surface);
   blit(ctx, FIELD, season, o, px0, py0);
 }
 
@@ -594,7 +604,7 @@ export function fillFoxhole(f: EarthField, fx: FoxholeDraw, season: Season): Sha
   return { depthRef: depth * 0.75, old: false, seed, puddles: false, palette: FOXHOLE_PALETTES[season], warm: winter };
 }
 
-export function paintFoxhole(ctx: CanvasRenderingContext2D, fx: FoxholeDraw, season: Season, originX: number, originY: number, zoom: number): void {
+export function paintFoxhole(ctx: CanvasRenderingContext2D, fx: FoxholeDraw, season: Season, originX: number, originY: number, zoom: number, surface?: EarthworkSurface): void {
   const ext = foxholeExtentPx();
   const px0 = Math.floor((fx.x - ext - originX) * zoom), py0 = Math.floor((fx.y - ext - originY) * zoom);
   const px1 = Math.ceil((fx.x + ext - originX) * zoom), py1 = Math.ceil((fx.y + ext - originY) * zoom);
@@ -602,6 +612,7 @@ export function paintFoxhole(ctx: CanvasRenderingContext2D, fx: FoxholeDraw, sea
   if (px1 <= 0 || py1 <= 0 || px0 >= cw || py0 >= ch) return;
   FIELD.reset(px1 - px0, py1 - py0, zoom, originX + px0 / zoom, originY + py0 / zoom);
   const o = fillFoxhole(FIELD, fx, season);
+  applyEarthworkSurface(FIELD,surface);
   blit(ctx, FIELD, season, o, px0, py0);
 }
 
@@ -766,7 +777,7 @@ export function fillTrenches(f: EarthField, trenches: TrenchDraw[], season: Seas
 
 /** Paints all trenches overlapping the rectangle [originX, originX + w/zoom) x ... of `ctx`,
  * padded so shadows and banks crossing the canvas edge match the neighbouring chunk. */
-export function paintTrenches(ctx: CanvasRenderingContext2D, trenches: TrenchDraw[], season: Season, originX: number, originY: number, zoom: number): void {
+export function paintTrenches(ctx: CanvasRenderingContext2D, trenches: TrenchDraw[], season: Season, originX: number, originY: number, zoom: number, surface?: EarthworkSurface): void {
   if (!trenches.length) return;
   const cw = ctx.canvas.width, ch = ctx.canvas.height;
   const viewX1 = originX + cw / zoom, viewY1 = originY + ch / zoom;
@@ -785,6 +796,7 @@ export function paintTrenches(ctx: CanvasRenderingContext2D, trenches: TrenchDra
   const px1 = Math.ceil((x1 - originX) * zoom), py1 = Math.ceil((y1 - originY) * zoom);
   FIELD.reset(px1 - px0, py1 - py0, zoom, originX + px0 / zoom, originY + py0 / zoom);
   const o = fillTrenches(FIELD, trenches, season);
+  applyEarthworkSurface(FIELD,surface);
   blit(ctx, FIELD, season, o, px0, py0);
 }
 

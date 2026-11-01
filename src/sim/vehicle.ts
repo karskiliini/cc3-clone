@@ -1,3 +1,4 @@
+import { compressEarthworks, prepareEarthworkInterest, type EarthworkLoad } from './heightField';
 import { stepTrackPhysics, trackHasDrive, trackHullParams } from './trackPhysics';
 import { stepPassengerPhysics } from './passengerPhysics';
 import { stepMotorizedCrews, motorizedHold } from './motorizedCrew';
@@ -163,6 +164,7 @@ export function completeVehicleMovement(state: BattleState, rng: Rng, dt: number
   const body = v.body!, heading = v.hullFacing, relativeTurret = wrapAngle(v.turretFacing - heading);
   const sweep: AcceptedHullPoint[] = [{ pos: { ...v.pos }, heading, speedMs: 0 }];
   const poses: AcceptedHullPose[] = [], contacts: Vec2[] = [];
+  const earthworkLoads: EarthworkLoad[] = [];
   let acceptedSpeedMs = 0;
   const recordPose = () => {
     poses.push({ position: { ...body.position }, orientation: { ...body.orientation } });
@@ -193,6 +195,7 @@ export function completeVehicleMovement(state: BattleState, rng: Rng, dt: number
     appliedPullRadS: driverTicks.get(v)?.appliedTrackPullRadS ?? 0 }, model) : null;
   const rawDrive = actuation ? { speedMs: actuation.speedMs, yawRateRadS: actuation.differentialYawRadS, brake: actuation.brake } : requested;
   const contactInterest = prepareCrushableLineInterest(state.map);
+  const earthworkInterest = prepareEarthworkInterest(state.map);
   stepHullBody(body, def, rawDrive, groundProbe(state.map, 'tick'), dt, props.speedMul, (from, to) => {
     // At entry this is the complete accepted pose from the preceding substep.
     recordPose();
@@ -232,14 +235,17 @@ export function completeVehicleMovement(state: BattleState, rng: Rng, dt: number
     sweep.push(...points);
     acceptedSpeedMs = speedMs;
     return true;
-  }, contact => { contacts.push({ x: contact.point.x / TILE_M, y: contact.point.y / TILE_M }); },
-  point => contactInterest(point.x / TILE_M, point.y / TILE_M), trackHullParams(v, params));
+  }, contact => {
+    contacts.push({ x: contact.point.x / TILE_M, y: contact.point.y / TILE_M });
+    if(contact.kind === 'suspension' && contact.loadN) earthworkLoads.push({point:{...contact.point},loadNs:contact.loadN*.01});
+  },
+  point => contactInterest(point.x / TILE_M, point.y / TILE_M) || earthworkInterest(point.x / TILE_M, point.y / TILE_M), trackHullParams(v, params));
   if (towStep) {
     if (towStep.accept(body.position, body.orientation)) towStep.commit();
     else {
       // A rejected trailer rotation cancels this complete physical tick before effects.
       Object.assign(body, beforeTow!); body.velocity = { x: 0, y: 0, z: 0 }; body.angularVelocity = { x: 0, y: 0, z: 0 };
-      sweep.splice(1); poses.length = 0; contacts.length = 0; acceptedSpeedMs = 0; terrainBlocked = true;
+      sweep.splice(1); poses.length = 0; contacts.length = 0; earthworkLoads.length = 0; acceptedSpeedMs = 0; terrainBlocked = true;
     }
   }
   recordPose();
@@ -261,6 +267,7 @@ export function completeVehicleMovement(state: BattleState, rng: Rng, dt: number
     overrunFirst: def.turnRadiusM != null, checkMines: def.turnRadiusM == null,
   } : undefined);
   processAcceptedVehicleMovement(state, rng, v, def, live ? profile : undefined, sweep, poses, contacts, params);
+  compressEarthworks(state.map, earthworkLoads);
   syncVehicleOccupants(state, v);
   stepHullGameplay(state, rng, v, dt, recoveryApplied);
   const sample = driverTicks.get(v)?.local;

@@ -1,3 +1,4 @@
+import { earthworkCoverScale } from './heightField';
 // ============================================================================
 // cover.ts — directional cover model (spec §9). A tile's protection against
 // fire depends on the direction the fire is coming from: omnidirectional
@@ -19,7 +20,9 @@ export const BUNKER_COVER = 0.85;
 
 function omniCoverOf(map: GameMap, tx: number, ty: number, t: Terrain): number {
   if (map.bunkerId && map.bunkerId[ty * map.width + tx] >= 0) return BUNKER_COVER;
-  return OMNI_COVER[t] ?? TERRAIN_PROPS[t].cover;
+  const cover=OMNI_COVER[t] ?? TERRAIN_PROPS[t].cover;
+  const scale=t==='trench'||t==='crater'?earthworkCoverScale(map,tx,ty):1;
+  return scale===1?cover:.05+(cover-.05)*scale;
 }
 
 /** Omnidirectional cover value at a tile (spec §9's list), for display and tie-breaking. */

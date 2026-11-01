@@ -196,6 +196,7 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
   const field = state.map.heightField;
   h.int(field ? field.marksApplied : state.map.craterMarks?.length ?? 0);
   h.num(field?.version ?? 1); h.data(field?.directCraterEdits);
+  if(field?.earthworkEdits?.size) h.data([...field.earthworkEdits].sort((a,b)=>a[0]-b[0]));
   const buildings = state.map.physicalBuildings ?? computePhysicalBuildings(state.map);
   h.int(buildings.size);
   for (const [id, info] of [...buildings].sort((a, b) => a[0] - b[0])) { h.int(id); h.data(info); }

@@ -265,6 +265,8 @@ export interface HeightField {
   version: number;
   /** craterMarks already stamped into `dig` */
   marksApplied: number;
+  /** Canonical sparse earthwork edits: initial profile and current physical dig height. */
+  earthworkEdits?: Map<number, { original: number; dig: number }>;
   /** Direct API craters not sourced from map.craterMarks, in application order. */
   directCraterEdits?: { x: number; y: number; sizeM: number; marksApplied: number; revision: number }[];
 }

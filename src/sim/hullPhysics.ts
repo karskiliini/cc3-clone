@@ -86,7 +86,7 @@ export function applyHullImpulse(body: HullBody, impulse: Vec3, point: Vec3, def
 }
 
 /** Ephemeral observation of contact at an accepted pose. Never mutates the solver. */
-export interface HullContactObservation { point: Vec3; kind: 'suspension' | 'solid' }
+export interface HullContactObservation { point: Vec3; kind: 'suspension' | 'solid'; loadN?: number }
 
 /** One production tick, always ten 10 ms semi-implicit steps.
  * drive.yawRateRadS is the raw differential tread target here, not desired hull output. */
@@ -270,7 +270,7 @@ export function stepHullBody(body: HullBody, def: VehicleDef, drive: HullDrive, 
       const vn = dot(add(body.velocity, cross(body.angularVelocity, offset)), sample.normal);
       const magnitude = Math.max(0, k * clamp(separation, 0, suspension.travelM)
         + 10 * k * Math.max(0, separation - suspension.travelM) - c * vn);
-      if (magnitude > 0) observeContact({ point, kind: 'suspension' });
+      if (magnitude > 0) observeContact({ point, kind: 'suspension', loadN: magnitude });
     }
     const quietCandidate = !hasInput && loaded && stableSuspension
       && dot(body.velocity, body.velocity) < 0.005 * 0.005
