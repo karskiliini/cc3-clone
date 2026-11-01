@@ -435,8 +435,8 @@ export function aiDeploy(state: BattleState, side: Side, rng: Rng, battle: AIBat
     // Keep anchors off the MAP edge: natural formations (spawn.ts naturalFormation) spread several
     // tiles around the anchor; deployTeam lays each man out on his own passable, in-map tile, but an
     // anchor on the map's edge rows would still squash the shape against the edge.
-    // Interior zone edges are left alone (restricting those shifted AI deployment and harness
-    // balance for no benefit; deployTeam also clamps each soldier into the map).
+    // Interior zone edges remain usable: deployTeam folds every soldier inward to
+    // stay on passable tiles inside the side's deployment zone.
     const W = state.map.width, H = state.map.height;
     const zx0 = Math.max(zone.x, 0), zx1 = Math.min(zone.x + zone.w, W);
     const zy0 = Math.max(zone.y, 0), zy1 = Math.min(zone.y + zone.h, H);

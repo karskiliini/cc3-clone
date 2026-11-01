@@ -135,24 +135,29 @@ export class Battle {
       const x = Math.min(rawX, zone.x + zone.w - 1);
       const y = Math.min(rawY, zone.y + zone.h - 1);
       const mover = def.vehicleDefId ? 'vehicle' : 'infantry';
-      const pos = this.findPassableNear({ x, y }, mover);
+      const pos = this.findPassableNear({ x, y }, mover, zone);
       spawnTeam(this.state, def, side, pos, this.rng);
       i++;
     }
   }
 
-  private findPassableNear(p: Vec2, mover: 'infantry' | 'vehicle'): Vec2 {
+  private findPassableNear(p: Vec2, mover: 'infantry' | 'vehicle', zone: Rect): Vec2 {
     const bx = Math.floor(p.x), by = Math.floor(p.y);
-    if (isPassable(this.state.map, bx, by, mover)) return { x: bx + 0.5, y: by + 0.5 };
+    const legal = (x: number, y: number) => pointInRect({ x: x + 0.5, y: y + 0.5 }, zone)
+      && isPassable(this.state.map, x, y, mover);
+    if (legal(bx, by)) return { x: bx + 0.5, y: by + 0.5 };
     for (let r = 1; r < 10; r++) {
       for (let dx = -r; dx <= r; dx++) {
         for (let dy = -r; dy <= r; dy++) {
           const x = bx + dx, y = by + dy;
-          if (isPassable(this.state.map, x, y, mover)) return { x: x + 0.5, y: y + 0.5 };
+          if (legal(x, y)) return { x: x + 0.5, y: y + 0.5 };
         }
       }
     }
-    return p;
+    for (let y = Math.max(0, Math.floor(zone.y)); y < Math.min(this.state.map.height, zone.y + zone.h); y++)
+      for (let x = Math.max(0, Math.floor(zone.x)); x < Math.min(this.state.map.width, zone.x + zone.w); x++)
+        if (legal(x, y)) return { x: x + 0.5, y: y + 0.5 };
+    throw new Error('Deployment zone has no passable anchor');
   }
 
   sideIsAI(side: Side): boolean {
@@ -375,20 +380,28 @@ export class Battle {
     }
   }
 
-  /** Whether `deployTeam(teamId, pos)` would succeed now (the deploy screen checks a drop
-   * before submitting it). */
-  canDeployTeam(teamId: number, pos: Vec2): boolean {
-    if (this.state.phase !== 'deploy') return false;
+  /** Canonical per-man placement shared by drop validation, preview and application. */
+  deploymentPositions(teamId: number, pos: Vec2): Vec2[] | null {
+    if (this.state.phase !== 'deploy') return null;
     const team = this.state.teams.get(teamId);
-    if (!team) return false;
+    if (!team) return null;
     const zone = this.state.map.def.deployZones[team.side];
-    if (!pointInRect(pos, zone)) return false;
+    if (!pointInRect(pos, zone)) return null;
     const mover = team.vehicleId != null ? 'vehicle' : 'infantry';
-    return isPassable(this.state.map, Math.floor(pos.x), Math.floor(pos.y), mover);
+    if (!isPassable(this.state.map, Math.floor(pos.x), Math.floor(pos.y), mover)) return null;
+    const members = team.soldierIds.map(id => this.state.soldiers.get(id)).filter((s): s is Soldier => !!s);
+    return team.vehicleId != null ? members.map(() => ({ ...pos }))
+      : layoutTeamPositions(this.state.map, pos, members.map(s => s.formationOffset), zone);
+  }
+
+  /** A legal anchor alone is insufficient: every man must fit on allowed ground. */
+  canDeployTeam(teamId: number, pos: Vec2): boolean {
+    return this.deploymentPositions(teamId, pos) !== null;
   }
 
   deployTeam(teamId: number, pos: Vec2): boolean {
-    if (!this.canDeployTeam(teamId, pos)) return false;
+    const slots = this.deploymentPositions(teamId, pos);
+    if (!slots) return false;
     const team = this.state.teams.get(teamId)!;
 
     team.pos = { x: pos.x, y: pos.y };
@@ -405,10 +418,9 @@ export class Battle {
       }
     }
     const members = team.soldierIds.map((sid) => this.state.soldiers.get(sid)).filter((s): s is Soldier => !!s);
-    // Natural formation shape (spawn.ts), each man on his own passable tile.
-    const slots = team.vehicleId != null ? null : layoutTeamPositions(this.state.map, pos, members.map((s) => s.formationOffset));
+    // Apply the exact previewed formation only after the complete placement succeeds.
     members.forEach((s, i) => {
-      s.pos = slots ? slots[i] : { x: pos.x, y: pos.y };
+      s.pos = slots[i];
     });
     if (team.assignedVehicleIds?.length) alignMortarCarriers(this.state, team);
     return true;

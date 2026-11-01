@@ -83,6 +83,7 @@ Overlay screens (full 800×600, same chrome):
 - Elevation: not modeled (CC3 had it; we skip, stated non-goal for v1).
 - Victory locations: list of `{x, y, name, owner}` with flag sprite.
 - Deployment zones: rectangles per side.
+- **Deployment containment (2026-11-01, bug 060):** the zone restriction applies to every soldier, not only the team anchor. Manual drops, initial placement and Auto must lay out all dismounted members on distinct infantry-passable tiles inside their own allowed zone, with a half-tile body margin at its boundary. Fold edge formations inward rather than placing men in shaded neutral/enemy ground. Drag ghosts, valid/invalid feedback and applied positions must share the same deterministic placement calculation. If the full team cannot fit, reject the drop atomically and retain its previous positions. Mounted crew remain with their vehicle. Ordinary post-start movement is not restricted to deployment zones.
 - Map definition is code (`src/data/maps/*.ts`): a `paint(ctx)` DSL with helpers (`rect`, `road`, `building`, `woods`, `hedgeLine`) producing the terrain grid deterministically. Season selects palette.
 
 ### 6.2 Units

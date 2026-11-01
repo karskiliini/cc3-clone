@@ -1,4 +1,4 @@
-import type { BattleState, GameMap, Team, TeamDef, Side, Vec2, Soldier, Vehicle } from '@/shared/types';
+import type { BattleState, GameMap, Team, TeamDef, Side, Vec2, Soldier, Vehicle, Rect } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
 import { angleTo, facingFromAngle, vadd } from '@/shared/math';
@@ -186,12 +186,22 @@ export function formationPos(map: GameMap, anchor: Vec2, offset: Vec2): Vec2 {
 /** Infantry positions for a whole team at `anchor` + each offset, clamped inside the map, each on
  * its own passable tile: a slot on an impassable or already-taken tile moves to the nearest free
  * passable tile (keeping its sub-tile jitter), so deploy/spawn never stacks two men on a tile or
- * puts anyone off-map (where findPath returns [] and he would be stuck forever). */
-export function layoutTeamPositions(map: GameMap, anchor: Vec2, offsets: Vec2[]): Vec2[] {
+ * puts anyone off-map (where findPath returns [] and he would be stuck forever).
+ * With a deployment zone, keep every body inside it and return null if it cannot fit. */
+export function layoutTeamPositions(map: GameMap, anchor: Vec2, offsets: Vec2[]): Vec2[];
+export function layoutTeamPositions(map: GameMap, anchor: Vec2, offsets: Vec2[], zone: Rect): Vec2[] | null;
+export function layoutTeamPositions(map: GameMap, anchor: Vec2, offsets: Vec2[], zone?: Rect): Vec2[] | null {
   const used = new Set<number>();
   const out: Vec2[] = [];
-  const clampX = (x: number) => Math.min(Math.max(x, 0.5), map.width - 0.5);
-  const clampY = (y: number) => Math.min(Math.max(y, 0.5), map.height - 0.5);
+  // Keep a half-tile body margin at deployment boundaries, just as at map edges.
+  const minX = Math.max(0.5, zone ? zone.x + 0.5 : 0.5);
+  const maxX = Math.min(map.width - 0.5, zone ? zone.x + zone.w - 0.5 : map.width - 0.5);
+  const minY = Math.max(0.5, zone ? zone.y + 0.5 : 0.5);
+  const maxY = Math.min(map.height - 0.5, zone ? zone.y + zone.h - 0.5 : map.height - 0.5);
+  if (minX > maxX || minY > maxY) return null;
+  const clampX = (x: number) => Math.min(Math.max(x, minX), maxX);
+  const clampY = (y: number) => Math.min(Math.max(y, minY), maxY);
+  const legal = (p: Vec2) => p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY;
   for (const off of offsets) {
     const p = { x: clampX(anchor.x + off.x), y: clampY(anchor.y + off.y) };
     const tx = Math.floor(p.x), ty = Math.floor(p.y);
@@ -205,14 +215,30 @@ export function layoutTeamPositions(map: GameMap, anchor: Vec2, offsets: Vec2[])
           const x = tx + dx, y = ty + dy;
           if (x < 0 || y < 0 || x >= map.width || y >= map.height) continue;
           if (used.has(y * map.width + x) || !isPassable(map, x, y, 'infantry')) continue;
+          // Preserve the ordinary layout's jitter; clamp boundary tiles inward.
+          const candidate = r === 0 ? p : { x: x + 0.5 + (fx - 0.5) * 0.6, y: y + 0.5 + (fy - 0.5) * 0.6 };
+          if (zone) { candidate.x = clampX(candidate.x); candidate.y = clampY(candidate.y); }
+          if (zone && (!legal(candidate) || Math.floor(candidate.x) !== x || Math.floor(candidate.y) !== y)) continue;
           const d = dx * dx + dy * dy;
           if (d < bestD) {
             bestD = d;
-            // keep the slot's own position on its tile; elsewhere keep its sub-tile jitter, softened
-            chosen = r === 0 ? p : { x: x + 0.5 + (fx - 0.5) * 0.6, y: y + 0.5 + (fy - 0.5) * 0.6 };
+            chosen = candidate;
           }
         }
       }
+    }
+    if (!chosen && zone) {
+      // The nearest local rings may be blocked. Search the allowed area before
+      // rejecting, never fall back to a forbidden or occupied anchor tile.
+      let bestD = Infinity;
+      for (let y = Math.floor(minY); y <= Math.floor(maxY); y++) for (let x = Math.floor(minX); x <= Math.floor(maxX); x++) {
+        if (used.has(y * map.width + x) || !isPassable(map, x, y, 'infantry')) continue;
+        const candidate = { x: clampX(x + 0.5), y: clampY(y + 0.5) };
+        if (!legal(candidate) || Math.floor(candidate.x) !== x || Math.floor(candidate.y) !== y) continue;
+        const d = (candidate.x - p.x) * (candidate.x - p.x) + (candidate.y - p.y) * (candidate.y - p.y);
+        if (d < bestD) { chosen = candidate; bestD = d; }
+      }
+      if (!chosen) return null;
     }
     if (!chosen) chosen = { x: clampX(anchor.x), y: clampY(anchor.y) };
     used.add(Math.floor(chosen.y) * map.width + Math.floor(chosen.x));
@@ -377,7 +403,10 @@ export function spawnTeam(state: BattleState, def: TeamDef, side: Side, pos: Vec
   team.facing = facing;
   team.order = { type: 'defend', target: ahead, issuedAt: state.time };
   const offsets = naturalFormation(def, rng).map((o) => rotateOffset(o, baseHeading));
-  const positions = vehicle ? null : layoutTeamPositions(state.map, pos, offsets);
+  const positions = vehicle ? null : state.phase === 'deploy'
+    ? layoutTeamPositions(state.map, pos, offsets, state.map.def.deployZones[side])
+    : layoutTeamPositions(state.map, pos, offsets);
+  if (!vehicle && !positions) throw new Error(`No legal deployment formation for ${def.id}`);
   let totalExp = 0;
   def.soldiers.forEach((sd, i) => {
     // campaign identity (G1): uids come from the BattleConfig roster payload, in team order

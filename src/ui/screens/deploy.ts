@@ -28,8 +28,6 @@ import {
   updateCameraEdgeScrollAndKeys, makeDragPanState, makeEdgeScrollState, updateRightDragPan,
   updateModernDragPan, pickFriendlyTeamScreen, friendlyCentroid, type EdgeScrollState, type DragPanState,
 } from './battleInput';
-import { isPassable } from '@/sim/path';
-import { pointInRect } from '@/shared/math';
 import { BattleScreen } from './battle';
 const DRAG_THRESHOLD_PX = 5;
 /** Move-family orders accept Shift-click waypoint chaining. */
@@ -281,7 +279,6 @@ export class DeployScreen implements Screen {
     // cursor is a legal drop point, so the ghost/cursor can reflect it live.
     if (this.draggingTeamId != null) {
       const dropWorld = this.snappedDropPoint(cam, input.mouse);
-      const zone = map.def.deployZones[this.battle.playerSide()];
       const delta = this.groupDelta(cam, dropWorld);
       this.dragValidById.clear();
       this.dragInvalid = false;
@@ -289,8 +286,7 @@ export class DeployScreen implements Screen {
         const team = state.teams.get(id);
         if (!team) continue;
         const target = delta ? { x: Math.floor(team.pos.x) + delta.x + 0.5, y: Math.floor(team.pos.y) + delta.y + 0.5 } : dropWorld;
-        const mover = team.vehicleId != null ? 'vehicle' : 'infantry';
-        const ok = pointInRect(target, zone) && isPassable(map, Math.floor(target.x), Math.floor(target.y), mover);
+        const ok = this.battle.canDeployTeam(id, target);
         this.dragValidById.set(id, ok);
         if (id === this.draggingTeamId) this.dragInvalid = !ok;
       }
@@ -570,7 +566,8 @@ export class DeployScreen implements Screen {
     const drop = delta
       ? { x: Math.floor(team.pos.x) + delta.x + 0.5, y: Math.floor(team.pos.y) + delta.y + 0.5 }
       : dropCursor;
-    const tint = (this.dragValidById.get(team.id) ?? true) ? PALETTE.gold : PALETTE.red;
+    const slots = this.battle.deploymentPositions(team.id, drop);
+    const tint = slots ? PALETTE.gold : PALETTE.red;
     ctx.save();
     // Target tile outline, full strength so the snap point reads clearly.
     const tl = worldToScreen(cam, { x: Math.floor(drop.x), y: Math.floor(drop.y) });
@@ -579,10 +576,12 @@ export class DeployScreen implements Screen {
     ctx.lineWidth = 1;
     ctx.strokeRect(Math.round(tl.x) + 0.5, Math.round(tl.y) + 0.5, Math.max(1, Math.round(br.x - tl.x) - 1), Math.max(1, Math.round(br.y - tl.y) - 1));
     ctx.globalAlpha = 0.8;
+    let slot = 0;
     for (const sid of team.soldierIds) {
       const s = state.soldiers.get(sid);
       if (!s) continue;
-      const p = worldToScreen(cam, team.vehicleId != null ? drop : { x: drop.x + s.formationOffset.x, y: drop.y + s.formationOffset.y });
+      const pos = slots?.[slot++] ?? (team.vehicleId != null ? drop : { x: drop.x + s.formationOffset.x, y: drop.y + s.formationOffset.y });
+      const p = worldToScreen(cam, pos);
       ctx.fillStyle = tint;
       ctx.strokeStyle = 'rgba(0,0,0,0.9)';
       ctx.lineWidth = 1;
