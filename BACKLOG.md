@@ -11,7 +11,7 @@ Process requests in the order received. New requests are appended to the queue w
 Pushing to GitHub works again (since 2026-09-25); the earlier Zscaler push blocker no longer applies.
 ## Active
 
-**050 P2 — deterministic vehicle hull physics.** Implementation and task reviews are in progress on `codex/vehicles-3d-p2`; final routing, determinism, performance and balance acceptance remain open. The existing 044 M2 request stays queued. No new request changes this priority unless the user explicitly reprioritizes it.
+**050 P2 — deterministic vehicle hull physics.** Work is on `codex/vehicles-3d-p2`; final routing, determinism and balance acceptance remain open. **Performance optimization deferred by the user on 2026-11-01:** current performance is sufficient for now; resume additional profiling/optimization only when requested. Latest same-machine measurement: 40 moving vehicles, 2.59450 ms/tick on the Mac mini (report `docs/superpowers/reports/2026-11-01-p2-line-interest-performance.md`). The former 0.5 ms target remains a deferred aspiration and does not block proceeding with other work. This does not claim that the remaining P2 validation is complete. The existing 044 M2 request stays queued; other queue priorities are unchanged.
 
 
 
