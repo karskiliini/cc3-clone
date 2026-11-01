@@ -1,0 +1,26 @@
+{
+  "baseline": "a023795",
+  "engine": "v24.22.1",
+  "remoteHost": "teros-mac-mini.local",
+  "tests": {
+    "files": 19,
+    "passed": 348,
+    "command": "vitest run test/hull*.test.ts test/heightField.test.ts test/motorizedCrew.test.ts test/vehicleTow.test.ts test/mortarCarriers.test.ts --maxWorkers=2 --minWorkers=1"
+  },
+  "physicsToolsTypecheck": "passed",
+  "productionBuild": "passed",
+  "trace": {
+    "scenes": 3,
+    "ticksPerScene": 600,
+    "vehiclesPerScene": 4,
+    "beforeAfterByteIdentical": true,
+    "localM5MiniM2ByteIdentical": true,
+    "sha256": "cfa1693d01599ca3d36ab5f00bc77ad249e82f98fc441ad51e30eaf8277fea75"
+  },
+  "filesSha256": {
+    "src/sim/heightField.ts": "bfa74f49716994f1b12496fe228203f8bafad1411594fb3c51ed04e6b4d3ea43",
+    "test/hullCrushContacts.test.ts": "489a31fbae218bcfa1a215ba6922e9d0ecd65e42b8559091f1da71bde3f5465c"
+  },
+  "fullSuiteRerun": false,
+  "browserSuiteRerun": false
+}

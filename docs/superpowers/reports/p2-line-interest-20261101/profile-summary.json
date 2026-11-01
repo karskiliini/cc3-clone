@@ -1,0 +1,13 @@
+{
+  "engine": "v24.22.1",
+  "arch": "arm64",
+  "scene": "flat-awake",
+  "count": 40,
+  "warmup": 1000,
+  "ticks": 3000,
+  "profiledTiming": true,
+  "msPerTick": 2.9181338193333333,
+  "finalHash": 3544335981,
+  "awake": 40,
+  "asleep": 0
+}

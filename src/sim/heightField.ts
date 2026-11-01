@@ -676,6 +676,7 @@ function hasCrushableLineSource(ctx: FieldCtx, tx: number, ty: number): boolean 
 export function prepareCrushableLineInterest(map: GameMap): (x: number, y: number) => boolean {
   let field = getHeightField(map), version = field.version, ctx = ctxByField.get(field)!;
   const tiles = new Map<number, boolean>();
+  const regions = new Map<number, boolean | null>();
   const eligibleSample = (sample: number, weight: number): boolean => {
     if (weight <= 0) return false;
     const tx = Math.floor((sample % field.w) / field.res);
@@ -687,7 +688,44 @@ export function prepareCrushableLineInterest(map: GameMap): (x: number, y: numbe
   return (x, y) => {
     const current = getHeightField(map);
     if (current !== field || current.version !== version) {
-      field = current; version = field.version; ctx = ctxByField.get(field)!; tiles.clear();
+      field = current; version = field.version; ctx = ctxByField.get(field)!; tiles.clear(); regions.clear();
+    }
+    // Bilinear samples can reach one tile beyond the query tile; line sources
+    // reach one further tile. A source-free 5x5 region therefore proves that
+    // every positively weighted sample is ineligible, without computing weights.
+    // Dense source regions can also prove eligibility.
+    // Cache only finite in-map queries at the production sample resolution;
+    // outside/custom-resolution queries retain the exact path below.
+    if (field.res === HF_RES && Number.isFinite(x) && Number.isFinite(y)
+      && x >= 0 && y >= 0 && x < map.width && y < map.height) {
+      const tx = Math.floor(x), ty = Math.floor(y), key = ty * map.width + tx;
+      let possible = regions.get(key);
+      if (possible === undefined) {
+        possible = false;
+        outer: for (let yy = Math.max(0, ty - 2); yy <= Math.min(map.height - 1, ty + 2); yy++) {
+          for (let xx = Math.max(0, tx - 2); xx <= Math.min(map.width - 1, tx + 2); xx++) {
+            const terrain = map.tiles[yy * map.width + xx];
+            if (LINE_FEATURES.has(terrain) && TERRAIN_PROPS[terrain].crushable) {
+              possible = true; break outer;
+            }
+          }
+        }
+        if (possible) {
+          // Dense source regions also have an exact positive proof: each tile
+          // that can own an interpolation sample is itself a crushable source.
+          // Mixed regions keep the original weighted eligibility calculation.
+          dense: for (let yy = Math.max(0, ty - 1); yy <= Math.min(map.height - 1, ty + 1); yy++) {
+            for (let xx = Math.max(0, tx - 1); xx <= Math.min(map.width - 1, tx + 1); xx++) {
+              const terrain = map.tiles[yy * map.width + xx];
+              if (!LINE_FEATURES.has(terrain) || !TERRAIN_PROPS[terrain].crushable) {
+                possible = null; break dense;
+              }
+            }
+          }
+        }
+        regions.set(key, possible);
+      }
+      if (possible !== null) return possible;
     }
     // Only positively weighted sample owners matter here. Do not read/interpolate
     // base heights whose value the observer discards; retain all four exact weights.

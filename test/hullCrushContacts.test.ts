@@ -10,6 +10,7 @@ import { VEHICLE_DEFS } from '@/data/units';
 import { add, rotate } from '@/sim/hullMath';
 import { Rng } from '@/shared/rng';
 import { rig } from './hullPhysicsHelpers';
+import { TERRAIN_PROPS } from '@/sim/terrain';
 import type { Vec3 } from '@/shared/types';
 
 function fenceMap(diagonal = false) {
@@ -169,4 +170,45 @@ it('preserves filtered/unfiltered actual sources, fields and body through contac
     for(const key of ['ground','base','dig','height','canopy'] as const)expect(Buffer.from(b[key].buffer,b[key].byteOffset,b[key].byteLength).equals(Buffer.from(a[key].buffer,a[key].byteOffset,a[key].byteLength))).toBe(true);
     expect(states[1].map.tiles).toEqual(states[0].map.tiles);
   }
+});
+
+// Independent eligibility oracle: original four weighted samples and their
+// neighbouring line sources, without the source-free region shortcut.
+it('matches exact line eligibility across source halos, boundaries and terrain edits', () => {
+  const {map} = fenceMap(true), rng = new Rng(481);
+  map.width = 32; map.height = 32; map.tiles = new Array(32 * 32).fill('open');
+  const sources = ['fence', 'hedge', 'stonewall'] as const;
+  for (let i = 0; i < 25; i++) map.tiles[rng.int(0, map.tiles.length - 1)] = sources[i % sources.length];
+  map.heightField = buildHeightField(map);
+  const possible = prepareCrushableLineInterest(map);
+  const reference = (x: number, y: number) => {
+    const f = getHeightField(map), fx = x*f.res-.5, fy = y*f.res-.5;
+    const x0 = Math.max(0, Math.min(f.w-1, Math.floor(fx))), y0 = Math.max(0, Math.min(f.h-1, Math.floor(fy)));
+    const x1 = Math.min(f.w-1,x0+1), y1 = Math.min(f.h-1,y0+1);
+    const ax = Math.max(0,Math.min(1,fx-x0)), ay = Math.max(0,Math.min(1,fy-y0));
+    return [[x0,y0,(1-ax)*(1-ay)],[x1,y0,ax*(1-ay)],[x0,y1,(1-ax)*ay],[x1,y1,ax*ay]].some(([sx,sy,weight]) => {
+      if (weight <= 0) return false;
+      const tx = Math.floor(sx/f.res), ty = Math.floor(sy/f.res);
+      for (let yy = Math.max(0,ty-1); yy <= Math.min(map.height-1,ty+1); yy++) {
+        for (let xx = Math.max(0,tx-1); xx <= Math.min(map.width-1,tx+1); xx++) {
+          const t = map.tiles[yy*map.width+xx];
+          if ((t === 'fence' || t === 'hedge' || t === 'stonewall') && TERRAIN_PROPS[t].crushable) return true;
+        }
+      }
+      return false;
+    });
+  };
+  const check = () => {
+    for (let i=0;i<4000;i++) {
+      const x=rng.range(-1,map.width+1),y=rng.range(-1,map.height+1);
+      expect(possible(x,y)).toBe(reference(x,y));
+    }
+    for (let y=-.5;y<=map.height+.5;y+=.125) for (const x of [-.5,-0,0,.125,.875,1,1.125,map.width-.125,map.width,map.width+.5])
+      expect(possible(x,y)).toBe(reference(x,y));
+  };
+  check();
+  map.tiles[map.width+1]='fence';refreshTile(map,1,1);check();
+  map.tiles.fill('open');map.heightField=buildHeightField(map);check();
+  map.tiles.fill('fence');map.heightField=buildHeightField(map);check();
+  map.tiles[map.width+1]='open';refreshTile(map,1,1);check();
 });
