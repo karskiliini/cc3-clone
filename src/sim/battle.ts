@@ -1,3 +1,4 @@
+import { applyMultiplayerPolicy } from './multiplayerPolicy';
 import { stepDigging } from './digging';
 import { spawnMortarCarriers, alignMortarCarriers } from './mortarCarriers';
 import type {
@@ -106,6 +107,7 @@ export class Battle {
       results: null,
       tick: 0,
       speed: 1,
+      ...(config.multiplayer ? { deploymentReady:{german:false,soviet:false}, multiplayerPolicy: {active:true,speedVotes:{german:1,soviet:1},pausesUsed:{german:0,soviet:0},pauseOwner:null} } : {}),
     };
 
     for (const side of SIDES) {
@@ -160,6 +162,8 @@ export class Battle {
         if (legal(x, y)) return { x: x + 0.5, y: y + 0.5 };
     throw new Error('Deployment zone has no passable anchor');
   }
+
+  isReady(side:Side):boolean{return this.state.deploymentReady?.[side]??this.ready.has(side);}
 
   sideIsAI(side: Side): boolean {
     return this.controllers[side] === 'ai';
@@ -221,6 +225,8 @@ export class Battle {
 
   private applyCommand(cmd: Command): void {
     const state = this.state;
+    if(state.multiplayerPolicy?.active&&state.phase==='deploy'&&this.isReady(cmd.side)&&['order','deployTeam','autoDeploy'].includes(cmd.type))return;
+    if(applyMultiplayerPolicy(state,cmd.side,cmd))return;
     switch (cmd.type) {
       case 'order': {
         const team = state.teams.get(cmd.teamId);
@@ -250,9 +256,21 @@ export class Battle {
       case 'setSpeed':
         if (cmd.speed > 0 && Number.isFinite(cmd.speed)) state.speed = cmd.speed;
         return;
+      case 'takeoverAI': {
+        const peer=otherSide(cmd.side);
+        this.controllers[peer]='ai';state.controllerOverrides={...this.controllers};
+        if(state.multiplayerPolicy){state.multiplayerPolicy.active=false;state.multiplayerPolicy.pauseOwner=null;}
+        if(state.phase==='paused')state.phase='running';
+        if(state.phase==='deploy'){
+          aiDeploy(state,peer,this.rng,this);this.ready.add(peer);if(state.deploymentReady)state.deploymentReady[peer]=true;
+          if(SIDES.every(s=>this.controllers[s]==='ai'||this.isReady(s)))this.start();
+        }
+        return;
+      }
       case 'ready':
         this.ready.add(cmd.side);
-        if ((['german', 'soviet'] as Side[]).every((s) => this.controllers[s] === 'ai' || this.ready.has(s))) this.start();
+        if(state.deploymentReady)state.deploymentReady[cmd.side]=true;
+        if ((['german', 'soviet'] as Side[]).every((s) => this.controllers[s] === 'ai' || this.isReady(s))) this.start();
         return;
     }
   }

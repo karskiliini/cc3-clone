@@ -18,7 +18,9 @@ export type CommandBody =
   | { type: 'resume' }
   | { type: 'setSpeed'; speed: number }
   /** The side is ready to begin (deploy -> running once every human side is ready). */
-  | { type: 'ready' };
+  | { type: 'ready' }
+  /** Leave an online match locally; the opponent becomes AI in the same replayable battle. */
+  | { type: 'takeoverAI' };
 
 export type Command = CommandBody & {
   side: Side;

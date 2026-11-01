@@ -1327,6 +1327,7 @@ export interface SideState {
 export type Controller = 'human' | 'ai';
 
 export interface BattleConfig {
+  multiplayer?: boolean;
   mapId: string;
   /** The local viewer's side: the UI's perspective (selection, fog, own message log, debrief).
    * The sim never reads it; when `controllers` is absent this side is human and the other AI. */
@@ -1357,6 +1358,9 @@ export interface BattleConfig {
 }
 
 export interface BattleState {
+  deploymentReady?: Record<Side,boolean>;
+  multiplayerPolicy?: { active: boolean; speedVotes: Record<Side,number>; pausesUsed: Record<Side,number>; pauseOwner: Side|null };
+  controllerOverrides?: Record<Side,Controller>;
   config: BattleConfig;
   map: GameMap;
   phase: BattlePhase;

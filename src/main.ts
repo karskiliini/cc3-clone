@@ -2,6 +2,7 @@ import type { CursorKind } from '@/shared/types';
 import { createInput } from '@/engine/input';
 import { startLoop } from '@/engine/loop';
 import { cssCursorFor } from '@/render/cursor';
+import { handleOnlineInput,drawOnlineOverlay } from '@/ui/online';
 import { game } from '@/game';
 import { MainMenuScreen } from '@/ui/screens/mainMenu';
 
@@ -31,18 +32,20 @@ function logOnce(err: unknown): void {
 let lastCursorKind: CursorKind | null = null;
 
 startLoop((dt: number) => {
+  try { game.online?.update(performance.now()); } catch(err){logOnce(err);}
   const screen = game.screen;
   try {
-    screen.update(dt, input.state);
+    if(!handleOnlineInput(input.state))screen.update(dt, input.state);
   } catch (err) {
     logOnce(err);
   }
   try {
-    screen.draw(ctx);
+    game.screen.draw(ctx);
+    drawOnlineOverlay(ctx);
   } catch (err) {
     logOnce(err);
   }
-  const kind = screen.cursor?.() ?? 'arrow';
+  const kind = game.online?.blocked ? 'arrow' : game.screen.cursor?.() ?? 'arrow';
   if (kind !== lastCursorKind) {
     canvas.style.cursor = cssCursorFor(kind);
     lastCursorKind = kind;

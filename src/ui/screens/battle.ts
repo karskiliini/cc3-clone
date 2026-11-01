@@ -186,6 +186,7 @@ export class BattleScreen implements Screen {
     this.terrain = terrain ?? new TerrainRenderer(battle.state.map);
     this.combatMessages.setViewer(battle.playerSide());
     this.requestedSpeed = battle.state.speed ?? 1;
+    if(game.online?.battle===battle)this.netHealth=game.online.health;
   }
 
   /** Multiplayer: the network health shown as the red symbol in the top-right corner. */
@@ -199,7 +200,13 @@ export class BattleScreen implements Screen {
   /** Everything the player does to the battle goes through the command queue (item 042). */
   private command(body: CommandBody): void {
     if (this.replay) return; // a replay plays its log, nothing else
-    this.battle.submit(this.battle.playerSide(), body);
+    if(game.online?.battle===this.battle){
+      if(!game.online.issue(body)){
+        if(body.type==='order'&&this.paused)this.notice('Orders are disabled during a multiplayer pause.');
+        else if(body.type==='resume')this.notice('The player who paused can resume early; the pause ends automatically.');
+        else if(body.type==='pause')this.notice('No pauses remaining (three per player).');
+      }
+    }else this.battle.submit(this.battle.playerSide(), body);
   }
 
   /** A UI notice in the message column (never part of the sim state). */
@@ -316,7 +323,7 @@ export class BattleScreen implements Screen {
         this.command({ type: 'setSpeed', speed: game.settings.speed });
       }
       // always step: while paused no tick runs, but due commands (resume, orders) still apply
-      battle.step(dt * (state.speed ?? 1));
+      if(game.online?.battle!==battle)battle.step(dt * (state.speed ?? 1));
     }
 
     const selectableIds = new Set(battle.selectableTeams(battle.playerSide()).map((team) => team.id));
@@ -753,7 +760,7 @@ export class BattleScreen implements Screen {
 
     game.audio?.setPaused(this.paused || state.phase !== 'running');
     // while no tick runs (paused), this frame's commands apply now rather than next frame
-    battle.step(0);
+    if(game.online?.battle!==battle)battle.step(0);
     const viewer = battle.playerSide();
     // the other side's message chimes are not ours to hear
     const events = battle.drainEvents().filter((e) => e.kind !== 'message' || !e.side || e.side === viewer);

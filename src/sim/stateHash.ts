@@ -78,6 +78,9 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
   h.num(state.time);
   h.int(state.nextId);
   h.str(state.phase);
+  if(state.deploymentReady)h.data(state.deploymentReady);
+  if(state.multiplayerPolicy)h.data(state.multiplayerPolicy);
+  if(state.controllerOverrides)h.data(state.controllerOverrides);
   for (const s of state.soldiers.values()) {
     h.int(s.id);
     h.vec(s.pos);

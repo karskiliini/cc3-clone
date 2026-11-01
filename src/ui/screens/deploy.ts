@@ -97,12 +97,14 @@ export class DeployScreen implements Screen {
 
   /** Deployment moves, orders and Begin go through the command queue (item 042). */
   private command(body: CommandBody): void {
-    this.battle.submit(this.battle.playerSide(), body);
+    if(game.online?.battle===this.battle)game.online.issue(body);
+    else this.battle.submit(this.battle.playerSide(), body);
   }
 
   /** onEnter runs again when Options / the overview map hand control back: only the
    * first entry centres the camera on the deployment zone. */
   private entered = false;
+  private defaultsPlaced=false;
 
   onEnter(): void {
     if (this.entered) return;
@@ -116,10 +118,13 @@ export class DeployScreen implements Screen {
     // should point toward the enemy, not at the team's own feet (which left facing untouched).
     const enemyZone = map.def.deployZones[otherSide(this.battle.playerSide())];
     this.enemyCentre = { x: enemyZone.x + enemyZone.w / 2, y: enemyZone.y + enemyZone.h / 2 };
-    for (const team of this.battle.selectableTeams(this.battle.playerSide())) {
-      if (team.order) continue;
-      this.issueDefaultOrder(team);
-    }
+    this.ensureDefaults();
+  }
+
+  private ensureDefaults():void {
+    if(this.defaultsPlaced||game.online?.blocked)return;
+    for(const team of this.battle.selectableTeams(this.battle.playerSide()))if(!team.order)this.issueDefaultOrder(team);
+    this.defaultsPlaced=true;
   }
 
   /** Manual quickstart: "The Defend or Ambush orders are in effect by default."
@@ -165,8 +170,10 @@ export class DeployScreen implements Screen {
     const cam = game.cam;
     const map = this.battle.state.map;
     const state = this.battle.state;
+    this.ensureDefaults();
+    if(state.phase==='running'){game.setScreen(new BattleScreen(this.battle,this.terrain));return;}
     // no ticks run while deploying: this applies the deploy moves and orders queued so far
-    this.battle.step(0);
+    if(game.online?.battle!==this.battle)this.battle.step(0);
 
     if (this.quitConfirm) {
       this.updateQuitConfirm(input);
@@ -447,7 +454,7 @@ export class DeployScreen implements Screen {
     } else if (action === 'begin') {
       this.command({ type: 'ready' });
       game.audio?.play('click');
-      game.setScreen(new BattleScreen(this.battle, this.terrain));
+      if(game.online?.battle!==this.battle)game.setScreen(new BattleScreen(this.battle, this.terrain));
     } else if (action === 'map') {
       this.showMinimap = !this.showMinimap;
     } else if (action === 'options') {

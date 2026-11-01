@@ -38,6 +38,7 @@ import type { Command, CommandBody } from '@/sim/commands';
 import { hashState } from '@/sim/stateHash';
 import { SIM_DT, type BattleConfig, type Side } from '@/shared/types';
 import type { NetMessage, Transport, TurnHash } from './transport';
+import type { TurnHistory } from './relayProtocol';
 import type { NetHealth } from './netHealth';
 
 const SIDES: readonly Side[] = ['german', 'soviet'];
@@ -177,6 +178,9 @@ export class LockstepSession {
   /** The turn play last resumed at after a resync (a peer's request is not honoured again
    * within REQUEST_COOLDOWN_TURNS of it, so it cannot keep the host rebuilding). */
   private resumedTurn = -Infinity;
+  private pauseSinceTurn: number | null = null;
+  private autoResumeQueued = false;
+  private historyRestoring = false;
 
   constructor(opts: LockstepOptions) {
     this.battle = opts.battle;
@@ -205,7 +209,37 @@ export class LockstepSession {
   /** Queues a local command: it applies on both peers at the start of turn `turn + delay`
    * (or the next unsealed turn). Normalised through JSON, exactly as the peer receives it. */
   issue(body: CommandBody): void {
+    if(body.type==='resume')this.autoResumeQueued=true;
     this.outgoing.push(JSON.parse(JSON.stringify(body)) as CommandBody);
+  }
+
+  /** Flush already sealed input before the relay accepts a freeze acknowledgement. */
+  freezePoint():{turn:number;sealedTo:number}{
+    for(const t of this.unacked.keys())this.sendBundle(t);
+    return {turn:this.turn,sealedTo:this.sealedTo};
+  }
+
+  /** Unsealed local actions survive a room freeze/rejoin generation change. */
+  get pendingInput():CommandBody[]{return structuredClone(this.outgoing);}
+
+  /** A relay-proven complete history, not an untrusted opponent resync payload.
+   * Replay is sliced by update(); the room performs the two-client hash barrier. */
+  restoreHistory(history:TurnHistory):void {
+    if(!Number.isSafeInteger(history.turn)||history.turn<0||history.turn>1_000_000)throw new Error('Invalid recovery turn');
+    for(const side of SIDES){
+      if(!Number.isSafeInteger(history.sealedTo[side])||history.sealedTo[side]<history.turn-1||history.sealedTo[side]>1_000_000)throw new Error('Incomplete recovery bounds');
+    }
+    this.ownHistory=new Map(structuredClone(history.bundles[this.side]));
+    this.peerHistory=new Map(structuredClone(history.bundles[this.peer]));
+    this.bundles={german:new Map(),soviet:new Map()};
+    for(const side of SIDES){
+      const record=side===this.side?this.ownHistory:this.peerHistory;
+      for(let t=history.turn;t<=history.sealedTo[side];t++)this.bundles[side].set(t,record.get(t)??[]);
+    }
+    this.sealedTo=history.sealedTo[this.side];this.receivedTo=history.sealedTo[this.peer];
+    this.unacked.clear();this.localHashes.clear();this.remoteHashes.clear();this.latestHash=null;
+    this.turn=history.turn;this.status='resyncing';this.historyRestoring=true;this.pauseSinceTurn=null;this.autoResumeQueued=false;
+    this.rebuild={epoch:this.epoch,turn:history.turn,authorityTurns:this.peerHistory,battle:new Battle(structuredClone(this.config)),next:0};
   }
 
   /** Whether the session stopped: the battle ended (and is in sync), or recovery gave up. */
@@ -219,12 +253,16 @@ export class LockstepSession {
     return last && !last.recovered ? last : null;
   }
 
+  get pauseSecondsLeft():number|null{return this.pauseSinceTurn==null?null:Math.max(0,60-(this.turn-this.pauseSinceTurn)*SIM_DT);}
+
   /** Whether the next turn is due but waits for the peer's bundle. */
   get stalled(): boolean {
     return this.stallSince !== null;
   }
 
   /** How far a resync rebuild has got (0..1), or null when none is running. */
+  get rebuildTurn():number{return this.rebuild?.next??this.turn;}
+
   get resyncProgress(): number | null {
     if (this.status !== 'resyncing') return null;
     const r = this.rebuild;
@@ -244,7 +282,7 @@ export class LockstepSession {
   }
 
   private speed(): number {
-    return Math.max(1e-3, this.battle.state.speed ?? 1);
+    return this.battle.state.phase==='paused' ? 1 : Math.max(1e-3, this.battle.state.speed ?? 1);
   }
 
   /** Runs every turn due by `nowMs` whose bundles are in hand, or a slice of a resync rebuild;
@@ -279,6 +317,9 @@ export class LockstepSession {
     if (this.nextTurnAt === null) this.nextTurnAt = nowMs;
     let ran = 0;
     while (this.status === 'playing' && this.battle.state.phase !== 'ended' && nowMs >= this.nextTurnAt) {
+      const policy=this.battle.state.multiplayerPolicy;
+      if(policy?.active&&policy.pauseOwner===this.side&&this.pauseSinceTurn!=null&&!this.autoResumeQueued
+        &&this.turn-this.pauseSinceTurn>=600-this.delayTurns())this.issue({type:'resume'});
       this.seal(this.turn + this.delayTurns(), nowMs);
       if (!this.bundles[this.peer].has(this.turn)) {
         if (this.stallSince === null) {
@@ -339,10 +380,17 @@ export class LockstepSession {
       if (side === this.peer) this.bundles[side].delete(turn);
       else if (!this.unacked.has(turn)) this.bundles[side].delete(turn);
     }
+    const wasPaused=battle.state.phase==='paused';
     battle.advanceTick();
+    this.observePause(wasPaused,battle.state.phase==='paused',turn+1);
     this.turn = turn + 1;
     // hash every interval, and once more when the battle ends so the final state is compared too
     if (this.turn % this.hashInterval === 0 || battle.state.phase === 'ended') this.shareHash();
+  }
+
+  private observePause(before:boolean,after:boolean,turn:number):void {
+    if(!before&&after){this.pauseSinceTurn=turn-1;this.autoResumeQueued=false;}
+    if(!after){this.pauseSinceTurn=null;this.autoResumeQueued=false;}
   }
 
   private shareHash(): void {
@@ -503,13 +551,14 @@ export class LockstepSession {
     const report = this.reports[this.reports.length - 1];
     report.resumeTurn = turn;
     report.attempts++;
+    this.pauseSinceTurn=null;this.autoResumeQueued=false;
     this.rebuild = { epoch: this.epoch, turn, authorityTurns: peerTurns, battle: new Battle(structuredClone(this.config)), next: 0 };
   }
 
   /** One update's worth of resync work: (re)send what the peer may be missing, replay a slice. */
   private stepResync(nowMs: number): void {
     const r = this.rebuild;
-    if (nowMs - this.lastResyncSend >= this.resendMs) {
+    if (!this.historyRestoring && nowMs - this.lastResyncSend >= this.resendMs) {
       this.lastResyncSend = nowMs;
       if (!this.authority && !r) this.transport.send({ kind: 'resyncRequest', side: this.side, epoch: this.epoch, turn: this.turn });
       if (this.authority && this.payload && this.peerRebuiltHash === null) this.transport.send(this.payload);
@@ -525,13 +574,20 @@ export class LockstepSession {
         const tick = battle.state.tick ?? 0;
         for (const body of cmds ?? []) battle.submit(side, structuredClone(body), tick);
       }
+      const wasPaused=battle.state.phase==='paused';
       battle.advanceTick();
+      this.observePause(wasPaused,battle.state.phase==='paused',t+1);
       battle.drainEvents();
       this.stats.rebuiltTurns++;
     }
     if (r.next < r.turn && battle.state.phase !== 'ended') return;
     r.next = r.turn + 1;
-    this.adoptRebuilt(r, nowMs);
+    if(this.historyRestoring){
+      this.battle=r.battle;this.turn=r.turn;this.status='playing';this.historyRestoring=false;this.rebuild=null;
+      this.nextTurnAt=null;this.stallSince=null;this.onBattleReplaced?.(this.battle);
+      this.autoResumeQueued=[...this.ownHistory].some(([t,cmds])=>t>=this.turn&&cmds.some(c=>c.type==='resume'));
+      this.hashChain.push([this.turn,hashState(this.battle)]);
+    }else this.adoptRebuilt(r, nowMs);
   }
 
   /** Swaps the rebuilt battle in at the resume turn and reports its hash. */

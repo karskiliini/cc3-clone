@@ -1,0 +1,805 @@
+{
+  "errors": [],
+  "consoleErrors": [
+    "host: Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "guest: Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "guest: Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ],
+  "phases": [
+    {
+      "name": "room-joined",
+      "host": {
+        "screen": "rce",
+        "chain": [],
+        "rebuiltDrawn": false
+      },
+      "guest": {
+        "screen": "rce",
+        "chain": [],
+        "rebuiltDrawn": false
+      }
+    },
+    {
+      "name": "both-deployed-running",
+      "host": {
+        "screen": "ff",
+        "phase": "playing",
+        "message": "Waiting for the other player.",
+        "turn": 81,
+        "tick": 14,
+        "battlePhase": "running",
+        "side": "german",
+        "code": "GDADRG",
+        "status": "playing",
+        "progress": null,
+        "speed": 1,
+        "policy": {
+          "active": true,
+          "speedVotes": {
+            "german": 1,
+            "soviet": 1
+          },
+          "pausesUsed": {
+            "german": 0,
+            "soviet": 0
+          },
+          "pauseOwner": null
+        },
+        "ready": {
+          "german": true,
+          "soviet": true
+        },
+        "chain": [
+          [
+            10,
+            2469709999
+          ],
+          [
+            20,
+            2469709999
+          ],
+          [
+            30,
+            2469709999
+          ],
+          [
+            40,
+            3096288716
+          ],
+          [
+            50,
+            3096288716
+          ],
+          [
+            60,
+            775862460
+          ],
+          [
+            70,
+            492551746
+          ],
+          [
+            80,
+            2099687501
+          ]
+        ],
+        "reports": [],
+        "rebuiltDrawn": true
+      },
+      "guest": {
+        "screen": "ff",
+        "phase": "playing",
+        "message": "Waiting for the other player.",
+        "turn": 81,
+        "tick": 14,
+        "battlePhase": "running",
+        "side": "soviet",
+        "code": "GDADRG",
+        "status": "playing",
+        "progress": null,
+        "speed": 1,
+        "policy": {
+          "active": true,
+          "speedVotes": {
+            "german": 1,
+            "soviet": 1
+          },
+          "pausesUsed": {
+            "german": 0,
+            "soviet": 0
+          },
+          "pauseOwner": null
+        },
+        "ready": {
+          "german": true,
+          "soviet": true
+        },
+        "chain": [
+          [
+            10,
+            2469709999
+          ],
+          [
+            20,
+            2469709999
+          ],
+          [
+            30,
+            2469709999
+          ],
+          [
+            40,
+            3096288716
+          ],
+          [
+            50,
+            3096288716
+          ],
+          [
+            60,
+            775862460
+          ],
+          [
+            70,
+            492551746
+          ],
+          [
+            80,
+            2099687501
+          ]
+        ],
+        "reports": [],
+        "rebuiltDrawn": true
+      }
+    },
+    {
+      "name": "owner-controlled-pause",
+      "host": {
+        "screen": "ff",
+        "phase": "playing",
+        "message": "Waiting for the other player.",
+        "turn": 94,
+        "tick": 17,
+        "battlePhase": "paused",
+        "side": "german",
+        "code": "GDADRG",
+        "status": "playing",
+        "progress": null,
+        "speed": 1,
+        "policy": {
+          "active": true,
+          "speedVotes": {
+            "german": 1,
+            "soviet": 1
+          },
+          "pausesUsed": {
+            "german": 1,
+            "soviet": 0
+          },
+          "pauseOwner": "german"
+        },
+        "ready": {
+          "german": true,
+          "soviet": true
+        },
+        "chain": [
+          [
+            10,
+            2469709999
+          ],
+          [
+            20,
+            2469709999
+          ],
+          [
+            30,
+            2469709999
+          ],
+          [
+            40,
+            3096288716
+          ],
+          [
+            50,
+            3096288716
+          ],
+          [
+            60,
+            775862460
+          ],
+          [
+            70,
+            492551746
+          ],
+          [
+            80,
+            2099687501
+          ],
+          [
+            90,
+            4144794295
+          ]
+        ],
+        "reports": [],
+        "rebuiltDrawn": true
+      },
+      "guest": {
+        "screen": "ff",
+        "phase": "playing",
+        "message": "Waiting for the other player.",
+        "turn": 94,
+        "tick": 17,
+        "battlePhase": "paused",
+        "side": "soviet",
+        "code": "GDADRG",
+        "status": "playing",
+        "progress": null,
+        "speed": 1,
+        "policy": {
+          "active": true,
+          "speedVotes": {
+            "german": 1,
+            "soviet": 1
+          },
+          "pausesUsed": {
+            "german": 1,
+            "soviet": 0
+          },
+          "pauseOwner": "german"
+        },
+        "ready": {
+          "german": true,
+          "soviet": true
+        },
+        "chain": [
+          [
+            10,
+            2469709999
+          ],
+          [
+            20,
+            2469709999
+          ],
+          [
+            30,
+            2469709999
+          ],
+          [
+            40,
+            3096288716
+          ],
+          [
+            50,
+            3096288716
+          ],
+          [
+            60,
+            775862460
+          ],
+          [
+            70,
+            492551746
+          ],
+          [
+            80,
+            2099687501
+          ],
+          [
+            90,
+            4144794295
+          ]
+        ],
+        "reports": [],
+        "rebuiltDrawn": true
+      }
+    },
+    {
+      "name": "shared-speed-votes",
+      "host": {
+        "screen": "ff",
+        "phase": "playing",
+        "message": "Waiting for the other player.",
+        "turn": 128,
+        "tick": 47,
+        "battlePhase": "running",
+        "side": "german",
+        "code": "GDADRG",
+        "status": "playing",
+        "progress": null,
+        "speed": 1,
+        "policy": {
+          "active": true,
+          "speedVotes": {
+            "german": 2,
+            "soviet": 1
+          },
+          "pausesUsed": {
+            "german": 1,
+            "soviet": 0
+          },
+          "pauseOwner": null
+        },
+        "ready": {
+          "german": true,
+          "soviet": true
+        },
+        "chain": [
+          [
+            10,
+            2469709999
+          ],
+          [
+            20,
+            2469709999
+          ],
+          [
+            30,
+            2469709999
+          ],
+          [
+            40,
+            3096288716
+          ],
+          [
+            50,
+            3096288716
+          ],
+          [
+            60,
+            775862460
+          ],
+          [
+            70,
+            492551746
+          ],
+          [
+            80,
+            2099687501
+          ],
+          [
+            90,
+            4144794295
+          ],
+          [
+            100,
+            4101204019
+          ],
+          [
+            110,
+            2652592219
+          ],
+          [
+            120,
+            3421716186
+          ]
+        ],
+        "reports": [],
+        "rebuiltDrawn": true
+      },
+      "guest": {
+        "screen": "ff",
+        "phase": "playing",
+        "message": "Waiting for the other player.",
+        "turn": 128,
+        "tick": 47,
+        "battlePhase": "running",
+        "side": "soviet",
+        "code": "GDADRG",
+        "status": "playing",
+        "progress": null,
+        "speed": 1,
+        "policy": {
+          "active": true,
+          "speedVotes": {
+            "german": 2,
+            "soviet": 1
+          },
+          "pausesUsed": {
+            "german": 1,
+            "soviet": 0
+          },
+          "pauseOwner": null
+        },
+        "ready": {
+          "german": true,
+          "soviet": true
+        },
+        "chain": [
+          [
+            10,
+            2469709999
+          ],
+          [
+            20,
+            2469709999
+          ],
+          [
+            30,
+            2469709999
+          ],
+          [
+            40,
+            3096288716
+          ],
+          [
+            50,
+            3096288716
+          ],
+          [
+            60,
+            775862460
+          ],
+          [
+            70,
+            492551746
+          ],
+          [
+            80,
+            2099687501
+          ],
+          [
+            90,
+            4144794295
+          ],
+          [
+            100,
+            4101204019
+          ],
+          [
+            110,
+            2652592219
+          ],
+          [
+            120,
+            3421716186
+          ]
+        ],
+        "reports": [],
+        "rebuiltDrawn": true
+      }
+    },
+    {
+      "name": "tab-reloaded-rejoined",
+      "host": {
+        "screen": "ff",
+        "phase": "playing",
+        "message": "",
+        "turn": 142,
+        "tick": 61,
+        "battlePhase": "running",
+        "side": "german",
+        "code": "GDADRG",
+        "status": "playing",
+        "progress": null,
+        "speed": 1,
+        "policy": {
+          "active": true,
+          "speedVotes": {
+            "german": 2,
+            "soviet": 1
+          },
+          "pausesUsed": {
+            "german": 1,
+            "soviet": 0
+          },
+          "pauseOwner": null
+        },
+        "ready": {
+          "german": true,
+          "soviet": true
+        },
+        "chain": [
+          [
+            129,
+            1925378056
+          ],
+          [
+            130,
+            1454898042
+          ],
+          [
+            140,
+            3256580689
+          ]
+        ],
+        "reports": [],
+        "rebuiltDrawn": true
+      },
+      "guest": {
+        "screen": "ff",
+        "phase": "playing",
+        "message": "",
+        "turn": 144,
+        "tick": 63,
+        "battlePhase": "running",
+        "side": "soviet",
+        "code": "GDADRG",
+        "status": "playing",
+        "progress": null,
+        "speed": 1,
+        "policy": {
+          "active": true,
+          "speedVotes": {
+            "german": 2,
+            "soviet": 1
+          },
+          "pausesUsed": {
+            "german": 1,
+            "soviet": 0
+          },
+          "pauseOwner": null
+        },
+        "ready": {
+          "german": true,
+          "soviet": true
+        },
+        "chain": [
+          [
+            129,
+            1925378056
+          ],
+          [
+            130,
+            1454898042
+          ],
+          [
+            140,
+            3256580689
+          ]
+        ],
+        "reports": [],
+        "rebuiltDrawn": true
+      }
+    },
+    {
+      "name": "desync-recovered-visible",
+      "host": {
+        "screen": "ff",
+        "phase": "playing",
+        "message": "",
+        "turn": 151,
+        "tick": 70,
+        "battlePhase": "running",
+        "side": "german",
+        "code": "GDADRG",
+        "status": "playing",
+        "progress": null,
+        "speed": 1,
+        "policy": {
+          "active": true,
+          "speedVotes": {
+            "german": 2,
+            "soviet": 1
+          },
+          "pausesUsed": {
+            "german": 1,
+            "soviet": 0
+          },
+          "pauseOwner": null
+        },
+        "ready": {
+          "german": true,
+          "soviet": true
+        },
+        "chain": [
+          [
+            129,
+            1925378056
+          ],
+          [
+            130,
+            1454898042
+          ],
+          [
+            140,
+            3256580689
+          ],
+          [
+            150,
+            1298668361
+          ]
+        ],
+        "reports": [
+          {
+            "epoch": 1,
+            "recovered": true,
+            "attempts": 1
+          }
+        ],
+        "rebuiltDrawn": true
+      },
+      "guest": {
+        "screen": "ff",
+        "phase": "playing",
+        "message": "",
+        "turn": 151,
+        "tick": 70,
+        "battlePhase": "running",
+        "side": "soviet",
+        "code": "GDADRG",
+        "status": "playing",
+        "progress": null,
+        "speed": 1,
+        "policy": {
+          "active": true,
+          "speedVotes": {
+            "german": 2,
+            "soviet": 1
+          },
+          "pausesUsed": {
+            "german": 1,
+            "soviet": 0
+          },
+          "pauseOwner": null
+        },
+        "ready": {
+          "german": true,
+          "soviet": true
+        },
+        "chain": [
+          [
+            129,
+            1925378056
+          ],
+          [
+            130,
+            1454898042
+          ],
+          [
+            140,
+            3256580689
+          ],
+          [
+            150,
+            1298668361
+          ]
+        ],
+        "reports": [
+          {
+            "epoch": 1,
+            "recovered": true,
+            "attempts": 1
+          }
+        ],
+        "rebuiltDrawn": true
+      }
+    },
+    {
+      "name": "three-failed-rebuilds-actions",
+      "host": {
+        "screen": "ff",
+        "phase": "failed",
+        "message": "the rebuilt states kept disagreeing",
+        "turn": 162,
+        "tick": 81,
+        "battlePhase": "running",
+        "side": "german",
+        "code": "GDADRG",
+        "status": "failed",
+        "progress": null,
+        "speed": 1,
+        "policy": {
+          "active": true,
+          "speedVotes": {
+            "german": 2,
+            "soviet": 1
+          },
+          "pausesUsed": {
+            "german": 1,
+            "soviet": 0
+          },
+          "pauseOwner": null
+        },
+        "ready": {
+          "german": true,
+          "soviet": true
+        },
+        "chain": [
+          [
+            129,
+            1925378056
+          ],
+          [
+            130,
+            1454898042
+          ],
+          [
+            140,
+            3256580689
+          ],
+          [
+            150,
+            1298668361
+          ],
+          [
+            160,
+            2990952848
+          ]
+        ],
+        "reports": [
+          {
+            "epoch": 1,
+            "recovered": true,
+            "attempts": 1
+          },
+          {
+            "epoch": 2,
+            "recovered": false,
+            "attempts": 3,
+            "reason": "the rebuilt states kept disagreeing"
+          }
+        ],
+        "rebuiltDrawn": true
+      },
+      "guest": {
+        "screen": "ff",
+        "phase": "failed",
+        "message": "the rebuilt states kept disagreeing",
+        "turn": 162,
+        "tick": 81,
+        "battlePhase": "running",
+        "side": "soviet",
+        "code": "GDADRG",
+        "status": "failed",
+        "progress": null,
+        "speed": 1,
+        "policy": {
+          "active": true,
+          "speedVotes": {
+            "german": 2,
+            "soviet": 1
+          },
+          "pausesUsed": {
+            "german": 1,
+            "soviet": 0
+          },
+          "pauseOwner": null
+        },
+        "ready": {
+          "german": true,
+          "soviet": true
+        },
+        "chain": [
+          [
+            129,
+            1925378056
+          ],
+          [
+            130,
+            1454898042
+          ],
+          [
+            140,
+            3256580689
+          ],
+          [
+            150,
+            1298668361
+          ],
+          [
+            160,
+            2070095084
+          ]
+        ],
+        "reports": [
+          {
+            "epoch": 1,
+            "recovered": true,
+            "attempts": 1
+          },
+          {
+            "epoch": 2,
+            "recovered": false,
+            "attempts": 3,
+            "reason": "the rebuilt states kept disagreeing"
+          }
+        ],
+        "rebuiltDrawn": true
+      }
+    }
+  ],
+  "passed": true,
+  "localAI": true,
+  "forfeit": true,
+  "browsersStopped": true
+}

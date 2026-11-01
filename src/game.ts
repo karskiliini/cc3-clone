@@ -1,3 +1,4 @@
+import type { OnlineMatch } from '@/net/onlineMatch';
 import type { Screen, GameSettings, OperationState, BattleConfig, CampaignState } from '@/shared/types';
 import type { Battle } from '@/sim/battle';
 import type { Sfx } from '@/audio/sfx';
@@ -49,6 +50,7 @@ export class Game {
   campaign: CampaignState | null = null;
   battleConfig: BattleConfig | null = null;
   battle: Battle | null = null;
+  online: OnlineMatch | null = null;
 
   constructor() {
     this.settings = loadSettings();

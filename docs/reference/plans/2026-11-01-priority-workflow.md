@@ -21,8 +21,8 @@ capacity and preserve other jobs. Use immutable isolated inputs for long tests.
 | 2 | 052 physical broken tracks | Complete; physical cut/drive/render integration | Hit/mine breaks a particular link; loose chain moves over wheels/ground, can be dragged, loses that side's drive after sprocket disengagement; visible links and exact deterministic tests |
 | 3 | 054 terrain compression | Complete; accepted load/height/cover/art integration | Loaded accepted track/wheel contacts progressively compress holes/rims by vehicle weight and passes; height, cover and visuals agree; rejected movement creates no deformation |
 | 4 | 055 infantry digging | Complete; canonical sites/cover/tasks/animation/render integration | Eligible idle men dig visibly over time; orders/threats interrupt; persistent site depth/cover evolves deterministically and interacts with stage 3 |
-| 5 | 044 + 047b online multiplayer and recovery | Active: inspect lockstep and establish relay/lobby contract | Relay/browser transport, room join and forces/deployment, game UI, speed/pause policy, disconnect takeover/forfeit/rejoin, visible desync rebuild/failure/report flow, two browser/host verification |
-| 6 | 056 individual perception and human condition | Pending | Personal visual/acoustic contacts and delivered reports replace omniscient decisions; integrated pain/exertion/shock/exhaustion/sweat/tremor affect capability; hidden-state/viewer independence and exact replay tests |
+| 5 | 044 + 047b online multiplayer and recovery | Implementation complete; real relay/lobby/UI/recovery verified; public deployment left to user | Relay/browser transport, room join and forces/deployment, game UI, speed/pause policy, disconnect takeover/forfeit/rejoin, visible desync rebuild/failure/report flow, two browser/host verification |
+| 6 | 056 individual perception and human condition | Active: personal evidence and capability migration | Personal visual/acoustic contacts and delivered reports replace omniscient decisions; integrated pain/exertion/shock/exhaustion/sweat/tremor affect capability; hidden-state/viewer independence and exact replay tests |
 
 ## Stage 1: compartment implementation decisions
 
@@ -89,3 +89,13 @@ valid substitute for compartment occlusion. Render or model fixes belong to 051.
   M5 Node / M2 Node / Chromium 240 s SHA
   `88b31f0a2d26198b58615a6886d955f6400a08c532a989f671206b15c1d0c885`.
   Own browser/server stopped; no page errors.
+
+- Stage 044/047b implementation completed: native browser WebSocket and Node relay,
+  room/roster/deploy/UI, canonical pause/speed, disconnect/rejoin/AI/forfeit,
+  sliced history recovery/report/failure actions. Original 43 network tests and
+  final nine relay/policy tests pass; types/build; downloaded browser replay matches.
+  Two Chromium contexts pass the complete UI flow. Separate M5/M2 real LAN peers
+  match all 12 checkpoints over 120 ticks and repair injected desync. Owned servers
+  stopped. Public Internet hosting and cross-browser soak remain explicitly
+  unverified/user-deployed; see `docs/reference/multiplayer-protocol.md` and report
+  `docs/superpowers/reports/workflow-044-20261101/README.md`.

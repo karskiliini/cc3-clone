@@ -3,6 +3,7 @@ import { game } from '@/game';
 import { drawMetalButton, drawLabel, UI } from '@/ui/chrome';
 import { pointInRect } from '@/shared/math';
 import { drawMenuFrame, toMenuInput } from './common';
+import { OnlineLobbyScreen } from './onlineLobby';
 import { BattleSetupScreen } from './battleSetup';
 import { BootCampScreen } from './bootCampPicker';
 import { OperationScreen } from './operation';
@@ -25,9 +26,12 @@ export class MainMenuScreen implements Screen {
     { label: 'Boot Camp (Training)', rect: { x: 418, y: 222, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new BootCampScreen()) },
     { label: 'Operation', rect: { x: 434, y: 294, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OperationScreen()) },
     { label: 'History', rect: { x: 450, y: 366, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new HistoryScreen()) },
+    { label: 'Multiplayer', rect: { x: 482, y: 510, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OnlineLobbyScreen()) },
     { label: 'Options', rect: { x: 466, y: 438, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OptionsScreen(this, false)) },
   ];
   private hotIndex = -1;
+
+  onEnter():void{if(game.online){game.online.leave();game.online=null;}}
 
   update(_dt: number, input: InputState): void {
     if (input.clicks.length > 0) game.audio?.unlock?.();

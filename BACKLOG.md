@@ -11,7 +11,7 @@ Process requests in the order received. New requests are appended to the queue w
 Pushing to GitHub works again (since 2026-09-25); the earlier Zscaler push blocker no longer applies.
 ## Active
 
-**051 → 052 → 054 → 055 → 044/047b → 056 — user-requested implementation workflow (2026-11-01).** The user explicitly reprioritized these items and requested their implementation now as a workflow. **Active stage: 044/047b, online multiplayer and recovery; 051, 052, 054 and 055 complete.** Execution and evidence ledger: `docs/reference/plans/2026-11-01-priority-workflow.md`. Complete and verify each stage, commit/push it, then continue to the next without a new approval ceremony.
+**051 → 052 → 054 → 055 → 044/047b → 056 — user-requested implementation workflow (2026-11-01).** The user explicitly reprioritized these items and requested their implementation now as a workflow. **Active stage: 056, individual perception and human condition; 051, 052, 054, 055 and the 044/047b implementation complete. Public relay deployment/Internet acceptance remain with the user.** Execution and evidence ledger: `docs/reference/plans/2026-11-01-priority-workflow.md`. Complete and verify each stage, commit/push it, then continue to the next without a new approval ceremony.
 
 **050 P2 parked for this workflow.** Remaining routing/determinism/balance acceptance is not claimed complete. Performance optimization remains deferred at the user's request: current performance is sufficient for now; resume profiling/optimization only when requested. Latest measurement: 40 moving vehicles, 2.59450 ms/tick on the Mac mini (`docs/superpowers/reports/2026-11-01-p2-line-interest-performance.md`). The former 0.5 ms target does not block this workflow.
 
@@ -43,7 +43,7 @@ Done when: this goes through brainstorming into a written spec the user approves
 
 **047b — Feature: Desync recovery in the real game (remaining part of 047).**
 
-The session-level recovery is done (047 below). Remaining, after M2/M3 exist:
+Implemented 2026-11-01: the real-game overlay, rebuilt-battle handoff, report download, bounded failure actions, rejoin, local AI and forfeit. Verified through two Chromium contexts and separate M5/M2 LAN peers, focused failure regressions and offline report replay. Contract/evidence: `docs/reference/multiplayer-protocol.md`, `docs/superpowers/reports/workflow-044-20261101/README.md`. The originally listed UI requirements below are met; only conditional host snapshot transfer remains future scope:
 - the "Resynchronising… n %" overlay (`LockstepSession.resyncProgress`) and the battle screen drawing the rebuilt battle (`onBattleReplaced`);
 - on `status === 'failed'`: offer "Continue against AI" / "Rejoin" (M4/M5) and a "Download desync report" button instead of a frozen screen;
 - a browser check with two pages through the relay that forces a desync and shows the recovery and resumed play;
@@ -53,7 +53,7 @@ The session-level recovery is done (047 below). Remaining, after M2/M3 exist:
 
 Request: "plan multiplayer to the backlog. We should ponder 2 possibilities. 1) local games connecting to each other over internet, and 2) the game runs on a server and each player connects to the server and plays it." Both are evaluated in `docs/superpowers/plans/multiplayer.md`. The recommendation is deterministic lockstep over a WebSocket relay (option 1), with the authoritative server (option 2) kept as a later path for ranked play.
 
-Blocked on: nothing (042, 043, 045, 046 and 047's session-level recovery are done); next is M2. The user asked on 2026-10-05 ("lisää jonoon myös multiplayer mahdollisuus") to go ahead; the plan §8 questions were not answered, so work proceeds on the plan's recommended defaults, each easy to change later:
+Implementation M1–M5 complete (2026-11-01). Public hosting and different-network/full-battle acceptance remain external validation, not a completed deployment claim. The user asked on 2026-10-05 ("lisää jonoon myös multiplayer mahdollisuus") to go ahead; the plan §8 questions were not answered, so work proceeds on the plan's recommended defaults, each easy to change later:
 1. Mode: 1v1 (one human per side); co-op against the AI comes free through `controllers`.
 2. The AI stays available: AI takeover on disconnect.
 3. Lobby: six-character room codes shared out of band; no public lobby or ranking.
@@ -63,7 +63,7 @@ Blocked on: nothing (042, 043, 045, 046 and 047's session-level recovery are don
 7. Browsers: Chrome/Firefox/Node first; Safari is measured by the P5 check.
 8. Scope: single battles only; operations and campaigns stay single-player.
 
-Progress: **M1 done** (see the Completed table, row 044-M1); next is M2 (relay server and browser transport). Cross-browser play still needs 045.
+Progress: **M1–M5 implemented**, including real relay/browser transport, force/deploy UI, pause/speed, saved-token rejoin, local AI/forfeit and 047b recovery. Original 43 network tests plus nine final focused relay/policy tests, production build/types, real two-browser flow and exact M5/M2 LAN checkpoints pass. Run/deployment guide and limitations: `docs/reference/multiplayer-protocol.md`. Public Internet availability and Firefox/Safari online soak are not yet verified.
 
 Completion: plan milestones M1–M5 are met.
 - Two browsers on different networks choose their own forces and deploy.
