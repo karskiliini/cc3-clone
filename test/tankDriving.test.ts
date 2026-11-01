@@ -14,7 +14,7 @@ it('tanks drive long routes on real maps without stopping for waypoints they hav
     b.start();
     const st = b.state;
     // only one side's tanks, nobody else: pure driving
-    const tanks = [...st.teams.values()].filter((t) => t.side === 'german' && t.vehicleId != null && st.vehicles.get(t.vehicleId)!.defId !== 'sdkfz251');
+    const tanks = [...st.teams.values()].filter((t) => t.side === 'german' && t.supportForTeamId == null && t.vehicleId != null && st.vehicles.get(t.vehicleId)!.defId !== 'sdkfz251');
     for (const t of [...st.teams.values()]) if (!tanks.includes(t)) { for (const id of t.soldierIds) st.soldiers.delete(id); if (t.vehicleId != null) st.vehicles.delete(t.vehicleId); st.teams.delete(t.id); }
     const rng = new Rng(9);
     for (let leg = 0; leg < 2; leg++) {

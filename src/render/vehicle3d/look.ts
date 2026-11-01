@@ -11,6 +11,7 @@ import { isServiceable } from '@/sim/vehicleCrew';
 import { Quaternion, Vector3 } from 'three';
 import { VEHICLE_DEFS } from '@/data/units';
 import { TILT_RAD, type ViewCam } from './projection';
+import { cargoLocal, seatForSoldier, transportAction, transportLayout } from '../lightTransport';
 import { heightAt } from '@/sim/heightField';
 import { hullParams } from '@/data/vehiclePhysics';
 
@@ -24,7 +25,13 @@ export function recoilOf(veh: Vehicle, time: number): number {
   return t >= 0 && t < 1 ? (1 - t) * (1 - t) : 0;
 }
 
+export interface LightTransportVisuals {
+  occupants: { id: number; seat: Vec3; driver: boolean; side: string; facing?: number }[];
+  cargo?: Vec3;
+  time: number;
+}
 export interface VehicleLook {
+  lightTransport?: LightTransportVisuals;
   id: number;
   defId: string;
   posTiles: Vec2;
@@ -79,7 +86,7 @@ export function vehicleLook(veh: Vehicle, state: BattleState): VehicleLook {
   })) as { L: number; R: number } : undefined;
   const centreWheelTravelM = p?.contacts.flatMap((c, i) => !c.horn && Math.abs(c.local.x) <= CENTRELINE_WHEEL_EPS_M
     ? [{ yM: c.local.y, travelM: (veh.body!.suspensionTravel[i] ?? 0) - 0.35 * p.suspension.travelM }] : []);
-  return {
+  const look: VehicleLook = {
     ...(veh.body ? { bodyQuaternion: { ...veh.body.orientation }, worldCG: { ...veh.body.position } } : {}),
     ...(p ? { modelOriginLocal: { ...p.modelOriginLocal }, wheelTravelM, centreWheelTravelM } : {}),
     groundM: cachedGround(state, veh.pos),
@@ -90,6 +97,19 @@ export function vehicleLook(veh: Vehicle, state: BattleState): VehicleLook {
     turretLanding: veh.turretLanding ? { posTiles: { ...veh.turretLanding }, dirRad: veh.turretLandingDir ?? veh.turretFacing + 2.3 } : null,
     season: state.map.def.season, recoil: ko ? 0 : recoilOf(veh, state.time),
   };
+  const layout = transportLayout(def);
+  if (layout && !ko) {
+    const occupants: LightTransportVisuals['occupants'] = [];
+    for (const s of state.soldiers.values()) {
+      if (s.vehicleId !== veh.id || s.hatch || s.health === 'dead' || s.health === 'incapacitated') continue;
+      const seat = seatForSoldier(veh, s, layout);
+      if (seat) occupants.push({ id: s.id, seat, driver: veh.seats?.driver === s.id, side: s.side,
+        facing: layout.passengerFacing?.[layout.passengerSeats.indexOf(seat)] ?? 0 });
+    }
+    const action = [...state.teams.values()].map(t => t.crewWeapon && transportAction(t.crewWeapon)).find(a => a?.vehicleId === veh.id && ['loading', 'loaded', 'unloading'].includes(a.phase));
+    look.lightTransport = { occupants, time: state.time, ...(action ? { cargo: cargoLocal(look, layout, action, state.time) } : {}) };
+  }
+  return look;
 }
 
 export interface ModelNodes { hull: string; turret: string | null; winterHull: boolean; winterTurret: boolean }

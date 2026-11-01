@@ -1,0 +1,18 @@
+{
+  "errors": [],
+  "phases": [
+    "packing",
+    "boarding",
+    "loading",
+    "loaded",
+    "unloading",
+    "finished"
+  ],
+  "final": {
+    "time": 60.6,
+    "phase": "finished",
+    "weapon": "ready",
+    "aboard": 0
+  },
+  "maxAboard": 4
+}

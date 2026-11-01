@@ -28,7 +28,7 @@ export const WAIT_MAX_S = 45;
  * aboard is within BOARD_NEAR_TILES of it. */
 export const BOARD_STALL_S = 10;
 const BOARD_NEAR_TILES = 12;
-const boardProgress = new WeakMap<Vehicle, { aboard: number; at: number }>();
+// Boarding progress belongs to the canonical vehicle state (replay/desync coverage).
 /** A Move order ending this close to a transport (m, beyond half its length) means "get in". */
 export const MOUNT_ORDER_RADIUS_M = 2.5;
 /** Passengers firing over the sides of a halted transport. */
@@ -83,6 +83,11 @@ export function transportAt(state: BattleState, team: Team, pos: Vec2): Vehicle 
 
 /** Where the men queue: on the ground behind the rear door (tile coords). */
 export function doorSpot(state: BattleState, v: Vehicle, def: VehicleDef): Vec2 {
+  if (def.lightTransport) {
+    const a = def.lightTransport.access, p = hullToWorld(v, a.x, -a.y);
+    if (isPassable(state.map, Math.floor(p.x), Math.floor(p.y), 'infantry')) return p;
+    return besideHatch(state, v, def, 0);
+  }
   const door = vehicleLayout(def).doors[0];
   if (!door) return { ...v.pos };
   const p = hullToWorld(v, door.x, -(def.lengthM / 2 + BESIDE_HULL_M));
@@ -91,6 +96,7 @@ export function doorSpot(state: BattleState, v: Vehicle, def: VehicleDef): Vec2 
   return besideHatch(state, v, def, 0);
 }
 function doorOnHull(v: Vehicle, def: VehicleDef): Vec2 {
+  if (def.lightTransport) { const a = def.lightTransport.access; return hullToWorld(v, a.x * 0.5, -a.y); }
   const door = vehicleLayout(def).doors[0];
   return door ? hullToWorld(v, door.x, door.y + 0.9) : { ...v.pos };
 }
@@ -114,7 +120,7 @@ export function transportOrderHook(state: BattleState, team: Team, order: Order)
   }
   const moveLike = order.type === 'move' || order.type === 'moveFast';
   let v: Vehicle | null = null;
-  if (moveLike && canTeamMount(team)) {
+  if (moveLike && !order.onFoot && canTeamMount(team)) {
     v = order.mountVehicleId != null ? state.vehicles.get(order.mountVehicleId) ?? null : transportAt(state, team, order.target);
     if (v && (v.side !== team.side || !usable(v) || passengerCapacity(v) <= 0)) v = null;
     if (v && roomLeft(state, v) <= 0 && team.transportId !== v.id) v = null;
@@ -348,9 +354,9 @@ export function transportHolds(state: BattleState, v: Vehicle): boolean {
       }
     }
   }
-  if (!boarding) { v.waitingSince = undefined; boardProgress.delete(v); return false; }
-  const prog = boardProgress.get(v);
-  if (!prog || aboard > prog.aboard) boardProgress.set(v, { aboard, at: state.time });
+  if (!boarding) { v.waitingSince = undefined; delete v.boardingProgress; return false; }
+  const prog = v.boardingProgress;
+  if (!prog || aboard > prog.aboard) v.boardingProgress = { aboard, at: state.time };
   else if (state.time - prog.at >= BOARD_STALL_S && nearest > BOARD_NEAR_TILES) return false; // nobody is coming
   if (v.waitingSince == null) {
     v.waitingSince = state.time;
@@ -361,6 +367,7 @@ export function transportHolds(state: BattleState, v: Vehicle): boolean {
 
 /** Team-box word of a team that is boarding, riding or getting out, or null. */
 export function transportWord(state: BattleState, team: Team): 'Mounting' | 'Mounted' | 'Dismounting' | null {
+  if (team.mobility) return team.mobility.phase === 'driving' ? 'Mounted' : team.mobility.phase === 'unloading' ? 'Dismounting' : 'Mounting';
   if (team.transportId == null) return null;
   const v = state.vehicles.get(team.transportId);
   if (!v) return null;
@@ -393,7 +400,7 @@ export function stepTransport(state: BattleState, dt: number): void {
     stepUnload(state, v, def);
   }
   for (const team of state.teams.values()) {
-    if (team.transportId == null) continue;
+    if (team.mobility || team.transportId == null) continue;
     const v = state.vehicles.get(team.transportId);
     const def = v ? VEHICLE_DEFS[v.defId] : undefined;
     if (!v || !def) { team.transportId = undefined; continue; }

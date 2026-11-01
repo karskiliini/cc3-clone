@@ -284,6 +284,7 @@ export interface WeaponDef {
   /** Portable version when a crew MG's separate mount cannot be brought along. */
   unmountedWeaponId?: string;
   rangeM: number;             // max effective range in metres
+  transportMassKg?: number;   // optional gameplay towing load
   minRangeM?: number;         // mortars
   rate: number;               // shots per second (bursts count as shots)
   burst: number;              // rounds per trigger pull (1 for rifles)
@@ -709,6 +710,8 @@ export interface VehicleDef {
   layout?: VehicleLayoutDef;
   /** men it carries besides its crew (SdKfz 251: 10); absent = none */
   passengers?: number;
+  /** Light-carrier anchors in model-local metres: +x right, +y rear, +z up. Limits are gameplay estimates. */
+  lightTransport?: { driverSeat: Vec3; passengerSeats: Vec3[]; passengerFacing?: number[]; access: Vec2; cargo: Vec3; hitch: Vec3; towMaxKg: number };
 }
 
 /** A gunner's lay on one target (vehicles: sim/combat.ts; the same bracketing fields serve AT guns). */
@@ -889,6 +892,9 @@ export interface Vehicle {
   // ---- transport (sim/transport.ts) ----
   /** men riding as passengers (not crew), in boarding order */
   passengerIds?: number[];
+  towedTeamId?: number;
+  mobilityTeamId?: number;
+  boardingProgress?: { aboard: number; at: number };
   /** battle time the passenger door is busy until (one man at a time) */
   doorBusyUntil?: number;
   /** the passengers are getting out (orderly: through the door; else over the sides too) */
@@ -946,6 +952,8 @@ export interface Order {
   issuedAt: number;           // battle seconds
   /** Move/MoveFast onto a friendly transport with room: board it (sim/transport.ts) */
   mountVehicleId?: number;
+  /** Explicit ground continuation after a coordinated dismount; do not infer boarding at its endpoint. */
+  onFoot?: boolean;
   /** a transport's team: unload the passengers here and now */
   dismount?: boolean;
   /** Move/MoveFast/Sneak only: additional waypoints after `target`, placed by
@@ -1032,6 +1040,19 @@ export interface Team {
   aiObjective: Vec2 | null;
   /** the transport this team is boarding or riding in (sim/transport.ts) */
   transportId?: number;
+  /** Organic carrier assignment is persistent, unlike current boarding state. */
+  assignedVehicleIds?: number[];
+  supportForTeamId?: number;
+  mobility?: {
+    phase: 'packing' | 'boarding' | 'driving' | 'unloading';
+    order: Order;
+    vehicleIds: number[];
+    assignments: Record<number, number>;
+    startedAt: number;
+    unloadStartedAt?: number;
+    abort?: boolean;
+    tow?: boolean;
+  };
   /** crew-served weapon (mortar/HMG/AT gun) on the ground or carried; managed by sim/crewWeapon.ts */
   crewWeapon?: CrewWeaponState;
   /** B4: heavy MG crew — who carries the gun / tripod on the move. */
@@ -1050,6 +1071,13 @@ export interface Team {
 export type CrewWeaponPhase = 'packed' | 'settingUp' | 'ready' | 'packing';
 
 export interface CrewWeaponState {
+  transport?: {
+    vehicleId: number;
+    phase: 'loading' | 'loaded' | 'unloading' | 'coupling' | 'towed' | 'uncoupling';
+    startedAt: number;
+    until: number;
+    from: Vec2;
+  };
   weaponId: string;
   /** A separate physical load: the gunner cannot carry both gun and mount. */
   mount?: {

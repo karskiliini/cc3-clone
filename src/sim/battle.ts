@@ -1,3 +1,4 @@
+import { spawnMortarCarriers, alignMortarCarriers } from './mortarCarriers';
 import type {
   BattleConfig, BattleEvent, BattleReport, BattleState, Controller, Order, Rect, Side, Soldier,
   SoldierOutcome, Team, TeamOutcome, Vec2,
@@ -111,6 +112,8 @@ export class Battle {
       const defIds = config.forces[side] ?? [];
       this.autoDeployForce(side, zone, defIds);
     }
+
+    spawnMortarCarriers(this.state, this.rng);
 
     // AI-controlled sides deploy themselves. The sim visits sides in the fixed SIDES order, never
     // by the viewer: two clients watching different sides must consume the RNG identically.
@@ -407,6 +410,7 @@ export class Battle {
     members.forEach((s, i) => {
       s.pos = slots ? slots[i] : { x: pos.x, y: pos.y };
     });
+    if (team.assignedVehicleIds?.length) alignMortarCarriers(this.state, team);
     return true;
   }
 

@@ -135,7 +135,7 @@ export function vehicleDefAtlasName(defId: string, scale: 1 | 2, season: Season 
 /** Vehicles still waiting for their own Blender model are drawn as the closest existing one,
  * scaled to their own length, instead of not at all. A vehicle's own atlas wins as soon as it
  * exists. */
-export const VEHICLE_STAND_IN: Readonly<Record<string, string>> = {};
+export const VEHICLE_STAND_IN: Readonly<Record<string, string>> = { jeep: 'kubelwagen' };
 
 /** Crew weapons waiting for their own model, drawn as the closest existing one (none at present). */
 export const WEAPON_STAND_IN: Readonly<Record<string, string>> = {};

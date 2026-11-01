@@ -15,6 +15,20 @@ npm run build
 
 ## Controls
 
+- **Mortar transport:** mortar teams receive organic carriers by default: a Kettenkrad and
+  Kübelwagen for German teams, two Jeeps for Soviet teams. Select the mortar and issue
+  **Move Fast (X)** to its destination. Packing, equipment loading, boarding, driving,
+  dismounting and emplacement run in sequence; Move/Sneak remain ground movement.
+  Passengers use real seat capacity, so the complete 4–5-man mortar crew travels together.
+- **Gun towing:** park a compatible free light tractor near the gun, then give the gun crew
+  a **Move Fast** destination. The crew packs and couples the gun, the tractor tows it and
+  uncouples near the destination. Crewmen use available seats; any remaining gun crew follow
+  on foot. Heavy/incompatible guns remain hand-hauled. Towing limits are provisional gameplay
+  estimates. Changing the crew's order stops the sequence and dismounts safely.
+- Carrier animations include seated people, boarding, packed mortar/ammunition loading,
+  coupling and uncoupling, the articulated drawbar and gun wheels. Assigned drivers appear
+  as subordinate carrier teams in the roster and follow their mortar during deployment.
+
 Classic (as in the original) and modern controls coexist. There is never a default order: pick the
 order first (hotkey, order bar, or right-click menu), then click the target.
 

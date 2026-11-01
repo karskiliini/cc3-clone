@@ -1,0 +1,22 @@
+{
+  "baseline": "8e73810",
+  "fullSuite": {
+    "files": 194,
+    "passed": 1810,
+    "skipped": 2,
+    "failed": 0,
+    "host": "Mac mini",
+    "note": "Before final completed-action/driver-status and disappeared-carrier fixes; those validated in final focused run."
+  },
+  "finalFocused": {
+    "files": 6,
+    "passed": 83,
+    "failed": 0
+  },
+  "types": true,
+  "productionBuild": true,
+  "sourceAndTestFiles": 385,
+  "localRemoteSourceSha256": "9463417e7337a2f807c26c86d077821b75e853cf926b54e7399c965b8a4153c0",
+  "crossDeviceExactTicks": 600,
+  "crossDeviceTraceSha256": "1b88a4b2e4fd2afd7e5866a6f3a186327385991055cd29d9aeec46d2c36eddd8"
+}

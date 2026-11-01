@@ -17,7 +17,7 @@ import { VEHICLE_GUN_GEOMETRY } from '@/data/vehicleGunGeometry';
 import { VEHICLE_DEFS } from '@/data/units';
 import { teamBarColor } from '@/ui/hud/hudChrome';
 import { drawOrderMarkers } from '@/render/orderMarkers';
-import { CREW_LAYOUT, gunHaulers, crewServedClass, crewWeaponView, crewWeaponVisual, separateMgMount, weaponFramePoint } from '@/sim/crewWeapon';
+import { CREW_LAYOUT, gunHaulers, crewServedClass, crewWeaponView, crewWeaponVisual, separateMgMount, weaponFramePoint, towLengthM } from '@/sim/crewWeapon';
 import { FLASH_LIFE, TILE_M, TILE_PX } from '@/shared/types';
 import type { Vec2, Vehicle } from '@/shared/types';
 import { vehicleDamageView, vehicleLayout } from '@/sim/vehicleDamage';
@@ -39,6 +39,7 @@ import { snapToMuzzle } from '@/render/muzzleSnap';
 import { RECOIL_M, vehicleLook, vehiclePose, vehicleScreenPoint, projectVehicleWorldPoint, type VehicleLook } from '@/render/vehicle3d/look';
 import { vehicles3d, loadVehicleModels } from '@/render/vehicle3d';
 import { bladesFor, grassHandOver, type HullPatch } from '@/render/vehicle3d/grassField';
+import { actionProgress, boardingWorld, localWorld, transportAction, transportLayout } from '@/render/lightTransport';
 import { crushMapFor } from '@/render/grassCrush';
 import { seasonKey, tallGrowthAt } from '@/render/grassFx';
 
@@ -461,7 +462,18 @@ export function drawVehicleSprite(
   // damage looks: `hull.blown` (open turret ring) with `turret.blown` lying beside it,
   // `hull.trackL|R` for a thrown track (a live hull only; wrecks keep their burnt look)
   const hullVariant = turretBlown ? 'blown' : state === 'ok' && brokenTrack ? (brokenTrack === 'R' ? 'trackR' : 'trackL') : undefined;
-  drawVehiclePart(ctx, defId, 'hull', state, hullRad, hullRad, cx, cy, zoom, hullVariant, season);
+  const hullDrawn = drawVehiclePart(ctx, defId, 'hull', state, hullRad, hullRad, cx, cy, zoom, hullVariant, season);
+  if (!hullDrawn && defId === 'jeep') {
+    // Distinct Jeep fallback while WebGL is unavailable: short flat hood, open tub and four tyres.
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(hullRad); ctx.scale(10 * zoom, 10 * zoom);
+    ctx.fillStyle = '#252921';
+    for (const x of [-0.72, 0.72]) for (const y of [-1.02, 1.02]) ctx.fillRect(x - 0.12, y - 0.35, 0.24, 0.7);
+    ctx.fillStyle = state === 'ok' ? '#62674a' : '#343329'; ctx.fillRect(-0.63, -1.5, 1.26, 3);
+    ctx.fillStyle = '#333c2c'; ctx.fillRect(-0.49, -0.18, 0.98, 1.4);
+    ctx.fillStyle = '#a6ad94'; ctx.fillRect(-0.62, -0.27, 1.24, 0.06);
+    ctx.fillStyle = '#292c25'; ctx.fillRect(0.06, 1.38, 0.6, 0.24);
+    ctx.restore();
+  }
   if (vdef?.hasTurret) drawVehiclePart(ctx, defId, 'turret', state, turretRad, hullRad, tcx, tcy, zoom, turretBlown ? 'blown' : undefined, season, !!physicalTurret);
 }
 
@@ -619,6 +631,7 @@ function drawVehicleLookSprite(ctx: CanvasRenderingContext2D, cam: Camera, look:
 /** Vehicle bodies first (the 3D layer, or a vehicle's sprite while it has no model, without
  * WebGL, or with ?vehicles=sprites), then each vehicle's overlays on top. */
 let grass3d: ReadonlySet<number> = new Set();
+let carriersIn3d: ReadonlySet<number> = new Set();
 /** Vehicles that stood in 3D grass in the last drawn frame: GrassFx.drawStanding skips their 2D fringe. */
 export function vehiclesWithGrass3d(): ReadonlySet<number> { return grass3d; }
 
@@ -634,6 +647,7 @@ function drawVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
   const in3d: VehicleLook[] = [];
   const patches: HullPatch[] = [];
   grass3d = new Set();
+  carriersIn3d = new Set();
   gl?.scene.begin();
   for (const veh of state.vehicles.values()) {
     if (!isEnemyVisible(state, playerSide, veh.side, veh.id, true)) continue;
@@ -657,10 +671,12 @@ function drawVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
     gl.scene.grass.update(field.blades);
     // a lost context or a renderer failure mid-frame: this frame's 3D vehicles are drawn as sprites
     const ok = gl.out.draw(ctx, gl.scene, cam);
+    if (ok) carriersIn3d = new Set(in3d.map(look => look.id));
     if (!ok) for (const look of in3d) drawVehicleLookSprite(ctx, cam, look);
     grass3d = grassHandOver(patches.map((p) => p.id), field.dropped, ok);
   }
   for (const { veh, look } of shown) {
+    if (look.lightTransport && !carriersIn3d.has(veh.id)) drawCarrierFallback(ctx, cam, look);
     const p = vehicleScreenPoint(cam, look);
     const dmg = vehicleDamageView(veh);
     // a serviceable hull whose crew is outside keeps its live look, hatches open (spec §10)
@@ -669,6 +685,24 @@ function drawVehicles(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
     if (dmg.hatchesBlown && cam.zoom > 0.4) drawHatchFire(ctx, cam, state, veh, p, state.time);
     if (dmg.engineSmoke || dmg.engineFire) drawEngineSmoke(ctx, veh, vehicleScreenPoint(cam, look, { x: 0, y: (VEHICLE_DEFS[veh.defId]?.lengthM ?? 6) * 0.32, z: 0 }), state.time, cam.zoom, 0, dmg.engineFire);
     if (dmg.turretBlown && cam.zoom > 0.4) drawTurretRingFx(ctx, veh, vehicleScreenPoint(cam, look, VEHICLE_GUN_GEOMETRY[veh.defId]?.ring), state.time, cam.zoom);
+  }
+}
+
+/** Top-down seats/cargo share the 3D anchors when the browser cannot draw WebGL. */
+function drawCarrierFallback(ctx: CanvasRenderingContext2D, cam: Camera, look: VehicleLook): void {
+  const z = cam.zoom;
+  for (const o of look.lightTransport?.occupants ?? []) {
+    const p = vehicleScreenPoint(cam, look, o.seat);
+    ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(look.hullRad + (o.facing ?? 0));
+    ctx.fillStyle = o.side === 'german' ? '#62695c' : '#7a7651'; ctx.fillRect(-2.2 * z, -2 * z, 4.4 * z, 4 * z);
+    ctx.fillStyle = '#a18b6a'; ctx.fillRect(-z, -3 * z, 2 * z, 2 * z);
+    ctx.fillStyle = '#434c38'; ctx.beginPath(); ctx.arc(0, -2.5 * z, 1.7 * z, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+  }
+  if (look.lightTransport?.cargo) {
+    const p = vehicleScreenPoint(cam, look, look.lightTransport.cargo);
+    ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(look.hullRad);
+    ctx.fillStyle = '#726345'; ctx.fillRect(-5 * z, -2 * z, 3 * z, 5 * z); ctx.fillRect(2 * z, -2 * z, 3 * z, 5 * z);
+    ctx.strokeStyle = '#303a2c'; ctx.lineWidth = 2 * z; ctx.beginPath(); ctx.moveTo(0, -5 * z); ctx.lineTo(0, 4 * z); ctx.stroke(); ctx.restore();
   }
 }
 
@@ -758,6 +792,26 @@ export function crewSoldierDraws(state: BattleState): Map<number, CrewSoldierDra
     if (!cw) continue;
     const cls = crewServedClass(cw.weaponId);
     if (!cls) continue;
+    const transport = transportAction(cw);
+    if (transport) {
+      const vehicle = state.vehicles.get(transport.vehicleId);
+      const layout = vehicle && transportLayout(VEHICLE_DEFS[vehicle.defId]);
+      if (vehicle && layout && ['loading', 'unloading', 'coupling', 'uncoupling'].includes(transport.phase)) {
+        const hitch = localWorld(vehicleLook(vehicle, state), layout.hitch);
+        const at = { x: hitch[0] / TILE_M, y: hitch[2] / TILE_M };
+        const p = actionProgress(transport, state.time);
+        for (const sid of team.soldierIds.slice(0, 2)) {
+          const man = state.soldiers.get(sid);
+          if (!man || man.hatch || man.vehicleId != null || man.health === 'dead' || man.health === 'incapacitated' || crewFleeing(man)) continue;
+          const heading = Math.atan2(at.x - man.pos.x, -(at.y - man.pos.y));
+          const moving = man.path.length > 0;
+          const keys = moving ? ['crew.carry', 'standing.walk'] : transport.phase === 'coupling' || transport.phase === 'uncoupling' ? ['crew.haul', 'kneeling.reload', 'kneeling.idle'] : ['crew.tube', 'crew.loader', 'kneeling.reload', 'kneeling.idle'];
+          out.set(man.id, { pose: moving ? 'carryTube' : 'gunnerKneel', pos: man.pos, facing: facingFromAngle(heading), keys, progress: moving ? null : p, heading });
+        }
+      }
+      // The mounted crew and limbered gun have no serving stations on the ground.
+      continue;
+    }
     const gunner = state.soldiers.get(cw.gunnerId);
     const crew: Soldier[] = [];
     for (const id of team.soldierIds) {
@@ -869,6 +923,27 @@ function crewTeamVisible(state: BattleState, team: Team, playerSide: Side): bool
 /** Weapons on the ground (under the crew), their firing cues, and the zoom-0.5 weapon symbol.
  * Also snaps this frame's muzzle flashes / tracer origins from the gunner to the weapon muzzle
  * (render-local, muzzleSnap.ts: the renderer never writes BattleState). */
+function drawTowConnection(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, axle: Vec2, facing: number, weaponId: string, action: NonNullable<ReturnType<typeof transportAction>>): void {
+  const v = state.vehicles.get(action.vehicleId), layout = v && transportLayout(VEHICLE_DEFS[v.defId]);
+  if (!v || !layout) return;
+  const hitch = vehicleScreenPoint(cam, vehicleLook(v, state), layout.hitch);
+  const end = worldToScreen(cam, weaponFramePoint(axle, facing, { x: 0, y: towLengthM(weaponId) * 0.82 }));
+  const p = action.phase === 'towed' ? 1 : action.phase === 'uncoupling' ? 1 - actionProgress(action, state.time) : actionProgress(action, state.time);
+  ctx.save(); ctx.strokeStyle = '#3a4132'; ctx.lineWidth = Math.max(1, 2 * cam.zoom);
+  ctx.beginPath(); ctx.moveTo(end.x, end.y); ctx.lineTo(end.x + (hitch.x - end.x) * p, end.y + (hitch.y - end.y) * p); ctx.stroke();
+  ctx.fillStyle = '#252b23'; ctx.beginPath(); ctx.arc(hitch.x, hitch.y, 1.5 * cam.zoom, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+}
+function drawTowWheels(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, axle: Vec2, facing: number, vehicleId: number): void {
+  const v = state.vehicles.get(vehicleId), spin = -(v?.speed ?? 0) * state.time / 0.38;
+  ctx.save(); ctx.strokeStyle = '#92947a'; ctx.lineWidth = Math.max(0.7, cam.zoom);
+  for (const side of [-1, 1]) {
+    const p = worldToScreen(cam, weaponFramePoint(axle, facing, { x: side * 0.72, y: 0 }));
+    const r = 2.6 * cam.zoom;
+    for (let i = 0; i < 2; i++) { const a = spin + i * Math.PI / 2; ctx.beginPath(); ctx.moveTo(p.x - Math.cos(a) * r, p.y - Math.sin(a) * r * 0.6); ctx.lineTo(p.x + Math.cos(a) * r, p.y + Math.sin(a) * r * 0.6); ctx.stroke(); }
+  }
+  ctx.restore();
+}
+
 export function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleState, playerSide: Side): void {
   const px = (m: number) => (m / TILE_M) * 20 * cam.zoom; // metres -> screen px
   for (const team of state.teams.values()) {
@@ -877,6 +952,8 @@ export function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, stat
     if (!cw) continue;
     const cls = crewServedClass(cw.weaponId);
     if (!cls) continue;
+    const transport = transportAction(cw);
+    if (cls === 'mortar' && transport && ['loading', 'loaded', 'unloading'].includes(transport.phase)) continue;
     const teamVisible = crewTeamVisible(state, team, playerSide);
     if (teamVisible && separateMgMount(cw) && visible(cw.mount!.pos, cam)) {
       // Cull the left-behind mount at its own location, even when the light gun has gone
@@ -957,7 +1034,10 @@ export function drawCrewWeapons(ctx: CanvasRenderingContext2D, cam: Camera, stat
     // an MG whose mount is carried separately draws the gun and the mount with their carriers
     if (visual === 'tripod' && separateMgMount(cw)) continue;
     const p = worldToScreen(cam, pos);
-    drawWeaponState(ctx, cw.weaponId, weaponStateChain(visual), rot, p.x, p.y, cam.zoom);
+    const towed = cls === 'atgun' && transport && ['coupling', 'towed', 'uncoupling'].includes(transport.phase);
+    if (towed) drawTowConnection(ctx, cam, state, cw.pos, cw.facing, cw.weaponId, transport);
+    drawWeaponState(ctx, cw.weaponId, weaponStateChain(towed ? 'trailsClosed' : visual), rot, p.x, p.y, cam.zoom);
+    if (towed) drawTowWheels(ctx, cam, state, cw.pos, cw.facing, transport.vehicleId);
   }
   // PTRD rifles on their bipods in front of their prone gunners
   if (cam.zoom > 0.5) {
@@ -1014,7 +1094,7 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
   const draggedBy = new Map<number, Soldier>();
   for (const s of state.soldiers.values()) if (s.carrying && s.health !== 'dead') draggedBy.set(s.carrying.patientId, s);
   for (const s of state.soldiers.values()) {
-    if (s.vehicleId != null || s.dismembered) continue;
+    if ((s.vehicleId != null && !s.hatch) || s.dismembered) continue;
     // blast ragdolls (spec §4): the flight — of the dead too — is drawn here, above the vehicles
     const rag = s.blast ? ragdollPhase(s, state.time) : null;
     if (s.health === 'dead' && rag?.phase !== 'flight') continue;
@@ -1024,7 +1104,10 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
     // a stunned survivor lies in the pose he landed in until he can push himself up
     if (rag?.phase === 'landed' && drawRagdollLanded(ctx, cam, s, season)) continue;
     const crewDraw = s.health === 'incapacitated' ? undefined : crewDraws.get(s.id);
-    const p = worldToScreen(cam, crewDraw ? crewDraw.pos : s.pos);
+    const vehicle = s.hatch ? state.vehicles.get(s.hatch.vehicleId) : undefined;
+    const layout = vehicle && transportLayout(VEHICLE_DEFS[vehicle.defId]);
+    const boarding = vehicle && layout ? boardingWorld(s, vehicle, vehicleLook(vehicle, state), layout, state.time) : null;
+    const p = boarding ? projectVehicleWorldPoint(cam, boarding) : worldToScreen(cam, crewDraw ? crewDraw.pos : s.pos);
     const selected = selectedTeamIds.includes(s.teamId);
     if (s.id === watchedSoldierId) drawWatchBracket(ctx, p);
     const atlas = soldierAtlas(s.side, season, cam.zoom);

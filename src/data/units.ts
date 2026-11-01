@@ -77,19 +77,49 @@ export const VEHICLE_DEFS: Record<string, VehicleDef> = {
     mainWeaponId: 'flamewerfer', coaxWeaponId: 'coax_mg34', bowWeaponId: 'bow_mg34', hasTurret: true, crew: 3, mainAmmo: 60,
     layout: { transmission: 'front' },
   }),
+  // Seat, cargo and hitch anchors are provisional simulation estimates.
+  // Towing limits are estimated gameplay limits, not historical certification.
+  // Anchors use vehicle local metres: x right, y rearward, z above model ground.
   kettenkrad: v({
     id: 'kettenkrad', name: 'Kettenkrad SdKfz 2', kind: 'halftrack', lengthM: 3.0, widthM: 1.6,
     speedRoadMs: 12, speedOffroadMs: 6, turretTraverseDegS: 60, turretTraverseHandDegS: 60, hullTurnDegS: 0, turnRadiusM: 3.5,
     armor: { front: 0, side: 0, rear: 0, top: 0 },
-    mainWeaponId: null, coaxWeaponId: null, hasTurret: false, crew: 3, mainAmmo: 0,
+    mainWeaponId: null, coaxWeaponId: null, hasTurret: false, crew: 1, mainAmmo: 0, passengers: 2,
     layout: { transmission: 'front', openTop: true, bowMg: false },
+    lightTransport: {
+      driverSeat: { x: 0, y: -0.35, z: 0.78 },
+      passengerSeats: [{ x: -0.35, y: 0.65, z: 0.78 }, { x: 0.35, y: 0.65, z: 0.78 }],
+      passengerFacing: [Math.PI, Math.PI],
+      access: { x: 0.9, y: 0.65 }, cargo: { x: 0, y: 1.05, z: 0.7 },
+      hitch: { x: 0, y: 1.55, z: 0.4 }, towMaxKg: 1000,
+    },
   }),
   kubelwagen: v({
     id: 'kubelwagen', name: 'Kübelwagen Type 82', kind: 'halftrack', lengthM: 3.1, widthM: 1.6,
     speedRoadMs: 15, speedOffroadMs: 7, turretTraverseDegS: 60, turretTraverseHandDegS: 60, hullTurnDegS: 0, turnRadiusM: 4,
     armor: { front: 0, side: 0, rear: 0, top: 0 },
-    mainWeaponId: null, coaxWeaponId: null, hasTurret: false, crew: 4, mainAmmo: 0,
+    mainWeaponId: null, coaxWeaponId: null, hasTurret: false, crew: 1, mainAmmo: 0, passengers: 3,
     layout: { transmission: 'front', openTop: true, bowMg: false },
+    lightTransport: {
+      driverSeat: { x: -0.38, y: -0.4, z: 0.7 },
+      passengerSeats: [{ x: 0.38, y: -0.4, z: 0.7 }, { x: -0.38, y: 0.55, z: 0.7 }, { x: 0.38, y: 0.55, z: 0.7 }],
+      access: { x: 1, y: 0.25 }, cargo: { x: 0, y: 1.15, z: 0.85 },
+      hitch: { x: 0, y: 1.6, z: 0.4 }, towMaxKg: 650,
+    },
+  }),
+  // Provisional light utility Jeep: simulation envelope, seats and towing limit are estimates.
+  jeep: v({
+    id: 'jeep', name: 'Jeep', kind: 'halftrack', lengthM: 3.35, widthM: 1.58,
+    speedRoadMs: 17, speedOffroadMs: 7, turretTraverseDegS: 60, turretTraverseHandDegS: 60, hullTurnDegS: 0, turnRadiusM: 4,
+    armor: { front: 0, side: 0, rear: 0, top: 0 },
+    mainWeaponId: null, coaxWeaponId: null, hasTurret: false, crew: 1, mainAmmo: 0, passengers: 3,
+    layout: { transmission: 'front', openTop: true, bowMg: false },
+    lightTransport: {
+      driverSeat: { x: -0.38, y: -0.35, z: 0.7 },
+      passengerSeats: [{ x: 0.38, y: -0.35, z: 0.7 }, { x: -0.38, y: 0.6, z: 0.7 }, { x: 0.38, y: 0.6, z: 0.7 }],
+      access: { x: 1, y: 0.25 }, cargo: { x: 0, y: 1.2, z: 0.8 },
+      hitch: { x: 0, y: 1.72, z: 0.4 }, towMaxKg: 1250,
+    },
   }),
   sdkfz251_rocket: v({
     id: 'sdkfz251_rocket', name: 'SdKfz 251/1 (Wurfrahmen)', kind: 'halftrack', lengthM: 5.8, widthM: 2.1,
@@ -526,17 +556,12 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
   }),
   ger_kettenkrad: t({
     id: 'ger_kettenkrad', name: 'Kettenkrad', type: 'transport', side: 'german', years: ALL_YEARS, cost: 8,
-    soldiers: [
-      { rank: 'Gefr', weaponId: 'mp40' }, { rank: 'Schtz', weaponId: 'kar98k' }, { rank: 'Schtz', weaponId: 'kar98k' },
-    ],
+    soldiers: [{ rank: 'Gefr', weaponId: 'mp40' }],
     vehicleDefId: 'kettenkrad', iconId: 'halftrack',
   }),
   ger_kubelwagen: t({
     id: 'ger_kubelwagen', name: 'Kübelwagen', type: 'transport', side: 'german', years: ALL_YEARS, cost: 8,
-    soldiers: [
-      { rank: 'Gefr', weaponId: 'mp40' }, { rank: 'Schtz', weaponId: 'kar98k' },
-      { rank: 'Schtz', weaponId: 'kar98k' }, { rank: 'Schtz', weaponId: 'kar98k' },
-    ],
+    soldiers: [{ rank: 'Gefr', weaponId: 'mp40' }],
     vehicleDefId: 'kubelwagen', iconId: 'halftrack',
   }),
   ger_251_rocket: t({
@@ -622,6 +647,11 @@ export const TEAM_DEFS: Record<string, TeamDef> = {
       { rank: 'Ryad', weaponId: 'mosin' }, { rank: 'Ryad', weaponId: 'mosin' },
     ],
     iconId: 'mg',
+  }),
+  sov_jeep: t({
+    id: 'sov_jeep', name: 'Jeep', type: 'transport', side: 'soviet', years: ALL_YEARS, cost: 8,
+    soldiers: [{ rank: 'Ryad', weaponId: 'mosin' }],
+    vehicleDefId: 'jeep', iconId: 'halftrack',
   }),
   sov_mortar82: t({
     id: 'sov_mortar82', name: '82mm Mortar', type: 'mortar', side: 'soviet', years: ALL_YEARS, cost: 22,

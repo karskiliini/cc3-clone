@@ -45,6 +45,13 @@ export const VEHICLE_PHYSICS_PROVENANCE: Readonly<Record<string, ModelPhysics>> 
   hetzer: model('hetzer', 0.38, 1.82), flammpanzer3: model('german_medium(flammpanzer3)', 0.42, 1.55),
   kettenkrad: model('kettenkrad', 0.35, 0.78, 'halftrack'),
   kubelwagen: model('kubelwagen', 0.4, 0.98, 'wheeled'),
+  jeep: { driveKind: 'wheeled', clearanceM: 0.25, hullHeightM: 0.8, massT: 1.15, cgHeightM: 0.65,
+    provenance: {
+      geometry: estimate('provisional utility Jeep simulation envelope: 3.35 × 1.58 m footprint, belly 0.25 m, hull roof 1.05 m; not historically verified'),
+      driveKind: estimate('four-wheel utility vehicle; provisional four driven contacts, front steering'),
+      massT: estimate('provisional loaded simulation mass 1.15 t; not a verified historical specification'),
+      cgHeightM: estimate('provisional utility vehicle CG 0.65 m above ground'),
+    } },
   sdkfz251_rocket: model('sdkfz251_rocket/sdkfz251', 0.5, 1.74, 'halftrack', 8, 1.45),
   pz3j: model('german_medium(pz3j)', 0.42, 1.55), pz4f1: model('german_medium(pz4f1)', 0.42, 1.62),
   pz4gh: model('german_medium(pz4gh)', 0.42, 1.62), stug3g: model('stug3g', 0.42, 1.81),
@@ -76,12 +83,13 @@ function contactsFor(id: string, driveKind: DriveKind, widthM: number, lengthM: 
   }
   // Stable order: left then right; within each run front-to-rear supports then horns.
   if (driveKind === 'wheeled') {
-    // Actual procedural axle positions, expressed in sim's rear-positive local y.
+    // Procedural model axles (Jeep: provisional 2.04 m wheelbase), in rear-positive local y.
     const axles = id === 'kubelwagen' ? [-lengthM / 2 + 0.62, lengthM / 2 - 0.62]
+      : id === 'jeep' ? [-1.02, 1.02]
       : id === 'bm13' ? [-lengthM / 2 + 1.05, lengthM / 2 - 2.3, lengthM / 2 - 1.25]
       : [-0.36 * lengthM, 0.36 * lengthM]; // legacy fixture fallback
     for (const side of [-1, 1] as const)
-      for (let i = 0; i < axles.length; i++) point(side, side * 0.42 * widthM, axles[i], i === 0, i !== 0);
+      for (let i = 0; i < axles.length; i++) point(side, side * 0.42 * widthM, axles[i], i === 0, id === 'jeep' || i !== 0);
   } else {
     for (const side of [-1, 1] as const) {
       for (let i = 0; i < 6; i++) point(side, side * 0.42 * widthM,

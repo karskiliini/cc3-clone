@@ -1,0 +1,74 @@
+[
+  {
+    "unit": "ger_mortar81",
+    "motorized": false,
+    "seconds": 500.1,
+    "distanceM": 200,
+    "maxAboard": 0,
+    "ready": false,
+    "position": {
+      "x": 189.74938826551164,
+      "y": 98.22098665977137
+    }
+  },
+  {
+    "unit": "ger_mortar81",
+    "motorized": true,
+    "seconds": 87.5,
+    "distanceM": 200,
+    "maxAboard": 4,
+    "ready": true,
+    "position": {
+      "x": 198.14409139570571,
+      "y": 100.34308792153585
+    }
+  },
+  {
+    "unit": "sov_mortar82",
+    "motorized": false,
+    "seconds": 500.1,
+    "distanceM": 200,
+    "maxAboard": 0,
+    "ready": false,
+    "position": {
+      "x": 186.34156510606778,
+      "y": 98.78161035151231
+    }
+  },
+  {
+    "unit": "sov_mortar82",
+    "motorized": true,
+    "seconds": 72.8,
+    "distanceM": 200,
+    "maxAboard": 4,
+    "ready": true,
+    "position": {
+      "x": 198.30038096943025,
+      "y": 100.26811330846982
+    }
+  },
+  {
+    "unit": "sov_mortar120",
+    "motorized": false,
+    "seconds": 500.1,
+    "distanceM": 200,
+    "maxAboard": 0,
+    "ready": false,
+    "position": {
+      "x": 186.38065800865186,
+      "y": 98.3401130408331
+    }
+  },
+  {
+    "unit": "sov_mortar120",
+    "motorized": true,
+    "seconds": 74.7,
+    "distanceM": 200,
+    "maxAboard": 5,
+    "ready": true,
+    "position": {
+      "x": 198.05038096943025,
+      "y": 99.91811330846983
+    }
+  }
+]

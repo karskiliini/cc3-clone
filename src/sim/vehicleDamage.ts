@@ -69,6 +69,7 @@ function defaultHatches(def: VehicleDef, openTop: boolean): VehicleHatchDef[] {
  * turret the commander is also the gunner; a two-man crew's commander loads as well. */
 export function seatRoles(def: VehicleDef): CrewRole[] {
   const lay = vehicleLayout(def);
+  if (def.crew === 1) return ['driver'];
   if (!def.mainWeaponId) return def.crew >= 3 ? ['commander', 'driver', 'radioOp'] : ['commander', 'driver'];
   if (def.crew >= 5) return ['commander', 'gunner', 'loader', 'driver', 'radioOp'];
   if (def.crew === 4) return lay.twoManTurret ? ['commander', 'loader', 'driver', 'radioOp'] : ['commander', 'gunner', 'loader', 'driver'];

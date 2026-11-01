@@ -347,7 +347,7 @@ function isOrderedMove(team: Team, gunner: Soldier, cw: CrewWeaponState): boolea
   const ord = team.order;
   // Waiting at a transport door is still travel: keep the weapon packed through the queue.
   return !!ord && MOVE_ORDERS.has(ord.type) && ord.issuedAt >= cw.setAt
-    && (gunner.path.length > 0 || ord.mountVehicleId != null);
+    && (gunner.path.length > 0 || ord.mountVehicleId != null || team.mobility != null);
 }
 
 // ------------------------------------------------------------------ state
@@ -1056,7 +1056,7 @@ function haulGun(state: BattleState, team: Team, cw: CrewWeaponState, gunner: So
 export function isHaulingGun(state: BattleState, s: Soldier): boolean {
   const team = state.teams.get(s.teamId);
   const cw = team?.crewWeapon;
-  if (!cw || cw.abandoned || cw.phase !== 'packed' || cw.goal !== 'pack' || crewServedClass(cw.weaponId) !== 'atgun') return false;
+  if (!cw || cw.transport || cw.abandoned || cw.phase !== 'packed' || cw.goal !== 'pack' || crewServedClass(cw.weaponId) !== 'atgun') return false;
   return gunHaulers(state, team!, cw).some((h) => h.id === s.id);
 }
 
@@ -1218,6 +1218,10 @@ export function stepCrewWeapons(state: BattleState, dt: number): void {
   for (const s of state.soldiers.values()) s.carryingMgMount = undefined;
   for (const team of state.teams.values()) {
     if (team.crewWeapon?.destroyed) continue; // item 028: smashed by an overrun — inert forever
+    if (team.crewWeapon?.transport) {
+      for (const id of team.soldierIds) { const s = state.soldiers.get(id); if (s) s.fireTimer = Math.max(s.fireTimer, dt + 0.01); }
+      continue;
+    }
     // riding in a transport with the weapon packed: it goes where its gunner goes
     if (team.transportId != null && team.crewWeapon) {
       const g = state.soldiers.get(team.crewWeapon.gunnerId);

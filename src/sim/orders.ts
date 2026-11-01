@@ -1,3 +1,4 @@
+import { requestMotorizedCrew } from './motorizedCrew';
 import { tryRemountOrder } from './vehicleCrew';
 import { transportOrderHook } from './transport';
 import type { BattleState, Team, Order, Side, Soldier, Vec2 } from '@/shared/types';
@@ -496,7 +497,7 @@ function releaseDelayedOrders(state: BattleState, rng: Rng): void {
 export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rng, own = false): void {
   // C4: a Move Fast whose target lands on/near a spotted enemy is an ASSAULT — the team
   // charges at moveFast pace with weapons ready; grenades free-throw once in range.
-  if (order.type === 'moveFast' && team.vehicleId == null) {
+  if (order.type === 'moveFast' && team.vehicleId == null && !['mortar', 'atgun', 'rocket'].includes(team.type)) {
     const spotted = spottedEnemyTeamNear(state, team.side, order.target);
     if (spotted != null) order = { ...order, type: 'assault', targetTeamId: spotted };
   }
@@ -506,7 +507,7 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
   if (team.outOfAction) return;
   // a Move order onto a friendly transport is a mount order; any other order gets a riding team
   // out first; a transport's Dismount order unloads it (sim/transport.ts)
-  if (transportOrderHook(state, team, order) === 'handled') return;
+  if (!team.mobility && transportOrderHook(state, team, order) === 'handled') return;
 
   const isVehicleTeam = team.vehicleId != null;
   // team.outOfAction lags a tick behind a kill (morale.ts refreshes it); a burning/knocked-out/
@@ -607,6 +608,7 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
   // crew-served weapons: a move order starts the pack-up tasks, a fire order the chain onto the
   // new target (spec 2026-09-17 §6)
   if (!isVehicleTeam) onCrewOrder(state, team, type);
+  if (!own) requestMotorizedCrew(state, team, order);
 }
 
 // ------------------------------------------------------------------ attack-unit fire orders

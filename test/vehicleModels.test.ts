@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createJeepModel } from '@/render/vehicle3d/jeep';
 import { VEHICLE_DEFS } from '@/data/units';
 
 const DIR = path.resolve(__dirname, '../public/models');
@@ -23,7 +24,10 @@ function nodeTris(g: any, nodeName: string): number {
 
 describe('vehicle models', () => {
   it('every vehicle def has a model entry', () => {
-    for (const id of Object.keys(VEHICLE_DEFS)) expect(manifest.vehicles[id], id).toBeTruthy();
+    for (const id of Object.keys(VEHICLE_DEFS)) {
+      if (id === 'jeep') { const model = createJeepModel(); expect(model.nodes.has('hull_ok')).toBe(true); expect(model.wheels).toHaveLength(4); }
+      else expect(manifest.vehicles[id], id).toBeTruthy();
+    }
   });
   for (const [id, m] of Object.entries<any>(manifest.vehicles)) {
     it(`${id}: nodes, budgets, size, pivot`, () => {

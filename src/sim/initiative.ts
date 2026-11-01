@@ -42,6 +42,7 @@ export function stepSubordinateInitiative(state: BattleState, rng: Rng, side: Si
   const playerSide: Side = side;
 
   for (const team of state.teams.values()) {
+    if (team.supportForTeamId != null || team.mobility) continue;
     if (team.side !== playerSide || team.outOfAction) continue;
     const leader = state.soldiers.get(team.leaderId);
     if (!leader || leader.health === 'dead' || leader.health === 'incapacitated') continue;

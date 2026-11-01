@@ -5,6 +5,7 @@
 // shadow root with a flat black material. Pure scene graph: tested in Node.
 // ============================================================================
 import { BackSide, DirectionalLight, DoubleSide, Group, HemisphereLight, Matrix4, Quaternion, Vector3, Mesh, MeshBasicMaterial, Scene } from 'three';
+import { LightTransportScene } from './lightTransportScene';
 import type { ModelSource, VehicleModel } from './models';
 import { CENTRELINE_WHEEL_EPS_M, RECOIL_M, modelNodes, vehiclePose, type VehicleLook } from './look';
 import { shadowMatrix, SUN_TO } from './projection';
@@ -27,7 +28,7 @@ const RIM_MAT = new MeshBasicMaterial({ color: 0x000000, side: BackSide, transpa
 const SHADOW_MAP_PX = 4096;
 
 interface Part { group: Group; meshes: Map<string, Mesh>; rims: Map<string, Mesh>; shadowGroup: Group; shadowMeshes: Map<string, Mesh> }
-interface Instance { model: VehicleModel; hull: Part; turret: Part; gun: Part; wheelsL: Part; wheelsR: Part; wheels: Map<number, Part>; used: boolean }
+interface Instance { transport: LightTransportScene; model: VehicleModel; hull: Part; turret: Part; gun: Part; wheelsL: Part; wheelsR: Part; wheels: Map<number, Part>; used: boolean }
 
 export class VehicleScene {
   readonly scene = new Scene();
@@ -74,9 +75,11 @@ export class VehicleScene {
     let it = this.inst.get(look.id);
     if (!it || it.model !== model) {
       if (it) this.dispose(it);
-      it = { model, hull: this.part(), turret: this.part(), gun: this.part(), wheelsL: this.part(), wheelsR: this.part(), wheels: new Map(), used: false };
+      it = { transport: new LightTransportScene(), model, hull: this.part(), turret: this.part(), gun: this.part(), wheelsL: this.part(), wheelsR: this.part(), wheels: new Map(), used: false };
       this.inst.set(look.id, it);
+      it.hull.group.add(it.transport.group);
     }
+    it.transport.update(look.lightTransport);
     const names = modelNodes(look, new Set(model.nodes.keys()), model.winterNodes !== null);
     const pose = vehiclePose(look, model.hasTurret, model.turretPivotM, model.turretPivot3M);
     this.show(it.hull, model, names.hull, names.winterHull);
@@ -193,6 +196,7 @@ export class VehicleScene {
   }
 
   private dispose(it: Instance): void {
+    it.transport.dispose();
     for (const p of [it.hull, it.turret, it.gun, it.wheelsL, it.wheelsR]) { p.group.removeFromParent(); p.shadowGroup.removeFromParent(); }
   }
 }

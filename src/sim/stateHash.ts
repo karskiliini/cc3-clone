@@ -97,6 +97,7 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
     h.str(s.mind.state);
     h.num(s.mind.stress);
     h.int(s.vehicleId ?? -1);
+    h.data(s.seat); h.data(s.hatch); h.data(s.crewTask);
   }
   for (const v of state.vehicles.values()) {
     h.int(v.id);
@@ -140,6 +141,7 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
     }
     h.num(v.gunElevationRad ?? 0);
     h.data(v.navigation);
+    h.data(v.passengerIds); h.data(v.unloading); h.data(v.doorBusyUntil); h.data(v.boardingProgress); h.data(v.towedTeamId); h.data(v.mobilityTeamId); h.data(v.seats);
     h.int(v.path.length); for (const point of v.path) h.vec(point);
     // Physical driver and gun ownership gates affect the next accepted pose.
     for (const key of ['targetVehicleId', 'targetSoldierId', 'targetPoint', 'holdUntil', 'blockedSince',
@@ -152,9 +154,10 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
     h.int(t.id);
     h.vec(t.pos);
     h.str(t.status);
+    h.data(t.transportId); h.data(t.assignedVehicleIds); h.data(t.supportForTeamId); h.data(t.mobility); h.data(t.crewWeapon);
     h.bool(!!t.order);
     if (t.order) for (const key of ['type', 'target', 'targetTeamId', 'targetVehicleId', 'lastSeenAt',
-      'lastKnownPos', 'issuedAt', 'mountVehicleId', 'dismount', 'waypoints'] as const) h.data(t.order[key]);
+      'lastKnownPos', 'issuedAt', 'mountVehicleId', 'onFoot', 'dismount', 'waypoints'] as const) h.data(t.order[key]);
   }
   for (const vl of state.map.victoryLocations) {
     h.int(vl.id);

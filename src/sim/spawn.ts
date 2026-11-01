@@ -436,5 +436,6 @@ export function spawnTeam(state: BattleState, def: TeamDef, side: Side, pos: Vec
 
   team.experience = def.soldiers.length ? totalExp / def.soldiers.length : 50;
   state.teams.set(teamId, team);
+  if (vehicle && VEHICLE_DEFS[vehicle.defId]?.crew === 1) vehicle.seats = { driver: soldierIds[0] };
   return team;
 }

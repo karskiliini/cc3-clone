@@ -29,7 +29,7 @@ function zoneCentre(zone: Rect): Vec2 {
 }
 
 function teamsCentre(state: BattleState, side: Side): Vec2 {
-  const teams = Array.from(state.teams.values()).filter((t) => t.side === side);
+  const teams = Array.from(state.teams.values()).filter((t) => t.side === side && t.supportForTeamId == null);
   if (!teams.length) return zoneCentre(state.map.def.deployZones[side]);
   const sum = teams.reduce((acc, t) => ({ x: acc.x + t.pos.x, y: acc.y + t.pos.y }), { x: 0, y: 0 });
   return { x: sum.x / teams.length, y: sum.y / teams.length };
@@ -413,7 +413,7 @@ function stepTransportAI(
 // -------------------------------------------------------------------- deploy
 export function aiDeploy(state: BattleState, side: Side, rng: Rng, battle: AIBattle): void {
   const zone = state.map.def.deployZones[side];
-  const teams = Array.from(state.teams.values()).filter((t) => t.side === side);
+  const teams = Array.from(state.teams.values()).filter((t) => t.side === side && t.supportForTeamId == null);
   const placed: Vec2[] = [];
   // The attacker forms up out of sight: every victory location starts in the defender's hands and
   // most of them look straight into the attacker's zone, so a squad placed in view of one is
@@ -502,7 +502,7 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
 function stepDefenceAI(state: BattleState, rng: Rng, battle: AIBattle, side: Side, n: number, mem: SideMemory): void {
   const track = getOrderTrack(state);
   const enemy = otherSide(side);
-  const myTeams = Array.from(state.teams.values()).filter((t) => t.side === side && !t.outOfAction);
+  const myTeams = Array.from(state.teams.values()).filter((t) => t.side === side && !t.outOfAction && t.supportForTeamId == null);
   if (myTeams.length === 0) return;
 
   const enemyZoneCentre = zoneCentre(state.map.def.deployZones[enemy]);
@@ -1314,7 +1314,7 @@ function prepSeconds(state: BattleState): number { return Math.min(70, state.con
 function stepAttackAI(state: BattleState, rng: Rng, battle: AIBattle, side: Side, mem: SideMemory): void {
   const track = getOrderTrack(state);
   const enemy = otherSide(side);
-  const myTeams = Array.from(state.teams.values()).filter((t) => t.side === side && !t.outOfAction).sort((a, b) => a.id - b.id);
+  const myTeams = Array.from(state.teams.values()).filter((t) => t.side === side && !t.outOfAction && t.supportForTeamId == null).sort((a, b) => a.id - b.id);
   if (!myTeams.length) return;
   const ownZone = zoneCentre(state.map.def.deployZones[side]);
   const enemyZone = zoneCentre(state.map.def.deployZones[enemy]);

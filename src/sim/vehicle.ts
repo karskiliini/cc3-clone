@@ -1,3 +1,5 @@
+import { stepMotorizedCrews, motorizedHold } from './motorizedCrew';
+import { createTowStep, towingMassKg } from './vehicleTow';
 import { acceptedFootprintTiles, type AcceptedHullPose } from './hullFootprint';
 import type { VehicleNavigationMemory } from '@/shared/types';
 import { wireAt, consumeWire, WIRE_INTACT, VEHICLE_BREAK_CHANCE } from './wire';
@@ -154,6 +156,8 @@ function syncVehicleOccupants(state: BattleState, v: Vehicle): void {
 export function completeVehicleMovement(state: BattleState, rng: Rng, dt: number, v: Vehicle, def: VehicleDef,
   movement: AcceptedVehicleMovement | undefined, recoveryApplied = false): void {
   const params = tickHullParams(v, def);
+  const towStep = v.towedTeamId != null ? createTowStep(state, v) : null;
+  const beforeTow = towStep ? structuredClone(v.body!) : null;
   const body = v.body!, heading = v.hullFacing, relativeTurret = wrapAngle(v.turretFacing - heading);
   const sweep: AcceptedHullPoint[] = [{ pos: { ...v.pos }, heading, speedMs: 0 }];
   const poses: AcceptedHullPose[] = [], contacts: Vec2[] = [];
@@ -165,6 +169,10 @@ export function completeVehicleMovement(state: BattleState, rng: Rng, dt: number
     sweep.push({ pos: { x: body.position.x / TILE_M, y: body.position.y / TILE_M },
       heading: acceptedSpeedMs < 0 ? wrapAngle(actualHeading + Math.PI) : actualHeading, speedMs: acceptedSpeedMs });
   };
+  if (motorizedHold(state, v)) {
+    requestHullDrive(v, { speedMs: 0, yawRateRadS: 0, brake: true }); recoveryApplied = false;
+    const tick = driverTicks.get(v); if (tick) tick.local = undefined;
+  }
   const wasCoasting = dm.hypot(body.velocity.x, body.velocity.y) > 0.005;
   let blocker: Vehicle | null = null;
   let terrainBlocked = false, terrainRejects = 0;
@@ -218,11 +226,20 @@ export function completeVehicleMovement(state: BattleState, rng: Rng, dt: number
       points.push({ pos, heading: travelHeading, speedMs });
       previous = pos;
     }
+    if (towStep && !towStep.accept(to, body.orientation)) { terrainBlocked = true; return false; }
     sweep.push(...points);
     acceptedSpeedMs = speedMs;
     return true;
   }, contact => { contacts.push({ x: contact.point.x / TILE_M, y: contact.point.y / TILE_M }); },
   point => contactInterest(point.x / TILE_M, point.y / TILE_M), params);
+  if (towStep) {
+    if (towStep.accept(body.position, body.orientation)) towStep.commit();
+    else {
+      // A rejected trailer rotation cancels this complete physical tick before effects.
+      Object.assign(body, beforeTow!); body.velocity = { x: 0, y: 0, z: 0 }; body.angularVelocity = { x: 0, y: 0, z: 0 };
+      sweep.splice(1); poses.length = 0; contacts.length = 0; acceptedSpeedMs = 0; terrainBlocked = true;
+    }
+  }
   recordPose();
   syncVehicleFromBody(v);
   // Hull carry precedes actual traversal; frozen guns retain their pre-step relative angle.
@@ -1165,6 +1182,7 @@ export function beginVehicleBodyTick(state: BattleState, v: Vehicle, def: Vehicl
 export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
   if (dt !== SIM_DT) throw new Error('Vehicle physics dt must equal SIM_DT');
   for (const v of state.vehicles.values()) beginVehicleBodyTick(state, v, VEHICLE_DEFS[v.defId]);
+  stepMotorizedCrews(state, rng, dt);
   stepVehicleMinds(state, rng, dt);
   stepTransport(state, dt); // passengers boarding and leaving
   stepVehicleCrews(state, rng, dt); // hatch queues, climbs, crews going back (spec 2026-09-17 §10)
@@ -1296,7 +1314,7 @@ function stepVehicleDriver(state: BattleState, rng: Rng, dt: number, v: Vehicle,
     return;
   }
   // a transport stands still while anyone boards or leaves (it keeps its route)
-  if (transportHolds(state, v)) { driveVehicle(v, { speedMs: 0 }, dt); return; }
+  if (motorizedHold(state, v) || transportHolds(state, v)) { driveVehicle(v, { speedMs: 0 }, dt); return; }
   // a man under the hull with nowhere to go: stand still and wait (he is re-prompted to dodge)
   if (v.holdUntil != null) {
     stepHeldFriendly(state, v);
@@ -1345,7 +1363,11 @@ function stepVehicleDriver(state: BattleState, rng: Rng, dt: number, v: Vehicle,
   const onRoad = tile === 'dirtroad' || tile === 'pavedroad' || tile === 'bridge';
   const baseSpeed = onRoad ? def.speedRoadMs : def.speedOffroadMs;
   // slope: tracks lose far more than legs do on a climb (GRADE_UPHILL_VEHICLE)
-  const fullSpeedMs = (onRoad ? baseSpeed : baseSpeed * props.speedMul)
+  const towed = v.towedTeamId != null ? state.teams.get(v.towedTeamId)?.crewWeapon : undefined;
+  const towLoad = towed ? towingMassKg(towed.weaponId) / (tickHullParams(v, def).massKg) : 0;
+  // Provisional towing pace/braking margin; the actual trailer is collision constrained below.
+  const towPace = towed ? Math.min(0.65, 1 / (1 + towLoad)) : 1;
+  const fullSpeedMs = (onRoad ? baseSpeed : baseSpeed * props.speedMul) * towPace
     * gradeSpeedMul(map, v.pos, wp, GRADE_UPHILL_VEHICLE) * damageSpeedMul(v);
 
   if (def.turnRadiusM != null) {

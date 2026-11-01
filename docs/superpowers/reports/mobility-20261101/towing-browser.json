@@ -1,0 +1,20 @@
+{
+  "errors": [],
+  "phases": [
+    "packing",
+    "boarding",
+    "coupling",
+    "towed",
+    "driving-tow",
+    "uncoupling",
+    "finished"
+  ],
+  "final": {
+    "speed": 3.827513415121631e-16,
+    "time": 139.7,
+    "phase": "finished",
+    "weapon": "ready",
+    "aboard": 0
+  },
+  "maxAboard": 2
+}

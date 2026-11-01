@@ -6,6 +6,7 @@
 // models are disposed when the next one asks for its set.
 // ============================================================================
 import { Mesh, MeshLambertMaterial, SRGBColorSpace, type Texture } from 'three';
+import { createJeepModel } from './jeep';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { Vec3, Season } from '@/shared/types';
 
@@ -49,6 +50,7 @@ function disposeNodes(v: Variant | null): void {
 export class ModelCache implements ModelSource {
   private manifest: Promise<Manifest | null> | null = null;
   private readonly entries = new Map<string, Entry>();
+  private readonly procedural = new Map<string, VehicleModel>();
   private season: Season = 'summer';
 
   constructor(
@@ -59,12 +61,15 @@ export class ModelCache implements ModelSource {
   load(defIds: readonly string[], season: Season): void {
     this.season = season;
     const want = new Set(defIds);
+    for (const [id, model] of this.procedural) if (!want.has(id)) { disposeNodes(model.nodes); this.procedural.delete(id); }
+    if (want.has('jeep') && !this.procedural.has('jeep')) this.procedural.set('jeep', createJeepModel());
     for (const [id, e] of this.entries) {
       if (!want.has(id)) { disposeNodes(e.summer); disposeNodes(e.winter); this.entries.delete(id); continue; }
       if (season !== 'winter' && e.winter instanceof Map) { disposeNodes(e.winter); e.winter = null; e.model = null; }
     }
     this.manifest ??= this.fetchManifest().catch(() => null);
     for (const id of want) {
+      if (this.procedural.has(id)) continue;
       let e = this.entries.get(id);
       if (!e) { e = { info: null, requested: false, summer: 'pending', winter: null, model: null }; this.entries.set(id, e); }
       const entry = e;
@@ -87,6 +92,7 @@ export class ModelCache implements ModelSource {
   }
 
   get(defId: string): VehicleModel | null {
+    if (this.procedural.has(defId)) return this.procedural.get(defId)!;
     const e = this.entries.get(defId);
     if (!e?.info || !(e.summer instanceof Map)) return null;
     let winterNodes: Map<string, Mesh> | null = null;
