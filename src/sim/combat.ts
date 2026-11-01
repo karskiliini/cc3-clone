@@ -1,3 +1,4 @@
+import { riderCanExpose, onPassengerFired } from './passengerPhysics';
 import { PASSENGER_FIRE_MUL } from './transport';
 import type {
   AimPoint, BattleEvent, BattleMessage, BattleState, Health, IncomingTrajectory, RoundType, Side, Soldier, Team, Vec2, Vec3, Vehicle, WeaponDef,
@@ -214,7 +215,7 @@ function canSoldierFire(s: Soldier, state: BattleState, allowPanic = false): boo
   if (s.mind.state === 'broken' || s.mind.state === 'cowering' || (!allowPanic && isPanicking(s))) return false;
   if (s.vehicleId != null) {
     // passengers fire over the sides of a HALTED transport (badly); crews never with their own arms
-    if (s.seat !== 'passenger') return false;
+    if (s.seat !== 'passenger' || !riderCanExpose(state, s)) return false;
     const ride = state.vehicles.get(s.vehicleId);
     if (!ride || Math.abs(ride.speed) > 0.05 || (ride.state !== 'ok' && ride.state !== 'immobilized')) return false;
   }
@@ -1259,6 +1260,7 @@ function fireBurst(state: BattleState, rng: Rng, soldier: Soldier, weapon: Weapo
   if (!isPanicking(soldier) && soldier.activity !== 'moving' && soldier.activity !== 'sneaking' && soldier.activity !== 'movingFast') {
     soldier.activity = 'firing';
   }
+  onPassengerFired(state, soldier);
   if (weapon.cls === 'smg') {
     const team = state.teams.get(soldier.teamId);
     soldier.smgBurst = createSmgBurst(soldier, weapon, targetPosOf(target), team, state.time, rng);

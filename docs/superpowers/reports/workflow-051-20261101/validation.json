@@ -1,0 +1,21 @@
+{
+  "baseline": "794cfb9",
+  "broadRegressions": {
+    "files": 12,
+    "passed": 252
+  },
+  "finalChangedPathTests": {
+    "files": 4,
+    "passed": 53
+  },
+  "typecheck": "passed",
+  "productionBuild": "passed",
+  "parity": {
+    "ticks": 100,
+    "local": "M5 / Node 24.22.1",
+    "remote": "M2 / Node 24.22.1",
+    "sha256": "9d7b54047567ef896b0bd1398324648fba05077ac2b6bcb7926b71846f489265"
+  },
+  "fullSuiteRerun": false,
+  "newCrossBrowserSuiteRerun": false
+}

@@ -693,6 +693,14 @@ function drawCarrierFallback(ctx: CanvasRenderingContext2D, cam: Camera, look: V
   const z = cam.zoom;
   for (const o of look.lightTransport?.occupants ?? []) {
     const p = vehicleScreenPoint(cam, look, o.seat);
+    if (o.body) {
+      ctx.strokeStyle = o.side === 'german' ? '#62695c' : '#7a7651'; ctx.lineWidth = 3 * z;
+      for (const [a,b] of [[0,1],[1,2],[1,3],[1,4],[2,5],[2,6]]) {
+        const p0 = vehicleScreenPoint(cam, look, o.body[a]), p1 = vehicleScreenPoint(cam, look, o.body[b]);
+        ctx.beginPath(); ctx.moveTo(p0.x,p0.y); ctx.lineTo(p1.x,p1.y); ctx.stroke();
+      }
+      continue;
+    }
     ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(look.hullRad + (o.facing ?? 0));
     ctx.fillStyle = o.side === 'german' ? '#62695c' : '#7a7651'; ctx.fillRect(-2.2 * z, -2 * z, 4.4 * z, 4 * z);
     ctx.fillStyle = '#a18b6a'; ctx.fillRect(-z, -3 * z, 2 * z, 2 * z);
@@ -1094,6 +1102,15 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
   const draggedBy = new Map<number, Soldier>();
   for (const s of state.soldiers.values()) if (s.carrying && s.health !== 'dead') draggedBy.set(s.carrying.patientId, s);
   for (const s of state.soldiers.values()) {
+    if (s.rider?.body && !s.rider.attached && isEnemyVisible(state, playerSide, s.side, s.id, false) && visible(s.pos, cam)) {
+      ctx.strokeStyle = s.side === 'german' ? '#62695c' : '#7a7651'; ctx.lineWidth = 3 * cam.zoom;
+      for (const [a,b] of [[0,1],[1,2],[1,3],[1,4],[2,5],[2,6]]) {
+        const p0 = s.rider.body[a].position, p1 = s.rider.body[b].position;
+        const x = projectVehicleWorldPoint(cam,[p0.x,p0.z,p0.y]), y = projectVehicleWorldPoint(cam,[p1.x,p1.z,p1.y]);
+        ctx.beginPath(); ctx.moveTo(x.x,x.y); ctx.lineTo(y.x,y.y); ctx.stroke();
+      }
+      continue;
+    }
     if ((s.vehicleId != null && !s.hatch) || s.dismembered) continue;
     // blast ragdolls (spec §4): the flight — of the dead too — is drawn here, above the vehicles
     const rag = s.blast ? ragdollPhase(s, state.time) : null;

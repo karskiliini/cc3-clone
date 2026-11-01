@@ -4,15 +4,24 @@ import { TILE_M } from '@/shared/types';
 import { Quaternion, Vector3 } from 'three';
 import { vehiclePose, type VehicleLook } from './vehicle3d/look';
 
-export interface LightTransportLayout { driverSeat: Vec3; passengerSeats: Vec3[]; passengerFacing?: number[]; access: Vec2; cargo: Vec3; hitch: Vec3; towMaxKg: number }
+export interface LightTransportLayout { driverSeat: Vec3; passengerSeats: Vec3[]; passengerFacing?: number[]; boardingVia?: Vec3; access: Vec2; cargo: Vec3; hitch: Vec3; towMaxKg: number }
 export interface TransportAction { vehicleId: number; phase: 'loading' | 'loaded' | 'unloading' | 'coupling' | 'towed' | 'uncoupling'; startedAt: number; until: number; from: Vec2 }
 export const transportAction = (cw: CrewWeaponState): TransportAction | undefined => (cw as CrewWeaponState & { transport?: TransportAction }).transport;
-export const transportLayout = (def: VehicleDef | undefined): LightTransportLayout | undefined => (def as (VehicleDef & { lightTransport?: LightTransportLayout }) | undefined)?.lightTransport;
+export function transportLayout(def: VehicleDef | undefined): LightTransportLayout | undefined {
+  if (def?.lightTransport) return def.lightTransport;
+  const c = def?.passengerCompartment;
+  return c ? { driverSeat: { x: -0.45, y: -0.5, z: 1.2 }, passengerSeats: c.seats, passengerFacing: c.facing,
+    boardingVia: { x: 0, y: c.rearY + 0.05, z: c.wallTopZ + 0.2 },
+    access: { x: 0, y: c.rearY + 0.7 }, cargo: { x: 0, y: 1.5, z: c.floorZ },
+    hitch: { x: 0, y: c.rearY, z: 0.5 }, towMaxKg: 0 } : undefined;
+}
 export const actionProgress = (a: { startedAt: number; until: number }, time: number): number => Math.max(0, Math.min(1, (time - a.startedAt) / Math.max(0.001, a.until - a.startedAt)));
 // Retain a passenger's visual seat while his id leaves passengerIds during dismount.
 // Weak ownership also prevents ids reused by a new battle from inheriting old assignments.
 const passengerSeats = new WeakMap<Vehicle, Map<number, number>>();
 export function seatForSoldier(v: Vehicle, s: Soldier, layout: LightTransportLayout): Vec3 | null {
+  if (s.hatch?.vehicleId === v.id && s.hatch.passengerSeatIndex != null) return layout.passengerSeats[s.hatch.passengerSeatIndex] ?? null;
+  if (s.rider?.vehicleId === v.id) return layout.passengerSeats[s.rider.seatIndex] ?? null;
   if (v.seats?.driver === s.id || (s.hatch?.vehicleId === v.id && !s.hatch.passenger)) return layout.driverSeat;
   let assigned = passengerSeats.get(v);
   if (!assigned) { assigned = new Map(); passengerSeats.set(v, assigned); }
@@ -43,6 +52,12 @@ export function boardingWorld(s: Soldier, v: Vehicle, look: VehicleLook, layout:
   const ground = h.kind === 'mount' ? h.from : h.to;
   const end: [number, number, number] = [ground.x * TILE_M, look.groundM ?? 0, ground.y * TILE_M];
   const a = h.kind === 'mount' ? end : mounted, b = h.kind === 'mount' ? mounted : end;
+  if (layout.boardingVia) {
+    // Vault the rear rim instead of interpolating through its closed armour.
+    const via = localWorld(look, { ...layout.boardingVia, x: seat.x });
+    const from = p < 0.5 ? a : via, to = p < 0.5 ? via : b, t = p < 0.5 ? p * 2 : (p - 0.5) * 2;
+    return [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t, from[2] + (to[2] - from[2]) * t];
+  }
   return [a[0] + (b[0] - a[0]) * p, a[1] + (b[1] - a[1]) * p + Math.sin(p * Math.PI) * 0.28, a[2] + (b[2] - a[2]) * p];
 }
 export function cargoLocal(look: VehicleLook, layout: LightTransportLayout, action: TransportAction, time: number): Vec3 {

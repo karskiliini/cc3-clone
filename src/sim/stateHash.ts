@@ -98,6 +98,7 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
     h.num(s.mind.stress);
     h.int(s.vehicleId ?? -1);
     h.data(s.seat); h.data(s.hatch); h.data(s.crewTask);
+    if (s.rider) { h.str('rider'); h.data(s.rider); }
   }
   for (const v of state.vehicles.values()) {
     h.int(v.id);

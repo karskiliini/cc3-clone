@@ -1,3 +1,4 @@
+import { ensureRiderSeat, reserveRiderSeat } from './passengerPhysics';
 // Infantry riding in transports (the SdKfz 251): a Move order onto a friendly transport with room
 // is a mount order; the men walk to the rear door and board ONE AT A TIME; the vehicle stands
 // still while anyone boards or leaves; mounted men are `vehicleId` + `seat: 'passenger'` (never
@@ -184,6 +185,7 @@ function stepUnload(state: BattleState, v: Vehicle, def: VehicleDef): void {
     const from = ex.door ? doorOnHull(v, def) : hullToWorld(v, lay.hatches[ex.index].x * 0.6, lay.hatches[ex.index].y);
     const to = ex.door ? doorSpot(state, v, def) : besideHatch(state, v, def, ex.index);
     const climb: HatchClimb = { vehicleId: v.id, hatch: ex.index, kind: 'bailout', from, to, start: state.time, until: state.time + dur, panicked: un.panicked, passenger: true, overSide: !ex.door };
+    if (s.rider?.attached) climb.passengerSeatIndex = s.rider.seatIndex;
     if (ex.door) v.doorBusyUntil = climb.until; else (v.hatchBusyUntil ??= [])[ex.index] = climb.until;
     s.vehicleId = null;
     s.seat = undefined;
@@ -208,12 +210,14 @@ export function onPassengerBoarded(state: BattleState, v: Vehicle, s: Soldier): 
   s.stance = 'crouching';
   s.suppression = 0;
   (v.passengerIds ??= []).push(s.id);
+  ensureRiderSeat(state, v, s);
 }
 
 /** Climb finished: a passenger is on the ground behind the transport. An orderly dismount fans out
  * to cover behind/beside the vehicle, away from what they know of the enemy (or sets off on the
  * team's order). */
 export function onPassengerOut(state: BattleState, v: Vehicle, s: Soldier, panicked: boolean): void {
+  delete s.rider;
   if (panicked) return; // vehicleCrew gives him his run
   const team = state.teams.get(s.teamId);
   const def = VEHICLE_DEFS[v.defId];
@@ -304,7 +308,8 @@ function stepBoarding(state: BattleState, team: Team, v: Vehicle, def: VehicleDe
     const d = dist(s.pos, spot);
     if (still && d <= DOOR_REACH_TILES && (v.doorBusyUntil ?? 0) <= state.time) {
       const dur = BOARD_S * (s.health === 'wounded' ? 1.5 : 1);
-      s.hatch = { vehicleId: v.id, hatch: 0, kind: 'mount', from: { ...s.pos }, to: doorOnHull(v, def), start: state.time, until: state.time + dur, panicked: false, passenger: true };
+      reserveRiderSeat(state, v, s);
+      s.hatch = { passengerSeatIndex: s.rider?.seatIndex, vehicleId: v.id, hatch: 0, kind: 'mount', from: { ...s.pos }, to: doorOnHull(v, def), start: state.time, until: state.time + dur, panicked: false, passenger: true };
       v.doorBusyUntil = s.hatch.until;
       s.path = [];
       s.activity = 'idle';

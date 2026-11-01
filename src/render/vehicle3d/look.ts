@@ -26,7 +26,8 @@ export function recoilOf(veh: Vehicle, time: number): number {
 }
 
 export interface LightTransportVisuals {
-  occupants: { id: number; seat: Vec3; driver: boolean; side: string; facing?: number }[];
+  occupants: { id: number; seat: Vec3; driver: boolean; side: string; facing?: number;
+    posture?: 'crouched' | 'firing' | 'casualty'; body?: Vec3[]; weapon?: boolean }[];
   cargo?: Vec3;
   time: number;
 }
@@ -98,13 +99,25 @@ export function vehicleLook(veh: Vehicle, state: BattleState): VehicleLook {
     season: state.map.def.season, recoil: ko ? 0 : recoilOf(veh, state.time),
   };
   const layout = transportLayout(def);
-  if (layout && !ko) {
+  if (layout && (!ko || def.passengerCompartment)) {
     const occupants: LightTransportVisuals['occupants'] = [];
     for (const s of state.soldiers.values()) {
-      if (s.vehicleId !== veh.id || s.hatch || s.health === 'dead' || s.health === 'incapacitated') continue;
+      if (s.vehicleId !== veh.id || s.hatch) continue;
+      const casualty = s.health === 'dead' || s.health === 'incapacitated';
+      if (casualty && !s.rider?.body) continue;
+      if (def.passengerCompartment && s.seat !== 'passenger') continue;
       const seat = seatForSoldier(veh, s, layout);
-      if (seat) occupants.push({ id: s.id, seat, driver: veh.seats?.driver === s.id, side: s.side,
-        facing: layout.passengerFacing?.[layout.passengerSeats.indexOf(seat)] ?? 0 });
+      if (seat) {
+        const pose = s.rider?.body ? vehiclePose(look, false, null) : null;
+        const inverse = pose ? new Quaternion().fromArray(pose.hullQuaternion).invert() : null;
+        const body = s.rider?.body?.map(p => {
+          const v = new Vector3(p.position.x, p.position.z, p.position.y).sub(new Vector3().fromArray(pose!.hullPos)).applyQuaternion(inverse!);
+          return { x: v.x, y: v.z, z: v.y };
+        });
+        occupants.push({ id: s.id, seat, driver: veh.seats?.driver === s.id, side: s.side,
+          facing: s.rider?.posture === 'firing' ? s.facing * Math.PI / 4 - veh.hullFacing : layout.passengerFacing?.[layout.passengerSeats.indexOf(seat)] ?? 0,
+          ...(s.rider ? { posture: s.rider.posture, body, weapon: !casualty } : {}) });
+      }
     }
     const action = [...state.teams.values()].map(t => t.crewWeapon && transportAction(t.crewWeapon)).find(a => a?.vehicleId === veh.id && ['loading', 'loaded', 'unloading'].includes(a.phase));
     look.lightTransport = { occupants, time: state.time, ...(action ? { cargo: cargoLocal(look, layout, action, state.time) } : {}) };

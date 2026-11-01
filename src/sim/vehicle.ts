@@ -1,3 +1,4 @@
+import { stepPassengerPhysics } from './passengerPhysics';
 import { stepMotorizedCrews, motorizedHold } from './motorizedCrew';
 import { createTowStep, towingMassKg } from './vehicleTow';
 import { acceptedFootprintTiles, type AcceptedHullPose } from './hullFootprint';
@@ -1229,6 +1230,7 @@ export function stepVehicles(state: BattleState, rng: Rng, dt: number): void {
     if (disabled || recovery) driverTicks.get(v)!.local = undefined;
     completeVehicleMovement(state, rng, dt, v, def, movement, recovery != null && !recovery.brake);
   }
+  stepPassengerPhysics(state, dt);
 }
 
 /** Produce driver requests. Every early return rejoins the one physical completion path. */

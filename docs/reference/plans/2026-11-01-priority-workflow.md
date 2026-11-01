@@ -17,8 +17,8 @@ capacity and preserve other jobs. Use immutable isolated inputs for long tests.
 
 | Stage | Work | Status | Required completion evidence |
 |---|---|---|---|
-| 1 | 051 physical APC passengers | Active: integrate existing boarding/fire/damage with compartment simulation and 3D occupants | Full squad boards/rides/crouches/fires/jumps out; killed riders remain constrained by walls/benches under pitch/roll; deterministic physical state; in-game recording |
-| 2 | 052 physical broken tracks | Pending | Hit/mine breaks a particular link; loose chain moves over wheels/ground, can be dragged, loses that side's drive after sprocket disengagement; visible links and exact deterministic tests |
+| 1 | 051 physical APC passengers | Complete; spec `docs/superpowers/specs/2026-11-01-physical-apc-passengers.md` | Full squad boards/rides/crouches/fires/jumps out; killed riders remain constrained by walls/benches under pitch/roll; deterministic physical state; in-game recording |
+| 2 | 052 physical broken tracks | Active: track model and damage/drive integration | Hit/mine breaks a particular link; loose chain moves over wheels/ground, can be dragged, loses that side's drive after sprocket disengagement; visible links and exact deterministic tests |
 | 3 | 054 terrain compression | Pending | Loaded accepted track/wheel contacts progressively compress holes/rims by vehicle weight and passes; height, cover and visuals agree; rejected movement creates no deformation |
 | 4 | 055 infantry digging | Pending | Eligible idle men dig visibly over time; orders/threats interrupt; persistent site depth/cover evolves deterministically and interacts with stage 3 |
 | 5 | 044 + 047b online multiplayer and recovery | Pending | Relay/browser transport, room join and forces/deployment, game UI, speed/pause policy, disconnect takeover/forfeit/rejoin, visible desync rebuild/failure/report flow, two browser/host verification |
@@ -66,3 +66,7 @@ valid substitute for compartment occlusion. Render or model fixes belong to 051.
 - Baseline: `ce5e9db`, branch `codex/vehicles-3d-p2`; worktree clean at start.
 - Initial audit confirms existing passenger boarding, halted fire and staying aboard
   after casualties; no completion of 051 is claimed by those existing mechanisms.
+
+- Stage 051 completed: 252 broad related tests, final 53 changed-path tests, types/build;
+  exact M5/M2 100-tick parity SHA `9d7b54047567ef896b0bd1398324648fba05077ac2b6bcb7926b71846f489265`;
+  actual Chromium 10 aboard → 2 corpses retained → 8 survivors out; no page errors.

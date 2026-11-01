@@ -176,6 +176,17 @@ export const VEHICLE_DEFS: Record<string, VehicleDef> = {
     armor: { front: 14, side: 8, rear: 8, top: 6 },
     mainWeaponId: null, coaxWeaponId: 'coax_mg34', hasTurret: false, crew: 2, mainAmmo: 0,
     layout: { transmission: 'front', openTop: true, bowMg: false }, passengers: 10,
+    // Inner surfaces derived from vehicles.py sdkfz251 bay/benches; padding is a
+    // simulation approximation, not a certified historical compartment survey.
+    passengerCompartment: {
+      floorZ: 1.02, wallTopZ: 1.72, lowerHalfWidth: 0.95, upperHalfWidth: 0.76,
+      frontY: 0.1, rearY: 2.7,
+      seats: [-0.54, 0.54].flatMap(x => [0.75, 1.15, 1.55, 1.95, 2.35].map(y => ({ x, y, z: 1.34 }))),
+      facing: [Math.PI / 2, Math.PI / 2, Math.PI / 2, Math.PI / 2, Math.PI / 2,
+        -Math.PI / 2, -Math.PI / 2, -Math.PI / 2, -Math.PI / 2, -Math.PI / 2],
+      benches: [-1, 1].map(side => ({ min: { x: side < 0 ? -0.7 : 0.38, y: 0.575, z: 1.26 },
+        max: { x: side < 0 ? -0.38 : 0.7, y: 2.475, z: 1.34 } })),
+    },
   }),
   marder3: v({
     id: 'marder3', name: 'Marder III', kind: 'spg', lengthM: 4.65, widthM: 2.95,

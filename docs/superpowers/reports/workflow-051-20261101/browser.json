@@ -1,0 +1,471 @@
+{
+  "errors": [],
+  "phases": [
+    {
+      "name": "boarded",
+      "time": 40,
+      "phase": "running",
+      "aboard": 10,
+      "bodies": 0,
+      "bodyAttached": 0,
+      "positions": [
+        {
+          "id": 6,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 0,
+          "pos": {
+            "x": 25.65335503629142,
+            "y": 51.73
+          }
+        },
+        {
+          "id": 7,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 2,
+          "pos": {
+            "x": 25.253665023005055,
+            "y": 51.73
+          }
+        },
+        {
+          "id": 8,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 1,
+          "pos": {
+            "x": 25.45351002964824,
+            "y": 51.73
+          }
+        },
+        {
+          "id": 9,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 4,
+          "pos": {
+            "x": 24.85397500971869,
+            "y": 51.73
+          }
+        },
+        {
+          "id": 10,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 3,
+          "pos": {
+            "x": 25.053820016361872,
+            "y": 51.73
+          }
+        },
+        {
+          "id": 11,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 6,
+          "pos": {
+            "x": 25.45351002964824,
+            "y": 52.27
+          }
+        },
+        {
+          "id": 12,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 5,
+          "pos": {
+            "x": 25.65335503629142,
+            "y": 52.27
+          }
+        },
+        {
+          "id": 13,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 8,
+          "pos": {
+            "x": 25.053820016361872,
+            "y": 52.27
+          }
+        },
+        {
+          "id": 14,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 7,
+          "pos": {
+            "x": 25.253665023005055,
+            "y": 52.27
+          }
+        },
+        {
+          "id": 15,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 9,
+          "pos": {
+            "x": 24.85397500971869,
+            "y": 52.27
+          }
+        }
+      ]
+    },
+    {
+      "name": "casualties-on-moving-hull",
+      "time": 58,
+      "phase": "running",
+      "aboard": 10,
+      "bodies": 2,
+      "bodyAttached": 2,
+      "positions": [
+        {
+          "id": 6,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 0,
+          "pos": {
+            "x": 26.054442191325393,
+            "y": 34.13233615739607
+          }
+        },
+        {
+          "id": 7,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 2,
+          "pos": {
+            "x": 26.03171303773616,
+            "y": 34.52367596906215
+          }
+        },
+        {
+          "id": 8,
+          "health": "dead",
+          "vehicleId": 2,
+          "posture": "casualty",
+          "seat": 1,
+          "pos": {
+            "x": 26.25000442045287,
+            "y": 34.910621194837454
+          }
+        },
+        {
+          "id": 9,
+          "health": "dead",
+          "vehicleId": 2,
+          "posture": "casualty",
+          "seat": 4,
+          "pos": {
+            "x": 26.16014314653091,
+            "y": 34.88313421051882
+          }
+        },
+        {
+          "id": 10,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 3,
+          "pos": {
+            "x": 26.020348460941545,
+            "y": 34.71934587489518
+          }
+        },
+        {
+          "id": 11,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 6,
+          "pos": {
+            "x": 26.580678234913226,
+            "y": 34.366084705737265
+          }
+        },
+        {
+          "id": 12,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 5,
+          "pos": {
+            "x": 26.59204281170784,
+            "y": 34.17041479990423
+          }
+        },
+        {
+          "id": 13,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 8,
+          "pos": {
+            "x": 26.557949081323994,
+            "y": 34.757424517403344
+          }
+        },
+        {
+          "id": 14,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 7,
+          "pos": {
+            "x": 26.56931365811861,
+            "y": 34.56175461157031
+          }
+        },
+        {
+          "id": 15,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 9,
+          "pos": {
+            "x": 26.546584504529378,
+            "y": 34.95309442323639
+          }
+        }
+      ]
+    },
+    {
+      "name": "firing-from-halted-hull",
+      "time": 75,
+      "phase": "running",
+      "aboard": 10,
+      "bodies": 2,
+      "bodyAttached": 2,
+      "positions": [
+        {
+          "id": 6,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 0,
+          "pos": {
+            "x": 26.23027023247385,
+            "y": 12.000665170048748
+          }
+        },
+        {
+          "id": 7,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 2,
+          "pos": {
+            "x": 26.230773032008084,
+            "y": 12.400354867080686
+          }
+        },
+        {
+          "id": 8,
+          "health": "dead",
+          "vehicleId": 2,
+          "posture": "casualty",
+          "seat": 1,
+          "pos": {
+            "x": 26.42133245122697,
+            "y": 12.755516264754844
+          }
+        },
+        {
+          "id": 9,
+          "health": "dead",
+          "vehicleId": 2,
+          "posture": "casualty",
+          "seat": 4,
+          "pos": {
+            "x": 26.398629747368712,
+            "y": 12.752423666037103
+          }
+        },
+        {
+          "id": 10,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "firing",
+          "seat": 3,
+          "pos": {
+            "x": 26.2310244317752,
+            "y": 12.600199715596656
+          }
+        },
+        {
+          "id": 11,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "firing",
+          "seat": 6,
+          "pos": {
+            "x": 26.770521204966368,
+            "y": 12.199830712754073
+          }
+        },
+        {
+          "id": 12,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "firing",
+          "seat": 5,
+          "pos": {
+            "x": 26.77026980519925,
+            "y": 11.999985864238104
+          }
+        },
+        {
+          "id": 13,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "firing",
+          "seat": 8,
+          "pos": {
+            "x": 26.771024004500603,
+            "y": 12.599520409786011
+          }
+        },
+        {
+          "id": 14,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 7,
+          "pos": {
+            "x": 26.770772604733484,
+            "y": 12.399675561270042
+          }
+        },
+        {
+          "id": 15,
+          "health": "healthy",
+          "vehicleId": 2,
+          "posture": "crouched",
+          "seat": 9,
+          "pos": {
+            "x": 26.77127540426772,
+            "y": 12.79936525830198
+          }
+        }
+      ]
+    },
+    {
+      "name": "dismounted-survivors",
+      "time": 101,
+      "phase": "running",
+      "aboard": 2,
+      "bodies": 2,
+      "bodyAttached": 2,
+      "positions": [
+        {
+          "id": 6,
+          "health": "healthy",
+          "vehicleId": null,
+          "pos": {
+            "x": 30.484615705158802,
+            "y": 17.484615705158802
+          }
+        },
+        {
+          "id": 7,
+          "health": "healthy",
+          "vehicleId": null,
+          "pos": {
+            "x": 28.71298017595888,
+            "y": 16.71298017595888
+          }
+        },
+        {
+          "id": 8,
+          "health": "dead",
+          "vehicleId": 2,
+          "posture": "casualty",
+          "seat": 1,
+          "pos": {
+            "x": 26.445810119601834,
+            "y": 12.491765614401151
+          }
+        },
+        {
+          "id": 9,
+          "health": "dead",
+          "vehicleId": 2,
+          "posture": "casualty",
+          "seat": 4,
+          "pos": {
+            "x": 26.4230662811346,
+            "y": 12.488989417518308
+          }
+        },
+        {
+          "id": 10,
+          "health": "healthy",
+          "vehicleId": null,
+          "pos": {
+            "x": 26.929373350825767,
+            "y": 14.740198416922272
+          }
+        },
+        {
+          "id": 11,
+          "health": "healthy",
+          "vehicleId": null,
+          "pos": {
+            "x": 27.5,
+            "y": 15.214208599943799
+          }
+        },
+        {
+          "id": 12,
+          "health": "wounded",
+          "vehicleId": null,
+          "pos": {
+            "x": 26.807999999999993,
+            "y": 12.5
+          }
+        },
+        {
+          "id": 13,
+          "health": "healthy",
+          "vehicleId": null,
+          "pos": {
+            "x": 26.499999405316682,
+            "y": 16.42063387492849
+          }
+        },
+        {
+          "id": 14,
+          "health": "healthy",
+          "vehicleId": null,
+          "pos": {
+            "x": 25.08177988460421,
+            "y": 12.066823383262232
+          }
+        },
+        {
+          "id": 15,
+          "health": "healthy",
+          "vehicleId": null,
+          "pos": {
+            "x": 26.505932469471205,
+            "y": 15.295692671781353
+          }
+        }
+      ]
+    }
+  ],
+  "passed": true,
+  "serverStopped": true
+}

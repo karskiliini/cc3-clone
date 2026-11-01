@@ -365,6 +365,7 @@ export interface VehicleHatchDef {
 }
 /** A man climbing out of (or into) a vehicle through one hatch (spec 2026-09-17 §10). */
 export interface HatchClimb {
+  passengerSeatIndex?: number;
   vehicleId: number;
   /** index into the vehicle layout's `hatches` */
   hatch: number;
@@ -438,6 +439,24 @@ export interface SoldierMind {
   warnedNoCommand?: number;
 }
 
+/** Canonical APC occupant state; articulated casualty particles are in world metres. */
+export interface RiderState {
+  vehicleId: number;
+  seatIndex: number;
+  attached: boolean;
+  posture: 'crouched' | 'firing' | 'casualty';
+  local: Vec3;
+  body?: { position: Vec3; velocity: Vec3 }[];
+}
+export interface PassengerCompartment {
+  /** Model-origin frame: +x right, +y rear, +z up. Conservative inner collision surfaces. */
+  floorZ: number; wallTopZ: number; lowerHalfWidth: number; upperHalfWidth: number;
+  frontY: number; rearY: number;
+  seats: Vec3[];
+  facing: number[];
+  benches: { min: Vec3; max: Vec3 }[];
+}
+
 export interface Soldier {
   /** campaign identity: stable across battles (G1). Undefined for AI forces. */
   uid?: string;
@@ -494,6 +513,7 @@ export interface Soldier {
   isLeader: boolean;
   /** which vehicle this soldier crews, or null */
   vehicleId: number | null;
+  rider?: RiderState;
   formationOffset: Vec2;
   /** last time (battle seconds) this soldier fired; used by spotting */
   lastFiredAt: number;
@@ -712,6 +732,7 @@ export interface VehicleDef {
   passengers?: number;
   /** Light-carrier anchors in model-local metres: +x right, +y rear, +z up. Limits are gameplay estimates. */
   lightTransport?: { driverSeat: Vec3; passengerSeats: Vec3[]; passengerFacing?: number[]; access: Vec2; cargo: Vec3; hitch: Vec3; towMaxKg: number };
+  passengerCompartment?: PassengerCompartment;
 }
 
 /** A gunner's lay on one target (vehicles: sim/combat.ts; the same bracketing fields serve AT guns). */

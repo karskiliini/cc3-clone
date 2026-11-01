@@ -14,6 +14,7 @@ import { stepMorale } from '@/sim/morale';
 import { applyOrder } from '@/sim/orders';
 import { resolveVehicleHit } from '@/sim/vehicleDamage';
 import { BOARD_S, passengersAboard, roomLeft, canTeamMount, transportHolds } from '@/sim/transport';
+import { riderWorld } from '@/sim/passengerPhysics';
 import { angleTo, dist, wrapAngle } from '@/shared/math';
 import { makeState, addTank, soldier, mkTeam, W, H } from './vehicleDamageHelpers';
 
@@ -93,7 +94,12 @@ describe('mounting a halftrack', () => {
     const tired = men.map((m) => m.fatigue);
     step(state, rng, 20);
     expect(dist(v.pos, start) * TILE_M).toBeGreaterThan(30);
-    men.forEach((m, i) => { expect(dist(m.pos, v.pos)).toBeLessThan(0.5); expect(m.fatigue).toBeLessThanOrEqual(tired[i]); });
+    men.forEach((m, i) => {
+      const seat = riderWorld(state, v, m.rider!.local);
+      expect(m.pos.x).toBeCloseTo(seat.x / TILE_M, 10); expect(m.pos.y).toBeCloseTo(seat.y / TILE_M, 10);
+      expect(dist(m.pos, v.pos) * TILE_M).toBeLessThan(VEHICLE_DEFS[v.defId].lengthM / 2);
+      expect(m.fatigue).toBeLessThanOrEqual(tired[i]);
+    });
   });
 
   it('capacity is respected: the rest of a big squad stays outside as the same team', () => {

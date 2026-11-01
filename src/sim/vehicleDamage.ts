@@ -1,3 +1,4 @@
+import { onPassengerCasualty } from './passengerPhysics';
 import { localDriverOwner } from './localDriver';
 // Locational vehicle damage: hit zones from the shot geometry, what sits behind each zone, what a
 // penetration (or a hit that does not get through) does to the crew and the equipment there, and
@@ -533,6 +534,7 @@ export function hurtPassenger(state: BattleState, v: Vehicle, s: Soldier, to: 'd
   if (to === 'wounded') { if (s.health !== 'wounded') { s.health = 'wounded'; s.morale = clamp(s.morale - 20, 0, 100); } return; }
   s.health = to;
   s.activity = to;
+  onPassengerCasualty(state, v, s);
   state.events.push({ kind: 'kill', pos: { ...v.pos }, side });
   state.sides[side].kills++;
   state.sides[s.side].losses++;
@@ -914,7 +916,8 @@ function nonPenetrating(
     // small arms and AT rifles: only men in an open compartment, from the side, rear or above
     const above = loc.zone === 'top';
     if (lay.openTop && team && ((TURRET_ZONES.has(loc.zone) && loc.face !== 'front') || above) && rng.next() < (above ? 0.3 : 0.1)) {
-      const riders = passengersAboard(state, v).filter((p) => p.health !== 'dead' && p.health !== 'incapacitated');
+      const riders = passengersAboard(state, v).filter((p) => p.health !== 'dead' && p.health !== 'incapacitated'
+        && (above || !def.passengerCompartment || p.rider?.posture === 'firing'));
       if (riders.length > 0 && rng.next() < riders.length / (riders.length + 2)) {
         const r = rng.next();
         hurtPassenger(state, v, riders[rng.int(0, riders.length - 1)], r < 0.35 ? 'dead' : r < 0.55 ? 'incapacitated' : 'wounded', input.shooterSide);
