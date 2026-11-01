@@ -266,13 +266,13 @@ export class BattleScreen implements Screen {
     this.setSelection([...new Set([...this.selectedTeamIds, ...ids])]);
   }
 
-  private issueOrderToSelection(input: InputState, world: Vec2): void {
+  private issueOrderToSelection(input: InputState, world: Vec2, type = this.pendingOrder): void {
     const battle = this.battle;
     const state = battle.state;
     const ids = this.selectedTeamIds.length > 0 ? this.selectedTeamIds : (this.selectedTeamId != null ? [this.selectedTeamId] : []);
-    if (ids.length === 0 || !this.pendingOrder) return;
+    if (ids.length === 0 || !type) return;
     const primary = state.teams.get(ids[0]);
-    const isMoveType = MOVE_TYPES.includes(this.pendingOrder);
+    const isMoveType = MOVE_TYPES.includes(type);
     const enemy = battle.teamAt(world, otherSide(battle.playerSide()));
     // Shift-click waypoints are intermediate points in click order, visited before `target`.
     const chain = isMoveType ? this.pendingWaypoints : [];
@@ -286,7 +286,7 @@ export class BattleScreen implements Screen {
         : { x: 0, y: 0 };
       const pts = offsetOrderPoints(world, chain, offset);
       this.command({ type: 'order', teamId: id, order: {
-        type: this.pendingOrder,
+        type,
         target: pts.target,
         targetTeamId: enemy ? enemy.id : undefined,
         issuedAt: state.time,
@@ -358,27 +358,31 @@ export class BattleScreen implements Screen {
 
     // right mouse: pressing directly on a friendly team opens the command
     // menu immediately at the press point (like the original's press/drag
-    // onto a row/release gesture); pressing elsewhere starts a pan-or-click
-    // gesture resolved on release; right-clicking again while the menu is
+    // onto a row/release gesture); a short click elsewhere issues contextual Move/Fire,
+    // while a drag pans. Right-clicking again while the menu is
     // open closes it (so does Escape, handled below).
     // While an order is being placed (manual input card: "Right-click mouse:
     // Cancel an order line without placing the order dot"), the right press
     // cancels the aiming line instead of opening the menu or panning.
+    if (input.keysPressed.has('escape')) this.rightDrag.active = false;
     for (const c of input.clicks) {
-      if (c.button !== 2) continue;
+      if (c.button !== 2 || input.keysPressed.has('escape')) continue;
+      this.rightDrag.active = false;
       if (this.markerDrag) { this.markerDrag = null; this.leftDrag.active = false; continue; }
       if (this.commandMenu.isOpen) {
         this.commandMenu.close();
         continue;
       }
-      if (this.overHud({ x: c.x, y: c.y })) continue;
+      if (c.x < 0 || c.x >= VIEW_W || c.y < 0 || this.overHud(c)) continue;
       if (this.pendingOrder) {
         this.pendingOrder = null;
         this.pendingWaypoints = [];
         continue;
       }
-      const hitTeam = pickFriendlyTeamScreen(state, cam, { x: c.x, y: c.y }, battle.playerSide());
-      this.rightDrag = { active: true, startX: c.x, startY: c.y, lastX: c.x, lastY: c.y, moved: 0, startTime: state.time, menuOpenedOnPress: false };
+      // A visible enemy wins over the broad friendly formation-picking circle.
+      const enemy = battle.teamAt(screenToWorld(cam, c), otherSide(battle.playerSide()));
+      const hitTeam = enemy ? null : pickFriendlyTeamScreen(state, cam, c, battle.playerSide());
+      this.rightDrag = { active: true, startX: c.x, startY: c.y, lastX: c.x, lastY: c.y, moved: 0, startTime: performance.now(), menuOpenedOnPress: false };
       if (hitTeam) {
         // The original issues a right-click order to the WHOLE current selection; only an
         // unselected team re-targets the menu. Pressing a selected member keeps the group intact.
@@ -391,31 +395,31 @@ export class BattleScreen implements Screen {
       }
     }
     if (this.rightDrag.active && input.buttons.right && !this.rightDrag.menuOpenedOnPress) {
-      const dx = input.mouse.x - this.rightDrag.lastX;
-      const dy = input.mouse.y - this.rightDrag.lastY;
-      if (dx !== 0 || dy !== 0) {
-        panCamera(cam, -dx, -dy);
+      const drag = this.rightDrag;
+      drag.moved = Math.max(drag.moved, Math.hypot(input.mouse.x - drag.startX, input.mouse.y - drag.startY));
+      if (drag.moved >= RIGHT_GESTURE_PX) {
+        panCamera(cam, drag.lastX - input.mouse.x, drag.lastY - input.mouse.y);
         clampCamera(cam, state.map.width, state.map.height);
-        this.rightDrag.lastX = input.mouse.x;
-        this.rightDrag.lastY = input.mouse.y;
+        drag.lastX = input.mouse.x; drag.lastY = input.mouse.y;
       }
-      this.rightDrag.moved = Math.max(this.rightDrag.moved, Math.hypot(input.mouse.x - this.rightDrag.startX, input.mouse.y - this.rightDrag.startY));
     }
     for (const r of input.releases) {
       if (r.button !== 2 || !this.rightDrag.active) continue;
-      const heldMs = (state.time - this.rightDrag.startTime) * 1000;
-      if (!this.rightDrag.menuOpenedOnPress && this.rightDrag.moved < RIGHT_GESTURE_PX && heldMs <= RIGHT_GESTURE_MS
-        && !this.overHud({ x: r.x, y: r.y })
+      const drag = this.rightDrag;
+      drag.moved = Math.max(drag.moved, Math.hypot(r.x - drag.startX, r.y - drag.startY));
+      const heldMs = performance.now() - drag.startTime;
+      if (!drag.menuOpenedOnPress && drag.moved >= RIGHT_GESTURE_PX) {
+        // Include the last delta, even when press and release arrive in the same frame.
+        panCamera(cam, drag.lastX - r.x, drag.lastY - r.y);
+        clampCamera(cam, state.map.width, state.map.height);
+      } else if (!drag.menuOpenedOnPress && heldMs <= RIGHT_GESTURE_MS
+        && input.pointerInside && r.x >= 0 && r.x < VIEW_W && r.y >= 0 && !this.overHud(r)
         && this.selectedTeamId != null && !this.commandMenu.isOpen) {
-        const team = state.teams.get(this.selectedTeamId);
-        if (team) {
-          this.commandMenu.open({ x: r.x, y: r.y }, team, {
-            canSmoke: teamHasSmoke(state, team),
-            canFire: teamCanFire(state, team),
-          });
-        }
+        const world = screenToWorld(cam, { x: drag.startX, y: drag.startY });
+        const enemy = battle.teamAt(world, otherSide(battle.playerSide()));
+        this.issueOrderToSelection(input, world, enemy ? 'fire' : 'move');
       }
-      this.rightDrag.active = false;
+      drag.active = false;
     }
 
     // command menu
