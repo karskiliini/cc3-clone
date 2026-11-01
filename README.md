@@ -35,7 +35,7 @@ order first (hotkey, order bar, or right-click menu), then click the target.
 - Select: left click a soldier or a team box; drag a rectangle on the map for group select;
   Shift adds to the selection; Ctrl+A selects all; double-click a team box to centre on it.
 - Orders: press **Z** Move, **X** Move Fast, **C** Sneak, **V** Fire, **B** Smoke, **N** Defend,
-  **M** Ambush (or click the order bar in the bottom strip, or right-click for the classic menu),
+  **M** Ambush / Hide (or click the order bar in the bottom strip, or right-click for the classic menu),
   then click the target. Shift-click adds waypoints (visited in click order before the final click). Esc cancels.
   Order endpoints stay marked on the map; hover one to see its line to the team, click it to select that team.
 - Scroll: two-finger scroll / mouse wheel pans; pinch or Ctrl+wheel zooms around the pointer;
@@ -96,6 +96,8 @@ order first (hotkey, order bar, or right-click menu), then click the target.
 - **F3** pause, **F5** team data, **F6** inset map, **F7** soldier monitor, **F8** options, **O** overview map,
   **Ctrl+K** toggle corpses, **+ / −** zoom, arrows or screen edge to scroll.
 - Bottom strip: Chat, Options, zoom, Map (inset on/off), Truce, Flee.
+
+During deployment, right-click a unit and choose **Defend** or **Ambush / Hide**, then click the desired direction. **N** and **M** select the same orders directly. The whole formation turns around its current anchor, and vehicle hull and turret turn immediately. Men remain inside the allowed deployment zone. Ambush and Hide are names for the same command.
 
 ## Structure
 

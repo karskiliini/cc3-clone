@@ -6,17 +6,17 @@ import { TILE_M, otherSide } from '@/shared/types';
 import { VEHICLE_DEFS } from '@/data/units';
 import { addMessage } from './messages';
 import type { Rng } from '@/shared/rng';
-import { angleTo, clamp, dist, facingFromAngle, facingTo, vadd, vnorm, vscale, vsub } from '@/shared/math';
+import { angleTo, clamp, dist, facingAngle, facingFromAngle, facingTo, vadd, vnorm, vscale, vsub } from '@/shared/math';
 import { teamInCommand } from './command';
 import { findPath, isPassable, type TileCostFn, type VehiclePathProfile } from './path';
 import { fireHazards, nearFireHazard } from './vehicleExplosion';
 import { teamHasSmoke } from './team';
 import { isFirstFireFrozen, isLeaderless } from './mind';
-import { formationBaseHeading, rotateOffset } from './spawn';
+import { formationBaseHeading, rotateOffset, layoutTeamPositions, deploymentOffsets } from './spawn';
 import { settleTile } from './coverSeek';
 import { buildingDestination, buildingTiles } from './buildingShelter';
 import { isDazed } from './daze';
-import { onCrewOrder } from './crewWeapon';
+import { onCrewOrder, placeCrewWeaponInDeployment } from './crewWeapon';
 import { RADIO_OUT_ORDER_DELAY_S, radioOut } from './vehicleDamage';
 import { placeVehicleBody } from './vehicle';
 import { groundProbe } from './hullGround';
@@ -373,6 +373,17 @@ export function applyOrderToSoldier(state: BattleState, team: Team, s: Soldier, 
   const type = effectiveType(team, order);
   const isVehicleTeam = team.vehicleId != null;
   if (type === 'smoke' && !isVehicleTeam && team.type !== 'mortar' && !teamHasSmoke(state, team)) { s.mind.pendingOrderAt = undefined; return; }
+  if (state.phase === 'deploy' && (type === 'defend' || type === 'ambush')) {
+    if (s.health === 'dead' || s.health === 'incapacitated') return;
+    // Planning arranges the unit now; combat obedience and turn rates start at Begin.
+    stopSoldier(s);
+    s.activity = type === 'defend' ? 'defending' : 'ambushing';
+    if (!isVehicleTeam) s.stance = type === 'ambush' || s.cover < 0.2 ? 'prone' : 'crouching';
+    s.facing = facingFromAngle(team.deploymentFacing ?? facingAngle(team.facing));
+    s.mind.pendingOrderAt = undefined;
+    s.mind.anchor = { ...s.pos };
+    return;
+  }
   if (!canObey(state, rng, s, team, order.target)) return;
 
   if (type === 'move' || type === 'moveFast' || type === 'sneak' || type === 'assault') {
@@ -535,6 +546,21 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
     if (order.type === 'move' || order.type === 'moveFast' || order.type === 'sneak') order.waypoints = order.waypoints.map((w) => ({ x: w.x, y: w.y }));
     else delete order.waypoints;
   }
+  // A direction click rotates the entire setup formation around its fixed anchor.
+  // Validate every slot before changing the old order, heading or any soldier.
+  const setupDirection = state.phase === 'deploy' && (order.type === 'defend' || order.type === 'ambush')
+    && dist(team.pos, order.target) > 1e-3 ? angleTo(team.pos, order.target) : null;
+  if (setupDirection != null) {
+    const members = team.soldierIds.map(id => state.soldiers.get(id)).filter((s): s is Soldier => !!s);
+    if (team.vehicleId == null) {
+      const slots = layoutTeamPositions(state.map, team.pos,
+        deploymentOffsets(state.map, team, members.map(s => s.formationOffset), setupDirection), state.map.def.deployZones[team.side]);
+      if (!slots) { addMessage(state, `${team.name}: no room to face this direction here.`, 'warn', team.side); return; }
+      members.forEach((s, i) => { s.pos = slots[i]; });
+    }
+    team.deploymentFacing = setupDirection;
+  }
+  if (state.phase !== 'deploy') delete team.deploymentFacing;
   team.order = order;
   if (team.vehicleId != null) { const v = state.vehicles.get(team.vehicleId); if (v) delete v.localDriver; }
   // G31 camouflage nets: an ambush order deploys the nets — they take effect immediately while
@@ -595,9 +621,7 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
     }
     // crew-served guns pivot to the arc direction immediately too, during deployment only; in
     // battle the crew slews the gun onto team.facing through its lay tasks (crewWeapon.ts).
-    if (state.phase === 'deploy' && !isVehicleTeam && team.crewWeapon && dist(team.crewWeapon.pos, order.target) > 1e-3) {
-      team.crewWeapon.facing = angleTo(team.crewWeapon.pos, order.target);
-    }
+    if (setupDirection != null && !isVehicleTeam) placeCrewWeaponInDeployment(state, team, setupDirection);
   }
 
   for (const sid of team.soldierIds) {

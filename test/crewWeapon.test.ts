@@ -71,10 +71,12 @@ describe('crew-served weapons: set-up time', () => {
     const packT = runUntil(battle, () => cw.phase === 'packed', 15);
     expect(packT).toBeGreaterThan(packTimeS('mortar81') - 1.2);
     expect(packT).toBeLessThan(15);
-    // moving: carried, cannot fire
+    // Packing already walks between stations. Measure carrying from the packed
+    // position: crossing the original pre-pack position is legitimate movement.
+    const carryStart = { ...gunner.pos };
     battle.step(1.5);
     expect(cw.phase).toBe('packed');
-    expect(dist(gunner.pos, start)).toBeGreaterThan(0.2);
+    expect(dist(gunner.pos, carryStart)).toBeGreaterThan(0.2);
     stepCrewWeapons(battle.state, SIM_DT);
     expect(gunner.fireTimer).toBeGreaterThan(0);
     // arrives and sets up: no sooner than the drill's working time

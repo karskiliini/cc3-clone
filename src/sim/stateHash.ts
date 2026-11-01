@@ -153,6 +153,7 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
   for (const t of state.teams.values()) {
     h.int(t.id);
     h.vec(t.pos);
+    if (t.deploymentFacing != null) { h.str('deploymentFacing'); h.num(t.deploymentFacing); }
     h.str(t.status);
     h.data(t.transportId); h.data(t.assignedVehicleIds); h.data(t.supportForTeamId); h.data(t.mobility); h.data(t.crewWeapon);
     h.bool(!!t.order);

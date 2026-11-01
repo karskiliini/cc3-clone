@@ -93,7 +93,7 @@ describe('deployment contains every soldier, not just the team anchor', () => {
   });
   it('contains initial and Auto placements for both sides on real maps', () => {
     for (const {id: mapId} of MAPS) {
-      const b = new Battle({...structuredClone(config),mapId, forces:{german:['ger_rifle_41','ger_mg34'],soviet:['sov_rifle_41']}});
+      const b = new Battle({...structuredClone(config),mapId, forces:{german:['ger_rifle_41','ger_mg34_hmg'],soviet:['sov_rifle_41']}});
       for (const t of b.state.teams.values()) expectContained(b,t);
       for (const side of ['german','soviet'] as const) aiDeploy(b.state,side,b.rng,b);
       for (const t of b.state.teams.values()) expectContained(b,t);

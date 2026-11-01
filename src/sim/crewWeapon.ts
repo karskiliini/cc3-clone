@@ -337,7 +337,7 @@ function desiredFacing(state: BattleState, team: Team, gunner: Soldier, from: Ve
   if (gunner.targetPoint) return angleTo(from, gunner.targetPoint);
   const ord = team.order;
   if (ord && ord.type === 'fire') return angleTo(from, ord.target);
-  if (ord && (ord.type === 'defend' || ord.type === 'ambush')) return facingAngle(team.facing);
+  if (ord && (ord.type === 'defend' || ord.type === 'ambush')) return team.deploymentFacing ?? facingAngle(team.facing);
   if (gunner.mind.threatDir != null) return gunner.mind.threatDir;
   return fallback;
 }
@@ -659,12 +659,24 @@ export function crewWeaponView(state: BattleState, team: Team): CrewWeaponState 
     if (s && s.weaponId === weaponId) { gunner = s; break; }
   }
   if (!gunner) return null;
-  const facing = formationBaseHeading(state.map, team.side);
+  const facing = team.deploymentFacing ?? formationBaseHeading(state.map, team.side);
   return {
     weaponId, pos: pivotFromGunner(cls, gunner.pos, facing), facing, phase: 'ready', timer: 0, phaseTotal: 0,
     gunnerId: gunner.id, abandoned: gunner.health === 'dead', abandonedAt: 0, setAt: 0,
     goal: 'deploy', done: allDeployTasks(cls), progress: {}, workers: {}, open: [],
   };
+}
+
+/** Reposition an existing weapon with its newly arranged crew during setup only. */
+export function placeCrewWeaponInDeployment(state: BattleState, team: Team, heading: number): void {
+  if (state.phase !== 'deploy') return;
+  const cw = team.crewWeapon;
+  if (!cw || cw.abandoned || cw.destroyed) return;
+  const cls = crewServedClass(cw.weaponId), gunner = state.soldiers.get(cw.gunnerId);
+  if (!cls || !gunner) return;
+  cw.facing = heading;
+  cw.pos = cw.phase === 'packed' ? { ...gunner.pos } : pivotFromGunner(cls, gunner.pos, heading);
+  if (cw.mount?.state === 'deployed') { cw.mount.pos = { ...cw.pos }; }
 }
 
 /** Takeover delay for the next crewman (spec §11: 2-6 s, longer for the inexperienced). */

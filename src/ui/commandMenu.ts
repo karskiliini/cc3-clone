@@ -18,7 +18,7 @@ const MENU_GROUPS: OrderType[][] = [
 ];
 const MENU_ORDER: OrderType[] = MENU_GROUPS.flat();
 
-const ROW_W = 104;
+const ROW_W = 128; // fits the Ambush / Hide alias without clipping
 const ROW_H = 18; // taller rows = a bigger, easier target (native-feel hit area)
 const GROUP_GAP = 4; // thin separator gap between categories
 const BORDER = 2;

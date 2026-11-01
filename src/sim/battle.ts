@@ -11,7 +11,7 @@ import { Rng } from '@/shared/rng';
 import { dist, pointInRect } from '@/shared/math';
 import { buildMap } from './map';
 import { isPassable } from './path';
-import { spawnTeam, layoutTeamPositions } from './spawn';
+import { spawnTeam, layoutTeamPositions, deploymentOffsets } from './spawn';
 import { applyOrder, stepAttackOrders, spottedEnemyTeamAt } from './orders';
 import { stepMovement } from './movement';
 import { stepVehicles, placeVehicleBody } from './vehicle';
@@ -391,7 +391,7 @@ export class Battle {
     if (!isPassable(this.state.map, Math.floor(pos.x), Math.floor(pos.y), mover)) return null;
     const members = team.soldierIds.map(id => this.state.soldiers.get(id)).filter((s): s is Soldier => !!s);
     return team.vehicleId != null ? members.map(() => ({ ...pos }))
-      : layoutTeamPositions(this.state.map, pos, members.map(s => s.formationOffset), zone);
+      : layoutTeamPositions(this.state.map, pos, deploymentOffsets(this.state.map, team, members.map(s => s.formationOffset)), zone);
   }
 
   /** A legal anchor alone is insufficient: every man must fit on allowed ground. */

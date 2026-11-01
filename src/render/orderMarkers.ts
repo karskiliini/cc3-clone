@@ -139,7 +139,7 @@ export function drawOrderMarkers(
       const gun = team.crewWeapon && !team.crewWeapon.abandoned ? team.crewWeapon : null;
       const from = worldToScreen(cam, gun ? gun.pos : team.pos);
       // canvas arc 0 = east; both bearing spaces are 0 = north, so shift both by -90deg.
-      const rad = (gun ? gun.facing : facingAngle(team.facing)) - Math.PI / 2;
+      const rad = (gun ? gun.facing : team.deploymentFacing ?? facingAngle(team.facing)) - Math.PI / 2;
       const spread = Math.PI / 6; // 30deg either side = 60deg arc
       ctx.strokeStyle = orderMarkerColor(team);
       ctx.lineWidth = 1;

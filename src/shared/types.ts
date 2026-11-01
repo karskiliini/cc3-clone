@@ -924,7 +924,7 @@ export type OrderType = 'move' | 'moveFast' | 'sneak' | 'fire' | 'smoke' | 'defe
 export const ORDER_TYPES: OrderType[] = ['move', 'moveFast', 'sneak', 'fire', 'smoke', 'defend', 'ambush', 'assault'];
 export const ORDER_LABELS: Record<OrderType, string> = {
   move: 'MOVE', moveFast: 'MOVE FAST', sneak: 'SNEAK', fire: 'FIRE',
-  smoke: 'SMOKE', defend: 'DEFEND', ambush: 'AMBUSH', assault: 'ASSAULT',
+  smoke: 'SMOKE', defend: 'DEFEND', ambush: 'AMBUSH / HIDE', assault: 'ASSAULT',
 };
 /** Original CC3 keyboard reference: Z Move, X Move Fast, C Sneak, V Fire, B Smoke, N Defend, M Ambush.
  * Assault (C4) is new: A. Each key must be unique — the battle-screen hotkey loop applies the LAST
@@ -1027,6 +1027,8 @@ export interface Team {
   order: Order | null;
   /** set by fire/defend/ambush orders */
   facing: Facing8;
+  /** Exact setup formation bearing in radians; offsets remain in their spawn frame. */
+  deploymentFacing?: number;
   experience: number;
   /** cached each step */
   morale: number;

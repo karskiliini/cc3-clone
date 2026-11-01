@@ -29,6 +29,8 @@ import {
   updateModernDragPan, pickFriendlyTeamScreen, friendlyCentroid, type EdgeScrollState, type DragPanState,
 } from './battleInput';
 import { BattleScreen } from './battle';
+import { CommandMenu } from '@/ui/commandMenu';
+import { teamCanFire, teamHasSmoke } from '@/sim/team';
 const DRAG_THRESHOLD_PX = 5;
 /** Move-family orders accept Shift-click waypoint chaining. */
 const MOVE_ORDER_TYPES: OrderType[] = ['move', 'moveFast', 'sneak'];
@@ -57,6 +59,7 @@ export class DeployScreen implements Screen {
   private grabTile: Vec2 | null = null;
   /** pre-begin order placement (user: units take orders in deploy): pick the order (hotkey),
    * then click a target. LOS preview draws while aiming. */
+  private commandMenu = new CommandMenu();
   private pendingOrder: OrderType | null = null;
   private pendingWaypoints: Vec2[] = [];
   private draggingTeamId: number | null = null;
@@ -167,6 +170,27 @@ export class DeployScreen implements Screen {
 
     if (this.quitConfirm) {
       this.updateQuitConfirm(input);
+      return;
+    }
+
+    // Setup uses the same clickable orders as battle, before any pan or drop
+    // handlers can consume the menu click. Empty-ground right drag still pans.
+    if (this.commandMenu.isOpen) {
+      if (input.clicks.some(c => c.button === 2)) { this.commandMenu.close(); return; }
+      const picked = this.commandMenu.update(input);
+      if (picked && picked !== 'cancel') { this.pendingOrder = picked; this.pendingWaypoints = []; }
+      return;
+    }
+    for (const c of input.clicks) {
+      if (c.button !== 2 || this.overHud({ x: c.x, y: c.y })) continue;
+      if (this.pendingOrder) { this.pendingOrder = null; this.pendingWaypoints = []; return; }
+      const team = pickFriendlyTeamScreen(state, cam, { x: c.x, y: c.y }, this.battle.playerSide());
+      if (!team) continue;
+      if (!this.selectedTeamIds.includes(team.id)) this.setSelection([team.id]);
+      this.dragPan.active = false; this.modernPanDrag.active = false;
+      this.commandMenu.open({ x: c.x, y: c.y }, team, {
+        canSmoke: teamHasSmoke(state, team), canFire: teamCanFire(state, team),
+      });
       return;
     }
 
@@ -682,6 +706,7 @@ export class DeployScreen implements Screen {
     this.combatMessages.draw(ctx, state);
     this.bottomStrip.draw(ctx, state, selTeam, this.soldierMonitor.watchedSoldierForTeam(state, selTeam));
 
+    this.commandMenu.draw(ctx);
     if (this.quitConfirm) this.drawQuitConfirm(ctx);
   }
 
@@ -740,6 +765,8 @@ export class DeployScreen implements Screen {
   }
 
   cursor(): CursorKind {
+    if (this.commandMenu.isOpen) return 'hand';
+    if (this.pendingOrder) return 'crosshair';
     if (this.dragPan.active || this.modernPanDrag.active) return 'hand';
     if (this.draggingTeamId != null) return this.dragInvalid ? 'no' : 'move';
     if (this.hoveredOrderMarker) return 'hand';

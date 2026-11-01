@@ -247,6 +247,13 @@ export function layoutTeamPositions(map: GameMap, anchor: Vec2, offsets: Vec2[],
   return out;
 }
 
+/** Setup turns are absolute rotations of the canonical spawn offsets, never cumulative. */
+export function deploymentOffsets(map: GameMap, team: Team, offsets: Vec2[], heading = team.deploymentFacing): Vec2[] {
+  if (heading == null) return offsets;
+  const delta = heading - formationBaseHeading(map, team.side);
+  return offsets.map(offset => rotateOffset(offset, delta));
+}
+
 // ------------------------------------------------------------ vehicle deployment spacing ---
 /** Clear ground kept between two deployed hulls, on top of the longer hull's length (metres). */
 export const VEHICLE_DEPLOY_GAP_M = 4;
