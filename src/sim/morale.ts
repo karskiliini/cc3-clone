@@ -323,6 +323,7 @@ function computeTeamStatus(state: BattleState, team: Team, track: MoraleTrack): 
     return { status: engaged ? 'Not Firing' : "Can't See", outOfAction, morale };
   }
 
+  if(!vehicle&&(word==='Waiting'||word==='Defending')&&alive.filter(s=>s.digging).length*2>=alive.length)word='Digging in';
   return { status: word, outOfAction, morale };
 }
 

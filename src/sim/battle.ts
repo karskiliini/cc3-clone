@@ -1,3 +1,4 @@
+import { stepDigging } from './digging';
 import { spawnMortarCarriers, alignMortarCarriers } from './mortarCarriers';
 import type {
   BattleConfig, BattleEvent, BattleReport, BattleState, Controller, Order, Rect, Side, Soldier,
@@ -321,6 +322,7 @@ export class Battle {
     stepTreeFires(state, this.rng, dt);
     stepPickups(state, this.rng, dt);
     stepMedic(state, this.rng, dt);
+    stepDigging(state, dt);
     stepVictory(state, dt);
     stepSmoke(state.map, dt);
 

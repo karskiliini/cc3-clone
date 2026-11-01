@@ -98,6 +98,8 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
     h.num(s.mind.stress);
     h.int(s.vehicleId ?? -1);
     h.data(s.seat); h.data(s.hatch); h.data(s.crewTask);
+    if(s.lastToolWorkAt!=null){h.str('toolWork');h.num(s.lastToolWorkAt);}
+    if (s.digging) { h.str('digging'); h.data(s.digging); }
     if (s.rider) { h.str('rider'); h.data(s.rider); }
   }
   for (const v of state.vehicles.values()) {
@@ -189,6 +191,7 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
       for (const p of [b.trajectory.endpoint, b.trajectory.direction]) { h.num(p.x); h.num(p.y); h.num(p.z); }
     }
   }
+  if(state.map.foxholes?.size) h.data([...state.map.foxholes].sort((a,b)=>a[0]-b[0]));
   // terrain the sim changed: crater marks and how many the height field has stamped (D1)
   h.int(state.map.craterMarks?.length ?? 0);
   h.data(state.map.craterMarks?.filter(mark => mark.kind !== 'track'));

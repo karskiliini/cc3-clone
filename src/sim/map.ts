@@ -1,7 +1,7 @@
 import type { GameMap, MapDef, Terrain, Vec2, VictoryLocation } from '@/shared/types';
 import { otherSide } from '@/shared/types';
 import { TERRAIN_PROPS } from './terrain';
-import { buildHeightField } from './heightField';
+import { buildHeightField,earthworkCoverScale,personalFoxholeCover } from './heightField';
 import { computeGroundSteep, paintElevation } from './mapdsl';
 
 const BUILDING_TILES = new Set<Terrain>(['buildingWood', 'buildingStone', 'floor']);
@@ -33,7 +33,8 @@ export function coverAt(map: GameMap, p: Vec2): number {
   const x = Math.floor(p.x);
   const y = Math.floor(p.y);
   if (!inBounds(map, x, y)) return 0;
-  return TERRAIN_PROPS[tileAt(map, x, y)].cover;
+  const t=tileAt(map,x,y),base=TERRAIN_PROPS[t].cover,scale=t==='trench'||t==='crater'?earthworkCoverScale(map,x,y):1;
+  return personalFoxholeCover(map,p,scale===1?base:.05+(base-.05)*scale);
 }
 
 /** Ground elevation (m) at a point, bilinearly interpolated between tile centres. The per-tile

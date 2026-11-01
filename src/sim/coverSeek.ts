@@ -20,7 +20,7 @@ const SEEK_INTERVAL_S = 2;
 const HAZARD_SEARCH_TILES = 12;
 
 
-function tilesWithinRadius(centre: Vec2, radius: number): Vec2[] {
+function tilesWithinRadius(centre: Vec2, radius: number, map?: BattleState['map']): Vec2[] {
   const out: Vec2[] = [];
   const cx = Math.floor(centre.x), cy = Math.floor(centre.y);
   const r = Math.floor(radius);
@@ -30,6 +30,7 @@ function tilesWithinRadius(centre: Vec2, radius: number): Vec2[] {
       out.push({ x: cx + dx + 0.5, y: cy + dy + 0.5 });
     }
   }
+  if(map?.foxholes)for(const site of map.foxholes.values())if(dist(centre,site.pos)<=radius)out.push({...site.pos});
   return out;
 }
 
@@ -52,7 +53,7 @@ function bestCoverTile(
   let best: Vec2 | null = null;
   let bestScore = -Infinity;
   let bestOmni = -Infinity;
-  for (const tile of tilesWithinRadius(centre, radius)) {
+  for (const tile of tilesWithinRadius(centre, radius, state.map)) {
     const tx = Math.floor(tile.x), ty = Math.floor(tile.y);
     if (!inBounds(map, tx, ty)) continue;
     if (!isPassable(map, tx, ty, 'infantry')) continue;
@@ -152,7 +153,7 @@ function seekForSoldier(state: BattleState, rng: Rng, s: Soldier): void {
     const cur = omniCoverAt(state.map, s.pos);
     let bestTile: Vec2 | null = null;
     let bestScore = -Infinity;
-    for (const tile of tilesWithinRadius(anchor, 6)) {
+    for (const tile of tilesWithinRadius(anchor, 6, state.map)) {
       const tx = Math.floor(tile.x), ty = Math.floor(tile.y);
       if (!inBounds(state.map, tx, ty) || !isPassable(state.map, tx, ty, 'infantry')) continue;
       if (occupiedByTeammate(state, team, s, tile)) continue;
@@ -254,7 +255,7 @@ export function settleTile(
   const sx = Math.floor(slot.x), sy = Math.floor(slot.y);
   let best: Vec2 | null = null;
   let bestScore = -Infinity;
-  for (const tile of tilesWithinRadius(slot, radius)) {
+  for (const tile of tilesWithinRadius(slot, radius, state.map)) {
     const tx = Math.floor(tile.x), ty = Math.floor(tile.y);
     if (!inBounds(map, tx, ty) || !isPassable(map, tx, ty, 'infantry') || taken(tx, ty)) continue;
     const own = tx === sx && ty === sy;

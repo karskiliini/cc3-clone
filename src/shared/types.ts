@@ -203,7 +203,13 @@ export interface HeightBuildingInfo {
   stone: boolean; big: boolean; eave: number; ridge: number; ridgeHoriz: boolean;
 }
 
+export interface PersonalFoxhole {
+  id: number; pos: Vec2; angle: number;
+  /** Construction target; physical depth/cover come from the dig layer (which can collapse). */
+  depthM: number; workS: number; appliedWorkS: number;
+}
 export interface GameMap {
+  foxholes?: Map<number, PersonalFoxhole>;
   def: MapDef;
   width: number;
   height: number;
@@ -460,6 +466,8 @@ export interface PassengerCompartment {
 }
 
 export interface Soldier {
+  digging?: { siteId: number; startedAt: number };
+  lastToolWorkAt?: number;
   /** campaign identity: stable across battles (G1). Undefined for AI forces. */
   uid?: string;
   /** Derived each crew step: hands occupied carrying this team's MG mount. */

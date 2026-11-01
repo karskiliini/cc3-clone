@@ -20,8 +20,8 @@ capacity and preserve other jobs. Use immutable isolated inputs for long tests.
 | 1 | 051 physical APC passengers | Complete; spec `docs/superpowers/specs/2026-11-01-physical-apc-passengers.md` | Full squad boards/rides/crouches/fires/jumps out; killed riders remain constrained by walls/benches under pitch/roll; deterministic physical state; in-game recording |
 | 2 | 052 physical broken tracks | Complete; physical cut/drive/render integration | Hit/mine breaks a particular link; loose chain moves over wheels/ground, can be dragged, loses that side's drive after sprocket disengagement; visible links and exact deterministic tests |
 | 3 | 054 terrain compression | Complete; accepted load/height/cover/art integration | Loaded accepted track/wheel contacts progressively compress holes/rims by vehicle weight and passes; height, cover and visuals agree; rejected movement creates no deformation |
-| 4 | 055 infantry digging | Active: persistent personal sites and interruption | Eligible idle men dig visibly over time; orders/threats interrupt; persistent site depth/cover evolves deterministically and interacts with stage 3 |
-| 5 | 044 + 047b online multiplayer and recovery | Pending | Relay/browser transport, room join and forces/deployment, game UI, speed/pause policy, disconnect takeover/forfeit/rejoin, visible desync rebuild/failure/report flow, two browser/host verification |
+| 4 | 055 infantry digging | Complete; canonical sites/cover/tasks/animation/render integration | Eligible idle men dig visibly over time; orders/threats interrupt; persistent site depth/cover evolves deterministically and interacts with stage 3 |
+| 5 | 044 + 047b online multiplayer and recovery | Active: inspect lockstep and establish relay/lobby contract | Relay/browser transport, room join and forces/deployment, game UI, speed/pause policy, disconnect takeover/forfeit/rejoin, visible desync rebuild/failure/report flow, two browser/host verification |
 | 6 | 056 individual perception and human condition | Pending | Personal visual/acoustic contacts and delivered reports replace omniscient decisions; integrated pain/exertion/shock/exhaustion/sweat/tremor affect capability; hidden-state/viewer independence and exact replay tests |
 
 ## Stage 1: compartment implementation decisions
@@ -82,3 +82,10 @@ valid substitute for compartment occlusion. Render or model fixes belong to 051.
   Exact M5/M2 160-tick SHA `3ec8df680c5767736367fa8a105d6dd977ae62183e4c44b3c3ba582ed22546e8`.
   Actual Chromium crossing changed 25 dig samples; final art preserves round outlines;
   no page errors and own server stopped.
+
+- Stage 055 completed: ten dedicated cases; 77 integration/replay checks and final
+  41 digging/morale/HUD checks; types/build. Ten real soldiers finish personal holes
+  with 0.717–0.8 physical cover; background no longer rebakes on shovel strokes.
+  M5 Node / M2 Node / Chromium 240 s SHA
+  `88b31f0a2d26198b58615a6886d955f6400a08c532a989f671206b15c1d0c885`.
+  Own browser/server stopped; no page errors.

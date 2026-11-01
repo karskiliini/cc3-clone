@@ -617,3 +617,11 @@ export function ragdollHeading(blast: NonNullable<Soldier['blast']>, pos: Vec2):
 /** Metres -> screen px at `zoom` (10 px per metre at zoom 1). */
 export function metresToPx(m: number, zoom: number): number { return (m / TILE_M) * 20 * zoom; }
 
+
+
+/** Reuses the four-frame entrenching motion; independent phase avoids a synchronized squad. */
+export function diggingAnimation(s:Soldier,time:number):{keys:string[];progress:number}|null {
+ if(!s.digging||s.health==='dead'||s.health==='incapacitated')return null;
+ const phase=((time-s.digging.startedAt)/1.6+phaseOffset(s.id))%1;
+ return {keys:['crew.dig','crew.loader.gun','crouched.idle'],progress:phase<0?phase+1:phase};
+}

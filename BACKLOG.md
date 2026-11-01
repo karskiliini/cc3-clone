@@ -11,7 +11,7 @@ Process requests in the order received. New requests are appended to the queue w
 Pushing to GitHub works again (since 2026-09-25); the earlier Zscaler push blocker no longer applies.
 ## Active
 
-**051 → 052 → 054 → 055 → 044/047b → 056 — user-requested implementation workflow (2026-11-01).** The user explicitly reprioritized these items and requested their implementation now as a workflow. **Active stage: 055, infantry digging; 051, 052 and 054 complete.** Execution and evidence ledger: `docs/reference/plans/2026-11-01-priority-workflow.md`. Complete and verify each stage, commit/push it, then continue to the next without a new approval ceremony.
+**051 → 052 → 054 → 055 → 044/047b → 056 — user-requested implementation workflow (2026-11-01).** The user explicitly reprioritized these items and requested their implementation now as a workflow. **Active stage: 044/047b, online multiplayer and recovery; 051, 052, 054 and 055 complete.** Execution and evidence ledger: `docs/reference/plans/2026-11-01-priority-workflow.md`. Complete and verify each stage, commit/push it, then continue to the next without a new approval ceremony.
 
 **050 P2 parked for this workflow.** Remaining routing/determinism/balance acceptance is not claimed complete. Performance optimization remains deferred at the user's request: current performance is sufficient for now; resume profiling/optimization only when requested. Latest measurement: 40 moving vehicles, 2.59450 ms/tick on the Mac mini (`docs/superpowers/reports/2026-11-01-p2-line-interest-performance.md`). The former 0.5 ms target does not block this workflow.
 
@@ -40,17 +40,6 @@ Gist:
 - Possibly a hex map, where one hex can be attacked from several directions. The moved pieces might then be companies, capping one battle at a battalion per side.
 Open questions: hexes vs. sectors; company vs. battalion pieces; how this relates to the existing operation/campaign code (`src/data/operation.ts`, `campaign.ts`); the turn order (simultaneous vs. alternating).
 Done when: this goes through brainstorming into a written spec the user approves. It is not scheduled until the user asks for it.
-
-**055 — Feature: Idle infantry dig in, and the foxhole grows over time.**
-Request (2026-10-09): "Kun miehet pysähtyvät ja heillä ei ole aktiivista tehtävää, niin he voivat heti alkaa kaivautua lapioilla. Foxhole alkaa hiljalleen kasvaa ja miehet saavat paremman suojan."
-Done when:
-- A soldier who has stopped and has no active task (not firing, moving, healing or carrying) starts digging at once with his entrenching tool, shown with a dig animation.
-- A personal foxhole grows step by step at his spot: depth, spoil mound and cover rise with digging time, and a full hole takes on the order of minutes.
-- Digging stops immediately for any order or threat reaction and resumes from the reached depth.
-- The hole stays in the map's dig layer. It is deterministic and included in the state hash.
-- The cover and protection it gives grow with its depth, and the cover-seeking code (`coverSeek.ts`) prefers holes that already exist.
-- Tests: depth grows with time; an order interrupts digging; cover at half depth lies between none and full; behaviour is identical across engines.
-Open questions: the dig rate per period and terrain (frozen ground in winter, rock, urban rubble); whether a crew-served weapon team digs a weapon pit.
 
 **047b — Feature: Desync recovery in the real game (remaining part of 047).**
 
@@ -270,3 +259,18 @@ Done when:
 Relates to 050 P2 (hull physics over terrain): do it after P2, or define the deformation so P2 reads it.
 
 Implemented and verified. Details: `docs/superpowers/specs/2026-11-01-earthwork-compression.md`.
+
+## Completed workflow stage 055 — 2026-11-01
+
+**055 — Feature: Idle infantry dig in, and the foxhole grows over time.**
+Request (2026-10-09): "Kun miehet pysähtyvät ja heillä ei ole aktiivista tehtävää, niin he voivat heti alkaa kaivautua lapioilla. Foxhole alkaa hiljalleen kasvaa ja miehet saavat paremman suojan."
+Done when:
+- A soldier who has stopped and has no active task (not firing, moving, healing or carrying) starts digging at once with his entrenching tool, shown with a dig animation.
+- A personal foxhole grows step by step at his spot: depth, spoil mound and cover rise with digging time, and a full hole takes on the order of minutes.
+- Digging stops immediately for any order or threat reaction and resumes from the reached depth.
+- The hole stays in the map's dig layer. It is deterministic and included in the state hash.
+- The cover and protection it gives grow with its depth, and the cover-seeking code (`coverSeek.ts`) prefers holes that already exist.
+- Tests: depth grows with time; an order interrupts digging; cover at half depth lies between none and full; behaviour is identical across engines.
+Open questions: the dig rate per period and terrain (frozen ground in winter, rock, urban rubble); whether a crew-served weapon team digs a weapon pit.
+
+Implemented and verified. Details: `docs/superpowers/specs/2026-11-01-individual-entrenchment.md`.

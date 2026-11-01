@@ -214,8 +214,8 @@ function stepEngineerWork(state: BattleState, s: Soldier, rng: Rng): void {
   if (!team || team.type !== 'engineer') return;
   if (s.health === 'dead' || s.health === 'incapacitated') return;
   if (s.activity === 'moving' || s.activity === 'movingFast') return;
-  if (cutWireNear(state, s)) return;
-  if (rng.chance(0.05)) clearMineNear(state, s); // slower work: a dig per couple of seconds
+  if (cutWireNear(state, s)) { s.lastToolWorkAt=state.time; return; }
+  if (rng.chance(0.05) && clearMineNear(state, s)) s.lastToolWorkAt=state.time; // slower work: a dig per couple of seconds
 }
 
 function onArrive(state: BattleState, s: Soldier): void {

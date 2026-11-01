@@ -1,4 +1,4 @@
-import { earthworkCoverScale } from './heightField';
+import { earthworkCoverScale,personalFoxholeCover } from './heightField';
 // ============================================================================
 // cover.ts — directional cover model (spec §9). A tile's protection against
 // fire depends on the direction the fire is coming from: omnidirectional
@@ -18,18 +18,18 @@ const OMNI_COVER: Partial<Record<Terrain, number>> = {
 /** Occupants of a bunker interior get near-immunity to small arms (G7). */
 export const BUNKER_COVER = 0.85;
 
-function omniCoverOf(map: GameMap, tx: number, ty: number, t: Terrain): number {
+function omniCoverOf(map: GameMap, tx: number, ty: number, t: Terrain, position: Vec2 = {x:tx+.5,y:ty+.5}): number {
   if (map.bunkerId && map.bunkerId[ty * map.width + tx] >= 0) return BUNKER_COVER;
   const cover=OMNI_COVER[t] ?? TERRAIN_PROPS[t].cover;
   const scale=t==='trench'||t==='crater'?earthworkCoverScale(map,tx,ty):1;
-  return scale===1?cover:.05+(cover-.05)*scale;
+  return personalFoxholeCover(map,position,scale===1?cover:.05+(cover-.05)*scale);
 }
 
 /** Omnidirectional cover value at a tile (spec §9's list), for display and tie-breaking. */
 export function omniCoverAt(map: GameMap, tile: Vec2): number {
   const tx = Math.floor(tile.x), ty = Math.floor(tile.y);
   if (!inBounds(map, tx, ty)) return 0;
-  return omniCoverOf(map, tx, ty, tileAt(map, tx, ty));
+  return omniCoverOf(map, tx, ty, tileAt(map, tx, ty), tile);
 }
 
 const LINEAR_COVER: Partial<Record<Terrain, number>> = {
@@ -78,7 +78,7 @@ function crestProtection(map: GameMap, tx: number, ty: number, stepX: number, st
 export function coverFrom(map: GameMap, tile: Vec2, dirRad: number, ctx?: CoverContext): number {
   const tx = Math.floor(tile.x), ty = Math.floor(tile.y);
   if (!inBounds(map, tx, ty)) return 0;
-  const omni = omniCoverOf(map, tx, ty, tileAt(map, tx, ty));
+  const omni = omniCoverOf(map, tx, ty, tileAt(map, tx, ty), tile);
 
   const stepX = Math.round(dm.sin(dirRad));
   const stepY = Math.round(-dm.cos(dirRad));

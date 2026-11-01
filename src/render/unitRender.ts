@@ -1,3 +1,4 @@
+import { diggingAnimation } from './soldierAnim';
 // ============================================================================
 // unitRender.ts — draws soldiers, vehicles, selection rings, VL flags, team
 // labels and order lines/arcs for the battle viewport.
@@ -805,6 +806,10 @@ function crewFleeing(s: Soldier): boolean {
 /** Per-frame crew pose / position overrides, keyed by soldier id. */
 export function crewSoldierDraws(state: BattleState): Map<number, CrewSoldierDraw> {
   const out = new Map<number, CrewSoldierDraw>();
+  for(const s of state.soldiers.values()){
+    const dig=diggingAnimation(s,state.time);
+    if(dig)out.set(s.id,{pose:null,pos:s.pos,facing:s.facing,...dig});
+  }
   for (const team of state.teams.values()) {
     if (team.vehicleId != null) continue;
     const cw = crewWeaponView(state, team);
@@ -1144,6 +1149,13 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, cam: Camera, state: BattleS
       // marker, like the zoomed-out view
       ctx.fillStyle = SIDE_COLOR[s.side];
       ctx.fillRect(Math.round(p.x) - 1, Math.round(p.y) - 1, DOT_SIZE, DOT_SIZE);
+    }
+    const dig=diggingAnimation(s,state.time);
+    if(dig){
+      const z=cam.zoom,lift=Math.sin(dig.progress*Math.PI*2);
+      ctx.save();ctx.translate(p.x,p.y);ctx.rotate(s.facing*Math.PI/4);
+      ctx.strokeStyle='#987545';ctx.lineWidth=1.4*z;ctx.beginPath();ctx.moveTo(-z,-3*z);ctx.lineTo(2*z,(-8+lift*3)*z);ctx.stroke();
+      ctx.fillStyle='#76796c';ctx.fillRect(.5*z,(-10+lift*3)*z,3*z,3*z);ctx.restore();
     }
     drawSuppressionStipple(ctx, p, s, 9 * cam.zoom);
     // 2px facing tick in front of the soldier, only for the selected team.

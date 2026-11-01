@@ -44,6 +44,10 @@ const retryAt = new WeakMap<BattleState, Map<number, number>>();
 /** Per-soldier treatment deadline (the sim's own copy of `bandageUntil`). */
 const treatUntil = new WeakMap<Soldier, number>();
 
+export function isReceivingTreatment(state:BattleState,s:Soldier):boolean {
+  return [...(tasks.get(state)?.values()??[])].some(t=>t.patientId===s.id&&t.phase==='treat');
+}
+
 export function isTreating(s: Soldier, time: number): boolean {
   const t = treatUntil.get(s);
   return t != null && time < t;

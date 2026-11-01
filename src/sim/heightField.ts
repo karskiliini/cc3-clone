@@ -911,3 +911,62 @@ export function earthworkCoverScale(map:GameMap,tx:number,ty:number):number {
   }
   return edited&&original>0?clamp01(depth/original):1;
 }
+
+
+/** Incremental personal excavation uses the same sparse physical layer as vehicle
+ * collapse. A repair removes soil gradually rather than restoring a full hole. */
+export function deepenPersonalFoxhole(map:GameMap,site:import('@/shared/types').PersonalFoxhole,incrementM:number):boolean {
+  const f=getHeightField(map),cx=site.pos.x*f.res-.5,cy=site.pos.y*f.res-.5;
+  const ca=dm.cos(site.angle),sa=dm.sin(site.angle);let changed=false,needsWork=false;
+  for(let y=Math.max(0,Math.floor(cy-5));y<=Math.min(f.h-1,Math.ceil(cy+5));y++)
+    for(let x=Math.max(0,Math.floor(cx-5));x<=Math.min(f.w-1,Math.ceil(cx+5));x++) {
+      const i=y*f.w+x;if(f.base[i]>=1)continue;
+      const dx=(x-cx)*HF_STEP_M,dy=(y-cy)*HF_STEP_M;
+      const forward=dx*ca+dy*sa,across=-dx*sa+dy*ca;
+      const e=Math.sqrt((across/1.05)*(across/1.05)+(forward/.5)*(forward/.5));
+      const pit=e<1?(e<.6?1:1-smooth((e-.6)/.4)):0;
+      const spoil=forward>.5&&forward<1.4&&Math.abs(across)<1.3 ? dm.sin((forward-.5)/.9*Math.PI)*(1-Math.abs(across)/1.3) : 0;
+      const desired=pit>0?-site.depthM*pit:site.depthM/1.2*.4*spoil;
+      const full=pit>0?-1.2*pit:.4*spoil;
+      const before=f.dig[i];let next=before;
+      if(pit>0){if(before>full+.005)needsWork=true;next=Math.min(before,Math.max(desired,before-incrementM*pit));}
+      else if(spoil>0&&before>=0)next=Math.max(before,Math.min(desired,before+incrementM/3*spoil));
+      const after=Math.fround(next);if(after===before)continue;
+      const edits=f.earthworkEdits??=new Map(),old=edits.get(i);
+      const original=pit>0?Math.min(old?.original??before,after):Math.max(old?.original??before,after);
+      edits.set(i,{original,dig:after});f.dig[i]=after;compose(f,i);changed=true;
+    }
+  if(changed)f.version++; // Personal holes have a separate small render patch, not a terrain rebake.
+  return needsWork;
+}
+
+// Positions never move; work/depth changes do not invalidate this derived spatial index.
+// A restored map has a new Map identity and therefore constructs its own index.
+const personalSiteIndex=new WeakMap<NonNullable<GameMap['foxholes']>,{size:number,buckets:Map<number,import('@/shared/types').PersonalFoxhole[]>}>();
+function sitesNear(map:GameMap,p:Vec2):import('@/shared/types').PersonalFoxhole[] {
+ const sites=map.foxholes;if(!sites)return [];
+ let index=personalSiteIndex.get(sites);
+ if(!index||index.size!==sites.size){
+   index={size:sites.size,buckets:new Map()};
+   for(const site of sites.values()){
+     const key=Math.floor(site.pos.y)*map.width+Math.floor(site.pos.x),bucket=index.buckets.get(key)??[];
+     bucket.push(site);index.buckets.set(key,bucket);
+   }personalSiteIndex.set(sites,index);
+ }
+ const out:import('@/shared/types').PersonalFoxhole[]=[];
+ for(let y=Math.max(0,Math.floor(p.y)-1);y<=Math.min(map.height-1,Math.floor(p.y)+1);y++)
+   for(let x=Math.max(0,Math.floor(p.x)-1);x<=Math.min(map.width-1,Math.floor(p.x)+1);x++)out.push(...index.buckets.get(y*map.width+x)??[]);
+ return out;
+}
+
+/** Personal sites provide cover only where the physical depression still exists. */
+export function personalFoxholeCover(map:GameMap,p:Vec2,base:number):number {
+  const f=map.heightField;if(!f||!map.foxholes?.size)return base;
+  for(const site of sitesNear(map,p)) {
+    const dx=(p.x-site.pos.x)*TILE_M,dy=(p.y-site.pos.y)*TILE_M;
+    if(dx*dx+dy*dy>.9*.9)continue;
+    const depth=Math.max(0,-sampleBilinear(f,f.dig,p.x,p.y));
+    base=Math.max(base,.8*clamp01(depth/1.2));
+  }
+  return base;
+}

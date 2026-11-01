@@ -164,6 +164,7 @@ function activityWord(s: Soldier, team: Team | null, vehicle: Vehicle | undefine
   // on a hatch, half out of (or into) the vehicle (spec 2026-09-17 §10)
   if (s.hatch) return s.hatch.kind === 'mount' ? 'Mounting' : s.hatch.passenger && !s.hatch.panicked ? 'Dismounting' : 'Bailing out';
   if (s.seat === 'passenger' && s.vehicleId != null) return 'Mounted';
+  if(s.digging)return 'Digging in';
   // spec §7: show the mental-state word for wary/shaken, which have no dedicated Activity of their
   // own (calm/alert are unremarkable and keep the normal activity word).
   // a man working a crew-served weapon shows his task (spec 2026-09-17 §6)

@@ -448,6 +448,7 @@ function paintTrackRut(ctx: CanvasRenderingContext2D, c: CraterDraw, season: Sea
 
 // ================================================================== foxholes
 export interface FoxholeDraw {
+  depthM?: number;
   x: number; y: number;      // centre, zoom-1 world px
   /** direction the position faces (toward the enemy), radians, 0 = +x (east), PI/2 = +y (south) */
   angle: number;
@@ -600,6 +601,10 @@ export function fillFoxhole(f: EarthField, fx: FoxholeDraw, season: Season): Sha
       H[i] = hh;
       soil[i] = sa;
     }
+  }
+  if(fx.depthM!=null){
+    const scale=Math.max(0,Math.min(1,fx.depthM/depth)),alpha=Math.min(1,fx.depthM/.1);
+    for(let i=0;i<w*h;i++){H[i]*=scale;soil[i]*=alpha;}
   }
   return { depthRef: depth * 0.75, old: false, seed, puddles: false, palette: FOXHOLE_PALETTES[season], warm: winter };
 }

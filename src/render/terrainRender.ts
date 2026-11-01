@@ -2762,6 +2762,7 @@ export class TerrainRenderer {
   /** Tile indexes that were already 'crater' when the map was built — the rest came from battle
    * explosions (and are drawn from map.craterMarks instead). */
   private mapCraterTiles = new Set<number>();
+  private personalPatches=new Map<number,{canvas:HTMLCanvasElement;zoom:number;version:number;depth:number;relief:string;field:GameMap['heightField']}>();
   /** Most-recently-used key per zoom, so draw() can skip the delete+set re-insert for it. */
   private mruKey = new Map<number, string>();
   private buildingBBoxes = new Map<number, BuildingBBox>();
@@ -3667,7 +3668,34 @@ export class TerrainRenderer {
         }
       }
     }
+    this.drawPersonalFoxholes(ctx,cam);
     ctx.restore();
+  }
+
+  /** Personal excavation changes a small transparent patch. Rebuilding complete
+   * ground chunks every shovel stroke made the background repeatedly fall back. */
+  private drawPersonalFoxholes(ctx:CanvasRenderingContext2D,cam:Camera):void {
+    const field=this.map.heightField,ext=foxholeExtentPx(),zoom=Math.min(2,cam.zoom);
+    for(const site of this.map.foxholes?.values()??[]){
+      const wx=site.pos.x*TILE_PX,wy=site.pos.y*TILE_PX,left=(wx-ext-cam.x*TILE_PX)*cam.zoom,top=(wy-ext-cam.y*TILE_PX)*cam.zoom,span=ext*2*cam.zoom;
+      if(left+span<0||top+span<0||left>VIEW_W||top>VIEW_H)continue;
+      let patch=this.personalPatches.get(site.id),relief=patch?.relief??'';
+      if(field&&(!patch||patch.version!==field.version||patch.field!==field)){
+        const values:number[]=[],cx=Math.floor(site.pos.x*field.res),cy=Math.floor(site.pos.y*field.res);
+        for(let y=Math.max(0,cy-5);y<=Math.min(field.h-1,cy+5);y++)for(let x=Math.max(0,cx-5);x<=Math.min(field.w-1,cx+5);x++)values.push(field.dig[y*field.w+x]);
+        relief=values.join(',');
+      }
+      if(!patch||patch.zoom!==zoom||patch.relief!==relief||patch.depth!==site.depthM||patch.field!==field){
+        const canvas=document.createElement('canvas');canvas.width=canvas.height=Math.ceil(ext*2*zoom);
+        const pc=canvas.getContext('2d')!;
+        paintFoxhole(pc,{x:wx,y:wy,angle:site.angle,variant:0,men:1,seed:site.id,depthM:site.depthM},this.map.def.season,wx-ext,wy-ext,zoom,this.earthworkSurface());
+        patch={canvas,zoom,version:field?.version??0,depth:site.depthM,relief,field};this.personalPatches.set(site.id,patch);
+      }
+      patch.version=field?.version??0;
+      this.personalPatches.delete(site.id);this.personalPatches.set(site.id,patch);
+      if(this.personalPatches.size>256)this.personalPatches.delete(this.personalPatches.keys().next().value!);
+      ctx.drawImage(patch.canvas,left,top,span,span);
+    }
   }
 
   thumbnail(w: number, h: number): HTMLCanvasElement {

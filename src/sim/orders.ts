@@ -506,6 +506,7 @@ function releaseDelayedOrders(state: BattleState, rng: Rng): void {
 }
 
 export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rng, own = false): void {
+  for(const id of team.soldierIds){const s=state.soldiers.get(id);if(s)delete s.digging;}
   // C4: a Move Fast whose target lands on/near a spotted enemy is an ASSAULT — the team
   // charges at moveFast pace with weapons ready; grenades free-throw once in range.
   if (order.type === 'moveFast' && team.vehicleId == null && !['mortar', 'atgun', 'rocket'].includes(team.type)) {
