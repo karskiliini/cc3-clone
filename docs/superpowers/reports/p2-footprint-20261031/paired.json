@@ -1,0 +1,85 @@
+{
+  "engine": "v24.22.1",
+  "scene": "flat-awake",
+  "count": 40,
+  "warmup": 1000,
+  "ticks": 1000,
+  "batches": 10,
+  "method": "same-process alternating paired production batches; hashes outside timing",
+  "samples": [
+    {
+      "batch": 0,
+      "before": 2.227381583,
+      "after": 1.9603137500000003,
+      "order": "before-after",
+      "hash": 2493278752
+    },
+    {
+      "batch": 1,
+      "before": 2.442510583000001,
+      "after": 1.9388502909999987,
+      "order": "after-before",
+      "hash": 1107278598
+    },
+    {
+      "batch": 2,
+      "before": 2.3986986670000006,
+      "after": 2.0809500000000005,
+      "order": "before-after",
+      "hash": 2699823055
+    },
+    {
+      "batch": 3,
+      "before": 2.265517125000002,
+      "after": 1.986389332999999,
+      "order": "after-before",
+      "hash": 182929083
+    },
+    {
+      "batch": 4,
+      "before": 2.1395903750000036,
+      "after": 2.009145708,
+      "order": "before-after",
+      "hash": 3618722263
+    },
+    {
+      "batch": 5,
+      "before": 2.8316019590000034,
+      "after": 2.129860166999999,
+      "order": "after-before",
+      "hash": 3331111507
+    },
+    {
+      "batch": 6,
+      "before": 2.2500939160000017,
+      "after": 1.9613212499999937,
+      "order": "before-after",
+      "hash": 1028738163
+    },
+    {
+      "batch": 7,
+      "before": 2.220219333000001,
+      "after": 1.9367617500000052,
+      "order": "after-before",
+      "hash": 1832715991
+    },
+    {
+      "batch": 8,
+      "before": 2.1365138330000044,
+      "after": 1.8882721249999959,
+      "order": "before-after",
+      "hash": 2959471551
+    },
+    {
+      "batch": 9,
+      "before": 2.1257008329999953,
+      "after": 1.909403542,
+      "order": "after-before",
+      "hash": 3349485386
+    }
+  ],
+  "beforeMedianMs": 2.238737749500001,
+  "afterMedianMs": 1.960817499999997,
+  "improvementPercent": 12.414149426929294,
+  "allCheckpointsExact": true
+}

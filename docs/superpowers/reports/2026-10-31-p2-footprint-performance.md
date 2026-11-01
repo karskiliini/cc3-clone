@@ -1,0 +1,11 @@
+# P2 accepted-footprint optimization — 2026-10-31
+
+Baseline: `6daffc4` (source tree identical to `e7540f5`). The Mac mini was unreachable via LAN and Tailscale. The current Mac was on AC power; verification ran locally with one worker, Node 24.22.1 / Apple M5 Pro. P2 remains open on its 0.5 ms production target.
+
+The accepted-footprint calculation now precomputes unchanged SAT edge projections, skips tiles already accepted, and avoids convex-hull construction when the conservative rectangle of exact projected corners is entirely covered by previously accepted tiles. No coordinates, contact thresholds, physical substeps or state-hash fields changed. First-insertion order remains unchanged. Independent Astra review found no actionable issue.
+
+The alternating same-process production comparison used 40 moving vehicles, 1,000 warm-up ticks and ten alternating pairs of 1,000 timed ticks. Median cost changed from **2.23874 to 1.96082 ms/tick (12.41% improvement)**. Each pair produced identical state hashes. Separate sequential benchmarks gave 2.17192 to 2.04333 ms/tick (5.9%); these runs illustrate timing variance. Raw results are in `p2-footprint-20261031`. Initial interrupted measurements and the inconclusive SAT-only candidate are excluded from these claims.
+
+Validation: 93 focused tests passed, including an ordered differential against the frozen old footprint over all 36 vehicle definitions and 3,600 seeded random pose batches, signed-zero/boundary/degenerate cases, accepted crushing, rejected translation and vehicle gameplay. Production traces across three scenes and 600 ticks each (7,200 body records plus per-tick hashes) were byte-identical, SHA-256 `3a89ec33c0428ba38f909222f08797f640038840b06a4911a20f082cd4301451`. TypeScript, physics-tool types and production build passed. The full repository suite and cross-browser ten-minute suite were not rerun for this pass.
+
+Frozen bundles, traces and the alternating harness remain at `/private/tmp/cc3-p2-footprint-20261031/`. The existing `tools/hullPhysicsBench.ts` and `tools/hullPhysicsTrace.ts` reproduce the sequential checks. The paired harness imports immutable before/after cores extracted from those native bundles; scene execution alternates order, with hashing outside timed regions. All measurements include the production completion path.
