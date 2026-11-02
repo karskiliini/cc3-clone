@@ -212,8 +212,10 @@ coverage. It is not a live union of every subordinate's current sight. Radio,
 telephone, voice and courier paths determine when a sighting reaches that picture.
 A broken connection leaves old reports; it does not continuously update hidden
 contacts or delete information already received. Reconnection needs actual report
-delivery. Scoped enemy radio intercepts also need to reach the applicable command
-context rather than becoming every subordinate's personal knowledge automatically.
+delivery. Under the later explicit 076 rule, player headset radio audio is global
+across both sides regardless of this view; own-side phone audio is global to that
+player too. This player exception does not deliver intelligence automatically to
+each subordinate or refresh that commander's personal contact picture.
 
 Apply the perspective to map contacts, terrain knowledge/visibility overlays,
 minimap, tooltips, targeting previews and support markers consistently. Selecting
@@ -237,6 +239,94 @@ knowledge, grant global enemy updates or route orders from the wrong leader.
 Verify overlays/minimap/targeting alongside the main view and exact deterministic
 save/replay/recovery. Keep this an optional alternative until its mode choice and
 relationship to the ordinary view are settled.
+
+## 076 — Both players hear both radio nets; only own-side phone audio
+
+Requested 2026-11-02, 14:21. **Queued, not implemented.** Both players hear all
+actual radio traffic from both sides through their headphones. Each player also
+hears their own side's telephone traffic, but never the opposing side's
+telephone-only conversations. This is audible communication content, not merely
+a text entry or generic radio beep. The existing text intercept log is not a
+completed speech/headset feature.
+
+Apply this rule independently of camera distance/zoom, selected team, HQ contact
+and optional 073 command perspective. Single-player likewise exposes the human
+and opposing AI radio traffic. Keep this player information access distinct
+from an individual soldier's hearing, equipment and actual receipt of a report.
+The player's headphone channel does not supply every soldier with that content.
+
+Radio playback uses only the actual public wire utterance: own/enemy side and
+channel are distinguishable, agreed signals say their identifier rather than
+their private plan meaning, and coordinates/reports reflect what was transmitted.
+Do not spatialize headset voices at a hidden transmitter's exact world position
+or expose callers through unintended audio metadata. Telephone playback and its
+supporting transcript are filtered to the owning player before rendering. If a
+phone report is later relayed by radio, that actual spoken radio payload becomes
+audible to both players, while unrelated phone conversation stays private.
+
+Model logical spoken messages and actual send times separately from internal
+contact synchronization/routing packets. A message cannot be dropped silently
+because many reports arrive in one frame. Define airtime, pending speech,
+overlapping nets and repeat/relay behavior so messages remain understandable:
+waiting for a free channel happens before actual transmission, not as an
+invented delayed enemy interception after a transmission occurred. Internal
+duplicate packet processing must not synthesize repeated spoken messages;
+distinct actual retransmissions/relays remain actual audible traffic.
+
+Use canonical emission/message identifiers and timing for replay/network
+consistency. Audio playback is a read-only local consumer and cannot change
+simulation knowledge, advance a message's receipt or mutate RNG. Ordinary user
+audio controls remain presentation settings. Verify own/enemy radio to both
+players, own-only phones, phone-to-radio relays, secret signal meanings, broken
+paths/unsent messages, burst traffic, replay delivery and selection/camera changes.
+Speech assets/synthesis and exact net presentation remain implementation choices;
+no external speech service is selected by this requirement.
+
+## 077 — A non-observing squad leader learns through a real relay chain
+
+Requested 2026-11-02, 14:22. **Queued telephone extension, not implemented.**
+Example: an observing element sees a T-34, informs its platoon, that platoon
+passes the report by telephone to another platoon, and the receiving platoon
+informs one of its squad leaders. That leader can then know the reported tank
+is in the area despite having no direct sight of it.
+
+Create and deliver an actual report across each legitimate hop. A connected
+graph is a possible path, not instant shared knowledge. The receiving platoon
+must pass the report down through working voice/radio/phone/other modeled links;
+the squad does not inherit the platoon's whole memory automatically. Apply 071's
+intact surface/underground wire and endpoint conditions and the existing human
+capability/communication delays. A connected neighboring platoon need not share
+an immediate parent to be a legitimate reporting recipient.
+
+Carry the original observation time, reported position/area, uncertainty,
+confidence and identifiable tank type only as supported by the observer's actual
+knowledge. Relays do not refresh the timestamp or magically upgrade an unknown
+tank to a T-34. Track report provenance/identity for duplicate prevention and
+stale/newer ordering; retransmission cannot multiply confidence by pretending to
+be several independent observations of the same source.
+
+The recipient's reported contact is distinguishable from direct sight. It can
+inform movement, cover, threat assessment and an eligible area-fire request, but
+does not confer direct LOS or a weapon's ability to fire through an obstruction.
+The report does not track the live tank after it moves out of sight. New position,
+damage or destruction requires a fresh supported report. On a later connection
+loss retain received information with its growing age/uncertainty; before receipt
+a broken relay cannot silently complete delivery. Reconnection needs an actual
+new/retried delivery, not a wholesale live-memory synchronization.
+
+076 player headset audio is a separate presentation entitlement. Hearing a phone
+or radio report as the player does not prove a particular squad leader received
+it. Conversely, a properly delivered report changes that recipient's knowledge
+even if the player is looking elsewhere or has muted audio. Scope 073's rendered
+command picture to its actual received knowledge while retaining 076's explicitly
+global player radio/own-phone audio.
+
+Verify a non-seeing leader acquires a frozen correct reported contact over two
+platoons and a telephone hop; severed wire or incapable relays prevent undelivered
+knowledge; subsequent tank movement stays unknown until a new report; relays
+preserve age/uncertainty and suppress duplicate confidence; mixed radio/phone
+paths obey public versus own-only audio; and save/replay/recovery preserve the
+same messages, recipient knowledge and command behavior.
 
 ## Historical starting references
 
