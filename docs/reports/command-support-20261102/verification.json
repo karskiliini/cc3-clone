@@ -1,0 +1,1543 @@
+{
+  "totals": {
+    "files": 218,
+    "passed": 1976,
+    "failed": 0,
+    "skipped": 7
+  },
+  "missing": [],
+  "simulationFingerprint": "79cde46070ba6161dddbb2eb012c158d96ee53e3fc0d4536dca1fd54e94d057f",
+  "excludedFile": "test/lockstep.test.ts (32 long legacy cases)",
+  "excludedCases": [
+    "dmath: three full-force viewer-chain soaks",
+    "integrity: two full-force damaged-packet soaks"
+  ],
+  "files": [
+    {
+      "file": "ai.test.ts",
+      "tests": 18,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "aimPoint.test.ts",
+      "tests": 16,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "airSupport.test.ts",
+      "tests": 18,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "airSupportProtocol.test.ts",
+      "tests": 6,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/final-focused.log"
+    },
+    {
+      "file": "ammoTypes.test.ts",
+      "tests": 12,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "armourExchanges.test.ts",
+      "tests": 6,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "artilleryBattlePlan.test.ts",
+      "tests": 12,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/final-focused.log"
+    },
+    {
+      "file": "attackOrder.test.ts",
+      "tests": 6,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "battle.test.ts",
+      "tests": 1,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "battlePlanPanel.test.ts",
+      "tests": 2,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "battleReport.test.ts",
+      "tests": 4,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "battleSupportInput.test.ts",
+      "tests": 10,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/final-focused.log"
+    },
+    {
+      "file": "blast.test.ts",
+      "tests": 5,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "blastCrew.test.ts",
+      "tests": 4,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "blastFx.test.ts",
+      "tests": 2,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "blastProtection.test.ts",
+      "tests": 16,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "bootcamp.test.ts",
+      "tests": 3,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "bootModal.test.ts",
+      "tests": 3,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "bottomStrip.test.ts",
+      "tests": 3,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "bowMg.test.ts",
+      "tests": 10,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "buildingShelter.test.ts",
+      "tests": 15,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "bunker.test.ts",
+      "tests": 3,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "camera.test.ts",
+      "tests": 11,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "camoNet.test.ts",
+      "tests": 2,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "campaignAirSupport.test.ts",
+      "tests": 4,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "campaignArtillery.test.ts",
+      "tests": 2,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "campaignStructure.test.ts",
+      "tests": 4,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "casemateArc.test.ts",
+      "tests": 5,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "catalog.test.ts",
+      "tests": 3,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "coaxArc.test.ts",
+      "tests": 2,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "coaxFireArc.test.ts",
+      "tests": 2,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "combat.test.ts",
+      "tests": 12,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "combatMessages.test.ts",
+      "tests": 10,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "command.test.ts",
+      "tests": 4,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "commandLayer.test.ts",
+      "tests": 10,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "commandSupportLockstep.test.ts",
+      "tests": 1,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/final-focused.log"
+    },
+    {
+      "file": "controlGroups.test.ts",
+      "tests": 8,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "cover.test.ts",
+      "tests": 5,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "coverSeek.test.ts",
+      "tests": 4,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "craters.test.ts",
+      "tests": 14,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "crawlUnderFire.test.ts",
+      "tests": 8,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "crewBailout.test.ts",
+      "tests": 8,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "crewCapability.test.ts",
+      "tests": 4,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "crewTasks.test.ts",
+      "tests": 17,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "crewWeapon.test.ts",
+      "tests": 8,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "data.test.ts",
+      "tests": 17,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "daze.test.ts",
+      "tests": 15,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "debrief.test.ts",
+      "tests": 4,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "debris.test.ts",
+      "tests": 9,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "deploymentBounds.test.ts",
+      "tests": 8,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "deploymentFacing.test.ts",
+      "tests": 14,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "deployOrders.test.ts",
+      "tests": 10,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "digging.test.ts",
+      "tests": 10,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "dmath.test.ts",
+      "tests": 14,
+      "failed": 0,
+      "skipped": 3,
+      "log": "evidence/legacy-units.log"
+    },
+    {
+      "file": "earthworkCompression.test.ts",
+      "tests": 9,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "elevation.test.ts",
+      "tests": 23,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "elevationReadout.test.ts",
+      "tests": 1,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "experience.test.ts",
+      "tests": 7,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "fireAimPreview.test.ts",
+      "tests": 6,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "firelight.test.ts",
+      "tests": 4,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "fireRoute.test.ts",
+      "tests": 4,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "flameTank.test.ts",
+      "tests": 1,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "fleeMapEdge.test.ts",
+      "tests": 3,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "formation.test.ts",
+      "tests": 7,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "fx.test.ts",
+      "tests": 6,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "fxRender.test.ts",
+      "tests": 3,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "grassCrush.test.ts",
+      "tests": 5,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "grassField.test.ts",
+      "tests": 21,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "grassFx.test.ts",
+      "tests": 20,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "grassLayer.test.ts",
+      "tests": 8,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "groundMarks.test.ts",
+      "tests": 5,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "groundStates.test.ts",
+      "tests": 3,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "growth.test.ts",
+      "tests": 3,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "guesstimateFire.test.ts",
+      "tests": 10,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "gunBlock.test.ts",
+      "tests": 17,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "gunTiming.test.ts",
+      "tests": 21,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "harness.test.ts",
+      "tests": 3,
+      "failed": 0,
+      "skipped": 1,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "hastyFire.test.ts",
+      "tests": 9,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "heightField.test.ts",
+      "tests": 15,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "historicalMaps.test.ts",
+      "tests": 6,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "houseVisibility.test.ts",
+      "tests": 2,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "hoverInfo.test.ts",
+      "tests": 10,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "hullActuation.test.ts",
+      "tests": 5,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "hullAim.test.ts",
+      "tests": 19,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "hullArmor.test.ts",
+      "tests": 20,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/final-focused.log"
+    },
+    {
+      "file": "hullBerlinStability.test.ts",
+      "tests": 2,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "hullCrushContacts.test.ts",
+      "tests": 11,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "hullFootprint.test.ts",
+      "tests": 3,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "hullGameplay.test.ts",
+      "tests": 26,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "hullGround.test.ts",
+      "tests": 13,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "hullHash.test.ts",
+      "tests": 86,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "hullMath.test.ts",
+      "tests": 5,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "hullMovingSlope.test.ts",
+      "tests": 9,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "hullPhysics.test.ts",
+      "tests": 24,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "hullSlope.test.ts",
+      "tests": 10,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "hullTraction.test.ts",
+      "tests": 42,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "hullVehicleIntegration.test.ts",
+      "tests": 36,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "illumination.test.ts",
+      "tests": 22,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "indirectFire.test.ts",
+      "tests": 16,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "infantryAim.test.ts",
+      "tests": 10,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "infantryPacing.test.ts",
+      "tests": 21,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "initiative.test.ts",
+      "tests": 4,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "inputCard.test.ts",
+      "tests": 7,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "inputEditing.test.ts",
+      "tests": 6,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "inputMouseDown.test.ts",
+      "tests": 3,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "integrity.test.ts",
+      "tests": 4,
+      "failed": 0,
+      "skipped": 2,
+      "log": "evidence/legacy-units.log"
+    },
+    {
+      "file": "items.test.ts",
+      "tests": 20,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "lightTransportRender.test.ts",
+      "tests": 13,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "localDriver.test.ts",
+      "tests": 7,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "localDriverBraking.test.ts",
+      "tests": 4,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "localDriverLifecycle.test.ts",
+      "tests": 7,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "localDriverReplay.test.ts",
+      "tests": 1,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "localDriverV32.test.ts",
+      "tests": 3,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "localDriverV4.test.ts",
+      "tests": 10,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "los.test.ts",
+      "tests": 9,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "losProfile.test.ts",
+      "tests": 4,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "mainGunDoctrine.test.ts",
+      "tests": 19,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "map.test.ts",
+      "tests": 6,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "markerDragWaypoints.test.ts",
+      "tests": 4,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "medals.test.ts",
+      "tests": 5,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "melee.test.ts",
+      "tests": 2,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "mgMount.test.ts",
+      "tests": 23,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "mgMountRender.test.ts",
+      "tests": 7,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "mind.test.ts",
+      "tests": 16,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "mines.test.ts",
+      "tests": 5,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "morale.test.ts",
+      "tests": 22,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "moraleRecovery.test.ts",
+      "tests": 3,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "mortarCarriers.test.ts",
+      "tests": 4,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "motorizedCrew.test.ts",
+      "tests": 11,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "moveFastUnderFire.test.ts",
+      "tests": 9,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "multiplayerPolicy.test.ts",
+      "tests": 4,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "navigationKnowledge.test.ts",
+      "tests": 8,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "netHealth.test.ts",
+      "tests": 5,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "nightLighting.test.ts",
+      "tests": 6,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "operation.test.ts",
+      "tests": 2,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "orders.test.ts",
+      "tests": 24,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "overrun.test.ts",
+      "tests": 9,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "overrunGun.test.ts",
+      "tests": 2,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "painVision.test.ts",
+      "tests": 7,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "passengerPhysics.test.ts",
+      "tests": 10,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "path.test.ts",
+      "tests": 9,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "penChance.test.ts",
+      "tests": 4,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "personalEvidence.test.ts",
+      "tests": 8,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "pixelfont.test.ts",
+      "tests": 6,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "probe_elev.test.ts",
+      "tests": 1,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "radioTraffic.test.ts",
+      "tests": 4,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "realismOptions.test.ts",
+      "tests": 3,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "relay.test.ts",
+      "tests": 5,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "replay.test.ts",
+      "tests": 11,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "requisition.test.ts",
+      "tests": 15,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "rockets.test.ts",
+      "tests": 6,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/final-focused.log"
+    },
+    {
+      "file": "roster.test.ts",
+      "tests": 6,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "rosterScreen.test.ts",
+      "tests": 8,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "sensoryBoundaries.test.ts",
+      "tests": 14,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "sfx.test.ts",
+      "tests": 11,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "shellFx.test.ts",
+      "tests": 5,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "shieldAndCollision.test.ts",
+      "tests": 14,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "shotInterdiction.test.ts",
+      "tests": 22,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "shotTrace.test.ts",
+      "tests": 12,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "smgAnim.test.ts",
+      "tests": 8,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "smgAtlas.test.ts",
+      "tests": 8,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "smgEffects.test.ts",
+      "tests": 4,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "smgFire.test.ts",
+      "tests": 19,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "smoke.test.ts",
+      "tests": 2,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "soldierAnim.test.ts",
+      "tests": 33,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "soldierMonitor.test.ts",
+      "tests": 9,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "spotting.test.ts",
+      "tests": 4,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "spriteAtlas.test.ts",
+      "tests": 13,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "structures.test.ts",
+      "tests": 7,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "supportLockstep.test.ts",
+      "tests": 2,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "supportReplay.test.ts",
+      "tests": 2,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "tankDriving.test.ts",
+      "tests": 1,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "tankFacing.test.ts",
+      "tests": 10,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "tankOrders.test.ts",
+      "tests": 8,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "terrain.test.ts",
+      "tests": 5,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "trackedDrive.test.ts",
+      "tests": 6,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "trackedMovement.test.ts",
+      "tests": 5,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "trackedYawReserve.test.ts",
+      "tests": 3,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "trackKinematics.test.ts",
+      "tests": 3,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "trackPhysics.test.ts",
+      "tests": 8,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "transport.test.ts",
+      "tests": 11,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "truce.test.ts",
+      "tests": 5,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "turnRates.test.ts",
+      "tests": 2,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "upgradeChains.test.ts",
+      "tests": 8,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "vehicle3dIsolation.test.ts",
+      "tests": 1,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "vehicle3dLook.test.ts",
+      "tests": 21,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "vehicle3dMaterial.test.ts",
+      "tests": 2,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "vehicle3dModels.test.ts",
+      "tests": 8,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "vehicle3dProjection.test.ts",
+      "tests": 8,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "vehicle3dScene.test.ts",
+      "tests": 21,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "vehicleBankApproach.test.ts",
+      "tests": 2,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "vehicleCorridor.test.ts",
+      "tests": 6,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "vehicleCorridorProduction.test.ts",
+      "tests": 3,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "vehicleCoverDrive.test.ts",
+      "tests": 5,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "vehicleDamage.test.ts",
+      "tests": 19,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "vehicleDeath.test.ts",
+      "tests": 5,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "vehicleDefendFacing.test.ts",
+      "tests": 1,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "vehicleDeploy.test.ts",
+      "tests": 7,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "vehicleDismount.test.ts",
+      "tests": 16,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "vehicleExplosion.test.ts",
+      "tests": 13,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "vehicleGiveWay.test.ts",
+      "tests": 3,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "vehicleMgAtArmour.test.ts",
+      "tests": 2,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "vehicleMind.test.ts",
+      "tests": 13,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "vehicleModels.test.ts",
+      "tests": 37,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "vehiclePhysics.test.ts",
+      "tests": 18,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "vehicleRecoveryTurn.test.ts",
+      "tests": 1,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "vehicleRouteTerrainBudget.test.ts",
+      "tests": 1,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/quick.log"
+    },
+    {
+      "file": "vehicleSpotFloor.test.ts",
+      "tests": 5,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "vehicleTow.test.ts",
+      "tests": 7,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "vehicleTrenchApproach.test.ts",
+      "tests": 7,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "vehicleVision.test.ts",
+      "tests": 7,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "victory.test.ts",
+      "tests": 7,
+      "failed": 0,
+      "skipped": 0,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "visibility.test.ts",
+      "tests": 10,
+      "failed": 0,
+      "skipped": 1,
+      "log": "../cc3-plan-radio-final-20261102w.noindex/evidence/full.log"
+    },
+    {
+      "file": "waypointChain.test.ts",
+      "tests": 3,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "waypointInput.test.ts",
+      "tests": 9,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "waypoints.test.ts",
+      "tests": 3,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "wire.test.ts",
+      "tests": 6,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    },
+    {
+      "file": "wreckAmmo.test.ts",
+      "tests": 5,
+      "failed": 0,
+      "skipped": 0,
+      "log": "evidence/remaining.log"
+    }
+  ]
+}

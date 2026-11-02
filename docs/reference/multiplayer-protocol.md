@@ -114,3 +114,21 @@ Chromium in this environment, so primary verification uses default graphics and
 screenshots. `tools/onlineHostProbe.ts` exercises real sockets on separate machines.
 The 2026-11-01 evidence covers this Mac (M5) and the user's Mac mini (M2) over LAN,
 not a publicly deployed Internet service. Hosting remains the user's responsibility.
+
+### Battle-plan and artillery commands (068–070)
+
+Ruleset `battle-plan-radio-artillery-1` adds `planOrder` (own team, ordinary order,
+Signal 1–3 or finite H-hour), `cancelPlanOrder`, `signal`, `artillery` (bounded
+map target and small/large size), and `cancelArtillery`. The relay validates their
+shape, identities and coordinates; the deterministic battle enforces ownership,
+deployment readiness, phase, actual radio capability and finite resources.
+Ready sides cannot edit their deployment plans. Multiplayer pauses reject
+runtime signal/fire/cancel commands consistently with ordinary orders.
+
+Private plans, received signal activations, battery queues/registrations,
+reservations, airborne shells and public radio emissions are canonical hashed
+state rebuilt from the same config/command log. UI rendering reads only the
+viewer's plan and intercepted enemy wire payloads. Signal activation executes
+the briefed order without retransmitting its private meaning. The lockstep
+trust model remains unchanged; these UI boundaries do not turn the existing
+full-state simulation into an authoritative anti-cheat server.

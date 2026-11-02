@@ -7,5 +7,5 @@ export const BUILD_VERSION: string = typeof __BUILD_VERSION__ === 'string' ? __B
 declare const __SIMULATION_BUILD__: string | undefined;
 export const SIMULATION_BUILD = typeof __SIMULATION_BUILD__ === 'string' ? __SIMULATION_BUILD__ : 'unbundled-test';
 
-/** Replay behavior contract; includes canonical aircraft, illumination and night memory. */
-export const SIMULATION_VERSION = 'air-support-night-1';
+/** Replay behavior contract; includes plans, radio traffic, registered fire and finite batteries. */
+export const SIMULATION_VERSION = 'battle-plan-radio-artillery-1';

@@ -1,6 +1,10 @@
 # Battalion command, synchronization and radio intelligence
 
-Requested 2026-11-02, 12:26–12:27. **Queued, not implemented**: 069 and 070.
+Requested 2026-11-02, 12:26–12:27. Implementation requested at 13:15.
+The pre-battle plan, H-hour/radio-signal activation and immediate radio traffic
+features below are implemented; verification is recorded in
+`docs/reports/command-support-20261102/README.md`. Broader battalion hierarchy,
+physical couriers, support handover and command-flare recognition remain queued.
 Connects operational forces (053), individual perception/condition (056), night
 signals (059), active campaign missions (067) and allocated artillery (068).
 
@@ -75,8 +79,9 @@ HQ radios/operators are actual equipment/people. Injury, damage, incompatibility
 range and condition can interrupt links. Units retain received orders and
 standing intent; new instructions need another channel or wait. Signals failure
 can delay action, while 067 still requires a coherent active tactical mission.
-Current voice/intercom/radio contact and indirect-message routing are foundations,
-not an implemented battalion hierarchy, physical courier system or command flares.
+Current voice/intercom/radio contact and indirect-message routing now support
+pre-briefed orders and radio activation. A full battalion hierarchy, physical
+courier system and command-flare recognition are separate remaining work.
 
 Completion: company mission execution with legitimate knowledge; real support
 handover; H-hour, visible signals and moving couriers; lost/late/stale orders and

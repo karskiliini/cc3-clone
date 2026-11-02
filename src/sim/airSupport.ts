@@ -1,3 +1,4 @@
+import {emitRadio,emitContactRadio} from './radioTraffic';
 import type {AirMission,AirOrdnance,AirRole,BattleState,PersonalContact,Side,Soldier,Vec2,Vec3} from '@/shared/types';
 import {TILE_M} from '@/shared/types';
 import {hash2} from '@/shared/rng';
@@ -62,7 +63,9 @@ export function requestAirSupport(state:BattleState,side:Side,target:Vec2,role:A
   initializeAirSupport(state);
   if(!airSupportStatus(state,side).available||!Number.isFinite(target.x)||!Number.isFinite(target.y)||target.x<0||target.y<0||target.x>=state.map.width||target.y>=state.map.height)return false;
   const reporter=requester(state,side,requesterId);
+  if(reporter)emitRadio(state,side,{kind:'message',text:'Air support requested',target});
   const reports=knownContacts(state,reporter).filter(c=>dist(c.pos,target)*TILE_M<=75).map(c=>structuredClone(c));
+  if(reporter)for(const contact of reports)emitContactRadio(state,side,{from:reporter.id,to:-1,sentAt:state.time,deliverAt:state.time+AIR_TIMING.reportS,channel:'radio',contact});
   // AUTO remains a bombing assignment until the operational radio actually
   // delivers the frozen target report during the two-second preparation window.
   const load=airLoadFor(state.config,side,role==='armour'),id=state.nextId++,p=pilot(state,side,-id,target);

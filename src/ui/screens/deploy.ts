@@ -1,3 +1,4 @@
+import { BattlePlanPanel } from '@/ui/battlePlanPanel';
 import type { BattleState, Camera, CursorKind, InputState, Rect, Screen, Team, Vec2 } from '@/shared/types';
 import { VIEW_H, VIEW_W, ORDER_HOTKEYS, ORDER_DOT_COLOR, otherSide, type OrderType } from '@/shared/types';
 import { game } from '@/game';
@@ -62,6 +63,7 @@ export class DeployScreen implements Screen {
   /** pre-begin order placement (user: units take orders in deploy): pick the order (hotkey),
    * then click a target. LOS preview draws while aiming. */
   private commandMenu = new CommandMenu();
+  private planPanel = new BattlePlanPanel();
   private pendingOrder: OrderType | null = null;
   private pendingWaypoints: Vec2[] = [];
   private draggingTeamId: number | null = null;
@@ -160,7 +162,7 @@ export class DeployScreen implements Screen {
   /** Bottom panel, or the minimap / soldier monitor insets floating over the map viewport:
    * presses and releases there never select, pick up or drop a team. */
   private overHud(p: Vec2): boolean {
-    if (p.y >= VIEW_H) return true;
+    if (p.y >= VIEW_H || this.planPanel.contains(p)) return true;
     if (this.showMinimap && hitRect(p, this.minimap.rect)) return true;
     const state = this.battle.state;
     const selTeam = this.selectedTeamId != null ? state.teams.get(this.selectedTeamId) ?? null : null;
@@ -181,6 +183,8 @@ export class DeployScreen implements Screen {
       this.updateQuitConfirm(input);
       return;
     }
+
+    input=this.planPanel.update(input,state,this.battle.playerSide(),body=>this.command(body));
 
     // Setup uses the same clickable orders as battle, before any pan or drop
     // handlers can consume the menu click. Empty-ground right drag still pans.
@@ -500,12 +504,12 @@ export class DeployScreen implements Screen {
       const offset = isMoveType && ids.length > 1
         ? { x: team.pos.x - primary.pos.x, y: team.pos.y - primary.pos.y }
         : { x: 0, y: 0 };
-      this.command({ type: 'order', teamId: id, order: {
+      this.command(this.planPanel.order(id, {
         type,
         target: { x: world.x + offset.x, y: world.y + offset.y },
         issuedAt: this.battle.state.time,
         waypoints: chaining ? undefined : (this.pendingWaypoints.length > 0 ? this.pendingWaypoints.map((p) => ({ x: p.x + offset.x, y: p.y + offset.y })) : undefined),
-      } });
+      }));;
     }
     game.audio?.play('click');
     if (chaining) return;
@@ -722,6 +726,7 @@ export class DeployScreen implements Screen {
     const assignment=state.airSupport?.assignments[this.battle.playerSide()];
     ctx.font='11px Arial, Helvetica, sans-serif';ctx.fillStyle='#c8d6df';ctx.fillText(state.config.timeOfDay==='night'?'Air unavailable at night. Mortar illumination: select mortar, then L during battle.':state.config.weather&&state.config.weather!=='clear'?'Air unavailable in this weather.':`Air support: ${assignment?.remaining??0} assigned mission(s); availability announced after battle begins.`,16,32);ctx.restore();
 
+    this.planPanel.draw(ctx,state,this.battle.playerSide());
     this.commandMenu.draw(ctx);
     if (this.quitConfirm) this.drawQuitConfirm(ctx);
   }

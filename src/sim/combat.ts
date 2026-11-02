@@ -3,7 +3,7 @@ import {openHumanRng,withHumanRng} from './humanRandom';
 import {directSoldier,directVehicle,recipientOrder} from './perception';
 import {emitShot,emitNoise} from './noise';
 import {seatOccupant} from './vehicleDamage';
-import {beginIndirectMission,stepIndirectCommunication,reportIndirectImpact,deliveredObservation} from './indirectCommunication';
+import {beginIndirectMission,indirectPreparationWait,registerIndirectLaunch,stepIndirectCommunication,reportIndirectImpact,deliveredObservation} from './indirectCommunication';
 import {humanCapability} from './humanCondition';
 import {visualIds,vehicleVisualIds,vehicleObserver,knownContacts,knowsDirectly,teamObserver,directContacts} from './perception';
 import { riderCanExpose, onPassengerFired } from './passengerPhysics';
@@ -1729,12 +1729,14 @@ function stepMortarTeam(state: BattleState, rng: Rng, dt: number, team: Team, tr
   const isSmokeOrder = team.order?.type === 'smoke';
   beginIndirectMission(state,team,target);
   const { obs, spotter, mul, own } = mortarObservation(state, team, target);
+  if(indirectPreparationWait(state,team)>0)return;
   const extraDelay=0; // delivery delay is modeled by actual messages, not mechanical laying
   const wait = fireMissionWait(state, team, gunner, { aim: target, targetTeamId: aim.trackedTeamId, extraFirstRoundDelayS: extraDelay });
   if (wait > 0) { gunner.fireTimer = Math.min(wait, 0.5); return; }
 
   const sigmaM=mortarDispersionM(distM,obs,team.indirectControl?.rounds??0,mul);
   onMissionRound(state, team, gunner);
+  registerIndirectLaunch(state,team);
 
   // item 020: rocket launchers pace a SALVO — one tube fires every ROCKET_RAIL_S until the racks
   // are empty ("empties in ten seconds"), instead of the mortar's one-round-per-reload cadence
@@ -2105,6 +2107,8 @@ function stepVehicleRockets(state: BattleState, rng: Rng, dt: number, vehicle: V
   vehicle.gunState = vehicle.mainFireTimer > 0 ? 'loading' : aimed && !moving && settled ? 'ready' : 'laying';
   if (!aimed || vehicle.mainFireTimer > 0 || moving || !settled) return;
 
+  const firingTeam=state.teams.get(vehicle.teamId);
+  if(firingTeam){beginIndirectMission(state,firingTeam,aim);if(indirectPreparationWait(state,firingTeam)>0){vehicle.gunState='laying';return;}}
   if ((vehicle.rocketSalvoLeft ?? 0) <= 0) {
     const salvo = Math.min(weapon.burst ?? 1, vehicle.mainAmmo);
     if (salvo <= 0) return;
@@ -2116,6 +2120,7 @@ function stepVehicleRockets(state: BattleState, rng: Rng, dt: number, vehicle: V
   vehicle.rocketSalvoTimer = ROCKET_RAIL_S;
   vehicle.rocketSalvoLeft = (vehicle.rocketSalvoLeft ?? 1) - 1;
   vehicle.mainAmmo--;
+  if(firingTeam)registerIndirectLaunch(state,firingTeam);
   vehicle.lastMainShotAt = state.time;
   emitShot(state,{ kind: 'shot', pos: { ...vehicle.pos }, weaponId: weapon.id, side: vehicle.side }, `v${vehicle.id}`);
   state.flashes.push({ pos: { ...vehicle.pos }, facing: vehicle.turretFacing, t: 0, kind: 'shell' });

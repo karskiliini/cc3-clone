@@ -54,7 +54,7 @@ function canObey(state: BattleState, rng: Rng, s: Soldier, team: Team, target: V
   // G11: no contact with HQ — orders beyond command radio range are refused. They stay
   // pending, so the team obeys as soon as it re-enters the radius. Deploy-phase orders
   // pre-commit paths/facing by design (tests: deployOrders) and bypass the radius.
-  if (state.phase === 'running' && !teamInCommand(state, team)) {
+  if (state.phase === 'running' && !team.order?.prebriefed && !teamInCommand(state, team)) {
     s.mind.pendingOrderAt = issuedAt;
     if (s.mind.warnedNoCommand === undefined || state.time - s.mind.warnedNoCommand > 8) {
       s.mind.warnedNoCommand = state.time;
@@ -530,7 +530,7 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
   if (deadHull && (deadHull.state === 'knockedOut' || deadHull.state === 'burning' || deadHull.state === 'abandoned')) return;
   // a vehicle whose radio is shot away gets its orders by hand signal or runner: they are acted on
   // RADIO_OUT_ORDER_DELAY_S later (released by stepAttackOrders)
-  if (deadHull && !own && !releasingDelayed && radioOut(deadHull)) {
+  if (deadHull && !own && !order.prebriefed && !releasingDelayed && radioOut(deadHull)) {
     let m = (state.humanRuntime?.delayedOrders as DelayedOrders|undefined);
     if (!m) { m = new Map(); (state.humanRuntime??={}).delayedOrders=m; }
     const prev = m.get(team.id);

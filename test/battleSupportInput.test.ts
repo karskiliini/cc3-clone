@@ -24,6 +24,48 @@ describe('support map input',()=>{
     const point={x:400,y:300,button:0 as const},result=screen.updateSupportInput(input([], [point]));
     expect(result.clicks).toEqual([]);expect(screen.command).toHaveBeenCalledTimes(1);expect(screen.command).toHaveBeenCalledWith({type:'airSupport',target:screenToWorld(game.cam,point),role:'auto',requesterId:1});expect(screen.pendingSupport).toBeNull();
   });
+  it('Shift+B targets artillery while plain B remains Smoke',()=>{
+    const {screen,state}=fixture();screen.artillerySize='small';state.artillery={batteries:[{id:1,side:'german',name:'Battery',weaponId:'mortar81',guns:2,ammo:20,readyAt:100}],missions:[],shells:[]};
+    expect(screen.updateSupportInput(input(['b'])).keysPressed.has('b')).toBe(true);
+    expect(screen.pendingSupport).toBeNull();
+    const event=input(['b']);event.keysDown.add('shift');expect(screen.updateSupportInput(event).keysPressed.has('b')).toBe(false);
+    expect(screen.pendingSupport).toEqual({kind:'artillery'});
+    screen.updateSupportInput(input([], [{x:400,y:300,button:0}]));
+    expect(screen.command).toHaveBeenCalledWith({type:'artillery',target:screenToWorld(game.cam,{x:400,y:300}),size:'small'});
+    expect(screen.command).toHaveBeenCalledTimes(1);
+  });
+  it('cancels only the viewing side active fire mission and consumes the HUD click',()=>{
+    const {screen,state}=fixture();state.artillery={batteries:[],missions:[{id:99,side:'soviet',phase:'preparing'},{id:7,side:'german',phase:'preparing'}],shells:[]} as any;
+    expect(screen.updateSupportInput(input([], [{x:960,y:50,button:0}])).clicks).toEqual([]);
+    expect(screen.command).toHaveBeenCalledTimes(1);expect(screen.command).toHaveBeenCalledWith({type:'cancelArtillery',missionId:7});
+  });
+  it('locates radio targets without revealing fog and marks only fresh uncancelled enemy evidence',()=>{
+    const {screen,state}=fixture(),before={...game.cam};screen.showRadio=true;state.time=100;
+    state.radioTraffic={nextId:7,messages:[
+      {id:0,at:1,senderSide:'soviet',payload:{kind:'fireRequest',missionId:1,target:{x:10,y:10}}},
+      {id:1,at:80,senderSide:'soviet',payload:{kind:'fireRequest',missionId:2,target:{x:70,y:70}}},
+      {id:2,at:81,senderSide:'soviet',payload:{kind:'fireCorrection',missionId:2,target:{x:80,y:80}}},
+      {id:3,at:82,senderSide:'soviet',payload:{kind:'fireCancellation',missionId:2,target:{x:80,y:80}}},
+      {id:4,at:90,senderSide:'german',payload:{kind:'fireRequest',missionId:3,target:{x:90,y:90}}},
+      {id:5,at:92,senderSide:'soviet',payload:{kind:'fireRequest',missionId:4,target:{x:95,y:95}}},
+      {id:6,at:95,senderSide:'soviet',payload:{kind:'fireCorrection',missionId:4,target:{x:100,y:120}}},
+    ]};
+    try{
+      expect(screen.interceptedFireMarkers()).toEqual([{at:95,target:{x:100,y:120},correction:true}]);
+      expect(screen.updateSupportInput(input([], [{x:700,y:100,button:0}])).clicks).toEqual([]);
+      expect(screenToWorld(game.cam,{x:512,y:335})).toEqual({x:100,y:120});
+      expect(state.spotted.german.size).toBe(0);expect(screen.command).not.toHaveBeenCalled();
+    }finally{Object.assign(game.cam,before);}
+  });
+  it('signals consume their clicks and require an operational HQ radio',()=>{
+    const {screen,state}=fixture();
+    screen.updateSupportInput(input([], [{x:690,y:16,button:0}]));
+    expect(screen.command).toHaveBeenCalledWith({type:'signal',signal:1});
+    screen.command.mockClear();state.soldiers.get(1)!.health='dead';
+    expect(screen.updateSupportInput(input([], [{x:770,y:16,button:0}])).clicks).toEqual([]);
+    expect(screen.command).not.toHaveBeenCalled();
+    expect(screen.notice).toHaveBeenCalledWith('Signal requires an operational HQ radio.','warn');
+  });
   it('cycles the visible role and consumes Escape/right-click cancellation',()=>{
     const {screen}=fixture();screen.updateSupportInput(input([], [{x:160,y:16,button:0}]));expect(screen.airRole).toBe('bombing');
     screen.updateSupportInput(input(['u']));expect(screen.updateSupportInput(input(['escape'])).keysPressed.has('escape')).toBe(false);expect(screen.pendingSupport).toBeNull();

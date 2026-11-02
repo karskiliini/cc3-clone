@@ -62,7 +62,10 @@ describe('item 020 — vehicle-mounted rocket salvos', () => {
     const target: Vec2 = { x: 200.5, y: 60.5 };
     addCluster(state, 4, target);
     const rng = new Rng(7);
-    run(state, 0.1, rng);
+    // Prepare real first-target data, stopping on the first launched rail.
+    const initialAmmo=v.mainAmmo;
+    for(let i=0;i<800&&v.mainAmmo===initialAmmo;i++)run(state,SIM_DT,rng);
+    expect(state.time).toBeGreaterThanOrEqual(60);
     const rockets = state.tracers.filter((t) => t.kind === 'rocket');
     expect(rockets.length).toBe(1);
     expect(v.mainAmmo).toBe(7);
@@ -94,7 +97,9 @@ describe('item 020 — vehicle-mounted rocket salvos', () => {
     expect(state.tracers.filter(t => t.kind === 'rocket')).toHaveLength(0);
     expect(v.gunState).toBe('laying');
     v.body.angularVelocity.x = 0;
-    run(state, 0.1, rng);
+    // Settle, perform the full new-target preparation, then observe the actual first rail.
+    for(let i=0;i<800&&v.mainAmmo===ammo;i++)run(state,SIM_DT,rng);
+    expect(state.time).toBeGreaterThanOrEqual(61);
     expect(v.mainAmmo).toBe(ammo - 1);
     const salvo = v.rocketSalvoLeft;
     v.body.angularVelocity.y = 0.1;
@@ -140,7 +145,10 @@ describe('item 020 — towed 15cm Nebelwerfer', () => {
     addCluster(state, 4, { x: 200.5, y: 60.5 });
     const rng = new Rng(11);
 
-    // the lay (range-scaled, ~7-10 s for a 481 m mission) completes, then the first tubes go off
+    // New fire-data preparation (60s), then range-scaled laying (~7-10s), then tubes.
+    run(state,60,rng);
+    expect(state.tracers.filter(t=>t.kind==='rocket')).toHaveLength(0);
+    expect(gunner.ammo).toBe(6);
     run(state, 12, rng);
     const rockets = state.tracers.filter((t) => t.kind === 'rocket');
     expect(rockets.length).toBeGreaterThanOrEqual(1);

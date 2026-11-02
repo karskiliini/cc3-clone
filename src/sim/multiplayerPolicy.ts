@@ -22,7 +22,7 @@ export function applyMultiplayerPolicy(state: BattleState, side: Side, body: Com
         state.phase = 'running'; p.pauseOwner = null;
       }
       return true;
-    case 'order': return state.phase === 'paused';
+    case 'order':case 'signal':case 'artillery':case 'cancelArtillery': return state.phase === 'paused';
     default: return false;
   }
 }

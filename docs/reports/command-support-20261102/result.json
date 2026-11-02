@@ -1,0 +1,414 @@
+{
+  "errors": [],
+  "passed": true,
+  "setup": {
+    "hq": 1,
+    "rifles": [
+      6,
+      17
+    ],
+    "enemy": 28
+  },
+  "plans": {
+    "german": {
+      "orders": [
+        {
+          "teamId": 1,
+          "order": {
+            "type": "move",
+            "target": {
+              "x": 30.5,
+              "y": 21.1652
+            },
+            "issuedAt": 0
+          },
+          "trigger": {
+            "kind": "signal",
+            "signal": 1
+          },
+          "status": "waiting"
+        },
+        {
+          "teamId": 6,
+          "order": {
+            "type": "move",
+            "target": {
+              "x": 38.4,
+              "y": 54.25
+            },
+            "issuedAt": 0
+          },
+          "trigger": {
+            "kind": "time",
+            "at": 60
+          },
+          "status": "waiting"
+        }
+      ],
+      "signals": []
+    },
+    "soviet": {
+      "orders": [
+        {
+          "teamId": 28,
+          "order": {
+            "type": "sneak",
+            "target": {
+              "x": 17,
+              "y": 19
+            },
+            "issuedAt": 0
+          },
+          "trigger": {
+            "kind": "signal",
+            "signal": 3
+          },
+          "status": "waiting"
+        }
+      ],
+      "signals": []
+    }
+  },
+  "signal": {
+    "before": {
+      "x": 26.546642911975862,
+      "y": 53.966236080551006
+    },
+    "after": {
+      "x": 28.011477782120604,
+      "y": 51.37164850314178
+    },
+    "plan": {
+      "teamId": 1,
+      "order": {
+        "type": "move",
+        "target": {
+          "x": 30.5,
+          "y": 21.1652
+        },
+        "issuedAt": 0
+      },
+      "trigger": {
+        "kind": "signal",
+        "signal": 1
+      },
+      "status": "executed",
+      "executedAt": 0.3
+    }
+  },
+  "timed": {
+    "teamId": 6,
+    "order": {
+      "type": "move",
+      "target": {
+        "x": 38.4,
+        "y": 54.25
+      },
+      "issuedAt": 0
+    },
+    "trigger": {
+      "kind": "time",
+      "at": 60
+    },
+    "status": "executed",
+    "executedAt": 60
+  },
+  "radio": [
+    {
+      "id": 1,
+      "at": 61.2,
+      "senderSide": "soviet",
+      "payload": {
+        "kind": "signal",
+        "signalId": "2"
+      }
+    },
+    {
+      "id": 2,
+      "at": 61.2,
+      "senderSide": "soviet",
+      "payload": {
+        "kind": "fireRequest",
+        "missionId": 82,
+        "target": {
+          "x": 80,
+          "y": 80
+        }
+      }
+    }
+  ],
+  "artilleryRequest": {
+    "id": 83,
+    "batteryId": 45,
+    "side": "german",
+    "target": {
+      "x": 79.4,
+      "y": 82.75
+    },
+    "size": "small",
+    "phase": "requested",
+    "calledAt": 61.4,
+    "acceptedAt": 63.4,
+    "readyAt": null,
+    "nextShotAt": null,
+    "roundsLeft": 4,
+    "repeat": false,
+    "requesterId": 2
+  },
+  "airborne": [
+    {
+      "id": 101,
+      "missionId": 83,
+      "side": "german",
+      "target": {
+        "x": 77.57636751336977,
+        "y": 81.3548083123751
+      },
+      "weaponId": "field_105",
+      "firedAt": 129.4,
+      "impactAt": 151.4
+    },
+    {
+      "id": 102,
+      "missionId": 83,
+      "side": "german",
+      "target": {
+        "x": 76.53183025829495,
+        "y": 82.42477000551298
+      },
+      "weaponId": "field_105",
+      "firedAt": 129.4,
+      "impactAt": 151.4
+    },
+    {
+      "id": 103,
+      "missionId": 83,
+      "side": "german",
+      "target": {
+        "x": 81.5855696826242,
+        "y": 85.77574769826606
+      },
+      "weaponId": "field_105",
+      "firedAt": 129.4,
+      "impactAt": 151.4
+    },
+    {
+      "id": 104,
+      "missionId": 83,
+      "side": "german",
+      "target": {
+        "x": 83.46898558838294,
+        "y": 86.9170490661636
+      },
+      "weaponId": "field_105",
+      "firedAt": 129.4,
+      "impactAt": 151.4
+    }
+  ],
+  "impacts": [
+    {
+      "kind": "explosion",
+      "pos": {
+        "x": 79.22481978544965,
+        "y": 76.21484888717532
+      },
+      "side": "soviet",
+      "weaponId": "field_122"
+    },
+    {
+      "kind": "explosion",
+      "pos": {
+        "x": 83.80377428838983,
+        "y": 76.02641042554751
+      },
+      "side": "soviet",
+      "weaponId": "field_122"
+    },
+    {
+      "kind": "explosion",
+      "pos": {
+        "x": 82.64817031100392,
+        "y": 76.96167408954352
+      },
+      "side": "soviet",
+      "weaponId": "field_122"
+    },
+    {
+      "kind": "explosion",
+      "pos": {
+        "x": 75.97663341788575,
+        "y": 82.8733818884939
+      },
+      "side": "soviet",
+      "weaponId": "field_122"
+    },
+    {
+      "kind": "explosion",
+      "pos": {
+        "x": 77.57636751336977,
+        "y": 81.3548083123751
+      },
+      "side": "german",
+      "weaponId": "field_105"
+    },
+    {
+      "kind": "explosion",
+      "pos": {
+        "x": 76.53183025829495,
+        "y": 82.42477000551298
+      },
+      "side": "german",
+      "weaponId": "field_105"
+    },
+    {
+      "kind": "explosion",
+      "pos": {
+        "x": 81.5855696826242,
+        "y": 85.77574769826606
+      },
+      "side": "german",
+      "weaponId": "field_105"
+    },
+    {
+      "kind": "explosion",
+      "pos": {
+        "x": 83.46898558838294,
+        "y": 86.9170490661636
+      },
+      "side": "german",
+      "weaponId": "field_105"
+    }
+  ],
+  "cancelled": {
+    "id": 105,
+    "batteryId": 45,
+    "side": "german",
+    "target": {
+      "x": 79.4,
+      "y": 82.75
+    },
+    "size": "small",
+    "phase": "cancelled",
+    "calledAt": 154.5,
+    "acceptedAt": 156.5,
+    "readyAt": 176.5,
+    "nextShotAt": 182.5,
+    "roundsLeft": 0,
+    "repeat": true,
+    "requesterId": 2
+  },
+  "commands": [
+    {
+      "type": "planOrder",
+      "teamId": 28,
+      "order": {
+        "type": "sneak",
+        "target": {
+          "x": 17,
+          "y": 19
+        },
+        "issuedAt": 0
+      },
+      "trigger": {
+        "kind": "signal",
+        "signal": 3
+      },
+      "side": "soviet",
+      "tick": 0,
+      "seq": 0
+    },
+    {
+      "type": "planOrder",
+      "teamId": 1,
+      "order": {
+        "type": "move",
+        "target": {
+          "x": 30.5,
+          "y": 21.1652
+        },
+        "issuedAt": 0
+      },
+      "trigger": {
+        "kind": "signal",
+        "signal": 1
+      },
+      "side": "german",
+      "tick": 0,
+      "seq": 1
+    },
+    {
+      "type": "planOrder",
+      "teamId": 6,
+      "order": {
+        "type": "move",
+        "target": {
+          "x": 38.4,
+          "y": 54.25
+        },
+        "issuedAt": 0
+      },
+      "trigger": {
+        "kind": "time",
+        "at": 60
+      },
+      "side": "german",
+      "tick": 0,
+      "seq": 2
+    },
+    {
+      "type": "signal",
+      "signal": 1,
+      "side": "german",
+      "tick": 2,
+      "seq": 5
+    },
+    {
+      "type": "signal",
+      "signal": 2,
+      "side": "soviet",
+      "tick": 612,
+      "seq": 6
+    },
+    {
+      "type": "artillery",
+      "target": {
+        "x": 80,
+        "y": 80
+      },
+      "size": "small",
+      "side": "soviet",
+      "tick": 612,
+      "seq": 7
+    },
+    {
+      "type": "artillery",
+      "target": {
+        "x": 79.4,
+        "y": 82.75
+      },
+      "size": "small",
+      "side": "german",
+      "tick": 614,
+      "seq": 8
+    },
+    {
+      "type": "artillery",
+      "target": {
+        "x": 79.4,
+        "y": 82.75
+      },
+      "size": "small",
+      "side": "german",
+      "tick": 1545,
+      "seq": 9
+    },
+    {
+      "type": "cancelArtillery",
+      "missionId": 105,
+      "side": "german",
+      "tick": 1546,
+      "seq": 10
+    }
+  ],
+  "ownedServicesStopped": true
+}

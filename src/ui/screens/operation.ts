@@ -1,3 +1,4 @@
+import {campaignArtilleryAssignment,campaignArtilleryPool,settleCampaignArtillery,artillerySpent} from '@/campaign/artillery';
 import type { BattleConfig, BattleResult, CampaignState, CursorKind, InputState, OperationState, Rect, Screen, Side } from '@/shared/types';
 import { otherSide } from '@/shared/types';
 import { pointInRect } from '@/shared/math';
@@ -89,6 +90,7 @@ export function advanceOperation(result: BattleResult): void {
     const report=battle.battleReport();
     const date=battle.state.config.scenarioDate??operationScenarioDate(OPERATION[op.index]);
     settleDailySupport(game.campaign,date,report.airMissionsUsed??{german:battle.state.airSupport?.assignments.german.used??0,soviet:battle.state.airSupport?.assignments.soviet.used??0});
+    settleCampaignArtillery(game.campaign,`${op.index}:${date}:${battle.state.config.seed}`,report.artillerySpent??artillerySpent(battle.state));
     applyReport(game.campaign, report);
     game.campaign.selectedUids = [];
   }
@@ -241,6 +243,7 @@ export class OperationScreen implements Screen {
         year: battleDef.year,
         scenarioDate:operationScenarioDate(battleDef),
         timeOfDay:battleDef.timeOfDay??'day',weather:battleDef.weather??'clear',
+        artillerySupport:campaignArtilleryAssignment(campaign),
         airSupport:campaignAirAssignment(campaign,operationScenarioDate(battleDef)),
         seed: Date.now() & 0xffff,
         durationS: 20 * 60,
@@ -297,6 +300,8 @@ export class OperationScreen implements Screen {
     const remaining=pool?.date===date?pool.remaining[op.playerSide]:1;
     const air=timeOfDay==='night'||weather!=='clear'?'unavailable':Math.min(1,remaining);
     ctx.fillText(truncateText(ctx, `${mapDef.name} · ${date}${battleDef.scenarioDate?'':' (representative day)'} · ${timeOfDay.toUpperCase()} / ${weather.toUpperCase()} · Air: ${air}`, 748), 26, 78);
+    if(game.campaign){const shells=campaignArtilleryPool(game.campaign).remaining[op.playerSide];
+      ctx.font=UI.note;ctx.fillText(`Artillery: ${Math.min(48,shells)} shells assigned / ${shells} campaign shells remaining`,26,92);}
     this.picker.draw(ctx);
   }
 

@@ -1,6 +1,6 @@
 import {updateSpotting} from '@/sim/spotting';
 import {stepCommunication} from '@/sim/perception';
-import {beginIndirectMission,stepIndirectCommunication} from '@/sim/indirectCommunication';
+import {beginIndirectMission,indirectPreparationWait,registerIndirectLaunch,stepIndirectCommunication} from '@/sim/indirectCommunication';
 import { describe, it, expect } from 'vitest';
 import type { BattleConfig, BattleState, GameMap, MapDef, Soldier, Team, Terrain, Vec2 } from '@/shared/types';
 import { SIM_DT, TILE_M } from '@/shared/types';
@@ -133,7 +133,7 @@ describe('indirect fire: mortars', () => {
     const target = { x: 100, y: 20 }; // 180 m, behind the wall
     for (const s of state.soldiers.values()) expect(hasLOS(state.map, s.pos, target)).toBe(false);
     mortar.order = { type: 'fire', target, issuedAt: 0 };
-    const hits = run(state, new Rng(3), 30);
+    const hits = run(state, new Rng(3), 60);
     expect(hits.length).toBeGreaterThan(0);
     expect(getCombatInstrumentation(state).mortarRoundsFiredBySide.german).toBe(hits.length);
     for (const h of hits) expect(dist(h.pos, target) * TILE_M).toBeLessThan(60);
@@ -144,7 +144,7 @@ describe('indirect fire: mortars', () => {
     mortar.order = { type: 'fire', target: { x: 100, y: 20 }, issuedAt: 0 };
     let fired: { t: number; from: Vec2; pos: Vec2; flightS: number } | null = null;
     let burst: { t: number; pos: Vec2 } | null = null;
-    for (let i = 0; i < Math.round(40 / SIM_DT) && !burst; i++) {
+    for (let i = 0; i < Math.round(70 / SIM_DT) && !burst; i++) {
       state.time += SIM_DT;
       stepCrewWeapons(state, SIM_DT);
       stepCombat(state, new Rng(4 + i), SIM_DT);
@@ -173,17 +173,17 @@ describe('indirect fire: mortars', () => {
     expect(mortar.crewWeapon!.mission).toBeUndefined();
   });
 
-  it('the first round waits for lay + load; later rounds on the same target only for the rate of fire', () => {
+  it('the first round waits for preparation + lay + load; later rounds on the same target only for the rate of fire', () => {
     const { state, mortar, gunner } = mortarSetup();
     const target = { x: 100, y: 20 };
     mortar.order = { type: 'fire', target, issuedAt: 0 };
-    const hits = run(state, new Rng(5), 24);
+    const hits = run(state, new Rng(5), 54);
     // (the loader hangs the bomb over the muzzle while the gunner finishes the lay)
     const lay = layTimeS('mortar81', gunner.experience, 180, 0);
     expect(lay).toBeGreaterThan(6);
     expect(loadTimeS('mortar81', gunner.experience)).toBeCloseTo(2, 5);
-    expect(hits[0].t).toBeGreaterThanOrEqual(lay - 0.05);
-    expect(hits[0].t).toBeLessThan(lay + 1.2);
+    expect(hits[0].t).toBeGreaterThanOrEqual(30 + lay - 0.05);
+    expect(hits[0].t).toBeLessThan(30 + lay + 1.2);
     expect(hits.length).toBeGreaterThanOrEqual(2);
     expect(hits[1].t - hits[0].t).toBeLessThan(1 / 0.15 + 0.6);
   });
@@ -191,7 +191,7 @@ describe('indirect fire: mortars', () => {
   it('shows Aiming then Loading as the team status while preparing', () => {
     const { state, mortar } = mortarSetup();
     mortar.order = { type: 'fire', target: { x: 100, y: 20 }, issuedAt: 0 };
-    run(state, new Rng(5), 1);
+    run(state, new Rng(5), 31);
     expect(crewWeaponStatus(mortar)).toBe('Aiming');
     // the loader hangs the bomb over the muzzle as the lay is finished
     run(state, new Rng(5), 6.5);
@@ -242,7 +242,7 @@ describe('indirect fire: mortars', () => {
     addSpotter(state, { x: 100, y: 2 });
     addEnemy(state, { x: 101, y: 21 });
     mortar.order = { type: 'fire', target, issuedAt: 0 };
-    run(state, new Rng(2), 30);
+    run(state, new Rng(2), 60);
     expect(mortarWalkState(mortar)!.tier).toBe('spotted');
     expect(mortarWalkState(mortar)!.rounds).toBeGreaterThanOrEqual(2);
     for (let x = 90; x <= 110; x++) state.map.tiles[10 * W + x] = 'buildingStone'; // wall between spotter and target
@@ -286,7 +286,7 @@ describe('indirect fire: mortars', () => {
   it('a cowering crew aborts the mission and does not fire', () => {
     const { state, mortar, gunner } = mortarSetup();
     mortar.order = { type: 'fire', target: { x: 100, y: 20 }, issuedAt: 0 };
-    run(state, new Rng(3), 3);
+    run(state, new Rng(3), 33);
     expect(mortar.crewWeapon!.mission).toBeDefined();
     gunner.activity = 'cowering';
     stepCrewWeapons(state, SIM_DT);
@@ -301,13 +301,14 @@ describe('indirect fire: mortars', () => {
     mortar.order = { type: 'fire', target: { x: 100, y: 22 }, targetTeamId: 50, lastSeenAt: 0, lastKnownPos: { x: 100, y: 22 }, issuedAt: 0 };
     const keep = () => { mortar.order!.lastSeenAt = state.time; };
     let n = 0;
-    for (let i = 0; i < 200; i++) { keep(); n += run(state, new Rng(i), SIM_DT).length; }
+    for (let i = 0; i < 600; i++) { keep(); n += run(state, new Rng(i), SIM_DT).length; }
     expect(n).toBeGreaterThan(0);
 
     const idle = mortarSetup();
     idle.gunner.mind.beliefs.push({ pos: { x: 90, y: 15 }, count: 3, confidence: 0.9, kind: 'fired', time: 0, deadSeen: 0 });
     idle.mortar.order = { type: 'defend', target: { x: 90, y: 15 }, issuedAt: 0 };
-    const hits = run(idle.state, new Rng(4), 40);
+    const hits: {pos:Vec2;t:number}[]=[];
+    for(let i=0;i<600;i++){idle.gunner.mind.beliefs[0].time=idle.state.time;hits.push(...run(idle.state,new Rng(4),SIM_DT));}
     expect(hits.length).toBeGreaterThan(0);
     for (const h of hits) expect(dist(h.pos, { x: 90, y: 15 }) * TILE_M).toBeLessThan(80);
   });
@@ -347,4 +348,43 @@ describe('fire-mission preparation (crew-served direct fire)', () => {
     expect(fireMissionWait(state, mortar, gunner, { aim: far, targetTeamId: null })).toBeGreaterThan(6);
     expect(cw.mission!.rounds).toBe(0);
   });
+});
+
+
+describe('registered on-map fire data',()=>{
+ it('discounts preparation only after a launch and retains canonical timing',()=>{
+  const {state,mortar}=mortarSetup(),aim={x:70,y:20};
+  beginIndirectMission(state,mortar,aim);
+  expect(indirectPreparationWait(state,mortar)).toBe(30);
+  state.time=40;mortar.order={type:'fire',target:aim,issuedAt:40};
+  beginIndirectMission(state,mortar,aim);
+  expect(mortar.indirectControl?.repeat).toBe(false);
+  state.time=70;registerIndirectLaunch(state,mortar);
+  state.time=80;mortar.order={type:'fire',target:aim,issuedAt:80};
+  beginIndirectMission(state,mortar,aim);
+  expect(indirectPreparationWait(state,mortar)).toBe(10);
+  const restored=JSON.parse(JSON.stringify(mortar));
+  expect(restored.indirectRegistration).toEqual(mortar.indirectRegistration);
+  expect(restored.indirectControl.readyAt).toBe(90);
+ });
+ it('does not share data and invalidates movement, weather and stale registrations',()=>{
+  const {state,mortar}=mortarSetup(),aim={x:70,y:20};
+  beginIndirectMission(state,mortar,aim);registerIndirectLaunch(state,mortar);
+  mortar.crewWeapon!.pos.x+=3;state.time=40;
+  beginIndirectMission(state,mortar,aim);expect(mortar.indirectControl?.repeat).toBe(false);
+  mortar.crewWeapon!.pos.x-=3;state.time=50;state.config.weather='rain';
+  beginIndirectMission(state,mortar,aim);expect(mortar.indirectControl?.repeat).toBe(false);
+  state.config.weather=undefined;state.time=700;
+  beginIndirectMission(state,mortar,aim);expect(mortar.indirectControl?.repeat).toBe(false);
+  const other=team(90,'mortar',[]);state.teams.set(other.id,other);
+  beginIndirectMission(state,other,aim);expect(other.indirectControl?.repeat).toBe(false);
+ });
+});
+
+it('retains previously fired A after firing B, without sharing registration',()=>{
+ const {state,mortar}=mortarSetup(),a={x:70,y:20},b={x:110,y:20};
+ for(const [time,aim] of [[0,a],[50,b]] as const){state.time=time;beginIndirectMission(state,mortar,aim);registerIndirectLaunch(state,mortar);}
+ state.time=100;beginIndirectMission(state,mortar,a);
+ expect(mortar.indirectControl?.repeat).toBe(true);expect(indirectPreparationWait(state,mortar)).toBe(10);
+ expect(mortar.indirectRegistrations).toHaveLength(2);
 });

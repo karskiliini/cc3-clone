@@ -1,3 +1,4 @@
+import { interceptedRadio, radioCommandSender } from '@/sim/radioTraffic';
 import {drawIndividualInspector} from '@/ui/hud/individualInspector';
 import type { AirRole,CursorKind, GameSettings, InputState, BattleState, OrderType, Rect, Screen, Side, Team, Vec2, Camera } from '@/shared/types';
 import { ORDER_DOT_COLOR, ORDER_HOTKEYS, ORDER_TYPES, TILE_PX, VIEW_H, VIEW_W, otherSide } from '@/shared/types';
@@ -70,6 +71,12 @@ const FLEE_CONFIRM_MS = 2000;
 const AIR_BUTTON:Rect={x:8,y:8,w:136,h:28};
 const AIR_ROLE_BUTTON:Rect={x:150,y:8,w:122,h:28};
 const FLARE_BUTTON:Rect={x:278,y:8,w:156,h:28};
+const ARTILLERY_BUTTON:Rect={x:440,y:8,w:130,h:28};
+const ARTILLERY_SIZE:Rect={x:576,y:8,w:96,h:28};
+const SIGNAL_BUTTONS:Rect[]=[1,2,3].map((_,i)=>({x:680+i*76,y:8,w:70,h:28}));
+const RADIO_BUTTON:Rect={x:914,y:8,w:102,h:28};
+const RADIO_PANEL:Rect={x:650,y:64,w:366,h:178};
+const CANCEL_ARTILLERY:Rect={x:914,y:40,w:102,h:19};
 
 /** Big gold word on a small 60%-black box, centred in the map viewport — used for
  * the PAUSED overlay and the end-of-battle result word. CC3 shows no whole-view dim
@@ -143,7 +150,9 @@ export class BattleScreen implements Screen {
   get selectionCount(): number { return this.selectedTeamIds.length; }
   private pendingOrder: OrderType | null = null;
   private airRole:AirRole='auto';
-  private pendingSupport:{kind:'air'}|{kind:'illumination';teamId:number}|null=null;
+  private pendingSupport:{kind:'air'}|{kind:'illumination';teamId:number}|{kind:'artillery'}|null=null;
+  private artillerySize:'small'|'large'='small';
+  private showRadio=false;
   /** Fire order pending and the pointer is over an enemy team that can be targeted right now. */
   private targetHover: TargetHover | null = null;
   /** what the pointer is over on the map, named in the pointer readout */
@@ -270,7 +279,7 @@ export class BattleScreen implements Screen {
    * the minimap / soldier monitor insets that float over the map viewport. Presses and releases
    * there must never select, deselect, box-select or issue orders. */
   private overHud(p: Vec2): boolean {
-    if([AIR_BUTTON,AIR_ROLE_BUTTON,FLARE_BUTTON].some(r=>hitRect(p,r)))return true;
+    if([AIR_BUTTON,AIR_ROLE_BUTTON,FLARE_BUTTON,ARTILLERY_BUTTON,ARTILLERY_SIZE,RADIO_BUTTON,CANCEL_ARTILLERY,...SIGNAL_BUTTONS].some(r=>hitRect(p,r)) || this.showRadio&&hitRect(p,RADIO_PANEL))return true;
     if (p.y >= VIEW_H) return true;
     if (this.showMinimap && hitRect(p, this.minimap.rect)) return true;
     if (this.showSoldierMonitor) {
@@ -286,10 +295,15 @@ export class BattleScreen implements Screen {
     const t=this.selectedTeamId!=null?this.battle.state.teams.get(this.selectedTeamId):undefined;
     return t&&t.side===this.battle.playerSide()&&mortarIlluminationAvailable(this.battle.state,t)?t:undefined;
   }
-  private armSupport(kind:'air'|'illumination'):void {
+  private armSupport(kind:'air'|'illumination'|'artillery'):void {
     if(this.replay||this.battle.state.phase==='ended')return;
     this.pendingSupport=null;this.pendingOrder=null;this.pendingWaypoints=[];this.markerDrag=null;this.leftDrag.active=false;this.rightDrag.active=false;this.commandMenu.close();
-    if(kind==='air'){
+    if(kind==='artillery'){
+      const batteries=this.battle.state.artillery?.batteries.filter(b=>b.side===this.battle.playerSide())??[];
+      if(!radioCommandSender(this.battle.state,this.battle.playerSide())){this.notice('Artillery requires an operational HQ radio.','warn');return;}
+      if(!batteries.some(b=>b.ammo>0)){this.notice('Artillery unavailable: no battery ammunition.','warn');return;}
+      this.pendingSupport={kind:'artillery'};
+    }else if(kind==='air'){
       const status=airSupportStatus(this.battle.state,this.battle.playerSide());
       if(!status.available){this.notice(status.reason,'warn');return;}
       this.pendingSupport={kind:'air'};
@@ -304,12 +318,36 @@ export class BattleScreen implements Screen {
     if(this.replay)return input;
     const keysPressed=new Set(input.keysPressed);
     if(!input.keysDown.has('control')&&!input.keysDown.has('meta')){
+      if(keysPressed.has('b')&&input.keysDown.has('shift')){this.armSupport('artillery');keysPressed.delete('b');}
       if(keysPressed.has('u')){this.armSupport('air');keysPressed.delete('u');}
       if(keysPressed.has('l')&&!input.keysDown.has('shift')&&this.selectedMortar()){this.armSupport('illumination');keysPressed.delete('l');}
     }
     if(this.pendingSupport&&ORDER_TYPES.some(o=>keysPressed.has(ORDER_HOTKEYS[o])))this.pendingSupport=null;
     if(this.pendingSupport&&keysPressed.has('escape')){this.pendingSupport=null;keysPressed.delete('escape');}
     const clicks=input.clicks.filter(c=>{
+      if(c.button===0&&hitRect(c,ARTILLERY_BUTTON)){this.armSupport('artillery');return false;}
+      if(c.button===0&&hitRect(c,CANCEL_ARTILLERY)){
+        const mission=this.battle.state.artillery?.missions.find(m=>m.side===this.battle.playerSide()&&m.phase!=='complete'&&m.phase!=='cancelled');
+        if(mission)this.command({type:'cancelArtillery',missionId:mission.id});
+        return false;
+      }
+      if(c.button===0&&hitRect(c,ARTILLERY_SIZE)){this.artillerySize=this.artillerySize==='small'?'large':'small';return false;}
+      if(c.button===0&&hitRect(c,RADIO_BUTTON)){this.showRadio=!this.showRadio;return false;}
+      const signal=SIGNAL_BUTTONS.findIndex(r=>hitRect(c,r));
+      if(c.button===0&&signal>=0){
+        if(!radioCommandSender(this.battle.state,this.battle.playerSide()))this.notice('Signal requires an operational HQ radio.','warn');
+        else this.command({type:'signal',signal:(signal+1) as 1|2|3});
+        return false;
+      }
+      if(this.showRadio&&hitRect(c,RADIO_PANEL)){
+        if(c.button===0){
+          const row=Math.floor((c.y-91)/18);
+          const message=row>=0&&row<8?interceptedRadio(this.battle.state,this.battle.playerSide()).slice(-8).reverse()[row]:undefined;
+          const payload=message?.payload,target=payload&&'target' in payload?payload.target:undefined;
+          if(target){centerCamera(game.cam,target);clampCamera(game.cam,this.battle.state.map.width,this.battle.state.map.height);}
+        }
+        return false;
+      }
       if(c.button===0&&hitRect(c,AIR_ROLE_BUTTON)){
         const roles:AirRole[]=['auto','bombing','armour'];this.airRole=roles[(roles.indexOf(this.airRole)+1)%roles.length];return false;
       }
@@ -323,11 +361,64 @@ export class BattleScreen implements Screen {
       if(pending.kind==='air'){
         const team=this.selectedTeamId!=null?this.battle.state.teams.get(this.selectedTeamId):undefined;
         this.command({type:'airSupport',target,role:this.airRole,requesterId:team?.leaderId});
-      }else this.command({type:'illuminate',teamId:pending.teamId,target});
+      }else if(pending.kind==='artillery')this.command({type:'artillery',target,size:this.artillerySize});
+      else this.command({type:'illuminate',teamId:pending.teamId,target});
       this.pendingSupport=null;this.leftDrag.active=false;game.audio?.play('click');return false;
     });
     return{...input,keysPressed,clicks};
   }
+  /** Public radio evidence only: no mission state or hidden impact schedule is consulted. */
+  private interceptedFireMarkers():{at:number;target:Vec2;correction:boolean}[] {
+    const latest=new Map<string,{at:number;target:Vec2;correction:boolean}>();
+    for(const message of interceptedRadio(this.battle.state,this.battle.playerSide())){
+      const payload=message.payload;
+      if(payload.kind!=='fireRequest'&&payload.kind!=='fireCorrection'&&payload.kind!=='fireCancellation')continue;
+      const key=`${message.senderSide}:${payload.missionId}`;
+      if(payload.kind==='fireCancellation')latest.delete(key);
+      else latest.set(key,{at:message.at,target:payload.target,correction:payload.kind==='fireCorrection'});
+    }
+    return [...latest.values()].filter(m=>this.battle.state.time>=m.at&&this.battle.state.time-m.at<=60);
+  }
+
+  private drawInterceptedFireMarkers(ctx:CanvasRenderingContext2D):void {
+    ctx.save();ctx.beginPath();ctx.rect(0,0,VIEW_W,VIEW_H);ctx.clip();
+    ctx.font='bold 11px Arial, sans-serif';ctx.textBaseline='middle';ctx.textAlign='left';
+    for(const message of this.interceptedFireMarkers()){
+      const p=worldToScreen(game.cam,message.target);if(p.x < -24||p.y < -24||p.x > VIEW_W+24||p.y > VIEW_H+24)continue;
+      ctx.strokeStyle='#ffc569';ctx.lineWidth=1.5;ctx.setLineDash([4,3]);ctx.beginPath();ctx.arc(p.x,p.y,18,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);
+      ctx.beginPath();ctx.moveTo(p.x-10,p.y);ctx.lineTo(p.x+10,p.y);ctx.moveTo(p.x,p.y-10);ctx.lineTo(p.x,p.y+10);ctx.stroke();
+      const label=`Radio fire ${message.correction?'correction':'request'} · ${Math.floor(this.battle.state.time-message.at)}s ago`,w=ctx.measureText(label).width+12;
+      const x=Math.max(2,Math.min(VIEW_W-w-2,p.x+23)),y=Math.max(12,Math.min(VIEW_H-12,p.y));
+      ctx.fillStyle='rgba(30,23,13,.92)';ctx.fillRect(x,y-10,w,20);ctx.fillStyle='#ffd18a';ctx.fillText(label,x+6,y);
+    }
+    ctx.restore();
+  }
+
+  private drawRadioArtilleryControls(ctx:CanvasRenderingContext2D):void {
+    const state=this.battle.state,side=this.battle.playerSide(),ready=!!radioCommandSender(state,side);
+    const batteries=state.artillery?.batteries.filter(b=>b.side===side)??[];
+    const labels=['ARTY [Shift+B]',this.artillerySize.toUpperCase(),...SIGNAL_BUTTONS.map((_,i)=>`Signal ${i+1}`),`Radio ${this.showRadio?'▼':'▶'}`];
+    ctx.save();ctx.font='bold 11px Arial, sans-serif';ctx.textBaseline='middle';ctx.textAlign='left';
+    [ARTILLERY_BUTTON,ARTILLERY_SIZE,...SIGNAL_BUTTONS,RADIO_BUTTON].forEach((r,i)=>{
+      ctx.fillStyle=i===0&&this.pendingSupport?.kind==='artillery'?'#785822':'rgba(17,22,25,.94)';ctx.fillRect(r.x,r.y,r.w,r.h);ctx.strokeStyle='#8a8970';ctx.strokeRect(r.x+.5,r.y+.5,r.w-1,r.h-1);ctx.fillStyle=i>=2&&i<=4&&!ready?'#929894':'#f6e4b6';ctx.fillText(labels[i],r.x+6,r.y+14);
+    });
+    const missions=state.artillery?.missions.filter(m=>m.side===side&&m.phase!=='complete'&&m.phase!=='cancelled')??[];
+    ctx.fillStyle='rgba(10,15,22,.86)';ctx.fillRect(440,40,576,19);ctx.fillStyle='#c8d6df';ctx.font='11px Arial, sans-serif';
+    ctx.fillText(`Artillery: ${batteries.reduce((n,b)=>n+b.ammo,0)} rounds · ${missions.length?missions.map(m=>`${m.size} ${m.phase}`).join(', '):'no active mission'} · Signals: ${ready?'HQ radio ready':'HQ radio unavailable'}`,446,50,458);
+    ctx.fillStyle=missions.length?'#703f2a':'#303b41';ctx.fillRect(CANCEL_ARTILLERY.x,CANCEL_ARTILLERY.y,CANCEL_ARTILLERY.w,CANCEL_ARTILLERY.h);ctx.strokeStyle='#8a8970';ctx.strokeRect(CANCEL_ARTILLERY.x+.5,CANCEL_ARTILLERY.y+.5,CANCEL_ARTILLERY.w-1,CANCEL_ARTILLERY.h-1);ctx.fillStyle=missions.length?'#ffe4c4':'#929894';ctx.fillText('Cancel fire',922,50);
+    if(this.showRadio){
+      ctx.fillStyle='rgba(13,19,24,.96)';ctx.fillRect(RADIO_PANEL.x,RADIO_PANEL.y,RADIO_PANEL.w,RADIO_PANEL.h);ctx.strokeStyle='#8a8970';ctx.strokeRect(RADIO_PANEL.x+.5,RADIO_PANEL.y+.5,RADIO_PANEL.w-1,RADIO_PANEL.h-1);
+      ctx.fillStyle='#f6e4b6';ctx.fillText('INTERCEPTED RADIO · click a target row to locate',658,78);
+      const messages=interceptedRadio(state,side).slice(-8).reverse();
+      if(!messages.length){ctx.fillStyle='#aebcc0';ctx.fillText('No enemy transmissions received.',658,101);}
+      messages.forEach((m,i)=>{
+        const p=m.payload;
+        const text=p.kind==='signal'?`Signal ${p.signalId}`:p.kind==='message'||p.kind==='report'?`${p.text}${p.target?` → ${p.target.x.toFixed(0)},${p.target.y.toFixed(0)}`:''}`:`${p.kind} #${p.missionId} → ${p.target.x.toFixed(0)},${p.target.y.toFixed(0)}`;
+        ctx.fillStyle='#d5dfd4';ctx.fillText(`${Math.floor(m.at)}s · ${text}`,658,100+i*18,350);
+      });
+    }ctx.restore();
+  }
+
   private drawSupportControls(ctx:CanvasRenderingContext2D):void {
     const state=this.battle.state,side=this.battle.playerSide(),status=airSupportStatus(state,side),mortar=this.selectedMortar(),mouse=game.input.state.mouse;
     const mission=state.airSupport?.missions.find(m=>m.side===side&&m.phase!=='complete');
@@ -351,7 +442,7 @@ export class BattleScreen implements Screen {
       ctx.fillStyle='rgba(13,17,22,.97)';ctx.fillRect(8,62,660,58);ctx.fillStyle='#efe4ca';lines.forEach((line,i)=>ctx.fillText(line,15,68+i*16));
     }
     if(this.pendingSupport){
-      const label=this.pendingSupport.kind==='air'?`AIR SUPPORT · ${this.airRole.toUpperCase()} · click target area`:'MORTAR ILLUMINATION · click target area';
+      const label=this.pendingSupport.kind==='air'?`AIR SUPPORT · ${this.airRole.toUpperCase()} · click target area`:this.pendingSupport.kind==='artillery'?`ARTILLERY · ${this.artillerySize.toUpperCase()} · click target area`:'MORTAR ILLUMINATION · click target area';
       ctx.fillStyle='rgba(55,37,13,.94)';ctx.fillRect(8,124,610,25);ctx.fillStyle='#ffe4a0';ctx.fillText(`${label} · Escape / right-click cancels`,15,131);
       if(!this.overHud(mouse)){ctx.strokeStyle='#ffe4a0';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(mouse.x,mouse.y,18,0,Math.PI*2);ctx.moveTo(mouse.x-24,mouse.y);ctx.lineTo(mouse.x+24,mouse.y);ctx.moveTo(mouse.x,mouse.y-24);ctx.lineTo(mouse.x,mouse.y+24);ctx.stroke();}
     }
@@ -1120,6 +1211,8 @@ export class BattleScreen implements Screen {
 
     ctx.restore();
 
+    this.drawInterceptedFireMarkers(ctx);
+
     // Minimap and soldier monitor sit over the map viewport itself.
     if (this.showMinimap) this.minimap.draw(ctx, this.terrain, state, cam, battle.playerSide());
     if (this.showSoldierMonitor) this.soldierMonitor.draw(ctx, state, selTeam);
@@ -1130,6 +1223,7 @@ export class BattleScreen implements Screen {
     this.bottomStrip.draw(ctx, state, selTeam, this.soldierMonitor.watchedSoldierForTeam(state, selTeam));
     this.controlGroupBar.draw(ctx, this.controlGroups.slots(this.selectedTeamIds));
     this.drawSupportControls(ctx);
+    this.drawRadioArtilleryControls(ctx);
 
     if (this.commandMenu.isOpen) this.commandMenu.draw(ctx);
     if(this.showIndividualInspector){const id=this.soldierMonitor.watchedSoldierForTeam(state,selTeam)??selTeam?.leaderId;const s=id!=null?state.soldiers.get(id):undefined;if(s&&s.side===battle.playerSide())drawIndividualInspector(ctx,state,s,selTeam?.order??null);}

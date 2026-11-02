@@ -1,3 +1,4 @@
+import {emitContactRadio} from './radioTraffic';
 import {vehicleEyes} from './vehicleVision';
 import {observerVisibility} from './spotting';
 import {rememberCell,rememberHull} from './navigationKnowledge';
@@ -133,6 +134,7 @@ export function stepCommunication(state:BattleState):void{
    for(const hull of navHulls)if(hullsSent<8&&net.queue.length<8192&&hull.sourceId!==b.id&&fresh(`hull:${hull.id}`,hull.observedAt)){net.queue.push({...base,navigationHull:{...structuredClone(hull),hops:hull.hops+1}});hullsSent++;}
    for(const [id,e] of Object.entries(p.objectives??{}))if(net.queue.length<8192&&e.sourceId!==b.id&&fresh(`objective:${id}`,e.observedAt))net.queue.push({...base,objective:{id:Number(id),...e}});
    if(s.teamId===b.teamId&&p.leadership&&net.queue.length<8192&&fresh('leadership',p.leadership.observedAt))net.queue.push({...base,leadership:{...p.leadership}});
+   if(link.channel==='radio')for(let i=before;i<net.queue.length;i++)emitContactRadio(state,s.side,net.queue[i]);
    if(!spoke&&link.channel==='voice'&&net.queue.length>before){spoke=true;emitNoise(state,s.pos,'voice',s.activity==='ambushing'||s.activity==='hiding'?5:s.id===state.teams.get(s.teamId)?.leaderId?40:15,`voice:${s.id}`,s.side);}
   }
  }

@@ -1,8 +1,12 @@
+import {artillerySpent} from '@/campaign/artillery';
 import {observeNavigationAll} from './navigationKnowledge';
 import {initializeAirSupport,requestAirSupport,stepAirSupport} from './airSupport';
 import {initializeIllumination,requestIllumination,stepIllumination} from './illumination';
 import {updateNightGroundMemory} from './nightVisibility';
 import {stepIndirectCommunication} from './indirectCommunication';
+import {initializeArtillery,requestArtillery,cancelArtillery,stepArtillery} from './artillery';
+import {setPlannedOrder,cancelPlannedOrder,sendPlanSignal,stepBattlePlan} from './battlePlan';
+import {emitRadio,radioOrderSender} from './radioTraffic';
 import {stepHumanCondition} from './humanCondition';
 import {stepHearing,stepCommunication} from './perception';
 import { applyMultiplayerPolicy } from './multiplayerPolicy';
@@ -123,6 +127,7 @@ export class Battle {
 
     spawnMortarCarriers(this.state, this.rng);
     initializeAirSupport(this.state);
+    initializeArtillery(this.state);
     initializeIllumination(this.state);
     updateNightGroundMemory(this.state);
 
@@ -233,9 +238,14 @@ export class Battle {
 
   private applyCommand(cmd: Command): void {
     const state = this.state;
-    if(state.multiplayerPolicy?.active&&state.phase==='deploy'&&this.isReady(cmd.side)&&['order','deployTeam','autoDeploy'].includes(cmd.type))return;
+    if(state.multiplayerPolicy?.active&&state.phase==='deploy'&&this.isReady(cmd.side)&&['order','deployTeam','autoDeploy','planOrder','cancelPlanOrder'].includes(cmd.type))return;
     if(applyMultiplayerPolicy(state,cmd.side,cmd))return;
     switch (cmd.type) {
+      case 'planOrder':setPlannedOrder(state,cmd.side,cmd.teamId,cmd.order,cmd.trigger);return;
+      case 'cancelPlanOrder':cancelPlannedOrder(state,cmd.side,cmd.teamId);return;
+      case 'signal':sendPlanSignal(state,cmd.side,cmd.signal);return;
+      case 'artillery':requestArtillery(state,cmd.side,cmd.target,cmd.size);return;
+      case 'cancelArtillery':cancelArtillery(state,cmd.side,cmd.missionId);return;
       case 'airSupport':
         if(state.phase==='running'||state.phase==='paused')requestAirSupport(state,cmd.side,cmd.target,cmd.role,cmd.requesterId);
         return;
@@ -254,7 +264,11 @@ export class Battle {
         return;
       case 'order': {
         const team = state.teams.get(cmd.teamId);
-        if (team && team.side === cmd.side) this.issueOrder(cmd.teamId, cmd.order);
+        if (team && team.side === cmd.side) {
+          if(state.phase==='deploy')cancelPlannedOrder(state,cmd.side,cmd.teamId);
+          const ordinary={...cmd.order};delete ordinary.prebriefed;
+          this.issueOrder(cmd.teamId, ordinary);
+        }
         return;
       }
       case 'deployTeam': {
@@ -359,6 +373,9 @@ export class Battle {
     stepHearing(state);
     stepCommunication(state);
     stepIndirectCommunication(state);
+    initializeArtillery(state);
+    stepArtillery(state,this.rng);
+    stepBattlePlan(state,(id,order)=>this.issueOrder(id,order,false));
     stepMinds(state, this.rng, dt);
 
     stepAttackOrders(state, this.rng);
@@ -410,9 +427,10 @@ export class Battle {
     if (state.structureFx.length > 32) state.structureFx.splice(0, state.structureFx.length - 32);
   }
 
-  issueOrder(teamId: number, order: Order): void {
+  issueOrder(teamId: number, order: Order, transmit=true): void {
     const team = this.state.teams.get(teamId);
     if (!team) return;
+    if(transmit&&this.state.phase==='running'&&radioOrderSender(this.state,team.side,teamId))emitRadio(this.state,team.side,{kind:'message',text:`${order.type} order`,target:order.target});
     const full: Order = { ...order, issuedAt: this.state.time };
     applyOrder(this.state, team, full, this.rng);
     // B7: the leader shouts the order back — a beat later (voice over the din, not radio),
@@ -659,6 +677,7 @@ export class Battle {
       teams.push({ defId: team.defId, kills: team.kills, soldiers, vehicleDamage });
     }
     return { result: this.state.results?.[side] ?? this.state.result ?? 'draw', fledSide: this.state.fledSide ?? null, teams,
+      artillerySpent:artillerySpent(this.state),
       airMissionsUsed:{german:this.state.airSupport?.assignments.german.used??0,soviet:this.state.airSupport?.assignments.soviet.used??0} };
   }
 }

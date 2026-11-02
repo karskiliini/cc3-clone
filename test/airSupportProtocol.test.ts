@@ -58,7 +58,7 @@ it('real relay preserves authored conditions for both peers, rejects bad support
     const send=(seq:number,commands:unknown[])=>{const body=JSON.stringify({kind:'bundle',side:'german',turn:3,commands,ack:2});a.send({k:'m',seq,crc:crc32(body),body});};
     send(0,[{type:'airSupport',target:point,role:'unknown'}]);await until(()=>af.some(f=>f.op==='error'&&f.code==='BAD_COMMAND'));
     const room=relay.rooms.values().next().value!;expect(room.sealedTo.german).toBe(2);expect(room.history.german.has(3)).toBe(false);
-    const commands=[{type:'airSupport',target:point,role:'auto',requesterId:3},{type:'illuminate',target:point,teamId:1}];
+    const commands=[{type:'airSupport',target:point,role:'auto',requesterId:3},{type:'illuminate',target:point,teamId:1},{type:'planOrder',teamId:1,order:{type:'defend',target:point,issuedAt:0},trigger:{kind:'signal',signal:1}},{type:'signal',signal:1},{type:'artillery',target:point,size:'small'},{type:'cancelArtillery',missionId:9}];
     send(1,commands);await until(()=>room.sealedTo.german===3);expect(room.history.german.get(3)).toEqual(commands);
   }finally{a.close();b.close();await relay.close();}
 });

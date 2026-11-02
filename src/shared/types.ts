@@ -1029,6 +1029,8 @@ export const ORDER_DOT_COLOR: Record<OrderType, string> = {
 export const AMBUSH_TRIGGER_M = 30;   // manual: ambush launches when enemy within 30 m
 
 export interface Order {
+  /** Internal: already received during pre-battle briefing; no fresh HQ link needed. */
+  prebriefed?:boolean;
   illumination?: boolean;
   formationHeading?:number;
   formationClaims?:Record<number,number>;
@@ -1108,13 +1110,15 @@ export interface TeamDef {
 export type TeamQuality = 'militia' | 'line' | 'seasoned' | 'elite';
 
 export interface IndirectObservation {observerId:number;observedAt:number;receivedAt:number;aim:Vec2;tier:'spotted'|'area';quality:number;impactAt?:number}
-export interface IndirectControl {aim:Vec2;startedAt:number;orderAt?:number;nextRequestAt:number;report?:IndirectObservation;rounds:number;lastImpactAt:number}
+export interface IndirectControl {aim:Vec2;startedAt:number;orderAt?:number;nextRequestAt:number;report?:IndirectObservation;rounds:number;lastImpactAt:number;readyAt?:number;preparationS?:number;repeat?:boolean;origin?:Vec2;weaponId?:string;conditions?:string}
 export interface IndirectMessage {kind:'request'|'observation';teamId:number;missionAt:number;aim:Vec2;route:number[];hop:number;deliverAt:number;channel:'voice'|'intercom'|'radio';observation?:IndirectObservation}
 export interface IndirectObserverTask {teamId:number;missionAt:number;aim:Vec2;observerId:number;nextReportAt:number}
 export interface Team {
   illuminationAmmo?: number;
   illuminationMission?: { target:Vec2; orderedAt:number; nextRoundAt:number; rounds:number; layUntil:number };
   indirectControl?:IndirectControl;
+  indirectRegistration?:{aim:Vec2;origin:Vec2;registeredAt:number;weaponId:string;conditions:string};
+  indirectRegistrations?:NonNullable<Team['indirectRegistration']>[];
   id: number;
   defId: string;
   side: Side;
@@ -1394,6 +1398,7 @@ export interface IlluminationFlare { id:number; side:Side; teamId:number; burstA
 export interface IlluminationShot { id:number; side:Side; teamId:number; from:Vec2; target:Vec2; firedAt:number; burstAt:number; altitudeM:number }
 
 export interface BattleConfig {
+  artillerySupport?: false | Partial<Record<Side,{shells:number;guns?:number;availableAtS?:number}>>;
   timeOfDay?: 'day' | 'night';
   weather?: 'clear' | 'overcast' | 'rain';
   scenarioDate?: string;
@@ -1435,6 +1440,8 @@ export interface HumanMindTrack {
 }
 export interface HumanMoraleTrack {lastHealth:Map<number,Health>;tankScareAt:Map<number,number>;teamLastStatus:Map<number,TeamStatusWord>;hesitationMsgAt:Map<number,number>}
 export interface BattleState {
+  battlePlans?:Record<Side,BattlePlan>;
+  artillery?:ArtilleryState;
   airSupport?: AirSupportState;
   flares?: IlluminationFlare[];
   illuminationShots?: IlluminationShot[];
@@ -1578,6 +1585,7 @@ export interface TeamOutcome {
 
 /** End-of-battle export for the player side: the campaign layer's only input. */
 export interface BattleReport {
+  artillerySpent?:Record<Side,number>;
   airMissionsUsed?: Record<Side,number>;
   result: BattleResult;
   fledSide: Side | null;
@@ -1628,6 +1636,7 @@ export interface CampaignTeam {
 
 /** Full campaign state persisted between battles. */
 export interface CampaignState {
+  artilleryPool?:{remaining:Record<Side,number>;settledBattles:string[]};
   airSupportDaily?: { date:string; remaining:Record<Side,number> };
   seed: number;
   playerSide: Side;
@@ -1685,3 +1694,19 @@ export interface GameSettings {
   alwaysFullEnemyInfo?: boolean;
   alwaysObeyOrders?: boolean;
 }
+
+/** Public transmitted content only; never private signal meanings. */
+export type RadioPayload =
+ | {kind:'message';text:string;target?:Vec2}
+ | {kind:'report';text:string;target?:Vec2}
+ | {kind:'signal';signalId:string}
+ | {kind:'fireRequest'|'fireCorrection'|'fireCancellation';missionId:number;target:Vec2};
+export interface RadioTransmission {id:number;at:number;senderSide:Side;payload:RadioPayload}
+export type PlanTrigger={kind:'signal';signal:1|2|3}|{kind:'time';at:number};
+export interface PlannedOrder {teamId:number;order:Order;trigger:PlanTrigger;status:'waiting'|'executed'|'failed';executedAt?:number}
+export interface BattlePlan {orders:PlannedOrder[];signals:{signal:1|2|3;sentAt:number;senderId?:number;deliveries?:{teamId:number;recipientId:number;channel:'voice'|'intercom'|'radio'|'self';at:number;delivered?:boolean}[]}[]}
+export interface ArtilleryBattery {id:number;side:Side;name:string;weaponId:string;guns:number;ammo:number;readyAt:number;registration?:{target:Vec2;at:number;weaponId?:string;conditions?:string};registrations?:{target:Vec2;at:number;weaponId?:string;conditions?:string}[];assignedTeamId?:number}
+export interface ArtilleryMission {id:number;batteryId:number;side:Side;target:Vec2;size:'small'|'large';phase:'requested'|'queued'|'preparing'|'firing'|'complete'|'cancelled';cancelAt?:number;cancelRequesterId?:number;calledAt:number;acceptedAt:number;readyAt:number;nextShotAt:number;roundsLeft:number;repeat:boolean;requesterId:number}
+export interface ArtilleryShell {id:number;missionId:number;side:Side;target:Vec2;weaponId:string;firedAt:number;impactAt:number}
+export interface ArtilleryState {batteries:ArtilleryBattery[];missions:ArtilleryMission[];shells:ArtilleryShell[]}
+export interface BattleState {radioTraffic?:{nextId:number;messages:RadioTransmission[]}}

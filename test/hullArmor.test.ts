@@ -254,9 +254,12 @@ it.each(['grenade', 'mortar', 'vehicleRocket'] as const)('%s producer snapshots 
     launch = add(v.body.position, rotate(v.body.orientation, { x: 0, y: 0, z: 1.5 - hullParams(VEHICLE_DEFS.bm13).cgHeightM }));
     team.order = { type: 'fire', target: { x: 200.5, y: 60.5 }, issuedAt: 0 };
   }
-  for (let i = 0; i < 400 && state.pendingBursts.length === 0; i++) {
+  // Exercise the real launch path, including the rocket's 60s first-target preparation.
+  const maxSteps=kind==='vehicleRocket'?800:400;
+  for (let i = 0; i < maxSteps && state.pendingBursts.length === 0; i++) {
     state.time += 0.1; stepCrewWeapons(state, 0.1); stepCombat(state, rng, 0.1);
   }
+  if(kind==='vehicleRocket')expect(state.time).toBeGreaterThanOrEqual(60);
   const burst = state.pendingBursts[0]; expect(burst, kind).toBeDefined(); expect(burst.trajectory).toBeDefined();
   const trajectory = burst.trajectory!;
   launch ??= { x: trajectory.sourcePos.x * TILE_M, y: trajectory.sourcePos.y * TILE_M, z: 3.5 };

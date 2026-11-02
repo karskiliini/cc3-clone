@@ -1,4 +1,4 @@
-import type { AirRole, BattleConfig, Controller, Order, Side, Vec2 } from '@/shared/types';
+import type { AirRole, BattleConfig, Controller, Order, PlanTrigger, Side, Vec2 } from '@/shared/types';
 
 /**
  * Everything a player can do to a battle, as plain serializable data (multiplayer plan §7 P1).
@@ -7,6 +7,11 @@ import type { AirRole, BattleConfig, Controller, Order, Side, Vec2 } from '@/sha
  * depend on the frame a click landed in and a command log can replay a battle exactly.
  */
 export type CommandBody =
+  | {type:'planOrder';teamId:number;order:Order;trigger:PlanTrigger}
+  | {type:'cancelPlanOrder';teamId:number}
+  | {type:'signal';signal:1|2|3}
+  | {type:'artillery';target:Vec2;size:'small'|'large'}
+  | {type:'cancelArtillery';missionId:number}
   | { type:'airSupport'; target:Vec2; role:AirRole; requesterId?:number }
   | { type:'illuminate'; teamId:number; target:Vec2 }
   | { type: 'order'; teamId: number; order: Order }

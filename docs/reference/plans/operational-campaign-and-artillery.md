@@ -5,6 +5,13 @@ and new artillery requirement 068. This develops the Sixth Army campaign 067;
 062–066 supply its terrain, river transport and defenses. Requirements do not
 automatically reprioritize implementation or add an approval ceremony.
 
+Implementation update (13:15 request): tactical artillery calls, finite battery
+stock/queues, physical delayed impacts, on-map preparation and registered-target
+history, plus persistent sequential-operation ammunition accounting are now
+implemented. See `docs/reports/command-support-20261102/README.md` for verification.
+The operational grand map (053), geographic cross-sector battery allocations and
+full command handovers depend on systems not yet implemented; those remain queued.
+
 ## 053 — Move forces across Sixth Army's operational area
 
 The user now explicitly requests the previously proposed grand-campaign layer.
