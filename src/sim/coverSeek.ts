@@ -1,3 +1,4 @@
+import {planningMap,knownHazards} from './navigationKnowledge';
 // ============================================================================
 // coverSeek.ts — automatic directional cover seeking (spec §9). Called once
 // per soldier per sim step from battle.ts's pipeline; internally throttled to
@@ -48,12 +49,12 @@ function occupiedByTeammate(state: BattleState, team: Team | undefined, self: So
 function bestCoverTile(
   state: BattleState, s: Soldier, team: Team | undefined, centre: Vec2, radius: number, threats: ThreatWeighted[],
 ): { tile: Vec2; score: number } | null {
-  const map = state.map;
-  const hazards = fireHazards(state);
+  const map = planningMap(state,s);
+  const hazards = knownHazards(state,s);
   let best: Vec2 | null = null;
   let bestScore = -Infinity;
   let bestOmni = -Infinity;
-  for (const tile of tilesWithinRadius(centre, radius, state.map)) {
+  for (const tile of tilesWithinRadius(centre,radius,map)) {
     const tx = Math.floor(tile.x), ty = Math.floor(tile.y);
     if (!inBounds(map, tx, ty)) continue;
     if (!isPassable(map, tx, ty, 'infantry')) continue;
@@ -71,7 +72,7 @@ function bestCoverTile(
 }
 
 function moveTo(state: BattleState, s: Soldier, tile: Vec2): void {
-  const path = findPath(state.map, s.pos, tile, 'infantry');
+  const path = findPath(planningMap(state,s), s.pos, tile, 'infantry');
   if (path.length > 0) {
     const end = path[path.length - 1];
     if (Math.floor(end.x) === Math.floor(tile.x) && Math.floor(end.y) === Math.floor(tile.y)) path[path.length - 1] = { ...tile };
@@ -115,7 +116,7 @@ function seekForSoldier(state: BattleState, rng: Rng, s: Soldier): void {
   // else (its ammunition may cook off), to the best cover outside that circle.
   // (a gun crew stays with its emplaced gun)
   if (s.path.length === 0 && !s.bailRun && !(team?.crewWeapon && !team.crewWeapon.abandoned && !team.crewWeapon.lightMode)) {
-    const hazards = fireHazards(state);
+    const hazards = knownHazards(state,s);
     if (hazards.length > 0 && nearFireHazard(hazards, s.pos)) {
       mind.lastCoverSeekAt = state.time;
       const found = bestCoverTile(state, s, team, s.pos, HAZARD_SEARCH_TILES, threats);
@@ -131,12 +132,12 @@ function seekForSoldier(state: BattleState, rng: Rng, s: Soldier): void {
     }
   }
   const orderedHouse = team?.order && ['move', 'moveFast', 'sneak', 'assault'].includes(team.order.type)
-    && buildingTiles(state.map, team.order.target).length > 0;
+    && buildingTiles(planningMap(state,s), team.order.target).length > 0;
   if (orderedHouse && s.path.length === 0 && ['idle', 'defending', 'ambushing', 'hiding'].includes(s.activity)) {
     mind.lastCoverSeekAt = state.time;
     const destination = buildingDestination(state, s, team!.order!.target, mind.anchor ?? team!.order!.target);
-    if (destination && dist(s.pos, destination) > 0.05 && (!inSameBuilding(state.map, s.pos, destination)
-      || coverScore(state.map, destination, threats) - coverScore(state.map, s.pos, threats) >= (mind.trait === 'cautious' ? 0.05 : mind.trait === 'reckless' ? 0.3 : 0.15))) {
+    if (destination && dist(s.pos, destination) > 0.05 && (!inSameBuilding(planningMap(state,s), s.pos, destination)
+      || coverScore(planningMap(state,s), destination, threats) - coverScore(planningMap(state,s), s.pos, threats) >= (mind.trait === 'cautious' ? 0.05 : mind.trait === 'reckless' ? 0.3 : 0.15))) {
       moveTo(state, s, destination);
       if (s.path.length) { mind.anchor = { ...destination }; s.activity = 'moving'; }
     }
@@ -166,7 +167,7 @@ function seekForSoldier(state: BattleState, rng: Rng, s: Soldier): void {
 
   // --- Pinned/cowering: crawl within 3 tiles if it helps by >=0.2.
   if (mind.state === 'pinned' || mind.state === 'cowering') {
-    const cur = coverScore(state.map, s.pos, threats);
+    const cur = coverScore(planningMap(state,s), s.pos, threats);
     const found = bestCoverTile(state, s, team, s.pos, 3, threats);
     mind.lastCoverSeekAt = state.time;
     if (found && found.score - cur >= 0.2) moveTo(state, s, found.tile);
@@ -177,7 +178,7 @@ function seekForSoldier(state: BattleState, rng: Rng, s: Soldier): void {
   const isSettled = s.activity === 'defending' || s.activity === 'ambushing' || s.activity === 'idle' || s.activity === 'hiding';
   if (isSettled) {
     const anchor = mind.anchor ?? s.pos;
-    const cur = coverScore(state.map, s.pos, threats);
+    const cur = coverScore(planningMap(state,s), s.pos, threats);
     let margin = 0.15;
     if (mind.trait === 'cautious') margin = 0.05;
     else if (mind.trait === 'reckless') margin = 0.3;
@@ -206,7 +207,7 @@ function seekForSoldier(state: BattleState, rng: Rng, s: Soldier): void {
   // whole approach.
   if ((s.activity === 'moving' || s.activity === 'sneaking') && mind.threatLevel > 0.5 && s.path.length > 0) {
     mind.lastCoverSeekAt = state.time;
-    const cur = coverScore(state.map, s.pos, threats);
+    const cur = coverScore(planningMap(state,s), s.pos, threats);
     const found = bestCoverTile(state, s, team, s.pos, 1, threats);
     if (found && found.score - cur >= 0.25 && dist(s.pos, found.tile) <= 1.5) {
       // A single-tile sidestep, then resume the existing path from there — never touches the
@@ -222,9 +223,9 @@ function seekForSoldier(state: BattleState, rng: Rng, s: Soldier): void {
 export function bestCoverNear(state: BattleState, s: Soldier, radius: number): { tile: Vec2; score: number; current: number } | null {
   const team = state.teams.get(s.teamId);
   const threats = buildThreatSet(state, s, team);
-  const reach = nearFireHazard(fireHazards(state), s.pos) ? Math.max(radius, HAZARD_SEARCH_TILES) : radius;
+  const reach = nearFireHazard(knownHazards(state,s), s.pos) ? Math.max(radius, HAZARD_SEARCH_TILES) : radius;
   const found = bestCoverTile(state, s, team, s.pos, reach, threats);
-  return found ? { tile: found.tile, score: found.score, current: coverScore(state.map, s.pos, threats) } : null;
+  return found ? { tile: found.tile, score: found.score, current: coverScore(planningMap(state,s), s.pos, threats) } : null;
 }
 
 /** Run automatic directional cover seeking for every living soldier (spec §9). AT guns and MGs use
@@ -247,15 +248,15 @@ export function settleTile(
   state: BattleState, s: Soldier, slot: Vec2, headingRad: number, radius: number,
   taken: (tx: number, ty: number) => boolean,
 ): Vec2 | null {
-  const map = state.map;
+  const map = planningMap(state,s);
   const team = state.teams.get(s.teamId);
   const threats = buildThreatSet(state, s, team);
   threats.unshift({ dirRad: headingRad, weight: 0.5 });
-  const hazards = fireHazards(state);
+  const hazards = knownHazards(state,s);
   const sx = Math.floor(slot.x), sy = Math.floor(slot.y);
   let best: Vec2 | null = null;
   let bestScore = -Infinity;
-  for (const tile of tilesWithinRadius(slot, radius, state.map)) {
+  for (const tile of tilesWithinRadius(slot, radius, map)) {
     const tx = Math.floor(tile.x), ty = Math.floor(tile.y);
     if (!inBounds(map, tx, ty) || !isPassable(map, tx, ty, 'infantry') || taken(tx, ty)) continue;
     const own = tx === sx && ty === sy;

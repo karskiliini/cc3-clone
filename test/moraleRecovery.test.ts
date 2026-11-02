@@ -1,3 +1,4 @@
+import {recordVisual,stepCommunication} from '@/sim/perception';
 import { describe, it, expect } from 'vitest';
 import type { BattleConfig, BattleState, CrewWeaponState, GameMap, MapDef, Soldier, Team, Terrain } from '@/shared/types';
 import { Rng } from '@/shared/rng';
@@ -64,7 +65,7 @@ function run(s: BattleState, seconds: number): void {
   const rng = new Rng(7);
   for (let t = 0; t < seconds; t += DT) {
     s.time += DT;
-    stepMinds(s, rng, DT);
+    stepCommunication(s);stepMinds(s, rng, DT);
   }
 }
 
@@ -174,7 +175,7 @@ describe('item 039: broken men recover once the fight moves away (moraleRecovery
       speed: 0, ammo: tankDef.mainAmmo, path: [], route: [],
     };
     s.vehicles.set(10, vehicle as never);
-    s.spottedVehicles.soviet.add(10);
+    s.spottedVehicles.soviet.add(10);recordVisual(s,gunner,vehicle as never,'vehicle');
 
     // seed the stress so both arms start identical: with an intact gun the tank stress adds
     // nothing (0.6/s is dwarfed by the 3/s decay), with the piece smashed it feeds the fear
@@ -192,7 +193,7 @@ describe('item 039: broken men recover once the fight moves away (moraleRecovery
     s2.teams.get(1)!.crewWeapon!.destroyed = true;
     s2.soldiers.set(1, destroyedGunner);
     s2.vehicles.set(10, vehicle as never);
-    s2.spottedVehicles.soviet.add(10);
+    s2.spottedVehicles.soviet.add(10);recordVisual(s2,destroyedGunner,vehicle as never,'vehicle');
     run(s2, 5);
 
     // destroyed gun: the crew keeps tank stress with no incoming fire (item 039)

@@ -1,3 +1,4 @@
+import {humanCapability} from './humanCondition';
 import { severTrack, trackHasDrive } from './trackPhysics';
 import { onPassengerCasualty } from './passengerPhysics';
 import { localDriverOwner } from './localDriver';
@@ -227,8 +228,8 @@ export function crewEffects(state: BattleState, v: Vehicle): CrewEffects {
   const hasLoaderSeat = 'loader' in seats;
   const commanderUp = !('commander' in seats) || !!seatOccupant(state, v, 'commander');
   return {
-    canDrive: !('driver' in seats) || !!seatOccupant(state, v, 'driver'),
-    gunner, gunnerMul,
+    canDrive: !('driver' in seats) || !!seatOccupant(state,v,'driver')&&humanCapability(seatOccupant(state,v,'driver')!,state.time).canDrive,
+    gunner, gunnerMul:gunnerMul*(gunner?humanCapability(gunner,state.time).accuracy:0),
     reloadMul: hasLoaderSeat && !seatOccupant(state, v, 'loader') ? LOADER_DOWN_RELOAD_MUL : 1,
     commanderUp,
     retargetS: commanderUp ? 0 : 3,
@@ -583,7 +584,7 @@ export function bailOut(state: BattleState, v: Vehicle, team: Team, to: 'abandon
   v.remount = undefined;
   if (message) addMessage(state, `${team.name}\n${message}`, 'bad', team.side);
   const crew = crewOf(state, v, team);
-  // the crew shared one mind (the commander's): every man takes what it knew and felt with him
+  // Each crew member retains their own knowledge and condition on exit.
   const lead = crew.find((c) => c.id === team.leaderId) ?? crew[0];
   const panicked = opts.panicked ?? true;
   if (lead) {
@@ -594,12 +595,9 @@ export function bailOut(state: BattleState, v: Vehicle, team: Team, to: 'abandon
     v.crewShockUntil = state.time + crewShockSeconds(exp, opts.cause ?? 'panic');
     const floor = opts.cause === 'heavy' ? 95 : opts.cause === 'penetration' ? 85 : panicked ? 75 : 30;
     for (const c of crew) {
-      if (c !== lead) {
-        c.mind.beliefs = lead.mind.beliefs.map((b) => ({ ...b, pos: { ...b.pos } }));
-        c.mind.threatDir = lead.mind.threatDir;
-        c.mind.threatLevel = lead.mind.threatLevel;
-      }
-      c.mind.stress = Math.max(c.mind.stress, lead.mind.stress, floor);
+      // The physical exit/shock affects everyone; information and temperament stay personal.
+      c.mind.stress=Math.max(c.mind.stress,floor);
+
     }
   }
   if (to === 'abandoned') team.order = null;

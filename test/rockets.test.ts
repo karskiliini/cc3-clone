@@ -1,6 +1,8 @@
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
 import { describe, it, expect } from 'vitest';
 import { makeState, addTank, soldier, mkTeam } from './vehicleDamageHelpers';
-import { stepCombat, stepPendingBursts } from '@/sim/combat';
+import { stepCombat as rawStepCombat, stepPendingBursts } from '@/sim/combat';
 import { stepCrewWeapons } from '@/sim/crewWeapon';
 import { Rng } from '@/shared/rng';
 import { createHullBody } from '@/sim/hullPhysics';

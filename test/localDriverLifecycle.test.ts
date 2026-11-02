@@ -82,8 +82,8 @@ it('real remount and immobility cancel recovery/window while keeping the consume
  v.localDriver=history();worsen(v,'engine','destroyed');expect(v.state).toBe('immobilized');expect(v.localDriver?.recovery).toBeNull();expect(v.localDriver?.window).toBeNull();expect(v.localDriver?.episode?.attempts).toBe(1);
 });
 
-it('records inactive owner after accepted mine disablement in the same real physical tick',()=>{
+it('an accepted mine cancels recovery without refunding its episode while a cut track still carries the hull',()=>{
  const state=makeState(),{v,team}=addTank(state,'pz4gh',{x:20.5,y:20.5});placeVehicleBody(v,VEHICLE_DEFS.pz4gh,v.pos,0,groundProbe(state.map));
  v.localDriver=history();v.localDriver.recovery!.gear=1;v.localDriver.episode!.anchorM={x:41,y:41};v.path=[{x:20.5,y:10}];team.order={type:'move',target:v.path[0],issuedAt:0};setMineAt(state.map,20,20,MINE_AT);
- stepVehicles(state,new Rng(3),.1);expect(v.state).toBe('immobilized');expect(v.localDriver?.owner).toBe(0);expect(v.localDriver?.recovery).toBeNull();expect(v.localDriver?.window).toBeNull();expect(v.localDriver?.episode?.attempts).toBe(1);
+ stepVehicles(state,new Rng(3),.1);expect([v.damage?.trackL,v.damage?.trackR]).toContain('destroyed');expect(Object.values(v.trackChains??{}).some(c=>c.cutLink>=0)).toBe(true);expect(v.state).toBe('ok');expect(v.localDriver?.owner).toBe(1);expect(v.localDriver?.recovery).toBeNull();expect(v.localDriver?.window).toBeNull();expect(v.localDriver?.episode?.attempts).toBe(1);
 });

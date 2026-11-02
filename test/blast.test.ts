@@ -1,10 +1,12 @@
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
 // Spec 2026-09-17 §4, sim side: blast record, knockback (scaled by force, blocked by walls), and
 // the knock-down stun that keeps a survivor from acting. Deterministic (seeded Rng only).
 import { describe, it, expect } from 'vitest';
 import type { BattleConfig, BattleState, GameMap, MapDef, Soldier, Terrain, WeaponDef } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import { Rng } from '@/shared/rng';
-import { applyBlastKnockback, applyHESplash, blastForce, isStunned, stepCombat } from '@/sim/combat';
+import { applyBlastKnockback, applyHESplash, blastForce, isStunned, stepCombat as rawStepCombat } from '@/sim/combat';
 import { stepMovement } from '@/sim/movement';
 import { createMind } from '@/sim/mind';
 

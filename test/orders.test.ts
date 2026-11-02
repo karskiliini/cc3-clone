@@ -6,7 +6,7 @@ import { MAPS } from '@/data/maps';
 import { DEFAULT_FORCES } from '@/data/operation';
 import { SIM_DT } from '@/shared/types';
 import type { BattleConfig, Side } from '@/shared/types';
-import type { Rng } from '@/shared/rng';
+import { Rng } from '@/shared/rng';
 
 const baseConfig: BattleConfig = {
   mapId: 'border_1941', playerSide: 'german', year: 1941, seed: 1, durationS: 600,
@@ -21,14 +21,10 @@ describe('orders: refused orders are retried after hesitation', () => {
     const s = battle.state.soldiers.get(team.soldierIds[1])!;
     const target = { x: s.pos.x + 12, y: s.pos.y };
 
-    const failing = new Proxy(battle.rng, {
-      get(obj, prop) {
-        if (prop === 'chance') return () => false;
-        const v = Reflect.get(obj, prop);
-        return typeof v === 'function' ? v.bind(obj) : v;
-      },
-    }) as Rng;
-    applyOrder(battle.state, team, { type: 'moveFast', target, issuedAt: battle.state.time }, failing);
+    // Refusal belongs to this person's canonical stream, not a shared RNG stub.
+    let seed=1;while(new Rng(seed).next()<.99)seed++;
+    s.randomStreams={orders:seed};
+    applyOrder(battle.state, team, { type: 'moveFast', target, issuedAt: battle.state.time }, battle.rng);
     expect(s.path.length).toBe(0);
     expect(s.mind.hesitation).toBeGreaterThan(0);
     expect(s.mind.pendingOrderAt).toBe(battle.state.time);

@@ -1,0 +1,1259 @@
+{
+  "simulationSourceSHA256": "700448133ee2f447354381e02812b231cf1dd54207f1ca40fa589a4c1518a858",
+  "machine": "own Mac mini M2 Pro",
+  "priority": "nice 19, one worker per batch",
+  "batches": [
+    {
+      "name": "full non-lockstep regression",
+      "passed": 1887,
+      "failed": 0,
+      "skipped": 2,
+      "files": [
+        {
+          "path": "test/ai.test.ts",
+          "passed": 18,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/aimPoint.test.ts",
+          "passed": 16,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/ammoTypes.test.ts",
+          "passed": 12,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/armourExchanges.test.ts",
+          "passed": 6,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/attackOrder.test.ts",
+          "passed": 6,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/battle.test.ts",
+          "passed": 1,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/battleReport.test.ts",
+          "passed": 4,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/blast.test.ts",
+          "passed": 5,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/blastCrew.test.ts",
+          "passed": 4,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/blastFx.test.ts",
+          "passed": 2,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/blastProtection.test.ts",
+          "passed": 16,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/bootModal.test.ts",
+          "passed": 3,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/bootcamp.test.ts",
+          "passed": 3,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/bottomStrip.test.ts",
+          "passed": 3,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/bowMg.test.ts",
+          "passed": 10,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/buildingShelter.test.ts",
+          "passed": 15,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/bunker.test.ts",
+          "passed": 3,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/camera.test.ts",
+          "passed": 11,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/camoNet.test.ts",
+          "passed": 2,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/campaignStructure.test.ts",
+          "passed": 4,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/casemateArc.test.ts",
+          "passed": 5,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/catalog.test.ts",
+          "passed": 3,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/coaxArc.test.ts",
+          "passed": 2,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/coaxFireArc.test.ts",
+          "passed": 2,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/combat.test.ts",
+          "passed": 12,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/combatMessages.test.ts",
+          "passed": 10,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/command.test.ts",
+          "passed": 4,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/commandLayer.test.ts",
+          "passed": 10,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/controlGroups.test.ts",
+          "passed": 8,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/cover.test.ts",
+          "passed": 5,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/coverSeek.test.ts",
+          "passed": 4,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/craters.test.ts",
+          "passed": 14,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/crawlUnderFire.test.ts",
+          "passed": 8,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/crewBailout.test.ts",
+          "passed": 8,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/crewCapability.test.ts",
+          "passed": 4,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/crewTasks.test.ts",
+          "passed": 17,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/crewWeapon.test.ts",
+          "passed": 8,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/data.test.ts",
+          "passed": 17,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/daze.test.ts",
+          "passed": 15,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/debrief.test.ts",
+          "passed": 4,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/debris.test.ts",
+          "passed": 9,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/deployOrders.test.ts",
+          "passed": 10,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/deploymentBounds.test.ts",
+          "passed": 8,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/deploymentFacing.test.ts",
+          "passed": 14,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/digging.test.ts",
+          "passed": 10,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/dmath.test.ts",
+          "passed": 14,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/earthworkCompression.test.ts",
+          "passed": 9,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/elevation.test.ts",
+          "passed": 23,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/elevationReadout.test.ts",
+          "passed": 1,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/experience.test.ts",
+          "passed": 7,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/fireAimPreview.test.ts",
+          "passed": 6,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/fireRoute.test.ts",
+          "passed": 4,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/firelight.test.ts",
+          "passed": 4,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/flameTank.test.ts",
+          "passed": 1,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/fleeMapEdge.test.ts",
+          "passed": 3,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/formation.test.ts",
+          "passed": 7,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/fx.test.ts",
+          "passed": 6,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/fxRender.test.ts",
+          "passed": 3,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/grassCrush.test.ts",
+          "passed": 5,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/grassField.test.ts",
+          "passed": 21,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/grassFx.test.ts",
+          "passed": 20,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/grassLayer.test.ts",
+          "passed": 8,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/groundMarks.test.ts",
+          "passed": 5,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/groundStates.test.ts",
+          "passed": 3,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/growth.test.ts",
+          "passed": 3,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/guesstimateFire.test.ts",
+          "passed": 10,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/gunBlock.test.ts",
+          "passed": 17,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/gunTiming.test.ts",
+          "passed": 21,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/harness.test.ts",
+          "passed": 2,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/hastyFire.test.ts",
+          "passed": 9,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/heightField.test.ts",
+          "passed": 15,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/historicalMaps.test.ts",
+          "passed": 6,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/houseVisibility.test.ts",
+          "passed": 2,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/hoverInfo.test.ts",
+          "passed": 10,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/hullActuation.test.ts",
+          "passed": 5,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/hullAim.test.ts",
+          "passed": 19,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/hullArmor.test.ts",
+          "passed": 20,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/hullBerlinStability.test.ts",
+          "passed": 2,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/hullCrushContacts.test.ts",
+          "passed": 11,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/hullFootprint.test.ts",
+          "passed": 3,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/hullGameplay.test.ts",
+          "passed": 26,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/hullGround.test.ts",
+          "passed": 13,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/hullHash.test.ts",
+          "passed": 86,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/hullMath.test.ts",
+          "passed": 5,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/hullMovingSlope.test.ts",
+          "passed": 9,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/hullPhysics.test.ts",
+          "passed": 24,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/hullSlope.test.ts",
+          "passed": 10,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/hullTraction.test.ts",
+          "passed": 42,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/hullVehicleIntegration.test.ts",
+          "passed": 36,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/indirectFire.test.ts",
+          "passed": 13,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/infantryAim.test.ts",
+          "passed": 10,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/infantryPacing.test.ts",
+          "passed": 21,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/initiative.test.ts",
+          "passed": 4,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/inputCard.test.ts",
+          "passed": 7,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/inputEditing.test.ts",
+          "passed": 6,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/inputMouseDown.test.ts",
+          "passed": 3,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/integrity.test.ts",
+          "passed": 4,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/items.test.ts",
+          "passed": 20,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/lightTransportRender.test.ts",
+          "passed": 13,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/localDriver.test.ts",
+          "passed": 7,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/localDriverBraking.test.ts",
+          "passed": 4,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/localDriverLifecycle.test.ts",
+          "passed": 7,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/localDriverReplay.test.ts",
+          "passed": 1,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/localDriverV32.test.ts",
+          "passed": 3,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/localDriverV4.test.ts",
+          "passed": 10,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/los.test.ts",
+          "passed": 9,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/losProfile.test.ts",
+          "passed": 4,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/mainGunDoctrine.test.ts",
+          "passed": 19,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/map.test.ts",
+          "passed": 6,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/markerDragWaypoints.test.ts",
+          "passed": 4,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/medals.test.ts",
+          "passed": 5,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/melee.test.ts",
+          "passed": 2,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/mgMount.test.ts",
+          "passed": 23,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/mgMountRender.test.ts",
+          "passed": 7,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/mind.test.ts",
+          "passed": 16,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/mines.test.ts",
+          "passed": 5,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/morale.test.ts",
+          "passed": 22,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/moraleRecovery.test.ts",
+          "passed": 3,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/mortarCarriers.test.ts",
+          "passed": 4,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/motorizedCrew.test.ts",
+          "passed": 11,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/moveFastUnderFire.test.ts",
+          "passed": 9,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/multiplayerPolicy.test.ts",
+          "passed": 4,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/navigationKnowledge.test.ts",
+          "passed": 8,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/netHealth.test.ts",
+          "passed": 5,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/operation.test.ts",
+          "passed": 2,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/orders.test.ts",
+          "passed": 24,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/overrun.test.ts",
+          "passed": 9,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/overrunGun.test.ts",
+          "passed": 2,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/painVision.test.ts",
+          "passed": 7,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/passengerPhysics.test.ts",
+          "passed": 10,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/path.test.ts",
+          "passed": 9,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/penChance.test.ts",
+          "passed": 4,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/personalEvidence.test.ts",
+          "passed": 8,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/pixelfont.test.ts",
+          "passed": 6,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/probe_elev.test.ts",
+          "passed": 1,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/realismOptions.test.ts",
+          "passed": 3,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/relay.test.ts",
+          "passed": 5,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/replay.test.ts",
+          "passed": 11,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/requisition.test.ts",
+          "passed": 15,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/rockets.test.ts",
+          "passed": 6,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/roster.test.ts",
+          "passed": 6,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/rosterScreen.test.ts",
+          "passed": 8,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/sensoryBoundaries.test.ts",
+          "passed": 14,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/sfx.test.ts",
+          "passed": 11,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/shellFx.test.ts",
+          "passed": 5,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/shieldAndCollision.test.ts",
+          "passed": 14,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/shotInterdiction.test.ts",
+          "passed": 22,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/shotTrace.test.ts",
+          "passed": 12,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/smgAnim.test.ts",
+          "passed": 8,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/smgAtlas.test.ts",
+          "passed": 8,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/smgEffects.test.ts",
+          "passed": 4,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/smgFire.test.ts",
+          "passed": 19,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/smoke.test.ts",
+          "passed": 2,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/soldierAnim.test.ts",
+          "passed": 33,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/soldierMonitor.test.ts",
+          "passed": 9,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/spotting.test.ts",
+          "passed": 4,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/spriteAtlas.test.ts",
+          "passed": 13,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/structures.test.ts",
+          "passed": 7,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/tankDriving.test.ts",
+          "passed": 1,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/tankFacing.test.ts",
+          "passed": 10,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/tankOrders.test.ts",
+          "passed": 8,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/terrain.test.ts",
+          "passed": 5,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/trackKinematics.test.ts",
+          "passed": 3,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/trackPhysics.test.ts",
+          "passed": 8,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/trackedDrive.test.ts",
+          "passed": 6,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/trackedMovement.test.ts",
+          "passed": 5,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/trackedYawReserve.test.ts",
+          "passed": 3,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/transport.test.ts",
+          "passed": 11,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/truce.test.ts",
+          "passed": 5,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/turnRates.test.ts",
+          "passed": 2,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/upgradeChains.test.ts",
+          "passed": 8,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicle3dIsolation.test.ts",
+          "passed": 1,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicle3dLook.test.ts",
+          "passed": 21,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicle3dMaterial.test.ts",
+          "passed": 2,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicle3dModels.test.ts",
+          "passed": 8,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicle3dProjection.test.ts",
+          "passed": 8,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicle3dScene.test.ts",
+          "passed": 21,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicleBankApproach.test.ts",
+          "passed": 2,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicleCorridor.test.ts",
+          "passed": 6,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicleCorridorProduction.test.ts",
+          "passed": 3,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicleCoverDrive.test.ts",
+          "passed": 5,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicleDamage.test.ts",
+          "passed": 19,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicleDeath.test.ts",
+          "passed": 5,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicleDefendFacing.test.ts",
+          "passed": 1,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicleDeploy.test.ts",
+          "passed": 7,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicleDismount.test.ts",
+          "passed": 16,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicleExplosion.test.ts",
+          "passed": 13,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicleGiveWay.test.ts",
+          "passed": 3,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicleMgAtArmour.test.ts",
+          "passed": 2,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicleMind.test.ts",
+          "passed": 13,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicleModels.test.ts",
+          "passed": 37,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehiclePhysics.test.ts",
+          "passed": 18,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicleRecoveryTurn.test.ts",
+          "passed": 1,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicleRouteTerrainBudget.test.ts",
+          "passed": 1,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicleSpotFloor.test.ts",
+          "passed": 5,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicleTow.test.ts",
+          "passed": 7,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicleTrenchApproach.test.ts",
+          "passed": 7,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/vehicleVision.test.ts",
+          "passed": 7,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/victory.test.ts",
+          "passed": 7,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/visibility.test.ts",
+          "passed": 9,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/waypointChain.test.ts",
+          "passed": 3,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/waypointInput.test.ts",
+          "passed": 9,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/waypoints.test.ts",
+          "passed": 3,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/wire.test.ts",
+          "passed": 6,
+          "skipped": 0,
+          "status": "passed"
+        },
+        {
+          "path": "test/wreckAmmo.test.ts",
+          "passed": 5,
+          "skipped": 0,
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "name": "full lockstep and recovery",
+      "passed": 32,
+      "failed": 0,
+      "skipped": 0,
+      "files": [
+        {
+          "path": "test/lockstep.test.ts",
+          "passed": 32,
+          "skipped": 0,
+          "status": "passed"
+        }
+      ]
+    }
+  ]
+}

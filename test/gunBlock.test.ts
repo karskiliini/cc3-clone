@@ -1,12 +1,17 @@
+import {refreshWeaponSight,withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
+const pickVehicleTarget=withWeaponSight(rawPickVehicleTarget);
+const orderedVehicleGunTarget=withWeaponSight(rawOrderedVehicleGunTarget);
+const orderedGunBlock=withWeaponSight(rawOrderedGunBlock);
 import { describe, expect, it } from 'vitest';
 import { SIM_DT } from '@/shared/types';
 import { Rng } from '@/shared/rng';
 import { stepVehicles } from '@/sim/vehicle';
-import { stepCombat, pickVehicleTarget } from '@/sim/combat';
+import { stepCombat as rawStepCombat, pickVehicleTarget as rawPickVehicleTarget } from '@/sim/combat';
 import { stepMorale } from '@/sim/morale';
 import { SIGHT_DESTROYED_MAX_M, ensureDamage } from '@/sim/vehicleDamage';
-import { orderedVehicleGunTarget } from '@/sim/vehicleGunTarget';
-import { gunBlockText, mainGunBlock, orderedGunBlock } from '@/sim/gunBlock';
+import { orderedVehicleGunTarget as rawOrderedVehicleGunTarget } from '@/sim/vehicleGunTarget';
+import { gunBlockText, mainGunBlock, orderedGunBlock as rawOrderedGunBlock } from '@/sim/gunBlock';
 import { targetableEnemyAt, targetStatusText } from '@/ui/targetHover';
 import { addTank, makeState, mkTeam, soldier } from './vehicleDamageHelpers';
 
@@ -96,7 +101,7 @@ describe('ordered infantry target agreement', () => {
   it('uses the combat exposure winner and its stance height for order and cursor', () => {
     const { state, tank, prone, standing } = infantry();
     expect(mainGunBlock(state, tank.v, prone.pos, 0.45)).toBe('elevation');
-    expect(pickVehicleTarget(state, tank.v)).toEqual({ kind: 'soldier', soldier: standing });
+    expect(pickVehicleTarget(state, tank.v)).toMatchObject({kind:'soldier',soldier:{id:standing.id,pos:standing.pos,stance:standing.stance}});
     expect(orderedGunBlock(state, tank.v, tank.team.order!)).toBeNull();
     const hover = targetableEnemyAt(state, 'german', [tank.team], standing.pos)!;
     expect(hover.lof).toBe(true); expect(hover.block).toBeUndefined();
@@ -104,25 +109,26 @@ describe('ordered infantry target agreement', () => {
   it('never uses the live position of an unspotted first member', () => {
     const { state, tank, prone, standing } = infantry();
     state.spotted.german.delete(prone.id); prone.pos = { x: 100, y: 99 };
-    expect(pickVehicleTarget(state, tank.v)).toEqual({ kind: 'soldier', soldier: standing });
+    expect(pickVehicleTarget(state, tank.v)).toMatchObject({kind:'soldier',soldier:{id:standing.id,pos:standing.pos,stance:standing.stance}});
     expect(orderedGunBlock(state, tank.v, tank.team.order!)).toBeNull();
   });
   it('keeps tie order and chooses exposure independently for each firing vehicle', () => {
     const { state, tank, prone, standing } = infantry();
     prone.stance = 'standing';
-    expect(orderedVehicleGunTarget(state, tank.v, tank.team.order!)).toEqual({ kind: 'soldier', soldier: prone });
+    expect(orderedVehicleGunTarget(state, tank.v, tank.team.order!)).toMatchObject({kind:'soldier',soldier:{id:prone.id,pos:prone.pos,stance:prone.stance}});
     prone.pos = { x: 100, y: 80 }; standing.pos = { x: 120, y: 80 };
     const other = addTank(state, 't34_76', { x: 120, y: 100 }, 0, 60, 'german');
     other.v.coaxAmmo = 0; other.v.bowAmmo = 0;
     other.team.order = tank.team.order;
-    expect(orderedVehicleGunTarget(state, tank.v, tank.team.order!)).toEqual({ kind: 'soldier', soldier: prone });
-    expect(orderedVehicleGunTarget(state, other.v, other.team.order!)).toEqual({ kind: 'soldier', soldier: standing });
-    expect(pickVehicleTarget(state, tank.v)).toEqual({ kind: 'soldier', soldier: prone });
-    expect(pickVehicleTarget(state, other.v)).toEqual({ kind: 'soldier', soldier: standing });
+    expect(orderedVehicleGunTarget(state, tank.v, tank.team.order!)).toMatchObject({kind:'soldier',soldier:{id:prone.id,pos:prone.pos,stance:prone.stance}});
+    expect(orderedVehicleGunTarget(state, other.v, other.team.order!)).toMatchObject({kind:'soldier',soldier:{id:standing.id,pos:standing.pos,stance:standing.stance}});
+    expect(pickVehicleTarget(state, tank.v)).toMatchObject({kind:'soldier',soldier:{id:prone.id,pos:prone.pos,stance:prone.stance}});
+    expect(pickVehicleTarget(state, other.v)).toMatchObject({kind:'soldier',soldier:{id:standing.id,pos:standing.pos,stance:standing.stance}});
     const hover = targetableEnemyAt(state, 'german', [tank.team, other.team], standing.pos)!;
     expect(hover.lof).toBe(true); expect(hover.block).toBeUndefined();
+    const lastObservedCentre={x:(prone.pos.x+standing.pos.x)/2,y:(prone.pos.y+standing.pos.y)/2};
     state.spotted.german.clear();
-    expect(orderedVehicleGunTarget(state, tank.v, tank.team.order!)).toEqual({ kind: 'point', pos: tank.team.order!.target });
+    expect(orderedVehicleGunTarget(state, tank.v, tank.team.order!)).toEqual({ kind: 'point', pos: lastObservedCentre });
     expect(orderedGunBlock(state, tank.v, tank.team.order!)).toBeNull();
   });
   it('keeps an unseen hull at the last-known order point, including legacy vehicle-id previews', () => {
@@ -135,12 +141,14 @@ describe('ordered infantry target agreement', () => {
   });
   it('uses only the last-known point during suppression and gives no warning during hold or MG-only engagement', () => {
     const { state, tank, prone, standing } = infantry();
+    prone.pos={x:100,y:80};standing.pos={...prone.pos};refreshWeaponSight(state);state.spotted.german.clear();
     state.time = 2; prone.pos = { x: 100, y: 99 }; standing.pos = prone.pos;
     expect(pickVehicleTarget(state, tank.v)).toMatchObject({ kind: 'point', pos: tank.team.order!.target });
     expect(orderedGunBlock(state, tank.v, tank.team.order!)).toBeNull();
     state.time = 100;
     expect(orderedVehicleGunTarget(state, tank.v, tank.team.order!)).toBeNull();
     expect(orderedGunBlock(state, tank.v, tank.team.order!)).toBeNull();
+    state.spotted.german.add(prone.id);state.spotted.german.add(standing.id);
     state.time = 0; tank.v.coaxAmmo = 100; tank.v.bowAmmo = 100;
     expect(pickVehicleTarget(state, tank.v)).toBeNull();
     expect(orderedVehicleGunTarget(state, tank.v, tank.team.order!)).toBeNull();

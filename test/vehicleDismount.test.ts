@@ -7,7 +7,7 @@ import { VEHICLE_DEFS } from '@/data/units';
 import { stepVehicles } from '@/sim/vehicle';
 import { stepMovement } from '@/sim/movement';
 import { stepMinds } from '@/sim/mind';
-import { stepCombat } from '@/sim/combat';
+import {refreshWeaponSight,stepCombatWithSight as stepCombat} from './fixtures/weaponSight';
 import { stepMorale } from '@/sim/morale';
 import { applyOrder } from '@/sim/orders';
 import { bailOut, crewEffects, ensureDamage, seatOccupant, vehicleLayout, resolveVehicleHit } from '@/sim/vehicleDamage';
@@ -19,6 +19,7 @@ import { makeState, addTank, soldier, mkTeam } from './vehicleDamageHelpers';
 function step(state: BattleState, rng: Rng, seconds: number, opts: { combat?: boolean; each?: () => void } = {}): void {
   for (let i = 0; i < seconds / SIM_DT; i++) {
     state.time += SIM_DT;
+    refreshWeaponSight(state);
     stepMovement(state, rng, SIM_DT);
     stepVehicles(state, rng, SIM_DT);
     stepMinds(state, rng, SIM_DT);

@@ -1,7 +1,9 @@
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
 import { describe, it, expect } from 'vitest';
 import type { Soldier, WeaponDef } from '@/shared/types';
 import { Rng } from '@/shared/rng';
-import { hitChance, penetrates, applyHESplash, applyHit, getSmallArmsStats, stepCombat } from '@/sim/combat';
+import { hitChance, penetrates, applyHESplash, applyHit, getSmallArmsStats, stepCombat as rawStepCombat } from '@/sim/combat';
 import type { BattleConfig, BattleState, GameMap, MapDef, Team, Terrain } from '@/shared/types';
 import { createMind } from '@/sim/mind';
 

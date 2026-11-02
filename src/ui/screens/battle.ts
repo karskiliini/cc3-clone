@@ -1,3 +1,4 @@
+import {drawIndividualInspector} from '@/ui/hud/individualInspector';
 import type { CursorKind, GameSettings, InputState, BattleState, OrderType, Rect, Screen, Side, Team, Vec2, Camera } from '@/shared/types';
 import { ORDER_DOT_COLOR, ORDER_HOTKEYS, ORDER_TYPES, TILE_PX, VIEW_H, VIEW_W, otherSide } from '@/shared/types';
 import { COMMAND_RADIUS_TILES } from '@/sim/command';
@@ -161,6 +162,7 @@ export class BattleScreen implements Screen {
   private fleeArmedUntil = 0;
 
   // F5/F6/F7 toggles, Ctrl+K show-dead toggle (original CC3 keyboard reference).
+  private showIndividualInspector=false;
   private showTeamGrid = true;
   private showMinimap = true;
   private showSoldierMonitor = true;
@@ -704,6 +706,7 @@ export class BattleScreen implements Screen {
     }
     if (input.keysPressed.has('f5')) this.showTeamGrid = !this.showTeamGrid;
     if (input.keysPressed.has('f6')) this.showMinimap = !this.showMinimap;
+    if(input.keysPressed.has('i'))this.showIndividualInspector=!this.showIndividualInspector;
     if (input.keysPressed.has('f7')) this.showSoldierMonitor = !this.showSoldierMonitor;
     if (input.keysPressed.has('f8')) { game.setScreen(new OptionsScreen(this, true)); return; }
     if (input.keysDown.has('control') && input.keysPressed.has('k')) this.showDead = !this.showDead;
@@ -1034,6 +1037,7 @@ export class BattleScreen implements Screen {
     this.controlGroupBar.draw(ctx, this.controlGroups.slots(this.selectedTeamIds));
 
     if (this.commandMenu.isOpen) this.commandMenu.draw(ctx);
+    if(this.showIndividualInspector){const id=this.soldierMonitor.watchedSoldierForTeam(state,selTeam)??selTeam?.leaderId;const s=id!=null?state.soldiers.get(id):undefined;if(s&&s.side===battle.playerSide())drawIndividualInspector(ctx,state,s,selTeam?.order??null);}
     if (this.netHealth) drawNetIndicator(ctx, this.netHealth, performance.now());
     if (this.quitConfirm) this.drawQuitConfirm(ctx);
 

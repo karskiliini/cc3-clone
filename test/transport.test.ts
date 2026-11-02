@@ -1,3 +1,5 @@
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
 // Infantry riding in a halftrack (sim/transport.ts).
 import { describe, it, expect } from 'vitest';
 import type { BattleState, Soldier, Team, Vehicle } from '@/shared/types';
@@ -9,7 +11,7 @@ import { stepVehicles } from '@/sim/vehicle';
 import { takeHullDrive } from '@/sim/hullDrive';
 import { stepMovement } from '@/sim/movement';
 import { stepMinds } from '@/sim/mind';
-import { stepCombat, applyHESplash } from '@/sim/combat';
+import { stepCombat as rawStepCombat, applyHESplash } from '@/sim/combat';
 import { stepMorale } from '@/sim/morale';
 import { applyOrder } from '@/sim/orders';
 import { resolveVehicleHit } from '@/sim/vehicleDamage';

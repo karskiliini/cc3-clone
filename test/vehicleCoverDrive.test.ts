@@ -1,3 +1,4 @@
+import type {BattleState,Vec2,Vehicle,WeaponDef} from '@/shared/types';
 import { takeHullDrive } from '@/sim/hullDrive';
 import { describe, expect, it } from 'vitest';
 import { SIM_DT, TILE_M } from '@/shared/types';
@@ -10,6 +11,14 @@ import { isPassable } from '@/sim/path';
 import { isVehicleReversing, onVehicleNearMiss, stepVehicles } from '@/sim/vehicle';
 import { addTank, makeState } from './vehicleDamageHelpers';
 
+// These locomotion tests start with a previously localized threat estimate.
+// Hearing uncertainty is covered by sensoryBoundaries; a new unseen near miss
+// alone must not be assumed to reveal the true shooter coordinate.
+function localizedNearMiss(state:BattleState,v:Vehicle,weapon:WeaponDef,estimate:Vec2){
+  onVehicleNearMiss(state,v,weapon,estimate);
+  if(v.navigation?.nearMiss)v.navigation.nearMiss.pos={...estimate};
+}
+
 describe('a tank drives into cover instead of sliding', () => {
   for (const defId of ['pz4gh', 't34_76']) {
     it(`${defId} turns and drives into side cover with hull-aligned displacement, front toward the threat`, () => {
@@ -17,14 +26,14 @@ describe('a tank drives into cover instead of sliding', () => {
       const { v } = addTank(state, defId, { x: 200.5, y: 200.5 }, 0, 60, 'german');
       state.map.tiles[200 * state.map.width + 202] = 'buildingStone';
       const threat = { x: 200.5, y: 192.5 };
-      onVehicleNearMiss(state, v, WEAPONS.pak40, threat);
+      localizedNearMiss(state, v, WEAPONS.pak40, threat);
       expect(hasLOS(state.map, v.pos, threat)).toBe(true);
       const start = { ...v.pos };
       const rng = new Rng(3);
       let moved = 0, reachedCover = false;
       const startFacing = v.hullFacing;
       for (let i = 0; i < 55 / SIM_DT; i++) {
-        if (i % 100 === 0) onVehicleNearMiss(state, v, WEAPONS.pak40, threat);
+        if (i % 100 === 0) localizedNearMiss(state, v, WEAPONS.pak40, threat);
         const before = { ...v.pos }, facing = v.hullFacing;
         state.time += SIM_DT;
         stepVehicles(state, rng, SIM_DT);
@@ -62,7 +71,7 @@ describe('a tank drives into cover instead of sliding', () => {
     state.map.tiles[199 * state.map.width + 201] = 'buildingStone';
     for (let y = 200; y <= 203; y++) state.map.tiles[y * state.map.width + 201] = 'water';
     const threat = { x: 204.5, y: 184.5 };
-    onVehicleNearMiss(state, v, WEAPONS.pak40, threat);
+    localizedNearMiss(state, v, WEAPONS.pak40, threat);
     const rng = new Rng(9);
     let reversed = false;
     for (let i = 0; i < 8 / SIM_DT; i++) {
@@ -84,7 +93,7 @@ describe('a tank drives into cover instead of sliding', () => {
     const { v } = addTank(state, 'pz4gh', { x: 200.5, y: 200.5 }, 0, 60);
     state.map.tiles[200 * state.map.width + 202] = 'buildingStone';
     const threat = { x: 200.5, y: 192.5 };
-    onVehicleNearMiss(state, v, WEAPONS.pak40, threat);
+    localizedNearMiss(state, v, WEAPONS.pak40, threat);
     const orderedRoute = [{ x: 190.5, y: 210.5 }];
     v.path = orderedRoute;
     const rng = new Rng(3);
@@ -127,11 +136,11 @@ describe('a tank drives into cover instead of sliding', () => {
     }
     state.map.tiles[200 * state.map.width + 202] = 'buildingStone';
     const threat = { x: 200.5, y: 192.5 };
-    onVehicleNearMiss(state, v, WEAPONS.pak40, threat);
+    localizedNearMiss(state, v, WEAPONS.pak40, threat);
     const rng = new Rng(3);
     const start = { ...v.pos };
     for (let i = 0; i < 55 / SIM_DT; i++) {
-      if (i % 100 === 0) onVehicleNearMiss(state, v, WEAPONS.pak40, threat);
+      if (i % 100 === 0) localizedNearMiss(state, v, WEAPONS.pak40, threat);
       state.time += SIM_DT;
       stepVehicles(state, rng, SIM_DT);
       expect(isPassable(state.map, Math.floor(v.pos.x), Math.floor(v.pos.y), 'vehicle')).toBe(true);

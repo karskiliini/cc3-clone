@@ -1,3 +1,4 @@
+import {captureNavigationBriefing} from './navigationBase';
 import type { GameMap, MapDef, Terrain, Vec2, VictoryLocation } from '@/shared/types';
 import { otherSide } from '@/shared/types';
 import { TERRAIN_PROPS } from './terrain';
@@ -26,7 +27,7 @@ export function tileAt(map: GameMap, x: number, y: number): Terrain {
 
 export function setTile(map: GameMap, x: number, y: number, t: Terrain): void {
   if (!inBounds(map, x, y)) return;
-  map.tiles[idx(map, x, y)] = t;
+  const i=idx(map,x,y);map.tiles[i]=t;(map.navigationChanged??=new Set()).add(i);
 }
 
 export function coverAt(map: GameMap, p: Vec2): number {
@@ -230,6 +231,6 @@ export function buildMap(def: MapDef): GameMap {
     map.groundSteep = computeGroundSteep(ground, w, h);
   }
   map.heightField = buildHeightField(map);
-
+  captureNavigationBriefing(map);
   return map;
 }

@@ -231,7 +231,7 @@ it('hashes every pending field and optional presence by exact bits without mutat
   expect(state.pendingBursts).toEqual(snapshot); expect(rng.state()).toBe(rngBefore);
 });
 
-import { stepCombat } from '@/sim/combat';
+import {stepCombatWithSight as stepCombat} from './fixtures/weaponSight';
 import { stepCrewWeapons } from '@/sim/crewWeapon';
 import { addGun, mkTeam, soldier } from './vehicleDamageHelpers';
 it.each(['grenade', 'mortar', 'vehicleRocket'] as const)('%s producer snapshots launch-time absolute trajectory', kind => {

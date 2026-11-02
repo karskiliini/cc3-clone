@@ -1,10 +1,13 @@
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepVehicleMinds=withWeaponSight(rawStepVehicleMinds);
+const stepVehicles=withWeaponSight(rawStepVehicles);
 import { describe, it, expect } from 'vitest';
 import type {
   BattleConfig, BattleState, GameMap, MapDef, Soldier, Team, Terrain, Vehicle,
 } from '@/shared/types';
 import { Rng } from '@/shared/rng';
 import { createMind, baseMotivation } from '@/sim/mind';
-import { stepVehicleMinds, stepVehicles, onVehicleHit, onVehicleNearMiss } from '@/sim/vehicle';
+import { stepVehicleMinds as rawStepVehicleMinds, stepVehicles as rawStepVehicles, onVehicleHit, onVehicleNearMiss } from '@/sim/vehicle';
 import { applyOrder } from '@/sim/orders';
 import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';

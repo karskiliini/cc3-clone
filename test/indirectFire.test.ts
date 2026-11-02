@@ -1,3 +1,6 @@
+import {updateSpotting} from '@/sim/spotting';
+import {stepCommunication} from '@/sim/perception';
+import {beginIndirectMission,stepIndirectCommunication} from '@/sim/indirectCommunication';
 import { describe, it, expect } from 'vitest';
 import type { BattleConfig, BattleState, GameMap, MapDef, Soldier, Team, Terrain, Vec2 } from '@/shared/types';
 import { SIM_DT, TILE_M } from '@/shared/types';
@@ -83,7 +86,7 @@ function mortarSetup(): { state: BattleState; mortar: Team; gunner: Soldier } {
 function addSpotter(state: BattleState, pos: Vec2): Soldier {
   const s = soldier(10, 5, pos, 'kar98k', { isLeader: true });
   state.soldiers.set(10, s);
-  state.teams.set(5, team(5, 'rifle', [10]));
+  state.teams.set(5, team(5, 'command', [10]));
   return s;
 }
 
@@ -95,6 +98,7 @@ function run(state: BattleState, rng: Rng, seconds: number): { pos: Vec2; t: num
   const steps = Math.round(seconds / SIM_DT);
   for (let i = 0; i < steps; i++) {
     state.time += SIM_DT;
+    updateSpotting(state,rng);stepCommunication(state);stepIndirectCommunication(state);
     stepCrewWeapons(state, SIM_DT);
     const n0 = state.projectiles.length;
     stepCombat(state, rng, SIM_DT);
@@ -115,6 +119,12 @@ function run(state: BattleState, rng: Rng, seconds: number): { pos: Vec2; t: num
     }
   }
   return out;
+}
+
+/** Send the mission and wait for real request/report delivery without firing. */
+function deliverMission(state:BattleState,mortar:Team,target:Vec2):void{
+ mortar.order={type:'fire',target,issuedAt:state.time};beginIndirectMission(state,mortar,target);
+ for(let i=0;i<80;i++){state.time+=SIM_DT;updateSpotting(state,new Rng(1));stepCommunication(state);stepIndirectCommunication(state);}
 }
 
 describe('indirect fire: mortars', () => {
@@ -203,8 +213,9 @@ describe('indirect fire: mortars', () => {
       const { state, mortar } = mortarSetup();
       if (tier !== 'none') addSpotter(state, { x: 100, y: 2 }); // 36 m off, clear view of the target
       if (tier === 'spotted') addEnemy(state, { x: 101, y: 21 });
+      expect(mortarObservation(state,mortar,target).obs).toBe('none');
+      deliverMission(state,mortar,target);
       expect(mortarObservation(state, mortar, target).obs).toBe(tier);
-      mortar.order = { type: 'fire', target, issuedAt: 0 };
       const hits = run(state, new Rng(11), 80 * 7);
       expect(hits.length).toBeGreaterThan(60);
       const mean = hits.reduce((a, h) => a + dist(h.pos, target), 0) / hits.length * TILE_M;
@@ -215,8 +226,9 @@ describe('indirect fire: mortars', () => {
     const blind = sample('none');
     expect(spotted.mean).toBeLessThan(area.mean * 0.85);
     expect(area.mean).toBeLessThan(blind.mean * 0.8);
-    // an outside spotter's correction delays the first round
-    expect(spotted.first).toBeGreaterThan(blind.first + 1.9);
+    // Message latency is paid through delivered requests/reports, not a second
+    // artificial firing delay after the crew already received the correction.
+    expect(spotted.first).toBeGreaterThanOrEqual(blind.first-1e-6);
     // the model: walk-in 1.6 -> 1.0 when spotted, only to 1.4 on bare ground, none unobserved
     expect(mortarDispersionM(200, 'spotted', 0)).toBeCloseTo(mortarDispersionM(200, 'area', 0), 5);
     expect(mortarDispersionM(200, 'spotted', 3) / mortarDispersionM(200, 'spotted', 0)).toBeCloseTo(1 / 1.6, 5);
@@ -224,7 +236,7 @@ describe('indirect fire: mortars', () => {
     expect(mortarDispersionM(200, 'none', 0)).toBe(mortarDispersionM(200, 'none', 10));
   });
 
-  it("losing the spotter's line of sight mid-mission drops the tier and restarts walk-in", () => {
+  it("losing the spotter's view expires the delivered report and stops observed walk-in", () => {
     const { state, mortar } = mortarSetup();
     const target = { x: 100, y: 20 };
     addSpotter(state, { x: 100, y: 2 });
@@ -234,34 +246,27 @@ describe('indirect fire: mortars', () => {
     expect(mortarWalkState(mortar)!.tier).toBe('spotted');
     expect(mortarWalkState(mortar)!.rounds).toBeGreaterThanOrEqual(2);
     for (let x = 90; x <= 110; x++) state.map.tiles[10 * W + x] = 'buildingStone'; // wall between spotter and target
-    const before = getCombatInstrumentation(state).mortarRoundsFiredBySide.german;
-    for (let i = 0; i < 100 && getCombatInstrumentation(state).mortarRoundsFiredBySide.german === before; i++) run(state, new Rng(2), SIM_DT);
-    expect(mortarWalkState(mortar)).toEqual({ tier: 'none', rounds: 1 });
+    run(state,new Rng(2),25); // in-flight reports and their 15 s evidence age expire
+    expect(mortarObservation(state,mortar,target).obs).toBe('none');
+    const rounds=mortarWalkState(mortar)!.rounds;
+    run(state,new Rng(2),30);expect(mortarWalkState(mortar)!.rounds).toBe(rounds);
+
   });
 
   it('a panicked or cowering soldier is no spotter; nor is one beyond 600 m', () => {
-    const { state, mortar } = mortarSetup();
-    const target = { x: 100, y: 20 };
-    const spotter = addSpotter(state, { x: 100, y: 2 });
-    expect(mortarObservation(state, mortar, target).obs).toBe('area');
-    spotter.activity = 'panicked';
-    expect(mortarObservation(state, mortar, target).obs).toBe('none');
-    spotter.activity = 'defending'; spotter.mind.state = 'cowering';
-    expect(mortarObservation(state, mortar, target).obs).toBe('none');
-    spotter.mind.state = 'pinned';
-    const pinned = mortarObservation(state, mortar, target);
-    expect(pinned.obs).toBe('area');
-    expect(pinned.mul).toBeCloseTo(1.3, 5);
+    const target={x:100,y:20};
+    for(const status of ['calm','panicked','cowering','pinned'] as const){
+      const {state,mortar}=mortarSetup(),spotter=addSpotter(state,{x:100,y:2});spotter.mind.state=status;spotter.activity=status==='calm'?'defending':status;
+      deliverMission(state,mortar,target);const report=mortarObservation(state,mortar,target);
+      expect(report.obs).toBe(status==='panicked'||status==='cowering'?'none':'area');
+      if(status==='pinned')expect(report.mul).toBeCloseTo(1.3,5);
+    }
+    const far=mortarSetup(),t2={x:60,y:20},s2=addSpotter(far.state,{x:365,y:20});
+    deliverMission(far.state,far.mortar,t2);expect(mortarObservation(far.state,far.mortar,t2).obs).toBe('none');
+    s2.pos={x:150,y:20}; // 180 m from target and within the actual radio link
+    for(let i=0;i<120;i++){far.state.time+=SIM_DT;updateSpotting(far.state,new Rng(1));stepCommunication(far.state);stepIndirectCommunication(far.state);}
+    const near=mortarObservation(far.state,far.mortar,t2);expect(near.obs).toBe('area');expect(near.mul).toBeGreaterThan(1);expect(near.mul).toBeLessThan(1.25);
 
-    const far = mortarSetup();
-    const t2 = { x: 60, y: 20 };
-    const s2 = addSpotter(far.state, { x: 60 + 305, y: 20 }); // 610 m down an open row
-    expect(mortarObservation(far.state, far.mortar, t2).obs).toBe('none');
-    s2.pos = { x: 60 + 125, y: 20 }; // 250 m: counts, a little less precise than a close spotter
-    const near = mortarObservation(far.state, far.mortar, t2);
-    expect(near.obs).toBe('area');
-    expect(near.mul).toBeGreaterThan(1);
-    expect(near.mul).toBeLessThan(1.25);
   });
 
   it('set-up still blocks firing: a mortar that is not assembled fires nothing until its crew has set it up', () => {

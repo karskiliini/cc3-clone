@@ -1,3 +1,5 @@
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
 // The hull machine gun (VehicleDef.bowWeaponId): the radio operator's gun, along the hull.
 import { describe, it, expect } from 'vitest';
 import type { BattleState, Soldier, Vehicle } from '@/shared/types';
@@ -5,7 +7,7 @@ import { SIM_DT, TILE_M } from '@/shared/types';
 import { Rng } from '@/shared/rng';
 import { VEHICLE_DEFS } from '@/data/units';
 import { WEAPONS } from '@/data/weapons';
-import { BOW_MG_AMMO, inBowMgArc, stepCombat } from '@/sim/combat';
+import { BOW_MG_AMMO, inBowMgArc, stepCombat as rawStepCombat } from '@/sim/combat';
 import { bowGunner, ensureDamage, ensureSeats, seatOccupant } from '@/sim/vehicleDamage';
 import { stepVehicles } from '@/sim/vehicle';
 import { makeState, addTank, soldier, mkTeam } from './vehicleDamageHelpers';

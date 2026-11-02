@@ -132,13 +132,13 @@ describe('hung-up recovery', () => {
     expect(hullRecoveryDrive(f.v, experience)).toEqual(stop);
     tick(f, 30); expect(next).toHaveBeenCalledTimes(max);
   });
-  it('draws a side only upon track loss and uses existing immobilization', () => {
+  it('draws a side only upon track loss and creates the cut physical chain', () => {
     const f = fixture(); f.body.hungUp = true; f.body.rockPhaseS = 1.4;
-    const next = vi.spyOn(f.rng, 'next').mockReturnValueOnce(0.01).mockReturnValueOnce(0.8);
+    const next = vi.spyOn(f.rng, 'next').mockReturnValue(0.9).mockReturnValueOnce(0.01).mockReturnValueOnce(0.8);
     tick(f);
     expect(next).toHaveBeenCalledTimes(2); expect(f.v.damage?.trackR).toBe('destroyed');
-    expect(isImmobile(f.v)).toBe(true); expect(f.v.state).toBe('immobilized');
-    tick(f, 50); expect(next).toHaveBeenCalledTimes(2);
+    expect(Object.values(f.v.trackChains??{}).some(c=>c.cutLink>=0)).toBe(true);
+    const attempts=f.body.rockTries;tick(f,50);expect(next).toHaveBeenCalledTimes(2+f.body.rockTries-attempts);
   });
   it('clears recovery state when support is regained and starts creation with clear flags', () => {
     const f = fixture(); expect(f.body.hungUp).toBe(false); expect(f.body.hungS).toBe(0);

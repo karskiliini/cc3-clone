@@ -1,3 +1,4 @@
+import {recordVisual} from '@/sim/perception';
 import { describe, expect, it } from 'vitest';
 import { Rng } from '@/shared/rng';
 import { stepCombat } from '@/sim/combat';
@@ -17,6 +18,8 @@ function scene(weaponId = 'kar98k', rangeM = 100) {
     for (let i = 0; i < Math.round(seconds / 0.05); i++) {
       state.time += 0.05;
       if (move) stepMovement(state, rng, 0.05);
+      // These acquisition fixtures supply an already identified personal target.
+      for(const id of state.spotted.german){const enemy=state.soldiers.get(id);if(enemy)recordVisual(state,s,enemy,'soldier');}
       stepCombat(state, rng, 0.05);
     }
   };

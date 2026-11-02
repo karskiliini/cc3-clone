@@ -1,3 +1,4 @@
+import {humanCapability} from '@/sim/humanCondition';
 // ============================================================================
 // soldierMonitor.ts — the "soldier monitor" popup that floats over the
 // bottom-right of the MAP VIEWPORT (not the bottom panel) whenever a team is
@@ -105,7 +106,7 @@ export const MONITOR_GUN_WORDS: string[] = [
 
 /** Every word the role and status/activity columns can show. */
 export const MONITOR_ROLE_WORDS = ['Leader', 'Gunner', 'Assist', 'Assist. Ldr.', 'Loader', 'Driver', 'Commander', 'Soldat', 'Radioman', 'Crew'];
-export const MONITOR_STATUS_WORDS = ['Healthy', 'Slightly injured', 'Incap.', 'Dead', 'Pinned', 'Cowering', 'Panicked', 'Broken', 'Berserk', 'Dazed'];
+export const MONITOR_STATUS_WORDS = ['Healthy', 'Slightly injured', 'Incap.', 'Dead', 'Pinned', 'Cowering', 'Panicked', 'Broken', 'Berserk', 'Dazed','Winded','Exhausted','In pain','Trembling'];
 export const MONITOR_ACTIVITY_WORDS = ['Dead', 'Unconscious', 'Wary', 'Shaken', 'Driving', 'Moving', 'Running', 'Crawling', 'Firing', 'Reloading', 'Loading', 'Assisting', 'Defending', 'Ambushing', 'Hiding', 'Fleeing', 'Charging', 'Surrendered', 'Waiting', 'Changing seat', 'Bailing out', 'Mounting', 'Mounted', 'Dismounting', ...CREW_TASK_WORDS, ...AIM_WORDS, ...MONITOR_GUN_WORDS];
 /** Damaged-system words of the vehicle header (two per line). */
 export const MONITOR_DAMAGE_WORDS = DAMAGE_WORDS;
@@ -240,7 +241,7 @@ function statusCell(s: Soldier, time: number): { word: string; color: string } {
     case 'panicked': return { word: 'Panicked', color: HUD.red };
     case 'broken': return { word: 'Broken', color: HUD.red };
     case 'berserk': return { word: 'Berserk', color: HUD.magenta };
-    default: return { word: healthWord(s), color: healthColor(s) };
+    default:{const c=humanCapability(s,time);if(c.exhaustion>.8)return{word:'Exhausted',color:HUD.yellow};if(c.breath>.65)return{word:'Winded',color:HUD.yellow};if(c.pain>.4)return{word:'In pain',color:HUD.yellow};if(c.tremor>.45)return{word:'Trembling',color:HUD.yellow};return{word:healthWord(s),color:healthColor(s)};}
   }
 }
 

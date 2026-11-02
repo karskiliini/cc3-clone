@@ -1,3 +1,4 @@
+import {makeState,soldier} from './vehicleDamageHelpers';
 import { describe, it, expect } from 'vitest';
 import { FIRELIGHT_RANGE_M, observerVisibility } from '@/sim/spotting';
 import { updateSpotting } from '@/sim/spotting';
@@ -8,8 +9,8 @@ const spotterMind = (): any => ({ state: 'steady', motivation: 80, stress: 10, f
 function stateWith(burning: { x: number; y: number } | null, target: { x: number; y: number }) {
   const W = 72;
   const idx = (p: { x: number; y: number }) => Math.round(p.y) * W + Math.round(p.x);
-  const spotter = { id: 1, side: 'german', teamId: 1, health: 'ok', stance: 'standing', activity: 'idle', mind: spotterMind(), facing: 0, pos: { x: 4, y: 36 }, vehicleId: null } as any;
-  const enemy = { id: 2, side: 'soviet', teamId: 2, health: 'ok', stance: 'prone', activity: 'idle', mind: spotterMind(), facing: 0, pos: target, vehicleId: null } as any;
+  const spotter=soldier(1,1,'german',{x:4,y:36},'kar98k',{stance:'standing'});
+  const enemy=soldier(2,2,'soviet',target,'mosin',{stance:'prone'});
   const veh = burning ? { id: 9, side: 'soviet', teamId: 2, defId: 't34_76', pos: burning, state: 'burning', hullFacing: 0, turretFacing: 0, speed: 0, path: [], mainAmmo: 0, coaxAmmo: 0, bowAmmo: 0 } as any : null;
   const state: any = {
     time: 10, map: { width: W, height: W, tiles: new Array(W * W).fill('open'), buildingId: new Int16Array(W * W).fill(-1), windows: new Uint8Array(W * W), smoke: new Float32Array(W * W), craters: [] },
@@ -18,6 +19,7 @@ function stateWith(burning: { x: number; y: number } | null, target: { x: number
     teams: new Map(), spotted: { german: new Set(), soviet: new Set() }, spottedVehicles: { german: new Set(), soviet: new Set() },
     spottedBy: { german: new Map(), soviet: new Map() },
   };
+  state.config=makeState().config;state.map.def={...makeState().map.def,width:W,height:W};state.map.victoryLocations=[];
   return { state, spotter, enemy };
 }
 

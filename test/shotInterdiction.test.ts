@@ -7,7 +7,9 @@ import { describe, it, expect } from 'vitest';
 import type { BattleConfig, BattleState, GameMap, MapDef, Soldier, Terrain, Vehicle, WeaponDef } from '@/shared/types';
 import { Rng } from '@/shared/rng';
 import { createMind } from '@/sim/mind';
-import { shotInterdiction, pickSoldierTargetForTest, stepCombat } from '@/sim/combat';
+import { shotInterdiction, pickSoldierTargetForTest as rawPick } from '@/sim/combat';
+import {refreshWeaponSight,stepCombatWithSight as stepCombat} from './fixtures/weaponSight';
+const pickSoldierTargetForTest:typeof rawPick=(state,soldier)=>{refreshWeaponSight(state);return rawPick(state,soldier);};
 import { WEAPONS } from '@/data/weapons';
 import { leadFactor } from '@/sim/aimPoint';
 

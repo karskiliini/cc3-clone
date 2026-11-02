@@ -1,3 +1,5 @@
+import {hasLOS} from './los';
+import {knownLeader,canObserveComrade,learnCasualty,knownContacts,directContacts,conscious} from './perception';
 import { crewMayReturn, crewOutsideWord } from './vehicleCrew';
 import { orderedGunBlock } from './gunBlock';
 import { inCommand } from './command';
@@ -23,22 +25,13 @@ import { isDazed } from './daze';
 // ============================================================================
 
 // ---------------------------------------------------------------- tracking
-interface MoraleTrack {
-  lastHealth: Map<number, Health>;
-  tankScareAt: Map<number, number>;
-  teamLastStatus: Map<number, TeamStatusWord>;
-  /** last time (battle seconds) a "is hesitating" flavour message was posted for a team, so it
-   * doesn't spam every step while an order stays refused (round5 critique #9). */
-  hesitationMsgAt: Map<number, number>;
-}
-
-const tracks = new WeakMap<BattleState, MoraleTrack>();
+type MoraleTrack=NonNullable<BattleState['moraleRuntime']>;
 
 function getTrack(state: BattleState): MoraleTrack {
-  let t = tracks.get(state);
+  let t = state.moraleRuntime;
   if (!t) {
     t = { lastHealth: new Map(), tankScareAt: new Map(), teamLastStatus: new Map(), hesitationMsgAt: new Map() };
-    tracks.set(state, t);
+    state.moraleRuntime=t;
   }
   return t;
 }
@@ -62,31 +55,8 @@ function aliveTeammatesWithin(state: BattleState, s: Soldier, team: Team, radius
   return n;
 }
 
-function nearestEnemySoldierDistTiles(state: BattleState, s: Soldier): number {
-  const spotted = state.spotted[s.side];
-  let best = Infinity;
-  for (const id of spotted) {
-    const e = state.soldiers.get(id);
-    if (!e || e.health === 'dead' || e.health === 'incapacitated') continue;
-    const d = dist(e.pos, s.pos);
-    if (d < best) best = d;
-  }
-  return best;
-}
-
-function nearestEnemyTankDistTiles(state: BattleState, s: Soldier): number {
-  const spotted = state.spottedVehicles[s.side];
-  let best = Infinity;
-  for (const id of spotted) {
-    const v = state.vehicles.get(id);
-    if (!v || v.state === 'knockedOut') continue;
-    const def = VEHICLE_DEFS[v.defId];
-    if (!def || def.kind !== 'tank') continue;
-    const d = dist(v.pos, s.pos);
-    if (d < best) best = d;
-  }
-  return best;
-}
+function nearestEnemySoldierDistTiles(state:BattleState,s:Soldier):number{return Math.min(Infinity,...knownContacts(state,s).filter(c=>c.entity==='soldier'&&c.health!=='dead'&&c.health!=='incapacitated').map(c=>dist(c.pos,s.pos)));}
+function nearestEnemyTankDistTiles(state:BattleState,s:Soldier):number{return Math.min(Infinity,...knownContacts(state,s).filter(c=>c.entity==='vehicle'&&state.time-c.observedAt<30&&VEHICLE_DEFS[c.vehicleDefId??'']?.kind==='tank'&&c.vehicleState!=='knockedOut'&&c.vehicleState!=='burning').map(c=>dist(c.pos,s.pos)));}
 
 function applyTeamMoraleHit(state: BattleState, team: Team, amount: number): void {
   for (const id of team.soldierIds) {
@@ -99,11 +69,10 @@ function applyTeamMoraleHit(state: BattleState, team: Team, amount: number): voi
 function stepSoldierMorale(state: BattleState, s: Soldier, dt: number, track: MoraleTrack): void {
   // Vehicle crew are shielded by armor: their morale/suppression is driven by vehicle.ts's crew
   // mind (spec §10), not by exposed-infantry mechanics.
-  if (s.vehicleId != null) return;
+  if (s.vehicleId != null) {s.suppression=clamp(s.suppression-5*dt,0,100);return;}
 
   const team = state.teams.get(s.teamId);
-  const leader = team ? state.soldiers.get(team.leaderId) : undefined;
-  const leaderAlive = !!leader && leader.health !== 'dead' && leader.health !== 'incapacitated';
+  const knowledge=knownLeader(state,s),leader=knowledge.leader,leaderAlive=knowledge.alive&&knowledge.near;
   const leaderNearM = leaderAlive && leader ? dist(leader.pos, s.pos) * TILE_M <= 10 : false;
   const leaderNotSuppressed = leaderAlive && leader ? leader.suppression <= 60 : false;
 
@@ -144,28 +113,19 @@ function stepSoldierMorale(state: BattleState, s: Soldier, dt: number, track: Mo
     }
   }
 
-  // -------------------------------------------------------------- fatigue
-  if (s.activity === 'idle' || s.activity === 'defending') {
-    s.fatigue = clamp(s.fatigue - 1 * dt, 0, 100);
-  }
+
 }
 
-function detectCasualtiesAndApply(state: BattleState, track: MoraleTrack): void {
-  for (const s of state.soldiers.values()) {
-    const last = track.lastHealth.get(s.id);
-    if (last !== s.health) {
-      track.lastHealth.set(s.id, s.health);
-      if (last !== undefined && last !== s.health && (s.health === 'dead' || s.health === 'incapacitated' || s.health === 'wounded')) {
-        const team = state.teams.get(s.teamId);
-        if (team) {
-          const isKIA = s.health === 'dead' || s.health === 'incapacitated';
-          let amount = isKIA ? 15 : 8;
-          if (s.isLeader) amount *= 2;
-          applyTeamMoraleHit(state, team, amount);
-        }
-      }
-    }
+function detectCasualtiesAndApply(state:BattleState,_track:MoraleTrack):void{
+ for(const observer of state.soldiers.values()){
+  if(!conscious(observer,state.time))continue;
+  const p=observer.perception;if(!p)continue;const team=state.teams.get(observer.teamId);if(!team)continue;
+  for(const id of team.soldierIds){const casualty=state.soldiers.get(id);if(!casualty||id===observer.id)continue;
+   const dM=dist(observer.pos,casualty.pos)*TILE_M;
+   const seen=canObserveComrade(state,observer,casualty);
+   if(!seen)continue;learnCasualty(state,observer,id,{health:casualty.health,pos:{...casualty.pos},observedAt:state.time,sourceId:observer.id,isLeader:casualty.isLeader});
   }
+ }
 }
 
 const ACTIVITY_TO_STATUS: Partial<Record<Activity, TeamStatusWord>> = {

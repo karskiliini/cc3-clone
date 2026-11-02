@@ -1,13 +1,15 @@
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
 import { describe, expect, it } from 'vitest';
 import { Rng } from '@/shared/rng';
 import { TILE_M } from '@/shared/types';
 import { dist } from '@/shared/math';
-import { bailOut } from '@/sim/vehicleDamage';
+import { bailOut,startFireBail } from '@/sim/vehicleDamage';
 import { stepVehicleCrews } from '@/sim/vehicleCrew';
 import { stepMovement } from '@/sim/movement';
 import { stepCoverSeeking } from '@/sim/coverSeek';
 import { stepMinds } from '@/sim/mind';
-import { stepCombat } from '@/sim/combat';
+import { stepCombat as rawStepCombat } from '@/sim/combat';
 import { applyOrder } from '@/sim/orders';
 import { Battle } from '@/sim/battle';
 import { actionFor, hatchClimbAnim, hatchClimbFrame, postureFor } from '@/render/soldierAnim';
@@ -102,7 +104,7 @@ describe('panicked crew escape', () => {
 
   it('crawls toward cover outside a burning hull danger zone after the shock', () => {
     const { state, v, s, rng } = scene();
-    v.state = 'burning';
+    v.state = 'burning';startFireBail(state,v,state.teams.get(v.teamId));
     const at = { ...s.hatch!.to };
     const cover = { x: Math.floor(at.x) - 6.5, y: Math.floor(at.y) + 0.5 };
     state.map.tiles[Math.floor(cover.y) * state.map.width + Math.floor(cover.x)] = 'trench';

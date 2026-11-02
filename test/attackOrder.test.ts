@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import {recordVisual,recipientOrder} from '@/sim/perception';
 import { Battle } from '@/sim/battle';
 import { stepAttackOrders, attackPhase, ATTACK_LOST_SUPPRESS_S } from '@/sim/orders';
 import { pickSoldierTargetForTest } from '@/sim/combat';
@@ -64,15 +65,18 @@ function setup() {
   return { b, ger, sov, members: (t: Team) => t.soldierIds.map((id) => b.state.soldiers.get(id)!) };
 }
 
-const spotAll = (b: Battle, t: Team) => t.soldierIds.forEach((id) => b.state.spotted.german.add(id));
+const spotAll = (b: Battle, t: Team) => {
+  for(const id of t.soldierIds){b.state.spotted.german.add(id);const target=b.state.soldiers.get(id)!;for(const observer of b.state.soldiers.values())if(observer.side==='german')recordVisual(b.state,observer,target,'soldier');}
+};
 
 describe('attack-unit fire orders', () => {
-  it('clicking where an unspotted enemy stands gives area fire (no targetTeamId)', () => {
+  it('an order naming an unseen target carries only its issued point, never live tracking', () => {
     const { b, ger, sov, members } = setup();
     const p = { ...members(sov)[0].pos };
     expect(b.teamAt(p, 'soviet')).toBeNull();
     b.issueOrder(ger.id, { type: 'fire', target: p, targetTeamId: sov.id, issuedAt: 0 });
-    expect(ger.order!.targetTeamId).toBeUndefined();
+    for(const enemy of members(sov))enemy.pos={x:enemy.pos.x+9,y:enemy.pos.y+4};
+    stepAttackOrders(b.state,b.rng);
     expect(ger.order!.target).toEqual(p);
   });
 
@@ -86,13 +90,13 @@ describe('attack-unit fire orders', () => {
     const order = ger.order!;
     expect(order.targetTeamId).toBe(sov.id);
     refreshPos(b, sov);
-    expect(order.target.x).toBeCloseTo(sov.pos.x, 5);
+    expect(recipientOrder(b.state,members(ger)[0],order)!.target.x).toBeCloseTo(sov.pos.x,5);
 
     for (const s of members(sov)) s.pos = { x: s.pos.x + 3, y: s.pos.y + 2 };
     refreshPos(b, sov);
+    spotAll(b,sov);
     stepAttackOrders(b.state, b.rng);
-    expect(order.target.x).toBeCloseTo(sov.pos.x, 5);
-    expect(order.target.y).toBeCloseTo(sov.pos.y, 5);
+    expect(recipientOrder(b.state,members(ger)[0],order)!.target).toEqual(sov.pos);
     expect(attackPhase(b.state, order)).toBe('tracking');
   });
 
@@ -118,7 +122,7 @@ describe('attack-unit fire orders', () => {
     spotAll(b, sov);
     b.issueOrder(ger.id, { type: 'fire', target: { ...sov.pos }, targetTeamId: sov.id, issuedAt: 0 });
     const order = ger.order!;
-    const last = { ...order.target };
+    const last = { ...recipientOrder(b.state,members(ger)[0],order)!.target };
     const rifleman = members(ger).find((s) => s.weaponId && !s.isLeader) ?? members(ger)[0];
     rifleman.activity = 'firing';
 
@@ -127,7 +131,7 @@ describe('attack-unit fire orders', () => {
     b.state.time += 3;
     stepAttackOrders(b.state, b.rng);
     expect(attackPhase(b.state, order)).toBe('suppress');
-    expect(order.target).toEqual(last);
+    expect(recipientOrder(b.state,rifleman,order)!.target).toEqual(last);
     const t = pickSoldierTargetForTest(b.state, rifleman);
     expect(t?.kind).toBe('point');
     if (t?.kind === 'point') expect(t.pos).toEqual(last);
@@ -142,21 +146,24 @@ describe('attack-unit fire orders', () => {
     stepAttackOrders(b.state, b.rng);
     expect(attackPhase(b.state, order)).toBe('tracking');
     refreshPos(b, sov);
-    expect(order.target.y).toBeCloseTo(sov.pos.y, 5);
+    expect(recipientOrder(b.state,rifleman,order)!.target.y).toBeCloseTo(sov.pos.y,5);
   });
 
   it('destroying the target completes the order with Defend and a message', () => {
     const { b, ger, sov, members } = setup();
     spotAll(b, sov);
     b.issueOrder(ger.id, { type: 'fire', target: { ...sov.pos }, targetTeamId: sov.id, issuedAt: 0 });
-    const last = { ...ger.order!.target };
+    const last = { ...recipientOrder(b.state,members(ger)[0],ger.order!)!.target };
     members(sov).forEach((s, i) => {
       if (i % 2 === 0) { s.health = 'dead'; s.activity = 'dead'; } else s.activity = 'surrendered';
     });
+    stepAttackOrders(b.state,b.rng);
+    expect(ger.order?.type).toBe('fire'); // unseen status never completes the order
+    spotAll(b,sov);
     stepAttackOrders(b.state, b.rng);
     expect(ger.order?.type).toBe('defend');
     expect(ger.order?.target).toEqual(last);
-    expect(b.state.messages.some((m) => m.text === `${ger.name}\nTarget destroyed.`)).toBe(true);
+    expect(b.state.messages.some((m) => m.text === `${ger.name}\nKnown targets neutralised.`)).toBe(true);
   });
 
   it('a spotted vehicle is picked by its hull (+0.5 tile) and tracked via targetVehicleId', () => {
@@ -169,14 +176,17 @@ describe('attack-unit fire orders', () => {
     b.state.spottedVehicles.german.clear();
     expect(b.teamAt(click, 'soviet')).toBeNull();
     b.state.spottedVehicles.german.add(v.id);
+    for(const s of b.state.soldiers.values())if(s.side==='german')recordVisual(b.state,s,v,'vehicle');
     expect(b.teamAt(click, 'soviet')?.id).toBe(tank.id);
     b.issueOrder(ger.id, { type: 'fire', target: click, targetTeamId: tank.id, issuedAt: 0 });
     const order = ger.order!;
     expect(order.targetVehicleId).toBe(v.id);
     v.pos = { x: v.pos.x + 4, y: v.pos.y };
+    for(const s of b.state.soldiers.values())if(s.side==='german')recordVisual(b.state,s,v,'vehicle');
     stepAttackOrders(b.state, b.rng);
-    expect(order.target).toEqual(v.pos);
+    expect(recipientOrder(b.state,b.state.soldiers.get(ger.leaderId)!,order)!.target).toEqual(v.pos);
     v.state = 'knockedOut';
+    for(const s of b.state.soldiers.values())if(s.side==='german')recordVisual(b.state,s,v,'vehicle');
     stepAttackOrders(b.state, b.rng);
     expect(ger.order?.type).toBe('defend');
   });

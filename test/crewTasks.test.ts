@@ -4,7 +4,7 @@ import type { BattleConfig, BattleState, CrewTaskId, GameMap, MapDef, Soldier, T
 import { SIM_DT } from '@/shared/types';
 import { Rng } from '@/shared/rng';
 import { dist } from '@/shared/math';
-import { stepCombat } from '@/sim/combat';
+import {stepCombatWithSight as stepCombat} from './fixtures/weaponSight';
 import {
   stepCrewWeapons, crewWeaponStatus, crewWeaponVisual, crewTaskWord, taskStation, fireMissionWait, isInAction,
   AT_STATION_TILES, TASK_S, CREW_LAYOUT, weaponFramePoint, crewDrillFactor, loadTimeS,

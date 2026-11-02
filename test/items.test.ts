@@ -1,3 +1,4 @@
+import {recordVisual} from '@/sim/perception';
 // Spec 2026-09-17 §9: kit as objects on the ground, and picking things up as an individual
 // decision. Ammunition pickup when low and compatible; MG takeover by the nearest able man; no
 // pickup while pinned or under fire; grenades topped up to the cap; the replaced weapon becomes an
@@ -241,6 +242,7 @@ describe('picking things up (§9)', () => {
       if (armourKnown) {
         state.vehicles.set(50, { id: 50, state: 'ok', pos: { x: 35, y: 35 }, side: 'soviet' } as never);
         state.spottedVehicles.german.add(50);
+        recordVisual(state,s,state.vehicles.get(50)!,'vehicle');
       }
       weaponItem(state, 'panzerfaust', 11.5, 10.5, 1, { side: 'german' });
       run(state, new Rng(1), 12);

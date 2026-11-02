@@ -1,3 +1,5 @@
+import {vehicleObserver} from './perception';
+import {planningMap} from './navigationKnowledge';
 /** Organic mortar mobility and light-gun towing. Every reservation and phase is canonical. */
 import type { BattleState, Order, Soldier, Team, Vec2, Vehicle } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
@@ -26,7 +28,7 @@ function reserved(state: BattleState, id: number, except: number): boolean {
 function access(state: BattleState, v: Vehicle): Vec2 { return doorSpot(state, v, VEHICLE_DEFS[v.defId]); }
 function walk(state: BattleState, s: Soldier, target: Vec2): void {
   if (dist(s.pos, target) < 0.35) { s.path = []; s.activity = 'idle'; return; }
-  if (!s.path.length || dist(s.path[s.path.length - 1], target) > 0.5) s.path = findPath(state.map, s.pos, target, 'infantry');
+  if (!s.path.length || dist(s.path[s.path.length - 1], target) > 0.5) s.path = findPath(planningMap(state,s), s.pos, target, 'infantry');
   s.activity = 'moving'; s.stance = 'standing';
 }
 function vehicleRoute(state: BattleState, v: Vehicle, order: Order, slot: number): void {
@@ -39,7 +41,7 @@ function vehicleRoute(state: BattleState, v: Vehicle, order: Order, slot: number
   }));
   const route: Vec2[] = []; let from = v.pos;
   for (const p of points) {
-    const leg = findPath(state.map, from, p, 'vehicle', 6000, undefined, { def: VEHICLE_DEFS[v.defId] });
+    const leg = findPath(planningMap(state,vehicleObserver(state,v,'driver')), from, p, 'vehicle', 6000, undefined, { def: VEHICLE_DEFS[v.defId] });
     if (!leg.length && dist(from, p) > 0.5) { v.path = []; return; }
     route.push(...leg); from = p;
   }
@@ -181,7 +183,7 @@ export function stepMotorizedCrews(state: BattleState, rng: Rng, dt: number): vo
         if (!g || !isAbleCrewman(state, g)) continue;
         if (dist(cw.pos, target) > 0.08) {
           if (!g.path.length || dist(g.path[g.path.length - 1], target) > 0.2) {
-            const path = findPath(state.map, cw.pos, target, 'vehicle');
+            const path = findPath(planningMap(state,g), cw.pos, target, 'vehicle');
             const end = path.at(-1) ?? cw.pos;
             if (Math.floor(end.x) === Math.floor(target.x) && Math.floor(end.y) === Math.floor(target.y)
               && isPassable(state.map, Math.floor(target.x), Math.floor(target.y), 'vehicle')) path.push({ ...target });

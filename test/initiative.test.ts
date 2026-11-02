@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { stepSubordinateInitiative } from '../src/sim/initiative';
+import {perception} from '../src/sim/perception';
 import { Rng } from '../src/shared/rng';
 import type { BattleState, Soldier, Team } from '../src/shared/types';
 import { createMind } from '../src/sim/mind';
@@ -19,6 +20,7 @@ function soldier(id: number, teamId: number, side: 'german' | 'soviet', override
 
 function state(): BattleState {
   const leader = soldier(1, 1, 'german');
+  perception(leader).objectives={0:{owner:'soviet',observedAt:0,sourceId:1},1:{owner:'german',observedAt:0,sourceId:1}};
   const men = [soldier(2, 1, 'german'), soldier(3, 1, 'german')];
   const enemy = soldier(9, 2, 'soviet');
   const team: Team = {
@@ -93,4 +95,11 @@ describe('subordinate initiative (G18)', () => {
     }
     expect(fired).toBe(false);
   });
+});
+it('hidden objective ownership cannot change the same leader’s initiative',()=>{
+ const a=state(),b=state();b.map.victoryLocations[0].owner='german';b.map.victoryLocations[1].owner='soviet';
+ let seed=0;while(new Rng(seed).next()>=.002)seed++;
+ for(const s of [a,b])s.soldiers.get(1)!.randomStreams={initiative:seed};
+ const x=stepSubordinateInitiative(a,new Rng(7),'german',()=>{}),y=stepSubordinateInitiative(b,new Rng(123),'german',()=>{});
+ expect(x).not.toBeNull();expect(y).toEqual(x);
 });

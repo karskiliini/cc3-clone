@@ -1,3 +1,7 @@
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
+const pickVehicleTarget=withWeaponSight(rawPickVehicleTarget);
+const vehicleAreaTarget=withWeaponSight(rawVehicleAreaTarget);
 // Item 038 regression: armoured engagements fizzle — vehicles never re-acquire and the AI
 // drives them blind.
 //
@@ -8,7 +12,7 @@
 //  - a seeded AI-vs-AI armour battle produces ongoing main-gun exchanges.
 import { describe, it, expect } from 'vitest';
 import { makeState, addTank } from './vehicleDamageHelpers';
-import { stepCombat, pickVehicleTarget, vehicleAreaTarget } from '@/sim/combat';
+import { stepCombat as rawStepCombat, pickVehicleTarget as rawPickVehicleTarget, vehicleAreaTarget as rawVehicleAreaTarget } from '@/sim/combat';
 import { VEHICLE_DEFS } from '@/data/units';
 import { gunTarget, vehicleGunRay } from '@/sim/hullAim';
 import { groundProbe } from '@/sim/hullGround';

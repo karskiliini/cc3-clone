@@ -9,7 +9,7 @@ import { SIM_DT } from '@/shared/types';
 import { Rng } from '@/shared/rng';
 import { WEAPONS } from '@/data/weapons';
 import { VEHICLE_DEFS } from '@/data/units';
-import { stepCombat } from '@/sim/combat';
+import {stepCombatWithSight as stepCombat} from './fixtures/weaponSight';
 import { placeVehicleBody, stepVehicles } from '@/sim/vehicle';
 import {
   BRACKET_LOST_M, bracketMul, designateS, fineLayBaseS, fineLayS, followUpLayS, laySkillMul, loadSkillMul, timeToFirstShotS,
@@ -256,10 +256,11 @@ describe('first shot and follow-up shots', () => {
 });
 
 describe('snap shot', () => {
-  it('a veteran about to be fired at shoots before his fine lay is complete; a regular crew finishes the lay', () => {
+  it('a veteran reacts to a visibly aimed enemy gun before fine lay; a regular crew finishes the lay', () => {
     const first = (experience: number): number => {
       const sc = duel('pz4gh', experience, 400, 0);
-      // the enemy gun is loaded and all but laid on us
+      // Visible turret direction supplies the threat cue, not hidden loading/lay timers.
+      sc.e.v.turretFacing=Math.PI;
       sc.e.v.loadedRound = 'ap';
       sc.e.v.gunLay = { key: `v${sc.v.id}`, aim: { ...sc.v.pos }, designateLeftS: 0, fineLeftS: 0.5, totalS: 5 };
       return run(sc, new Rng(12), 20, { stopAfterShots: 1 })[0];
@@ -304,6 +305,7 @@ describe('bracketing', () => {
     const second = (seed: number, forget: boolean): { firstHit: boolean; secondHit: boolean; sc: Scene; rng: Rng } | null => {
       const sc = duel('pz4gh', 50, 600, 0);
       const rng = new Rng(seed);
+      crewEffects(sc.state,sc.v).gunner!.randomStreams={vehicleWeapon:seed};
       const results: boolean[] = [];
       run(sc, rng, 30, {
         stopAfterShots: 2,

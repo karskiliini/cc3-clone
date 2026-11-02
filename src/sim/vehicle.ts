@@ -1,3 +1,6 @@
+import {planningMap,knownHulls,learnHullContact,learnTerrainContact} from './navigationKnowledge';
+import {directSoldier,directVehicle,recipientOrder} from './perception';
+import {hearNoise,visualIds,vehicleVisualIds,vehicleObserver,knownContacts,knowsDirectly,teamObserver,directContacts} from './perception';
 import { compressEarthworks, prepareEarthworkInterest, type EarthworkLoad } from './heightField';
 import { stepTrackPhysics, trackHasDrive, trackHullParams } from './trackPhysics';
 import { stepPassengerPhysics } from './passengerPhysics';
@@ -224,6 +227,7 @@ export function completeVehicleMovement(state: BattleState, rng: Rng, dt: number
         y: (from.y + (to.y - from.y) * i / count) / TILE_M };
       const x = Math.floor(pos.x), y = Math.floor(pos.y);
       if (!inBounds(state.map, x, y) || !isPassable(state.map, x, y, 'vehicle', VEHICLE_DEFS[v.defId])) {
+        learnTerrainContact(state,v,pos);
         terrainBlocked = true; terrainRejects++; return false;
       }
       const hit = vehicleBlockingAt(state, v, pos, previous, actualHeading);
@@ -281,9 +285,9 @@ export function completeVehicleMovement(state: BattleState, rng: Rng, dt: number
   driverTicks.delete(v);
 }
 
-function targetPosition(state: BattleState, v: Vehicle): Vec2 | null {
-  return v.targetSoldierId != null ? state.soldiers.get(v.targetSoldierId)?.pos ?? null
-    : v.targetVehicleId != null ? state.vehicles.get(v.targetVehicleId)?.pos ?? null : v.targetPoint;
+function targetPosition(state:BattleState,v:Vehicle):Vec2|null{
+ const observer=vehicleObserver(state,v),contact=directContacts(state,observer).find(c=>c.entity==='soldier'?c.id===v.targetSoldierId:c.id===v.targetVehicleId);
+ return contact?.pos??v.targetPoint;
 }
 
 function traverseVehicleGun(state: BattleState, v: Vehicle, def: VehicleDef, dt: number): void {
@@ -368,18 +372,13 @@ export function onVehicleHit(
   const { category, atAlarm } = categorizeVehicleHit(weapon, isHalftrack);
   const mind = commander.mind;
 
-  if (atAlarm) {
-    mind.threatLevel = 1;
-    if (shooterPos) {
-      mind.threatDir = angleTo(vehicle.pos, shooterPos);
-      addOrMergeBelief(mind, shooterPos, 'fired', 0.9, 1, state.time);
-    }
+  if(atAlarm){
+   for(const id of team.soldierIds){const c=state.soldiers.get(id);if(!c||c.vehicleId!==vehicle.id)continue;c.mind.threatLevel=1;if(shooterPos)hearNoise(state,c,shooterPos,`vh:${vehicle.id}:${state.time}`,'shot',600);}
   }
 
   if (!penetrated) {
     const base = category === 'smallArms' ? 1.5 : category === 'atRifle' ? 6 : 12;
-    const mult = 1.4 - commander.experience / 100;
-    addStress(mind, base * mult);
+    for(const id of team.soldierIds){const c=state.soldiers.get(id);if(c&&c.vehicleId===vehicle.id&&c.health!=='dead'&&c.health!=='incapacitated'){c.mind.lastIncomingAt=state.time;addStress(c.mind,base*(1.4-c.experience/100));}}
     // spec §10.2: small arms alone never raise threatLevel above 0.3.
     if (category === 'smallArms' && !atAlarm) mind.threatLevel = Math.min(mind.threatLevel, 0.3);
   }
@@ -412,12 +411,12 @@ function alarmCrewNearMiss(state: BattleState, v: Vehicle, weapon: WeaponDef, sh
   if (!commander) return;
   const mind = commander.mind;
   mind.threatLevel = Math.max(mind.threatLevel, 0.8);
-  // Toward the shooter if the crew can see the muzzle; otherwise back along the tracer's line,
-  // which points the same way but gives no pinpointed position (no belief).
-  mind.threatDir = angleTo(v.pos, shooterPos);
-  if (hasLOS(state.map, v.pos, shooterPos)) addOrMergeBelief(mind, shooterPos, 'fired', 0.6, 1, state.time);
+  hearNoise(state,commander,shooterPos,`vm:${v.id}:${state.time}`,'shot',600);
+  const cue=commander.perception?.sounds.at(-1);
+  if(cue)navigationMemory(v).nearMiss={pos:{...cue.pos},weapon:WEAPONS.pak38,at:state.time};
+
   addStress(mind, 4);
-  navigationMemory(v).nearMiss = { pos: { ...shooterPos }, weapon, at: state.time };
+
 }
 
 
@@ -452,8 +451,8 @@ export function shotsWithin(firstShotS: number, cycleS: number, horizonS = DUEL_
 
 function gatherArmorThreats(state: BattleState, v: Vehicle): ArmorThreat[] {
   const out: ArmorThreat[] = [];
-  for (const id of state.spottedVehicles[v.side]) {
-    const ev = state.vehicles.get(id);
+  for (const id of vehicleVisualIds(state,v,'vehicle','commander')) {
+    const ev = directVehicle(state,vehicleObserver(state,v,'commander'),id);
     if (!ev || ev.state === 'knockedOut') continue;
     const edef = VEHICLE_DEFS[ev.defId];
     if (!edef || (edef.kind !== 'tank' && edef.kind !== 'spg')) continue;
@@ -463,11 +462,11 @@ function gatherArmorThreats(state: BattleState, v: Vehicle): ArmorThreat[] {
     if (!weapon) continue;
     out.push({
       pos: { ...ev.pos }, distM, weapon, theirArmor: edef.armor.front, vehicle: ev,
-      firstShotS: timeToFirstShotS(state, ev, v.pos, Math.abs(v.speed) > 0.1), cycleS: cycleTimeS(state, ev),
+      firstShotS: 5, cycleS: Math.max(4,weapon.loadS??weapon.reloadS),
     });
   }
-  for (const id of state.spotted[v.side]) {
-    const s = state.soldiers.get(id);
+  for (const id of vehicleVisualIds(state,v,'soldier','commander')) {
+    const s = directSoldier(state,vehicleObserver(state,v,'commander'),id);
     if (!s || s.health === 'dead' || s.health === 'incapacitated') continue;
     const w = WEAPONS[s.weaponId];
     if (!w || (w.cls !== 'atgun' && w.cls !== 'atrocket' && w.cls !== 'atrifle')) continue;
@@ -498,13 +497,13 @@ function getReverseTrack(state: BattleState, vehicleId: number): ReverseTrack {
  * within 4 tiles, by a building/stonewall/woods. */
 const BLOCKING_TERRAIN = new Set(['buildingStone', 'buildingWood', 'stonewall', 'woods']);
 function findVehicleCoverRoute(state: BattleState, v: Vehicle, threatPos: Vec2): { target: Vec2; route: Vec2[]; staging?: Vec2 } | null {
-  const map = state.map;
+  const map = planningMap(state,vehicleObserver(state,v,'driver'));
   const cx = Math.floor(v.pos.x), cy = Math.floor(v.pos.y);
   const candidates: { target: Vec2; distance: number }[] = [];
   // item 038: a cover spot another vehicle already occupies (or drives to) is not available —
   // two tanks converging on the same spot used to stand nose-to-nose forever.
   const taken: Vec2[] = [];
-  for (const o of state.vehicles.values()) {
+  for (const o of knownHulls(state,vehicleObserver(state,v,'driver'))) {
     if (o.id === v.id) continue;
     if (o.state === 'ok' || o.state === 'immobilized') taken.push(o.pos);
   }
@@ -786,7 +785,7 @@ function driveToCover(state: BattleState, rng: Rng, dt: number, v: Vehicle, def:
     const start = { x: v.pos.x, y: v.pos.y };
     const skip = selectRoutePrefix(route,start,props.vehicleCost,LOOKAHEAD_TILES,
       (a,b)=>vehicleSlopeCost(state.map,a,b,def),
-      p=>TERRAIN_PROPS[tileAt(state.map,Math.floor(p.x),Math.floor(p.y))].vehicleCost,
+      p=>TERRAIN_PROPS[tileAt(planningMap(state,vehicleObserver(state,v,'driver')),Math.floor(p.x),Math.floor(p.y))].vehicleCost,
       (p,ceiling)=>(!track.bankStaging || route.indexOf(p) <= route.indexOf(track.bankStaging))
         && straightDrivable(state,v,p,ceiling),p=>p !== track.bankStaging && dist(start,p)<0.55,p=>p === track.bankStaging);
     if(skip>0)route.splice(0,skip);
@@ -888,6 +887,8 @@ const HULL_WAIT_MOVING_S = 2.5;
  * (as near as two hulls can be); a vehicle on the move is given time to clear; otherwise, after a
  * moment, `v` routes round every other hull to where it was going. */
 function onHullBlocked(state: BattleState, v: Vehicle, blocker: Vehicle): void {
+  learnHullContact(state,v,blocker);
+  const map=planningMap(state,vehicleObserver(state,v,'driver'));
   driveVehicle(v, { speedMs: 0 }, 0);
   const goal = v.path[v.path.length - 1];
   if (!goal) return;
@@ -902,12 +903,12 @@ function onHullBlocked(state: BattleState, v: Vehicle, blocker: Vehicle): void {
   if (state.time - since < (Math.abs(blocker.speed) > 0.3 ? HULL_WAIT_MOVING_S : HULL_WAIT_S)) return;
   delete v.navigation?.blockedSince;
   const r = hullRadiusTiles(v);
-  const others = [...state.vehicles.values()].filter((o) => o !== v);
+  const others = knownHulls(state,vehicleObserver(state,v,'driver')).filter((o) => o !== v);
   const aroundHulls = (x: number, y: number): number => {
     const c = { x: x + 0.5, y: y + 0.5 };
     return others.some((o) => dist(o.pos, c) < r + hullRadiusTiles(o)) ? 40 : 0;
   };
-  const route = findPath(state.map, v.pos, goal, 'vehicle', 6000, aroundHulls, { def: VEHICLE_DEFS[v.defId] });
+  const route = findPath(map, v.pos, goal, 'vehicle', 6000, aroundHulls, { def: VEHICLE_DEFS[v.defId] });
   if (route.length > 0) v.path = route;
 }
 
@@ -921,11 +922,12 @@ const FIRE_SPOT_RETRY_S = 3;
 /** Told to fire at something it cannot hit from here (a hill, a wall, a wood in between), the crew
  * drives to the nearest reachable spot within gun range that has a clear line of fire to it. */
 function seekFiringSpot(state: BattleState, v: Vehicle, def: VehicleDef): void {
+  const map=planningMap(state,vehicleObserver(state,v,'driver'));
   const order = state.teams.get(v.teamId)?.order;
   if (!order || order.type !== 'fire' || !def.mainWeaponId) return;
   const target = order.target;
   const eye = { eyeM: EYE_VEHICLE_M };
-  if (hasLineOfFire(state.map, v.pos, target, eye)) return;
+  if (hasLineOfFire(map, v.pos, target, eye)) return;
   const last = v.navigation?.firingSpotLook;
   if (last && state.time - last.at < FIRE_SPOT_RETRY_S && dist(last.target, target) < 2) return;
   navigationMemory(v).firingSpotLook = { at: state.time, target: { ...target } };
@@ -937,15 +939,15 @@ function seekFiringSpot(state: BattleState, v: Vehicle, def: VehicleDef): void {
     for (let k = 0; k < n; k++) {
       const a = (k / n) * Math.PI * 2;
       const c = { x: Math.floor(v.pos.x + dm.sin(a) * r) + 0.5, y: Math.floor(v.pos.y - dm.cos(a) * r) + 0.5 };
-      if (!isPassable(state.map, Math.floor(c.x), Math.floor(c.y), 'vehicle', VEHICLE_DEFS[v.defId])) continue;
+      if (!isPassable(map, Math.floor(c.x), Math.floor(c.y), 'vehicle', VEHICLE_DEFS[v.defId])) continue;
       const toTarget = dist(c, target);
-      if (toTarget > rangeTiles || vehicleBlockingAt(state, v, c)) continue;
+      if (toTarget > rangeTiles || knownHulls(state,vehicleObserver(state,v,'driver')).some(o=>hullsOverlap(v,c,o))) continue;
       const score = toTarget;
-      if (score >= bestScore || !hasLineOfFire(state.map, c, target, eye)) continue;
+      if (score >= bestScore || !hasLineOfFire(map, c, target, eye)) continue;
       best = c; bestScore = score;
     }
     if (best) {
-      const route = findPath(state.map, v.pos, best, 'vehicle', 4000, undefined, { def });
+      const route = findPath(map, v.pos, best, 'vehicle', 4000, undefined, { def });
       if (route.length > 0 && dist(route[route.length - 1], best) <= 1) { v.path = route; return; }
     }
   }
@@ -964,20 +966,21 @@ const ARRIVED_OFF_BOW = Math.PI / 3;
 /** `v` can drive the straight line from where it is to `b`: every tile on it can be driven, none
  * is harder going than `maxCost` (a shortcut never takes it through the bog its route went round),
  * and it passes clear of every other hull (nor through the vehicle its route went round). */
-function straightDrivable(state: BattleState, v: Vehicle, b: Vec2, maxCost: number): boolean {
+function straightDrivable(state: BattleState, v: Vehicle, b: Vec2, maxCost: number, traffic = true): boolean {
+  const map=planningMap(state,vehicleObserver(state,v,'driver'));
   const a = v.pos;
-  if (!crossedCells(a,b,(x,y)=>isPassable(state.map,x,y,'vehicle',VEHICLE_DEFS[v.defId])
-    &&TERRAIN_PROPS[tileAt(state.map,x,y)].vehicleCost<=maxCost)) return false;
+  if (!crossedCells(a,b,(x,y)=>isPassable(map,x,y,'vehicle',VEHICLE_DEFS[v.defId])
+    &&TERRAIN_PROPS[tileAt(map,x,y)].vehicleCost<=maxCost)) return false;
   const d = dist(a, b);
   const travelHeading = d > 0 ? angleTo(a, b) : v.hullFacing;
   const n = Math.max(1, Math.ceil(d / 0.3));
-  const others = [...state.vehicles.values()].filter((o) => o !== v && dist(o.pos, a) < d + hullRadiusTiles(v) + hullRadiusTiles(o) + 2);
+  const others = traffic ? knownHulls(state,vehicleObserver(state,v,'driver')).filter((o) => o !== v && dist(o.pos, a) < d + hullRadiusTiles(v) + hullRadiusTiles(o) + 2) : [];
   for (let i = 1; i <= n; i++) {
     const p = { x: a.x + ((b.x - a.x) * i) / n, y: a.y + ((b.y - a.y) * i) / n };
     const x = Math.floor(p.x), y = Math.floor(p.y);
     const previous = { x: a.x + (b.x - a.x) * (i - 1) / n, y: a.y + (b.y - a.y) * (i - 1) / n };
-    const slope = vehicleSlopeCost(state.map, previous, p, VEHICLE_DEFS[v.defId]);
-    if (!Number.isFinite(slope) || TERRAIN_PROPS[tileAt(state.map, x, y)].vehicleCost * slope > maxCost) return false;
+    const slope = vehicleSlopeCost(map, previous, p, VEHICLE_DEFS[v.defId]);
+    if (!Number.isFinite(slope) || TERRAIN_PROPS[tileAt(map, x, y)].vehicleCost * slope > maxCost) return false;
     for (const o of others) if ((hullsOverlap(v, p, o) || hullsOverlap(v, p, o, travelHeading))
       && dist(o.pos, p) < dist(o.pos, a)) return false;
   }
@@ -989,19 +992,20 @@ function straightDrivable(state: BattleState, v: Vehicle, b: Vec2, maxCost: numb
  * the last couple of metres to a point off his bow count as arrived. A shortcut never cuts past a
  * waypoint the player set (the route goes where it was told to). */
 function pursuePath(state: BattleState, v: Vehicle, def: VehicleDef, travelFacing = v.hullFacing): () => boolean {
+  const map=planningMap(state,vehicleObserver(state,v,'driver'));
   const path = v.path;
   const offBow = (p: Vec2): number => Math.abs(wrapAngle(angleTo(v.pos, p) - travelFacing));
   const pinned = state.teams.get(v.teamId)?.order?.waypoints ?? [];
-  const isApproach = (p: Vec2): boolean => isTrenchApproachPoint(state.map, def, p);
+  const isApproach = (p: Vec2): boolean => isTrenchApproachPoint(map, def, p);
   const isPinned = (p: Vec2): boolean => isApproach(p) || pinned.some((w) => dist(w, p) <= 1);
   if (v.localDriver?.recovery) return () => false;
   const start = { x:v.pos.x, y:v.pos.y };
   const prefixSlope = (a: Vec2, b: Vec2): number => {
-    const slope = vehicleSlopeCost(state.map, a, b, def);
-    const endCost = TERRAIN_PROPS[tileAt(state.map, Math.floor(b.x), Math.floor(b.y))].vehicleCost;
+    const slope = vehicleSlopeCost(map, a, b, def);
+    const endCost = TERRAIN_PROPS[tileAt(map, Math.floor(b.x), Math.floor(b.y))].vehicleCost;
     let crossingCost = endCost;
     crossedCells(a, b, (x, y) => {
-      crossingCost = Math.max(crossingCost, TERRAIN_PROPS[tileAt(state.map, x, y)].vehicleCost);
+      crossingCost = Math.max(crossingCost, TERRAIN_PROPS[tileAt(map, x, y)].vehicleCost);
       return true;
     });
     // Retain every cell in the original edge, including orthogonal corner cells
@@ -1009,13 +1013,38 @@ function pursuePath(state: BattleState, v: Vehicle, def: VehicleDef, travelFacin
     return slope * crossingCost / endCost;
   };
   const pursuit = prepareRoutePrefix(path,start,
-    TERRAIN_PROPS[tileAt(state.map,Math.floor(start.x),Math.floor(start.y))].vehicleCost,
+    TERRAIN_PROPS[tileAt(map,Math.floor(start.x),Math.floor(start.y))].vehicleCost,
     path[1] && (isApproach(path[0]) || dist(start, path[0]) <= WAYPOINT_REACH_TILES)
       ? Math.max(LOOKAHEAD_TILES, dist(start, path[1])) : LOOKAHEAD_TILES,
     prefixSlope,
-    p=>TERRAIN_PROPS[tileAt(state.map,Math.floor(p.x),Math.floor(p.y))].vehicleCost,
+    p=>TERRAIN_PROPS[tileAt(map,Math.floor(p.x),Math.floor(p.y))].vehicleCost,
     (p,ceiling)=>straightDrivable(state,v,p,ceiling),
     p=>dist(start,p)<=(isApproach(p) ? TRENCH_APPROACH_REACH : WAYPOINT_REACH_TILES)||(dist(start,p)<PASSED_TILES&&offBow(p)>Math.PI/2&&!isPinned(p)),isPinned);
+  // A reached corner can be held by known traffic without any physical contact.
+  // Waiting for a collision here deadlocks terminal steering at the reached point.
+  let waitingForTraffic=false;
+  if(pursuit.index===0&&path[1]&&dist(start,path[0])<=(isApproach(path[0])?TRENCH_APPROACH_REACH:WAYPOINT_REACH_TILES)&&!pursuit.successorDrivable()){
+    const ceiling=Math.max(TERRAIN_PROPS[tileAt(map,Math.floor(start.x),Math.floor(start.y))].vehicleCost,
+      TERRAIN_PROPS[tileAt(map,Math.floor(path[0].x),Math.floor(path[0].y))].vehicleCost*prefixSlope(start,path[0]),
+      TERRAIN_PROPS[tileAt(map,Math.floor(path[1].x),Math.floor(path[1].y))].vehicleCost*prefixSlope(path[0],path[1]));
+    if(straightDrivable(state,v,path[1],ceiling,false)&&!straightDrivable(state,v,path[1],ceiling)){
+      waitingForTraffic=true;
+      const wait=v.navigation?.pursuitTraffic;
+      if(!wait||dist(wait.corner,path[0])>.1)navigationMemory(v).pursuitTraffic={since:state.time,corner:{...path[0]}};
+      else if(state.time-wait.since>=HULL_WAIT_S){
+        delete v.navigation?.pursuitTraffic;
+        // Replan only as far as the next unconsumed player waypoint. Terrain
+        // approach/exit points are regenerated by the ordinary profile planner.
+        const pinnedIndex=path.findIndex((p,i)=>i>0&&pinned.some(w=>dist(w,p)<=1));
+        const end=pinnedIndex>=0?pinnedIndex:path.length-1,goal=path[end],driver=vehicleObserver(state,v,'driver');
+        const others=knownHulls(state,driver),r=hullRadiusTiles(v);
+        const cost=(x:number,y:number)=>others.some(o=>dist(o.pos,{x:x+.5,y:y+.5})<r+hullRadiusTiles(o))?40:0;
+        const route=findPath(map,start,goal,'vehicle',6000,cost,{def});
+        if(route.length&&dist(route[route.length-1],goal)<=.5){path.splice(0,end+1,...route);return()=>false;}
+      }
+    }
+  }
+  if(!waitingForTraffic)delete v.navigation?.pursuitTraffic;
   if(pursuit.index>0)path.splice(0,pursuit.index);
   if (def.turnRadiusM == null && path.length === 1 && dist(v.pos, path[0]) < ARRIVED_TILES && offBow(path[0]) > ARRIVED_OFF_BOW) path.length = 0;
   return pursuit.successorDrivable;

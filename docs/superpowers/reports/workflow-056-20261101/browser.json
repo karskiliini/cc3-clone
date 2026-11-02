@@ -1,0 +1,16 @@
+{
+  "errors": [],
+  "traceSHA": "f9aca3e43f73cafb2f02d9ae9e408531bccc26dfe6e011be2c5e7dfdccc4d352",
+  "before": {
+    "hash": 1230186448,
+    "rng": 736989181,
+    "heard": 1
+  },
+  "after": {
+    "hash": 1230186448,
+    "rng": 736989181,
+    "inspector": true
+  },
+  "passed": true,
+  "serverStopped": true
+}

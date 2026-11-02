@@ -1,3 +1,4 @@
+import {emitNoise} from './noise';
 // ============================================================================
 // vehicleExplosion.ts — a vehicle blowing up as a real area event (user request: "when a tank is
 // destroyed, sometimes a huge explosion should occur which hits the nearby soldiers").
@@ -279,6 +280,7 @@ function cookOffPop(state: BattleState, rng: Rng, v: Vehicle): void {
   if (v.cookOff) v.cookOff.pops += lost;
   state.events.push({ kind: 'cookOffPop', pos: { ...v.pos } });
   state.explosions.push({ pos: { ...v.pos }, radiusM: 1.5, t: 0, kind: 'small' });
+  emitNoise(state,v.pos,'blast',500,`cookoff:${v.id}:${state.time}`);
   const enemy = otherSide(v.side);
   for (const s of state.soldiers.values()) {
     if (s.vehicleId != null || s.health === 'dead' || s.health === 'incapacitated') continue;

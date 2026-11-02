@@ -1,8 +1,10 @@
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
 import { describe, expect, it } from 'vitest';
 import { Rng } from '@/shared/rng';
 import { dist } from '@/shared/math';
 import { stepMovement } from '@/sim/movement';
-import { stepCombat } from '@/sim/combat';
+import { stepCombat as rawStepCombat } from '@/sim/combat';
 import { ableToLoot, stepPickups } from '@/sim/pickup';
 import { stepItemDrops } from '@/sim/items';
 import { doorSpot, onPassengerBoarded, stepTransport } from '@/sim/transport';

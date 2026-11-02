@@ -1,3 +1,5 @@
+import {planningMap,rememberHull} from './navigationKnowledge';
+import {visualIds,vehicleVisualIds,vehicleObserver,knownContacts,knowsDirectly,teamObserver,directContacts} from './perception';
 import { localDriverOwner } from './localDriver';
 // Leaving and re-entering vehicles (spec 2026-09-17 §10): the crew climbs out one man per hatch at
 // a time and is exposed while it does; a serviceable vehicle stays where it was left, with its
@@ -149,6 +151,9 @@ function pickHatch(state: BattleState, v: Vehicle, def: VehicleDef, s: Soldier, 
 // ------------------------------------------------------------------ getting out
 /** The crew starts to leave: one man per hatch at a time (stepVehicleCrews does the rest). */
 export function startExit(state: BattleState, v: Vehicle, opts: { panicked: boolean; fire?: boolean }): void {
+  // Heat and smoke in one's own compartment are a physical input, retained
+  // through exit shock; this conveys no hidden shooter information.
+  if(opts.fire)for(const c of state.soldiers.values())if((c.vehicleId===v.id||c.hatch?.vehicleId===v.id)&&c.health!=='dead'&&c.health!=='incapacitated')rememberHull(c,{id:v.id,teamId:v.teamId,side:v.side,defId:v.defId,pos:{...v.pos},heading:v.hullFacing,state:'burning',observedAt:state.time,sourceId:c.id,hops:0,onFire:true});
   if (v.exiting) {
     v.exiting.panicked = v.exiting.panicked || opts.panicked;
     v.exiting.fire = v.exiting.fire || !!opts.fire;
@@ -354,29 +359,13 @@ function knownThreatCovers(state: BattleState, v: Vehicle, def: VehicleDef, men:
     if (danger <= 0.01 || (veteran && danger < VETERAN_DANGER_OK)) return false;
     return hasLOS(state.map, from, v.pos);
   };
-  for (const id of state.spottedVehicles[v.side]) {
-    const ev = state.vehicles.get(id);
-    if (!ev || ev.side === v.side || (ev.state !== 'ok' && ev.state !== 'immobilized')) continue;
-    const edef = VEHICLE_DEFS[ev.defId];
-    if (edef && dangerous(edef.mainWeaponId, ev.pos, vehicleGunRay(state, ev, edef, gunTarget(state, v.pos, v)).origin)) return true;
-  }
-  for (const id of state.spotted[v.side]) {
-    const e = state.soldiers.get(id);
-    if (!isAble(e) || e.side === v.side || e.vehicleId != null) continue;
-    const cls = WEAPONS[e.weaponId]?.cls;
-    if (cls !== 'atgun' && cls !== 'atrocket' && cls !== 'atrifle') continue;
-    if (dangerous(e.weaponId, e.pos, { x: e.pos.x * TILE_M, y: e.pos.y * TILE_M, z: gunTarget(state, e.pos, undefined, e).heightM })) return true;
-  }
-  // what drove them out: still believed to be there, and able to see the hull from where they think it is
-  const bt = v.bailThreat;
-  if (bt) {
-    const need = veteran ? 0.6 : 0.3;
-    for (const s of men) {
-      for (const b of s.mind.beliefs) {
-        if (b.confidence <= need || dist(b.pos, bt.pos) > 6) continue;
-        if (hasLOS(state.map, b.pos, v.pos)) return true;
-      }
+  for(const s of men){
+    for(const c of knownContacts(state,s)){
+      const defId=c.vehicleDefId,weaponId=c.entity==='vehicle'?VEHICLE_DEFS[defId??'']?.mainWeaponId:c.weaponId;
+      const alive=c.entity==='vehicle'?c.vehicleState==='ok'||c.vehicleState==='immobilized':c.health!=='dead'&&c.health!=='incapacitated';
+      if(alive&&state.time-c.observedAt<30&&dangerous(weaponId,c.pos,{x:c.pos.x*TILE_M,y:c.pos.y*TILE_M,z:1.5}))return true;
     }
+    for(const b of s.mind.beliefs)if(b.confidence>(veteran?.6:.3)&&state.time-b.time<60&&hasLOS(state.map,b.pos,v.pos))return true;
   }
   return false;
 }
@@ -485,7 +474,7 @@ function sendToHatch(state: BattleState, v: Vehicle, def: VehicleDef, s: Soldier
   }
   const end = s.path.length > 0 ? s.path[s.path.length - 1] : null;
   if (!end || dist(end, spot) > 0.5) {
-    s.path = findPath(state.map, s.pos, spot, 'infantry');
+    s.path = findPath(planningMap(state,s), s.pos, spot, 'infantry');
     if (s.path.length === 0 || dist(s.path[s.path.length - 1], spot) > 0.05) s.path.push(spot);
   }
   s.activity = fast ? 'movingFast' : 'moving';

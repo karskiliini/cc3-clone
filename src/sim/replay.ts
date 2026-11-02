@@ -7,7 +7,7 @@
 // ============================================================================
 import type { BattleConfig } from '@/shared/types';
 import { SIM_DT } from '@/shared/types';
-import { BUILD_VERSION } from '@/shared/version';
+import { BUILD_VERSION,SIMULATION_VERSION } from '@/shared/version';
 import { Battle } from './battle';
 import type { Command } from './commands';
 import { hashState } from './stateHash';
@@ -16,6 +16,8 @@ export interface ReplayLog {
   format: 1;
   /** The build that recorded it (src/shared/version.ts); another build may not reproduce it. */
   buildVersion: string;
+  /** Optional only for legacy logs; behavior is not promised across rulesets. */
+  simulationVersion?: string;
   /** The battle's config (seed, map, forces, controllers...) as it was built. */
   config: BattleConfig;
   /** Every applied command, in application order (`Battle.commandLog()`). */
@@ -29,6 +31,7 @@ export function makeReplayLog(battle: Battle): ReplayLog {
   return {
     format: 1,
     buildVersion: BUILD_VERSION,
+    simulationVersion: SIMULATION_VERSION,
     config: structuredClone(battle.state.config),
     commands: structuredClone([...battle.commandLog()]),
     final: { tick: battle.state.tick ?? 0, hash: hashState(battle) },

@@ -1,3 +1,7 @@
+import {planningMap} from './navigationKnowledge';
+import {openHumanRng} from './humanRandom';
+import {humanCapability} from './humanCondition';
+import {knownLeader,canObserveComrade,directContacts,knownContacts,knowsDirectly,perception,recordVisual,hearNoise,communicationLink,conscious} from './perception';
 // ============================================================================
 // mind.ts — per-soldier psychology, belief memory and mental-state machine.
 // See docs/superpowers/specs/2026-09-13-soldier-mind-design.md (sections 1-8, 11).
@@ -81,39 +85,17 @@ export function addStress(mind: SoldierMind, amount: number): void {
 }
 
 // ------------------------------------------------------------------ tracking
-interface SoldierTrack {
-  panicLowFear: number;
-  shakenLowFear: number;
-  calmNoThreat: number;
-  beliefAccum: number;
-  shareAccum: number;
-  hadFirstFire: boolean;
-  freezeUntil: number;
-  shotsFromSpot: number;
-  spotAnchor: Vec2 | null;
-  buddyFearUntil: number;
-  gunAbandoned: boolean;
-}
-
-interface MindTrack {
-  soldiers: Map<number, SoldierTrack>;
-  berserkUntil: Map<number, number>;
-  lastRallyAt: Map<number, number>;       // by team id
-  leaderDeadSince: Map<number, number>;   // by team id
-  gunTakeoverAt: Map<number, number>;     // by team id
-  lastMsgAt: Map<number, number>;         // by team id, personality-message rate limit
-}
-
-const tracks = new WeakMap<BattleState, MindTrack>();
+type MindTrack=NonNullable<BattleState['mindRuntime']>;
+type SoldierTrack=MindTrack['soldiers'] extends Map<number,infer T>?T:never;
 
 function getTrack(state: BattleState): MindTrack {
-  let t = tracks.get(state);
+  let t = state.mindRuntime;
   if (!t) {
     t = {
       soldiers: new Map(), berserkUntil: new Map(), lastRallyAt: new Map(),
       leaderDeadSince: new Map(), gunTakeoverAt: new Map(), lastMsgAt: new Map(),
     };
-    tracks.set(state, t);
+    state.mindRuntime=t;
   }
   return t;
 }
@@ -141,7 +123,7 @@ function personalityMessage(state: BattleState, track: MindTrack, team: Team, te
 
 /** True while a soldier is frozen by first-fire shock (spec §11): no movement, no fire. */
 export function isFirstFireFrozen(state: BattleState, soldierId: number): boolean {
-  const t = getTrack(state).soldiers.get(soldierId);
+  const t = state.mindRuntime?.soldiers.get(soldierId);
   return !!t && state.time < t.freezeUntil;
 }
 
@@ -181,37 +163,21 @@ export function addOrMergeBelief(
 
 /** Called by spotting.ts for each (spotter, spotted-enemy) pair each spotting pass. */
 export function onSpotted(state: BattleState, spotter: Soldier, enemy: Soldier, clusterCount: number): void {
+  if(!directContacts(state,spotter).some(c=>c.entity==='soldier'&&c.id===enemy.id))recordVisual(state,spotter,enemy,'soldier');
   addOrMergeBelief(spotter.mind, enemy.pos, 'seen', 1, clusterCount, state.time);
+  const belief=spotter.mind.beliefs.find(b=>b.time===state.time&&dist(b.pos,enemy.pos)<4);if(belief){belief.sourceId=spotter.id;belief.modality='visual';belief.uncertaintyM=0;belief.hops=0;}
   if (spotter.mind.state === 'calm') spotter.mind.state = 'alert';
 }
 
-function countDeadNear(state: BattleState, soldier: Soldier, pos: Vec2): number {
-  let n = 0;
-  for (const e of state.soldiers.values()) {
-    if (e.side === soldier.side) continue;
-    if (e.health !== 'dead') continue;
-    if (dist(e.pos, pos) > MERGE_RADIUS_TILES) continue;
-    if (!hasLOS(state.map, soldier.pos, e.pos)) continue;
-    n++;
-  }
-  return n;
-}
-
-function enemyVisibleNear(state: BattleState, soldier: Soldier, pos: Vec2): boolean {
-  for (const id of state.spotted[soldier.side]) {
-    const e = state.soldiers.get(id);
-    if (!e || e.health === 'dead' || e.health === 'incapacitated') continue;
-    if (dist(e.pos, pos) <= MERGE_RADIUS_TILES) return true;
-  }
-  return false;
-}
+function countDeadNear(state:BattleState,soldier:Soldier,pos:Vec2):number{return directContacts(state,soldier).filter(c=>c.entity==='soldier'&&c.health==='dead'&&dist(c.pos,pos)<=MERGE_RADIUS_TILES).length;}
+function enemyVisibleNear(state:BattleState,soldier:Soldier,pos:Vec2):boolean{return directContacts(state,soldier).some(c=>c.entity==='soldier'&&c.health!=='dead'&&c.health!=='incapacitated'&&dist(c.pos,pos)<=MERGE_RADIUS_TILES);}
 
 function maintainBeliefs(state: BattleState, soldier: Soldier, dtSinceLast: number): void {
   const mind = soldier.mind;
   for (let i = mind.beliefs.length - 1; i >= 0; i--) {
     const b = mind.beliefs[i];
     b.confidence -= (1 / 120) * dtSinceLast;
-    if (hasLOS(state.map, soldier.pos, b.pos) && !enemyVisibleNear(state, soldier, b.pos)) {
+    if (dist(soldier.pos,b.pos)*TILE_M<100*humanCapability(soldier,state.time).sensing&&hasLOS(state.map, soldier.pos, b.pos) && !enemyVisibleNear(state, soldier, b.pos)) {
       b.confidence *= dm.pow(0.5, dtSinceLast / 10);
     }
     b.deadSeen = countDeadNear(state, soldier, b.pos);
@@ -221,22 +187,6 @@ function maintainBeliefs(state: BattleState, soldier: Soldier, dtSinceLast: numb
       continue;
     }
     if (b.confidence < 0.1) mind.beliefs.splice(i, 1);
-  }
-}
-
-function shareBeliefs(state: BattleState, soldier: Soldier, team: Team | undefined): void {
-  if (!team) return;
-  const isLeader = soldier.id === team.leaderId;
-  for (const id of team.soldierIds) {
-    if (id === soldier.id) continue;
-    const o = state.soldiers.get(id);
-    if (!o || o.health === 'dead' || o.health === 'incapacitated') continue;
-    const dM = dist(o.pos, soldier.pos) * TILE_M;
-    const shares = (isLeader && dM <= 30) || dM <= 10;
-    if (!shares) continue;
-    for (const b of soldier.mind.beliefs) {
-      addOrMergeBelief(o.mind, b.pos, 'reported', b.confidence * 0.7, b.count, b.time);
-    }
   }
 }
 
@@ -275,11 +225,7 @@ function decayThreatAndBeliefs(state: BattleState, dt: number, soldier: Soldier,
     maintainBeliefs(state, soldier, t.beliefAccum);
     t.beliefAccum = 0;
   }
-  t.shareAccum += dt;
-  if (t.shareAccum >= 2) {
-    shareBeliefs(state, soldier, state.teams.get(soldier.teamId));
-    t.shareAccum = 0;
-  }
+
 }
 
 // ------------------------------------------------------------------- events
@@ -290,9 +236,10 @@ export const TEAMMATE_FIRE_STRESS = 0.5;
 /** Fire that lands near (or on) a soldier: near-miss/hit stress + belief/threatDir update (spec §5),
  * plus first-fire shock for green troops (spec §11). */
 export function onIncomingFire(
-  state: BattleState, rng: Rng, soldier: Soldier, shooter: Soldier | null, impactPos: Vec2,
+  state: BattleState, _rng: Rng, soldier: Soldier, shooter: Soldier | null, impactPos: Vec2,
   weaponCls: WeaponClass, applyStress = true,
 ): void {
+  const local=openHumanRng(state,soldier,'incoming'),rng=local.rng;try{
   const mind = soldier.mind;
   const distTiles = dist(soldier.pos, impactPos);
   const distM = distTiles * TILE_M;
@@ -326,24 +273,9 @@ export function onIncomingFire(
   }
   mind.lastIncomingAt = state.time;
 
-  if (shooter) {
-    const spotted = state.spotted[soldier.side].has(shooter.id);
-    if (spotted) {
-      addOrMergeBelief(mind, shooter.pos, 'fired', 0.9, 1, state.time);
-      mind.threatDir = angleTo(soldier.pos, shooter.pos);
-      mind.threatLevel = 1;
-    } else if (hasLOS(state.map, soldier.pos, shooter.pos)) {
-      mind.threatDir = angleTo(soldier.pos, shooter.pos);
-      mind.threatLevel = 1;
-      const dir = mind.threatDir;
-      const farPos = { x: soldier.pos.x + dm.sin(dir) * (60 / TILE_M), y: soldier.pos.y - dm.cos(dir) * (60 / TILE_M) };
-      addOrMergeBelief(mind, farPos, 'fired', 0.5, 1, state.time);
-    } else {
-      mind.threatLevel = Math.max(mind.threatLevel, 0.6);
-    }
-  } else {
-    mind.threatLevel = Math.max(mind.threatLevel, 0.6);
-  }
+  const seen=shooter?directContacts(state,soldier).find(c=>c.entity==='soldier'&&c.id===shooter.id):null;
+  if(seen){addOrMergeBelief(mind,seen.pos,'fired',.9,1,seen.observedAt);mind.threatDir=angleTo(soldier.pos,seen.pos);mind.threatLevel=1;}
+  else mind.threatLevel=Math.max(mind.threatLevel,.6); // identity/range arrives only through sensory evidence
   if (mind.state === 'calm') mind.state = 'alert';
 
   // ---- first-fire shock (spec §11): experience < 30, first time fired upon this battle.
@@ -355,7 +287,7 @@ export function onIncomingFire(
       const team = state.teams.get(soldier.teamId);
       const leader = team ? state.soldiers.get(team.leaderId) : undefined;
       const leaderNear5 = !!leader && leader.id !== soldier.id && leader.health !== 'dead' && leader.health !== 'incapacitated'
-        && dist(leader.pos, soldier.pos) * TILE_M <= 5;
+        && canObserveComrade(state,soldier,leader,5);
       // Balance fix (suspect c): first-fire shock used to freeze every green soldier independently
       // the instant he was fired upon, so a whole conscript squad taking its first incoming rounds
       // together could freeze almost as one — no one left firing back to justify the freeze. Cap it
@@ -366,7 +298,8 @@ export function onIncomingFire(
         for (const id of team.soldierIds) {
           if (id === soldier.id) continue;
           const ot = track.soldiers.get(id);
-          if (ot && state.time < ot.freezeUntil) squadFrozenCount++;
+          const mate=state.soldiers.get(id);
+          if (ot && state.time < ot.freezeUntil && mate&&canObserveComrade(state,soldier,mate)) squadFrozenCount++;
         }
       }
       const squadSize = team ? team.soldierIds.length : 1;
@@ -380,6 +313,8 @@ export function onIncomingFire(
       }
     }
   }
+
+  }finally{local.save();}
 }
 
 /** Explosion (HE/mortar/grenade) landing within 20 m of a soldier (spec §2). */
@@ -396,12 +331,7 @@ export function onExplosionNear(state: BattleState, soldier: Soldier, pos: Vec2)
 function nearestBeliefOrEnemy(state: BattleState, s: Soldier): Vec2 | null {
   let best: Vec2 | null = null;
   let bestD = Infinity;
-  for (const id of state.spotted[s.side]) {
-    const e = state.soldiers.get(id);
-    if (!e || e.health === 'dead' || e.health === 'incapacitated') continue;
-    const d = dist(e.pos, s.pos);
-    if (d < bestD) { bestD = d; best = e.pos; }
-  }
+  for(const c of knownContacts(state,s)){if(c.health==='dead'||c.health==='incapacitated')continue;const d=dist(c.pos,s.pos);if(d<bestD){bestD=d;best=c.pos;}}
   if (best) return best;
   for (const b of s.mind.beliefs) {
     const d = dist(b.pos, s.pos);
@@ -418,7 +348,7 @@ function enterBerserk(state: BattleState, soldier: Soldier, track: MindTrack): v
   const dest = nearestBeliefOrEnemy(state, soldier);
   if (dest) {
     soldier.targetPoint = { ...dest };
-    soldier.path = findPath(state.map, soldier.pos, dest, 'infantry');
+    soldier.path = findPath(planningMap(state,soldier), soldier.pos, dest, 'infantry');
   }
 }
 
@@ -439,7 +369,8 @@ function buddyIdOf(team: Team, id: number): number | null {
 }
 
 /** A teammate was killed/wounded within sight (spec §2 table + §11 buddies/payback). */
-export function onCasualtySeen(state: BattleState, rng: Rng, soldier: Soldier, victim: Soldier, killed: boolean): void {
+export function onCasualtySeen(state: BattleState, _rng: Rng, soldier: Soldier, victim: Soldier, killed: boolean): void {
+  const local=openHumanRng(state,soldier,'casualty'),rng=local.rng;try{
   const team = state.teams.get(soldier.teamId);
   const isBuddy = team ? buddyIdOf(team, soldier.id) === victim.id : false;
 
@@ -457,7 +388,7 @@ export function onCasualtySeen(state: BattleState, rng: Rng, soldier: Soldier, v
         const d = dist(b.pos, victim.pos);
         if (d < bestD) { bestD = d; best = b; }
       }
-      if (best) { best.confidence = 1; best.count += 1; best.time = state.time; }
+      if (best) best.confidence = Math.max(best.confidence,.7); // anger cannot refresh a stale sighting
       if (team) personalityMessage(state, track, team, `${soldier.rank}. ${soldier.name} wants payback.`, 'info');
     } else if (soldier.experience < 40) {
       getSoldierTrack(track, soldier.id).buddyFearUntil = state.time + 30;
@@ -465,6 +396,8 @@ export function onCasualtySeen(state: BattleState, rng: Rng, soldier: Soldier, v
   }
 
   if (killed) maybeBerserk(state, rng, soldier, getTrack(state));
+
+  }finally{local.save();}
 }
 
 /** The soldier was hit himself (spec §2 "Own wound"). */
@@ -478,16 +411,17 @@ export function onOwnWound(soldier: Soldier): void {
 }
 
 /** MG gunner hit while manning the gun: whole team gets +20 stress (spec §11 MG teams). */
-export function onGunnerHit(state: BattleState, team: Team): void {
+export function onGunnerHit(state: BattleState, team: Team,victim:Soldier): void {
   for (const id of team.soldierIds) {
     const o = state.soldiers.get(id);
-    if (!o || o.health === 'dead' || o.health === 'incapacitated') continue;
+    if (!o||!canObserveComrade(state,o,victim)) continue;
     addStress(o.mind, 20);
   }
 }
 
 /** Called by combat.ts each time a soldier fires; drives sniper relocation (spec §11). */
-export function onFired(state: BattleState, rng: Rng, soldier: Soldier): void {
+export function onFired(state: BattleState, _rng: Rng, soldier: Soldier): void {
+  const local=openHumanRng(state,soldier,'fired'),rng=local.rng;try{
   const team = state.teams.get(soldier.teamId);
   if (!team || team.type !== 'sniper') return;
   const t = getSoldierTrack(getTrack(state), soldier.id);
@@ -502,15 +436,17 @@ export function onFired(state: BattleState, rng: Rng, soldier: Soldier): void {
     const angle = rng.range(0, Math.PI * 2);
     const distTiles = rng.range(10, 20) / TILE_M;
     const dest = { x: soldier.pos.x + dm.cos(angle) * distTiles, y: soldier.pos.y + dm.sin(angle) * distTiles };
-    soldier.path = findPath(state.map, soldier.pos, dest, 'infantry');
+    soldier.path = findPath(planningMap(state,soldier), soldier.pos, dest, 'infantry');
     if (soldier.activity !== 'firing') soldier.activity = 'moving';
   }
+
+  }finally{local.save();}
 }
 
 // ---------------------------------------------------------- continuous inputs
 const AT_WEAPON_CLASSES = new Set<WeaponClass>(['atgun', 'atrocket', 'atrifle']);
 
-function teamHasAT(state: BattleState, team: Team): boolean {
+function teamHasAT(state: BattleState, team: Team,observer:Soldier): boolean {
   // item 039: a gun crew's own piece is AT-capable even though its men carry carbines/pistols —
   // the crew of an intact AT gun must not loop in tank stress; a destroyed/abandoned piece no longer counts
   if (team.crewWeapon && !team.crewWeapon.destroyed) {
@@ -525,22 +461,15 @@ function teamHasAT(state: BattleState, team: Team): boolean {
   }
   for (const id of team.soldierIds) {
     const s = state.soldiers.get(id);
-    if (!s || s.health === 'dead' || s.health === 'incapacitated') continue;
+    if (!s)continue;const health=s.id===observer.id?s.health:observer.perception?.casualties[s.id]?.health;
+    if(health==='dead'||health==='incapacitated')continue;
     const w = WEAPONS[s.weaponId];
     if (w && AT_WEAPON_CLASSES.has(w.cls)) return true;
   }
   return false;
 }
 
-function enemyTankInSight(state: BattleState, s: Soldier): boolean {
-  for (const id of state.spottedVehicles[s.side]) {
-    const v = state.vehicles.get(id);
-    if (!v || v.state === 'knockedOut') continue;
-    const def = VEHICLE_DEFS[v.defId];
-    if (def && (def.kind === 'tank' || def.kind === 'spg')) return true;
-  }
-  return false;
-}
+function enemyTankInSight(state:BattleState,s:Soldier):boolean{return knownContacts(state,s).some(c=>c.entity==='vehicle'&&state.time-c.observedAt<30&&dist(s.pos,c.pos)*TILE_M<150&&['tank','spg'].includes(VEHICLE_DEFS[c.vehicleDefId??'']?.kind??'')&&c.vehicleState!=='knockedOut'&&c.vehicleState!=='burning');}
 
 function computeSurrounded(state: BattleState, s: Soldier): boolean {
   const rangeTiles = 60 / TILE_M;
@@ -566,7 +495,7 @@ function stepContinuousStress(state: BattleState, s: Soldier, team: Team | undef
   let positive = 0;
   const mind = s.mind;
 
-  if (team && enemyTankInSight(state, s) && !teamHasAT(state, team)) positive += 0.6 * dt;
+  if (team && enemyTankInSight(state, s) && !teamHasAT(state, team,s)) positive += 0.6 * dt;
 
   mind.surrounded = computeSurrounded(state, s);
   if (mind.surrounded) positive += 2 * dt;
@@ -578,9 +507,8 @@ function stepContinuousStress(state: BattleState, s: Soldier, team: Team | undef
 
   positive *= traitStressMul(mind.trait);
 
-  const leader = team ? state.soldiers.get(team.leaderId) : undefined;
-  const leaderAlive = !!leader && leader.health !== 'dead' && leader.health !== 'incapacitated';
-  const leaderNear10 = leaderAlive && leader ? dist(leader.pos, s.pos) * TILE_M <= 10 : false;
+  const leadership=knownLeader(state,s),leader=leadership.leader,leaderAlive=leadership.alive;
+  const leaderNear10 = leaderAlive && leadership.near && leader ? dist(leader.pos, s.pos) * TILE_M <= 10 : false;
 
   // Balance tuning: decay rates raised (3/6/9, was 2/4/6) to match the halved stress inputs above
   // and let stress/fear actually fall between engagements instead of only ever ratcheting up.
@@ -601,7 +529,7 @@ function resumeFromOrder(state: BattleState, s: Soldier, team: Team | undefined)
   s.path = [];
   const order = team?.order;
   if (order && (order.type === 'move' || order.type === 'moveFast' || order.type === 'sneak')) {
-    s.path = routeVia(state, s.pos, orderRoutePoints(order), 'infantry');
+    s.path = routeVia(state, s.pos, orderRoutePoints(order), 'infantry',false,undefined,s);
     s.activity = order.type === 'moveFast' ? 'movingFast' : order.type === 'sneak' ? 'sneaking' : 'moving';
     // down under fire on the move (hitTheDirt.ts): he crawls on until he judges it quiet
     if ((order.type === 'moveFast' || order.type === 'move') && s.mind.downAt != null) s.stance = 'prone';
@@ -695,14 +623,14 @@ function maybeRally(state: BattleState, s: Soldier, team: Team | undefined, trac
   if (leader.health === 'dead' || leader.health === 'incapacitated') return;
   if (isDazed(leader, state.time)) return; // a dazed leader rallies nobody (sim/daze.ts)
   if (leader.experience < 50) return;
-  if (dist(leader.pos, s.pos) * TILE_M > 10) return;
+  if (dist(leader.pos, s.pos) * TILE_M > 10||!communicationLink(state,leader,s)) return;
   const last = track.lastRallyAt.get(team.id) ?? -Infinity;
   if (state.time - last < 30) return;
   track.lastRallyAt.set(team.id, state.time);
   for (const id of team.soldierIds) {
     const o = state.soldiers.get(id);
     if (!o || o.health === 'dead' || o.health === 'incapacitated') continue;
-    if (dist(o.pos, leader.pos) * TILE_M > 10) continue;
+    if (dist(o.pos, leader.pos) * TILE_M > 10||!communicationLink(state,leader,o)) continue;
     addStress(o.mind, -30);
     o.morale = clamp(o.morale + 5, 0, 100);
   }
@@ -710,6 +638,7 @@ function maybeRally(state: BattleState, s: Soldier, team: Team | undefined, trac
 }
 
 function syncActivityForState(state: BattleState, s: Soldier, team: Team | undefined, prevState: MentalState, track: MindTrack): void {
+  if(s.vehicleId!=null)return;
   const mind = s.mind;
   const wasSevere = SEVERE_ACTIVITY[prevState] !== undefined;
   const isSevere = SEVERE_ACTIVITY[mind.state] !== undefined;
@@ -734,13 +663,13 @@ function syncActivityForState(state: BattleState, s: Soldier, team: Team | undef
   }
 }
 
-function stepOneMind(state: BattleState, rng: Rng, dt: number, s: Soldier, track: MindTrack): void {
+function stepOneMind(state: BattleState, _rng: Rng, dt: number, s: Soldier, track: MindTrack): void {
+  const local=openHumanRng(state,s,'mind'),rng=local.rng;try{
   const mind = s.mind;
   const team = state.teams.get(s.teamId);
   const t = getSoldierTrack(track, s.id);
 
-  let hesitDt = dt;
-  if (s.fatigue > 70) hesitDt = dt * 0.5; // fatigue doubles hesitation duration -> halves the decay rate
+  const hesitDt=dt/humanCapability(s,state.time).decision;
   mind.hesitation = Math.max(0, mind.hesitation - hesitDt);
 
   // Retry a refused order once hesitation has run out (spec §4: "hesitates before retrying"),
@@ -778,18 +707,17 @@ function stepOneMind(state: BattleState, rng: Rng, dt: number, s: Soldier, track
   if (mind.fear > 60) s.morale = clamp(s.morale - 0.3 * dt, 0, 100);
   else if (mind.fear < 20) s.morale = clamp(s.morale + 0.2 * dt, 0, 100);
 
-  const leader = team ? state.soldiers.get(team.leaderId) : undefined;
-  const leaderAlive = !!leader && leader.health !== 'dead' && leader.health !== 'incapacitated';
-  const leaderNear15 = leaderAlive && leader ? dist(leader.pos, s.pos) * TILE_M <= 15 : false;
+  const leadership=knownLeader(state,s),leader=leadership.leader,leaderAlive=leadership.alive;
+  const leaderNear15 = leaderAlive && leadership.near && leader ? dist(leader.pos, s.pos) * TILE_M <= 15 : false;
   let mDelta = 0;
-  if (leaderNear15 && inCommand(state, s) && state.sides[s.side].morale > 50) mDelta += 0.02 * dt;
+  if (leaderNear15 && inCommand(state, s) && s.morale > 50) mDelta += 0.02 * dt;
   if (!leaderAlive) mDelta -= 0.05 * dt;
   if (mind.helpless) mDelta -= 0.1 * dt;
   mind.motivation = clamp(mind.motivation + mDelta, 0, 100);
 
   decayThreatAndBeliefs(state, dt, s, t);
 
-  const leaderNear10 = leaderAlive && leader ? dist(leader.pos, s.pos) * TILE_M <= 10 : false;
+  const leaderNear10 = leaderAlive && leadership.near && leader ? dist(leader.pos, s.pos) * TILE_M <= 10 : false;
   const leaderFactor = leaderNear10 ? 0.5 : (leaderAlive ? 1 : 2);
 
   const hasThreatSignal = mind.beliefs.length > 0 || mind.threatLevel > 0.05 || (state.time - mind.lastIncomingAt) < 5;
@@ -815,6 +743,8 @@ function stepOneMind(state: BattleState, rng: Rng, dt: number, s: Soldier, track
 
   if (mind.state !== prevState) mind.stateSince = state.time;
   syncActivityForState(state, s, team, prevState, track);
+
+  }finally{local.save();}
 }
 
 // -------------------------------------------------------------- team-level passes
@@ -890,25 +820,24 @@ function stepLeaderSuccession(state: BattleState, dt: number, track: MindTrack):
     if (leaderAlive) { track.leaderDeadSince.delete(team.id); continue; }
     if (team.soldierIds.length === 0) continue;
 
+    const witnesses=team.soldierIds.map(id=>state.soldiers.get(id)).filter((s):s is Soldier=>conscious(s,state.time)&&!knownLeader(state,s).alive);
+    if(!witnesses.length)continue;
     let since = track.leaderDeadSince.get(team.id);
     if (since === undefined) { since = state.time; track.leaderDeadSince.set(team.id, since); }
 
     for (const id of team.soldierIds) {
       const s = state.soldiers.get(id);
-      if (!s || s.health === 'dead' || s.health === 'incapacitated') continue;
+      if (!s || !witnesses.includes(s)) continue;
       addStress(s.mind, 0.5 * dt);
     }
 
     if (state.time - since >= 10) {
-      let best: Soldier | null = null;
-      for (const id of team.soldierIds) {
-        const s = state.soldiers.get(id);
-        if (!s || s.health === 'dead' || s.health === 'incapacitated') continue;
-        if (!best || s.experience > best.experience) best = s;
-      }
+      let best:Soldier|null=null;
+      for(const s of witnesses)if(!best||s.experience>best.experience)best=s;
       if (best) {
         team.leaderId = best.id;
         best.isLeader = true;
+        for(const s of witnesses)if(s.id===best.id||communicationLink(state,best,s)){const p=perception(s);p.leaderId=best.id;p.leadership={leaderId:best.id,observedAt:state.time};}
         personalityMessage(state, track, team, `${best.rank}. ${best.name} takes command.`, 'info');
       }
       track.leaderDeadSince.delete(team.id);
@@ -918,20 +847,19 @@ function stepLeaderSuccession(state: BattleState, dt: number, track: MindTrack):
 
 /** True while a team has no living leader (spec §11 "who's in charge?"): orders.ts applies an
  * obedience penalty during this window. */
-export function isLeaderless(state: BattleState, team: Team): boolean {
+export function isLeaderless(state: BattleState, team: Team,observer?:Soldier): boolean {
+  if(observer)return !knownLeader(state,observer).alive;
   const leader = state.soldiers.get(team.leaderId);
   return !leader || leader.health === 'dead' || leader.health === 'incapacitated';
 }
 
-/** Advance every living, uncrewed soldier's mind by dt. Vehicle crews share the commander's mind
- * and are stepped separately by vehicle.ts (spec §10). */
+/** Advance every living person, including each seated crew member, from their own evidence. */
 export function stepMinds(state: BattleState, rng: Rng, dt: number): void {
   const track = getTrack(state);
   stepMgAnchors(state, dt);
   stepGunTakeover(state, track);
   stepLeaderSuccession(state, dt, track);
   for (const s of state.soldiers.values()) {
-    if (s.vehicleId != null) continue;
     if (s.health === 'dead' || s.health === 'incapacitated' || s.activity === 'surrendered') continue;
     stepOneMind(state, rng, dt, s, track);
   }

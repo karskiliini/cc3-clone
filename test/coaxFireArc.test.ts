@@ -1,6 +1,8 @@
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
 import { describe, it, expect } from 'vitest';
 import { makeState, addTank, soldier } from './vehicleDamageHelpers';
-import { stepCombat } from '@/sim/combat';
+import { stepCombat as rawStepCombat } from '@/sim/combat';
 import { Rng } from '@/shared/rng';
 
 const DEG = Math.PI / 180;
@@ -10,9 +12,9 @@ function scene(turretDeg: number, targetDeg: number) {
   const state = makeState(1943);
   const { v } = addTank(state, 'pz4gh', { x: 200.5, y: 200.5 }, 0, 50);
   v.turretFacing = turretDeg * DEG;
-  const victim = soldier(1, 900, 'german', at(targetDeg, 60), 'kar98k');
+  const victim = soldier(1, 900, 'soviet', at(targetDeg, 60), 'kar98k');
   state.soldiers.set(1, victim);
-  state.teams.set(900, { id: 900, side: 'german', soldierIds: [1], outOfAction: false, order: { type: 'defend', target: victim.pos, issuedAt: 0 }, pos: victim.pos, facing: 0 } as never);
+  state.teams.set(900, { id: 900, side: 'soviet', soldierIds: [1], outOfAction: false, order: { type: 'defend', target: victim.pos, issuedAt: 0 }, pos: victim.pos, facing: 0 } as never);
   state.spotted.german = new Set([1]);
   return { state, v, victim };
 }

@@ -12,7 +12,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { runReplay, type ReplayLog } from '@/sim/replay';
 import { hashHex, hashState } from '@/sim/stateHash';
-import { BUILD_VERSION } from '@/shared/version';
+import { BUILD_VERSION,SIMULATION_VERSION } from '@/shared/version';
 
 const args = process.argv.slice(2);
 const opt = (name: string): string | undefined => {
@@ -27,6 +27,7 @@ if (!file) {
 
 const log = JSON.parse(readFileSync(file, 'utf8')) as ReplayLog;
 const until = opt('--until') != null ? Number(opt('--until')) : undefined;
+if(log.simulationVersion!==SIMULATION_VERSION)console.error(`note: recorded ruleset ${log.simulationVersion??'legacy'}, replayed by ${SIMULATION_VERSION}`);
 const t0 = performance.now();
 const { battle, chain } = runReplay(log, until);
 const ms = performance.now() - t0;

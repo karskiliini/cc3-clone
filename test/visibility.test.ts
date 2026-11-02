@@ -102,17 +102,18 @@ function fnv(str: string): string {
   return (h >>> 0).toString(16);
 }
 
-describe('spotting outcomes are unchanged by the observerVisibility refactor', () => {
-  it('matches the pre-refactor digest for fixed seeds', () => {
+describe('personal spotting acquisition under ruleset 056', () => {
+  it('keeps per-person acquisition stable for fixed seeds under ruleset 056', () => {
     const digests = [1, 2, 3, 4].map((seed) => fnv(spottingDigest(seed)));
     expect(digests).toEqual(GOLDEN);
   });
 });
 
-// Recorded from the pre-refactor spotting.ts (inline range checks + losTrace cache).
+// Ruleset 056 golden: observer-keyed independent acquisition, no shared RNG or best-observer union.
+// Regenerated 2026-11-02 alongside explicit sensory-boundary tests.
 // Regenerated 2026-09-17: low growth (grass, crops, hedges, fences, rubble) now conceals only a
 // sight line that passes below its top, so standing men and tank commanders see over tall grass.
-const GOLDEN: string[] = ['c98c42f5', '77c5fb91', '14b9794c', '4ba53a7b'];
+const GOLDEN: string[] = ['e362f33', 'da2e183f', 'd98a031b', '69f28296'];
 
 describe('observerVisibility', () => {
   const openMap = () => buildMap(makeDef((tiles) => tiles.fill('open'), 200, 20));

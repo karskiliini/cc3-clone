@@ -1,3 +1,5 @@
+import {planningMap} from './navigationKnowledge';
+import {visualIds,vehicleVisualIds,vehicleObserver,knownContacts,knowsDirectly,teamObserver,directContacts} from './perception';
 import { ensureRiderSeat, reserveRiderSeat } from './passengerPhysics';
 // Infantry riding in transports (the SdKfz 251): a Move order onto a friendly transport with room
 // is a mount order; the men walk to the rear door and board ONE AT A TIME; the vehicle stands
@@ -161,10 +163,10 @@ export function startUnload(state: BattleState, v: Vehicle, panicked: boolean, t
 function threatDirFor(state: BattleState, v: Vehicle, s: Soldier): number | null {
   if (s.mind.threatDir != null) return s.mind.threatDir;
   const crewTeam = state.teams.get(v.teamId);
-  if (crewTeam) for (const id of crewTeam.soldierIds) { const c = state.soldiers.get(id); if (c && c.mind.threatDir != null) return c.mind.threatDir; }
+  const commander=vehicleObserver(state,v,'commander');if(commander?.mind.threatDir!=null)return commander.mind.threatDir;
   let best: Vec2 | null = null, bd = Infinity;
-  for (const id of state.spotted[v.side]) { const e = state.soldiers.get(id); if (!e || !isAble(e)) continue; const d = dist(e.pos, v.pos); if (d < bd) { bd = d; best = e.pos; } }
-  for (const id of state.spottedVehicles[v.side]) { const e = state.vehicles.get(id); if (!e) continue; const d = dist(e.pos, v.pos); if (d < bd) { bd = d; best = e.pos; } }
+  for (const id of vehicleVisualIds(state,v)) { const e = state.soldiers.get(id); if (!e || !isAble(e)) continue; const d = dist(e.pos, v.pos); if (d < bd) { bd = d; best = e.pos; } }
+  for (const id of vehicleVisualIds(state,v,'vehicle')) { const e = state.vehicles.get(id); if (!e) continue; const d = dist(e.pos, v.pos); if (d < bd) { bd = d; best = e.pos; } }
   return best ? angleTo(v.pos, best) : null;
 }
 
@@ -225,7 +227,7 @@ export function onPassengerOut(state: BattleState, v: Vehicle, s: Soldier, panic
   const order = team?.order;
   if (team && order && !order.mountVehicleId && (order.type === 'move' || order.type === 'moveFast' || order.type === 'sneak')) {
     const dest = { x: order.target.x + s.formationOffset.x, y: order.target.y + s.formationOffset.y };
-    s.path = findPath(state.map, s.pos, dest, 'infantry');
+    s.path = findPath(planningMap(state,s), s.pos, dest, 'infantry');
     s.activity = order.type === 'moveFast' ? 'movingFast' : order.type === 'sneak' ? 'sneaking' : 'moving';
     s.stance = order.type === 'sneak' ? 'prone' : 'standing';
     return;
@@ -248,16 +250,16 @@ export function onPassengerOut(state: BattleState, v: Vehicle, s: Soldier, panic
     return false;
   };
   const tile = settleTile(state, s, slot, threat ?? v.hullFacing, 3, taken) ?? slot;
-  s.path = findPath(state.map, s.pos, tile, 'infantry');
+  s.path = findPath(planningMap(state,s), s.pos, tile, 'infantry');
   s.activity = s.path.length > 0 ? 'moving' : 'defending';
   s.mind.anchor = { x: tile.x, y: tile.y };
 }
 
-function straightLineClear(state: BattleState, a: Vec2, b: Vec2): boolean {
+function straightLineClear(state: BattleState, s:Soldier, a: Vec2, b: Vec2): boolean {
   const n = Math.max(2, Math.ceil(dist(a, b) * 2));
   for (let k = 1; k <= n; k++) {
     const x = Math.floor(a.x + ((b.x - a.x) * k) / n), y = Math.floor(a.y + ((b.y - a.y) * k) / n);
-    if (!inBounds(state.map, x, y) || !isPassable(state.map, x, y, 'infantry')) return false;
+    if (!inBounds(planningMap(state,s), x, y) || !isPassable(planningMap(state,s), x, y, 'infantry')) return false;
   }
   return true;
 }
@@ -266,9 +268,9 @@ function walkTo(state: BattleState, s: Soldier, spot: Vec2, fast: boolean): void
   const end = s.path.length > 0 ? s.path[s.path.length - 1] : null;
   if (!end || dist(end, spot) > 0.3) {
     // straight there when the ground allows: men funnelled through the same tile centres jam
-    if (straightLineClear(state, s.pos, spot)) s.path = [{ ...spot }];
+    if (straightLineClear(state, s, s.pos, spot)) s.path = [{ ...spot }];
     else {
-      s.path = findPath(state.map, s.pos, spot, 'infantry');
+      s.path = findPath(planningMap(state,s), s.pos, spot, 'infantry');
       if (s.path.length === 0 || dist(s.path[s.path.length - 1], spot) > 0.05) s.path.push({ ...spot });
     }
   }

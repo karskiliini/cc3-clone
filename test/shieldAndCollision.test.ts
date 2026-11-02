@@ -1,3 +1,6 @@
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
+const stepBowMgForTest=withWeaponSight(rawStepBowMgForTest);
 import { describe, it, expect } from 'vitest';
 import type { BattleState, CrewWeaponState, Soldier, Team, Vehicle } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
@@ -5,7 +8,7 @@ import { Rng } from '@/shared/rng';
 import { createMind } from '@/sim/mind';
 import { gunShieldShadow, GUN_SHIELD_HALF_WIDTH_M, GUN_SHIELD_ARC_RAD } from '@/sim/crewWeapon';
 import { stepVehicleCollisions } from '@/sim/vehicle';
-import { stepCombat, stepBowMgForTest } from '@/sim/combat';
+import { stepCombat as rawStepCombat, stepBowMgForTest as rawStepBowMgForTest } from '@/sim/combat';
 import { resolveSoldierOverlapForTest } from '@/sim/movement';
 import { VEHICLE_DEFS } from '@/data/units';
 

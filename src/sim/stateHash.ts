@@ -1,3 +1,4 @@
+import {TERRAIN_PROPS} from './terrain';
 import { computePhysicalBuildings } from './heightField';
 // ============================================================================
 // stateHash.ts — a 32-bit fingerprint of the battle (multiplayer plan §3 "Desync detection",
@@ -20,6 +21,7 @@ const FNV_PRIME = 0x01000193;
 const f64 = new Float64Array(1);
 const u32 = new Uint32Array(f64.buffer);
 
+const terrainCodes=new Map(Object.keys(TERRAIN_PROPS).sort().map((key,i)=>[key,i]));
 class Fnv {
   h = FNV_OFFSET;
   /** One 32-bit word, byte by byte. */
@@ -52,6 +54,8 @@ class Fnv {
     if (typeof value === 'number') { this.int(2); this.num(value); return; }
     if (typeof value === 'boolean') { this.int(3); this.bool(value); return; }
     if (typeof value === 'string') { this.int(4); this.str(value); return; }
+    if(value instanceof Set){this.int(8);this.data([...value].sort((a,b)=>typeof a==='number'&&typeof b==='number'?a-b:(String(a)<String(b)?-1:String(a)>String(b)?1:0)));return;}
+    if(value instanceof Map){this.int(7);this.data([...value].sort(([a],[b])=>typeof a==='number'&&typeof b==='number'?a-b:(String(a)<String(b)?-1:String(a)>String(b)?1:0)));return;}
     if (Array.isArray(value)) {
       this.int(5); this.int(value.length); for (const item of value) this.data(item); return;
     }
@@ -73,100 +77,22 @@ class Fnv {
 export function hashState(battle: { state: BattleState; rng: Rng }): number {
   const { state, rng } = battle;
   const h = new Fnv();
-  h.int(rng.state());
+  h.int(rng.state());h.data(state.noise);
   h.int(state.tick ?? 0);
   h.num(state.time);
   h.int(state.nextId);
+  for(const tile of state.map.tiles)h.int(terrainCodes.get(tile)??-1);
+  for(const smoke of state.map.smoke)h.num(smoke);
+  h.data(state.map.navigationChanged);
+  h.data(state.communication);h.data(state.indirectCommunication);h.data(state.mindRuntime);h.data(state.moraleRuntime);h.data(state.aiRuntime);h.data(state.humanRuntime);
   h.str(state.phase);
   if(state.deploymentReady)h.data(state.deploymentReady);
   if(state.multiplayerPolicy)h.data(state.multiplayerPolicy);
   if(state.controllerOverrides)h.data(state.controllerOverrides);
-  for (const s of state.soldiers.values()) {
-    h.int(s.id);
-    h.vec(s.pos);
-    h.str(s.health);
-    h.str(s.activity);
-    h.str(s.stance);
-    h.int(s.ammo);
-    h.int(s.ammoReserve);
-    h.int(s.grenades);
-    h.num(s.morale);
-    h.num(s.suppression);
-    h.int(s.facing);
-    h.int(s.path.length); for (const point of s.path) h.vec(point);
-    h.data(s.vehicleWaitSince); h.data(s.vehicleDodgeRollAt);
-    h.int(s.targetSoldierId ?? -1);
-    h.int(s.targetVehicleId ?? -1);
-    h.str(s.mind.state);
-    h.num(s.mind.stress);
-    h.int(s.vehicleId ?? -1);
-    h.data(s.seat); h.data(s.hatch); h.data(s.crewTask);
-    if(s.lastToolWorkAt!=null){h.str('toolWork');h.num(s.lastToolWorkAt);}
-    if (s.digging) { h.str('digging'); h.data(s.digging); }
-    if (s.rider) { h.str('rider'); h.data(s.rider); }
-  }
-  for (const v of state.vehicles.values()) {
-    h.int(v.id);
-    if (v.trackChains) { h.str('trackChains'); h.data(v.trackChains); }
-    h.vec(v.pos);
-    h.num(v.hullFacing);
-    h.num(v.turretFacing);
-    h.str(v.state);
-    h.int(v.mainAmmo);
-    h.int(v.coaxAmmo);
-    h.int(v.hits);
-    h.num(v.speed);
-    const b = v.body; h.bool(!!b);
-    if (b) {
-      for (const p of [b.position, b.velocity, b.angularVelocity]) { h.num(p.x); h.num(p.y); h.num(p.z); }
-      const q = b.orientation; h.num(q.x); h.num(q.y); h.num(q.z); h.num(q.w);
-      h.int(b.suspensionTravel.length); for (const x of b.suspensionTravel) h.num(x);
-      h.bool(b.asleep); h.bool(b.hungUp); h.bool(b.overturned);
-      h.num(b.quietS); h.num(b.tippedS); h.num(b.hungS); h.num(b.rockPhaseS);
-      h.num(b.rockTries); h.num(b.groundVersion);
-    }
-    const local = v.localDriver; h.bool(Object.hasOwn(v, 'localDriver')); h.bool(!!local);
-    if (local) {
-      const field = (o: any, k: string, integer = false) => { h.bool(o != null && Object.hasOwn(o, k)); integer ? h.int(o?.[k]) : h.num(o?.[k]); };
-      // Work budgets are safe integers, not restricted to32bits: serialize both words.
-      const count = (o: any, k: string) => { field(o,k,true); h.int(Math.floor(o?.[k] / 4294967296)); };
-      field(local,'owner',true);
-      const e = local.episode; h.bool(Object.hasOwn(local,'episode')); h.bool(!!e);
-      if (e) { h.num(e.anchorM.x); h.num(e.anchorM.y); h.int(e.attempts); h.int(e.limit); h.bool(e.exhausted); }
-      const p = local.recovery; h.bool(Object.hasOwn(local,'recovery')); h.bool(!!p);
-      if (p) {
-        field(p,'gear',true); field(p,'capMs'); field(p.anchorM,'x'); field(p.anchorM,'y'); field(p.axis,'x'); field(p.axis,'y'); field(p,'entryMaxProjection');
-        h.bool(Object.hasOwn(p,'phase')); h.int(p.phase==='pending'?1:p.phase==='braking'?2:p.phase==='retreat'?3:0);
-        h.bool(p.turning);
-        count(p,'budgetTicks'); count(p,'elapsedTicks');
-      }
-      const w = local.window; h.bool(Object.hasOwn(local,'window')); h.bool(!!w);
-      if (w) {
-        field(w.goal,'x'); field(w.goal,'y'); field(w,'gear',true); field(w,'onlyDir',true); field(w,'direction',true); field(w,'ticks',true);
-        field(w,'startDistanceM'); field(w,'startAbsError'); field(w,'startRate'); field(w.axis,'x'); field(w.axis,'y'); field(w,'startFlow'); field(w,'minimumYaw'); field(w,'minimumSpeed');
-      }
-    }
-    h.num(v.gunElevationRad ?? 0);
-    h.data(v.navigation);
-    h.data(v.passengerIds); h.data(v.unloading); h.data(v.doorBusyUntil); h.data(v.boardingProgress); h.data(v.towedTeamId); h.data(v.mobilityTeamId); h.data(v.seats);
-    h.int(v.path.length); for (const point of v.path) h.vec(point);
-    // Physical driver and gun ownership gates affect the next accepted pose.
-    for (const key of ['targetVehicleId', 'targetSoldierId', 'targetPoint', 'holdUntil', 'blockedSince',
-      'giveWayUntil', 'creepForGun', 'creepAim', 'creepUntil', 'fireHaltUntil', 'fireHaltSince',
-      'noFireHaltUntil', 'mineTileSeen', 'gunLay', 'loadedRound', 'mainFireTimer', 'loadTotalS'] as const) h.data(v[key]);
-    if (v.damage) for (const k of Object.keys(v.damage).sort()) { h.str(k); h.str(v.damage[k as keyof typeof v.damage]); }
-    else h.int(-1);
-  }
-  for (const t of state.teams.values()) {
-    h.int(t.id);
-    h.vec(t.pos);
-    if (t.deploymentFacing != null) { h.str('deploymentFacing'); h.num(t.deploymentFacing); }
-    h.str(t.status);
-    h.data(t.transportId); h.data(t.assignedVehicleIds); h.data(t.supportForTeamId); h.data(t.mobility); h.data(t.crewWeapon);
-    h.bool(!!t.order);
-    if (t.order) for (const key of ['type', 'target', 'targetTeamId', 'targetVehicleId', 'lastSeenAt',
-      'lastKnownPos', 'issuedAt', 'mountVehicleId', 'onFoot', 'dismount', 'waypoints'] as const) h.data(t.order[key]);
-  }
+  // Canonical person/task/vehicle state includes all future-affecting timers and evidence.
+  for(const s of state.soldiers.values())h.data(s);
+  for(const v of state.vehicles.values())h.data(v);
+  for(const t of state.teams.values())h.data(t);
   for (const vl of state.map.victoryLocations) {
     h.int(vl.id);
     h.str(vl.owner);
@@ -185,7 +111,7 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
   // Pending explosions are canonical future damage, including launch-time incoming geometry.
   h.int(state.pendingBursts.length);
   for (const b of state.pendingBursts) {
-    h.num(b.at); h.vec(b.pos); h.str(b.weaponId); h.str(b.side);
+    h.num(b.at); h.vec(b.pos); h.str(b.weaponId); h.str(b.side);h.data(b.indirectMissionAt);
     h.bool(b.shooterId !== undefined); if (b.shooterId !== undefined) h.int(b.shooterId);
     h.bool(b.smoke !== undefined); if (b.smoke !== undefined) h.bool(b.smoke);
     h.bool(!!b.trajectory);

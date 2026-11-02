@@ -1,3 +1,6 @@
+import {planningMap} from './navigationKnowledge';
+import {openHumanRng} from './humanRandom';
+import {visualIds,vehicleVisualIds,vehicleObserver,knownContacts,knowsDirectly,teamObserver,directContacts} from './perception';
 import type { BattleState, GameMap, Soldier, Vec2 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
@@ -60,6 +63,7 @@ export function stepMovement(state: BattleState, rng: Rng, dt: number): void {
   // dazed by a blast (sim/daze.ts): the self-preservation crawl; nobody else moves these men
   stepDazed(state, rng, dt);
   for (const s of state.soldiers.values()) {
+    const personal=openHumanRng(state,s,'movement'),rng=personal.rng;try{
     if (s.health === 'dead' || s.health === 'incapacitated') continue;
 
     if (s.vehicleId != null) {
@@ -116,14 +120,10 @@ export function stepMovement(state: BattleState, rng: Rng, dt: number): void {
       if (Math.floor(state.time / 0.3) % 2 === 0) s.animFrame = 0; else s.animFrame = 1;
     }
 
-    // a man crawling under a Move Fast order tires like a walker, not a sprinter
-    if (s.activity === 'movingFast' && s.mind?.downAt == null) s.fatigue = Math.min(100, s.fatigue + 2 * dt);
-    else if (s.activity === 'movingFast') s.fatigue = Math.min(100, s.fatigue + 0.5 * dt);
-    else if (s.activity === 'moving') s.fatigue = Math.min(100, s.fatigue + 0.5 * dt);
-    else if (s.activity === 'idle') s.fatigue = Math.max(0, s.fatigue - 1 * dt);
-
     // G7: engineers hold still and work — cut wire, dig mines (defending/idle only)
     stepEngineerWork(state, s, rng);
+
+    }finally{personal.save();}
   }
   separateSoldiers(state, dt);
 }
@@ -232,14 +232,7 @@ function onArrive(state: BattleState, s: Soldier): void {
   if (s.mind) { s.mind.downAt = undefined; s.mind.downHoldUntil = undefined; }
 }
 
-function isEnemyNear(state: BattleState, s: Soldier): boolean {
-  const spotted = state.spotted[s.side];
-  for (const eid of spotted) {
-    const e = state.soldiers.get(eid);
-    if (e && dist(e.pos, s.pos) < NEAR_ENEMY_RADIUS_TILES) return true;
-  }
-  return false;
-}
+function isEnemyNear(state:BattleState,s:Soldier):boolean{return knownContacts(state,s).some(c=>dist(c.pos,s.pos)<NEAR_ENEMY_RADIUS_TILES&&c.health!=='dead');}
 
 /** Panicked soldiers run directly away from the nearest threat (coverSeek.ts sets a path toward
  * cover >= 0.4 first, per spec §9; this is only the fallback when no such cover was found — a
@@ -251,15 +244,10 @@ function handleFleeing(state: BattleState, s: Soldier, dt: number): void {
   if (last <= -999) return; // already froze once with no destination
   let nearest: Vec2 | null = null;
   let nd = Infinity;
-  for (const eid of state.spotted[s.side]) {
-    const e = state.soldiers.get(eid);
-    if (!e) continue;
-    const d = dist(s.pos, e.pos);
-    if (d < nd) { nd = d; nearest = e.pos; }
-  }
+  for(const belief of s.mind.beliefs){if(belief.confidence<.2)continue;const d=dist(s.pos,belief.pos);if(d<nd){nd=d;nearest=belief.pos;}}
   const dir = nearest ? vnorm(vsub(s.pos, nearest)) : { x: s.side === 'german' ? -1 : 1, y: 0 };
   const dest = vadd(s.pos, vscale(dir, 20));
-  s.path = findPath(state.map, s.pos, dest, 'infantry');
+  s.path = findPath(planningMap(state,s), s.pos, dest, 'infantry');
   s.reloadTimer = s.path.length > 0 ? 0 : -1000;
 }
 
@@ -276,7 +264,7 @@ function handleRouting(state: BattleState, s: Soldier, dt: number): void {
   if (s.path.length === 0 || s.reloadTimer <= 0) {
     s.reloadTimer = REPATH_INTERVAL_S;
     const centre = { x: zone.x + zone.w / 2, y: zone.y + zone.h / 2 };
-    s.path = findPath(state.map, s.pos, centre, 'infantry');
+    s.path = findPath(planningMap(state,s), s.pos, centre, 'infantry');
   }
 }
 

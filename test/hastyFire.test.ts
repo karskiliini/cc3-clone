@@ -1,9 +1,11 @@
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
 import { describe, expect, it } from 'vitest';
 import { Rng } from '@/shared/rng';
 import { WEAPONS } from '@/data/weapons';
 import { clearInfantryAim, infantryAimReady } from '@/sim/infantryAim';
 import { hitChance } from '@/sim/ballistics';
-import { stepCombat } from '@/sim/combat';
+import { stepCombat as rawStepCombat } from '@/sim/combat';
 import { makeState, mkTeam, soldier } from './vehicleDamageHelpers';
 
 function scene(weapon = 'kar98k', seed = 7) {

@@ -1,3 +1,4 @@
+import {planningMap} from './navigationKnowledge';
 // ============================================================================
 // daze.ts — knocked down -> DAZED -> RECOVERING (user request 2026-09-17).
 //
@@ -107,6 +108,8 @@ export function dazeVisionFactor(s: Soldier, time: number): number {
 export function applyDaze(state: BattleState, s: Soldier, force: number, woundedByIt: boolean): void {
   if (s.health === 'dead' || s.health === 'incapacitated') return;
   const dur = dazeDurationS(s, force, woundedByIt);
+  const condition=s.condition??={breath:0,sweat:0,hearingLoss:0,at:state.time,lastPos:{...s.pos}};
+  condition.hearingLoss=Math.max(condition.hearingLoss,Math.min(.9,.35+force*.01));
   const downUntil = Math.max(state.time, s.stunnedUntil ?? state.time);
   const from = isDazed(s, state.time) ? Math.max(s.dazedUntil!, downUntil) : downUntil;
   s.dazedUntil = Math.min(state.time + DAZE_CAP_S, from + dur);
@@ -159,7 +162,7 @@ export function stepDazed(state: BattleState, _rng: Rng, dt: number): void {
       const found = bestCoverNear(state, s, DAZE_CRAWL_RADIUS_M / TILE_M);
       const underFire = state.time - s.mind.lastIncomingAt < DAZE_UNDER_FIRE_S;
       if (found && (found.current < DAZE_OPEN_COVER || underFire) && found.score - found.current >= DAZE_CRAWL_GAIN) {
-        const path = findPath(state.map, s.pos, found.tile, 'infantry');
+        const path = findPath(planningMap(state,s), s.pos, found.tile, 'infantry');
         let len = 0;
         for (let i = 0, p = s.pos; i < path.length; p = path[i], i++) len += dist(p, path[i]);
         // round a building is not "the nearest cover": he has the strength for a dozen metres

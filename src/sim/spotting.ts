@@ -6,6 +6,7 @@ import { losTrace, eyeHeightM, EYE_STANDING_M, EYE_VEHICLE_M } from './los';
 import { groundAtTile } from './map';
 import { angleTo, facingAngle, wrapAngle, dist } from '@/shared/math';
 import { onSpotted } from './mind';
+import {perception,recordVisual} from './perception';
 import { dazeVisionFactor } from './daze';
 import { VEHICLE_DEFS } from '@/data/units';
 import { vehicleEyes, type VehicleEye } from './vehicleVision';
@@ -68,45 +69,15 @@ function mindSpotFactor(spotter: Soldier, enemyPos: Vec2): number {
 // stronger one. Bout timing (phase, period, length) is derived from the soldier's id via hash2 —
 // deterministic and NOT drawn from the seeded Rng stream, so calling this never perturbs any other
 // random draw, and the same (soldier, time) always answers the same way (repeatable, no state).
-export const PAIN_MILD_FACTOR = 0.85;
-export const PAIN_BOUT_FACTOR = 0.35;
-export const PAIN_BOUT_FACTOR_LOW_MORALE = 0.2;
-export const PAIN_BOUT_FACTOR_VETERAN = 0.5;
-const PAIN_PERIOD_MIN_S = 12, PAIN_PERIOD_RANGE_S = 13; // bouts recur every 12-25 s
-const PAIN_BOUT_MIN_S = 3, PAIN_BOUT_RANGE_S = 3;       // each bout lasts 3-6 s
-/** Below this experience, or this morale, a wounded man's pain bouts hit him hardest (green troops
- * and men who have had enough); at/above VETERAN experience he grits his teeth instead. */
-const PAIN_LOW_EXPERIENCE = 35, PAIN_LOW_MORALE = 30, PAIN_VETERAN_EXPERIENCE = 65;
-
-/** Spotting-factor multiplier from pain: 1 for every healthy (or dead/incapacitated — moot, they
- * don't spot) man. A wounded man is at PAIN_MILD_FACTOR most of the time, dropping into a strong,
- * recurring bout (PAIN_BOUT_FACTOR, harder on green/shaken troops, easier on veterans) roughly
- * 15-35% of the time. Also usable directly by combat code (e.g. a wounded gunner's aim) — exported
- * for exactly that. Pure: same inputs, same answer, every time. */
-export function painBoutActive(soldier: Soldier, time: number): boolean {
-  if (soldier.health !== 'wounded') return false;
-  const id = soldier.id;
-  const period = PAIN_PERIOD_MIN_S + hash2(id, 0, 11) * PAIN_PERIOD_RANGE_S;
-  const boutLen = PAIN_BOUT_MIN_S + hash2(id, 0, 23) * PAIN_BOUT_RANGE_S;
-  const phase = hash2(id, 0, 37) * period;
-  const t = ((time + phase) % period + period) % period;
-  return t < boutLen;
-}
-
-export function painVisionFactor(soldier: Soldier, time: number): number {
-  if (soldier.health !== 'wounded') return 1;
-  if (!painBoutActive(soldier, time)) return PAIN_MILD_FACTOR;
-  if (soldier.experience >= PAIN_VETERAN_EXPERIENCE) return PAIN_BOUT_FACTOR_VETERAN;
-  if (soldier.experience < PAIN_LOW_EXPERIENCE || soldier.morale < PAIN_LOW_MORALE) return PAIN_BOUT_FACTOR_LOW_MORALE;
-  return PAIN_BOUT_FACTOR;
-}
+export { painBoutActive,painVisionFactor,PAIN_MILD_FACTOR,PAIN_BOUT_FACTOR,PAIN_BOUT_FACTOR_LOW_MORALE,PAIN_BOUT_FACTOR_VETERAN } from './humanCondition';
+import { painBoutActive,painVisionFactor,humanCapability } from './humanCondition';
 
 /** painVisionFactor of whichever soldier is behind this spotter (himself, or — for a vehicle
  * eye — the crewman whose eye it is); 1 for the no-crew-data fallback spotter. */
 function spotterPainFactor(state: BattleState, sp: Spotter): number {
   const s = sp.soldier ?? (sp.vehicleEye ? state.soldiers.get(sp.vehicleEye.soldierId) : undefined);
   // a man dazed by a blast sees very little (sim/daze.ts)
-  return s ? painVisionFactor(s, state.time) * dazeVisionFactor(s, state.time) : 1;
+  return s ? humanCapability(s,state.time).sensing : 1;
 }
 
 /** An eye on the battlefield: a dismounted soldier (with his mind's spotting bonuses), or one of a
@@ -166,7 +137,7 @@ export function collectSpotters(state: BattleState, side: Side, teamIds?: Readon
     if (teamIds && !teamIds.has(v.teamId)) continue;
     const eyes = vehicleEyes(state, v);
     if (eyes.length > 0) {
-      for (const eye of eyes) spotters.push({ pos: eye.pos, soldier: null, vehicleEye: eye });
+      for (const eye of eyes) spotters.push({ pos: eye.pos, soldier: state.soldiers.get(eye.soldierId)??null, vehicleEye: eye });
     } else if (!VEHICLE_DEFS[v.defId]) {
       // unrecognised defId (test fixtures): fall back to the old single blind-arc-less point spot
       spotters.push({ pos: v.pos, soldier: null });
@@ -268,127 +239,47 @@ export function item14FloorM(state: BattleState, ev: Vehicle): number {
   return 0;
 }
 
-export function updateSpotting(state: BattleState, rng: Rng): void {
-  const soldiers = Array.from(state.soldiers.values());
-  const vehicles = Array.from(state.vehicles.values());
-
-  for (const side of SIDES) {
-    const enemySide = otherSide(side);
-
-    const spotters = collectSpotters(state, side);
-    const losFor = makeLosVisibilityCache(state);
-
-    // ---- soldier targets ----
-    const prevSpotted = state.spotted[side];
-    const newSpotted = new Set<number>();
-    const alwaysSq = dm.pow(ALWAYS_SPOT_RANGE_M / TILE_M, 2);
-
-    // For belief clustering (spec §5): count how many currently-visible enemies of this side sit
-    // within 4 tiles of each other, computed once per enemy-of-this-side (not per spotter).
-    const clusterCache = new Map<number, number>();
-
-    // item 014: burning wrecks are light sources — anyone within the fire's glow and LOS of the
-    // burning hull is revealed to this side, whatever the ambient conditions.
-    const fires: Vec2[] = [];
-    for (const v of vehicles) {
-      if (v.side !== enemySide && v.side !== side) continue;
-      if (v.state === 'burning' || (v.state === 'knockedOut' && v.cookOff?.rackFire && state.time - (v.fire?.t0 ?? 0) < 60)) fires.push(v.pos);
-    }
-
-    for (const e of soldiers) {
-      if (e.side !== enemySide) continue;
-      if (e.health === 'dead') continue;
-      if (e.vehicleId !== null) continue; // crewed soldiers not spotted individually
-
-      let bestP = 0;
-      let bestSpotter: Soldier | null = null;
-      let anyClearLOS = false;
-      let alwaysSpotted = false;
-
-      // the target's own silhouette top: a prone man behind a crest is masked where a standing
-      // one is not, so the LOS trace needs his stance as well as the observer's
-      const targetTopM = eyeHeightM(e.stance);
-      // G31 camouflage nets: beyond close range a netted ambusher is effectively invisible
-      // (the net breaks up his silhouette against the ground); up close the signature is
-      // still reduced (CAMO_NET_VISIBILITY). Firing or moving sheds the net instantly.
-      const net = state.teams.get(e.teamId);
-      const netted = !!net?.camouflaged && e.activity === 'ambushing' &&
-        !isMoving(e.activity) && !isFiringRecently(e, state.time);
-      const camoRangeM = netted ? CAMO_NET_MAX_SPOT_M : SOLDIER_SPOT_RANGE_M;
-      for (const sp of spotters) {
-        const visibility = observerVisibility(state, sp, e.pos, camoRangeM, losFor, targetTopM);
-        const dsq = distSqTiles(sp.pos, e.pos);
-        if (visibility > 0.05) anyClearLOS = true;
-        if (dsq <= alwaysSq && visibility > 0) alwaysSpotted = true;
-
-        // item 014: within the fire's glow (FIRELIGHT_RANGE_M) and with LOS to the burning hull,
-        // the target is lit up regardless of his stance or movement
-        if (!alwaysSpotted && visibility > 0) {
-          for (const f of fires) {
-            if (distSqTiles(f, e.pos) <= dm.pow(FIRELIGHT_RANGE_M / TILE_M, 2)) { alwaysSpotted = true; break; }
-          }
-        }
-
-        const mindFactor = sp.soldier ? mindSpotFactor(sp.soldier, e.pos) : sp.vehicleEye?.factor ?? 1;
-        const moanFactor = e.health === 'wounded'
-          ? (painBoutActive(e, state.time) ? 1.5 : 1.1)
-          : 1;
-        const camoNet = netted ? CAMO_NET_VISIBILITY : 1;
-        const p = visibility * visibilityStanceFactor(e.stance) * (isMoving(e.activity) ? 1.5 : 1) *
-          (isFiringRecently(e, state.time) ? 3 : 1) * mindFactor * spotterPainFactor(state, sp) *
-          heightSpotFactor(state, sp.pos, e.pos) * moanFactor * camoNet;
-        if (p > bestP) { bestP = p; bestSpotter = sp.soldier; }
+export function updateSpotting(state: BattleState, _rng: Rng): void {
+  const previous=new Map<number,Set<string>>();
+  for(const s of state.soldiers.values()){const p=perception(s);previous.set(s.id,new Set(p.visual.map(c=>`${c.entity}:${c.id}`)));p.visual=[];}
+  for(const side of SIDES){
+    const soldiers=new Set<number>(),vehicles=new Set<number>(),spotters=collectSpotters(state,side),losFor=makeLosVisibilityCache(state);
+    for(const sp of spotters){
+      const owner=sp.soldier,prior=owner?previous.get(owner.id):undefined;
+      for(const e of state.soldiers.values()){
+        if(e.side===side||e.vehicleId!=null)continue;
+        const net=state.teams.get(e.teamId),netted=!!net?.camouflaged&&e.activity==='ambushing'&&!isFiringRecently(e,state.time);
+        const visibility=observerVisibility(state,sp,e.pos,netted?CAMO_NET_MAX_SPOT_M:SOLDIER_SPOT_RANGE_M,losFor,eyeHeightM(e.stance));
+        if(visibility<=0)continue;
+        const mind=owner?mindSpotFactor(owner,e.pos):sp.vehicleEye?.factor??1;
+        const p=visibility*visibilityStanceFactor(e.stance)*(isMoving(e.activity)?1.5:1)*(isFiringRecently(e,state.time)?3:1)*mind*spotterPainFactor(state,sp)*heightSpotFactor(state,sp.pos,e.pos)*(netted?CAMO_NET_VISIBILITY:1);
+        const near=distSqTiles(sp.pos,e.pos)<=dm.pow(ALWAYS_SPOT_RANGE_M/TILE_M,2),lit=Array.from(state.vehicles.values()).some(v=>v.state==='burning'&&distSqTiles(v.pos,e.pos)<=dm.pow(FIRELIGHT_RANGE_M/TILE_M,2));
+        // Keyed receiver/target noise: unrelated hidden entities never shift acquisition RNG.
+        const draw=hash2(owner?.id??-1,e.id,(state.tick??Math.floor(state.time*10))^7411);
+        const acquired=p>0&&(near||lit||p>=.5||draw<p*.5||!!prior?.has(`soldier:${e.id}`)&&p>.05);
+        if(!acquired)continue;if(e.health!=='dead')soldiers.add(e.id);if(owner)recordVisual(state,owner,e,'soldier');
       }
-
-      let spot = alwaysSpotted || bestP >= 0.5 || rng.chance(bestP * 0.5);
-      if (!spot && prevSpotted.has(e.id) && anyClearLOS) spot = true;
-
-      if (spot) {
-        newSpotted.add(e.id);
-        if (bestSpotter) {
-          let count = clusterCache.get(e.id);
-          if (count === undefined) {
-            count = 1;
-            for (const e2 of soldiers) {
-              if (e2 === e || e2.side !== enemySide || e2.health === 'dead') continue;
-              if (dist(e.pos, e2.pos) <= 4) count++;
-            }
-            clusterCache.set(e.id, count);
-          }
-          onSpotted(state, bestSpotter, e, count);
+      for(const v of state.vehicles.values()){
+        if(v.side===side)continue;
+        // Existing wreck illumination can extend acquisition range, but never LOS.
+        // Both the light-to-target and observer-to-target paths must be clear.
+        const illuminated=v.state==='burning'||v.engineOnFire||Array.from(state.vehicles.values()).some(f=>f.id!==v.id&&f.state==='burning'&&distSqTiles(f.pos,v.pos)<=dm.pow(FIRELIGHT_RANGE_M/TILE_M,2)&&losFor(f.pos,v.pos,EYE_VEHICLE_M,EYE_VEHICLE_M)>.025);
+        const visibility=observerVisibility(state,sp,v.pos,illuminated?Infinity:VEHICLE_SPOT_RANGE_M,losFor,EYE_VEHICLE_M);
+        // Fire and engine sounds cannot turn an occluded hull into an identified vehicle.
+        if(visibility*spotterPainFactor(state,sp)*(sp.vehicleEye?.factor??1)<=.025)continue;
+        vehicles.add(v.id);if(owner)recordVisual(state,owner,v,'vehicle');
+      }
+      if(owner){
+        const objectives=perception(owner).objectives??={};for(const vl of state.map.victoryLocations)if(observerVisibility(state,sp,{x:vl.x,y:vl.y},100,losFor)>.1)objectives[vl.id]={owner:vl.owner,observedAt:state.time,sourceId:owner.id};
+        const seen=perception(owner).visual;
+        for(const c of seen)if(c.entity==='soldier'&&c.health!=='dead'){
+          const e=state.soldiers.get(c.id)!;
+          const count=seen.filter(o=>o.entity==='soldier'&&o.health!=='dead'&&dist(o.pos,c.pos)<=4).length;
+          onSpotted(state,owner,e,count);
         }
       }
     }
-    state.spotted[side] = newSpotted;
-
-    // ---- vehicle targets ----
-    const newSpottedVehicles = new Set<number>();
-    for (const ev of vehicles) {
-      if (ev.side !== enemySide) continue;
-      const damagedEngine = ev.damage?.engine === 'damaged' || ev.damage?.engine === 'destroyed';
-      const floorM = Math.max(
-        ev.engineOnFire ? ALWAYS_SPOT_RANGE_M * 3 : damagedEngine ? ALWAYS_SPOT_RANGE_M * 1.5 : 0,
-        item14FloorM(state, ev));
-      const floorTiles = floorM / TILE_M;
-      // item 014: a vehicle standing in a burning wreck's firelight is revealed to any spotter
-      // who can see the FIRE itself — the glow marks the target's position even over ground the
-      // target hides behind
-      const litBy = item14FloorM(state, ev) > 0;
-      const firePos = litBy ? nearestFirePos(state, ev) : null;
-      let clear = false;
-      for (const sp of spotters) {
-        if (distSqTiles(sp.pos, ev.pos) <= floorTiles * floorTiles) { clear = true; break; }
-        if (firePos) {
-          const fireVis = losFor
-            ? losFor(sp.pos, firePos, spotterEyeM(sp), EYE_VEHICLE_M)
-            : losTrace(state.map, sp.pos, firePos, { eyeM: spotterEyeM(sp), targetM: EYE_VEHICLE_M }).visibility;
-          if (fireVis > 0) { clear = true; break; }
-        }
-        const visibility = observerVisibility(state, sp, ev.pos, VEHICLE_SPOT_RANGE_M, losFor, EYE_VEHICLE_M);
-        if (visibility > 0) { clear = true; break; }
-      }
-      if (clear) newSpottedVehicles.add(ev.id);
-    }
-    state.spottedVehicles[side] = newSpottedVehicles;
+    // Display summaries are derived outputs. They grant no personal knowledge.
+    state.spotted[side]=soldiers;state.spottedVehicles[side]=vehicles;
   }
 }

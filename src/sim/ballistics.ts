@@ -1,3 +1,4 @@
+import {humanCapability} from './humanCondition';
 import type { Health, IncomingTrajectory, RoundType, Soldier, Stance, Vec2, Vec3, Vehicle, WeaponDef } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import type { Rng } from '@/shared/rng';
@@ -29,7 +30,7 @@ function rangeFactor(weapon: WeaponDef, distM: number): number {
 function shooterFactor(shooter: Soldier): number {
   const suppressionTerm = 1 - shooter.suppression / 150;
   const expTerm = 0.7 + shooter.experience / 300;
-  const fatigueTerm = shooter.fatigue > 70 ? 0.8 : 1;
+  const fatigueTerm = humanCapability(shooter).accuracy;
   const mindState = shooter.mind?.state;
   // spec §3 state effects: shaken accuracy x0.7, berserk x1.2 (and ignores suppression, handled
   // by the caller bypassing the suppression fire-rate throttle for berserk soldiers).
@@ -37,7 +38,7 @@ function shooterFactor(shooter: Soldier): number {
   // first-fire shock (spec §11): a green soldier fires wildly once shaken by it.
   const wildFireTerm = mindState === 'shaken' && shooter.experience < 30 ? 0.5 : 1;
   // stress (mind spec §2) unsettles his hands before it tips him into 'shaken': up to -20% at 100
-  const stressTerm = 1 - clamp(shooter.mind?.stress ?? 0, 0, 100) * 0.002;
+  const stressTerm = 1; // stress already contributes through the shared tremor capability
   return suppressionTerm * expTerm * fatigueTerm * stateTerm * wildFireTerm * stressTerm;
 }
 

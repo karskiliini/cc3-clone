@@ -1,3 +1,4 @@
+import {planningMap,knownHazards} from './navigationKnowledge';
 import type { BattleState, GameMap, Soldier, Vec2 } from '@/shared/types';
 import { dist } from '@/shared/math';
 import { inBounds, tileAt } from './map';
@@ -57,9 +58,9 @@ export function canStepAside(state: BattleState, s: Soldier, to: Vec2): boolean 
  * needs real cover comparable to the best remaining indoor place. Only friendly occupancy and
  * this soldier's own threat set enter the decision. */
 export function buildingDestination(state: BattleState, s: Soldier, target: Vec2, slot: Vec2): Vec2 | null {
-  const rooms = buildingTiles(state.map, target);
+  const map = planningMap(state,s),rooms = buildingTiles(map, target);
   if (!rooms.length) return null;
-  const map = state.map, keys = new Set(rooms.map(p => Math.floor(p.y) * map.width + Math.floor(p.x)));
+  const keys = new Set(rooms.map(p => Math.floor(p.y) * map.width + Math.floor(p.x)));
   const occupied: Vec2[] = [];
   for (const other of state.soldiers.values()) {
     if (other.id === s.id || other.side !== s.side || other.health === 'dead' || other.vehicleId != null) continue;
@@ -67,7 +68,7 @@ export function buildingDestination(state: BattleState, s: Soldier, target: Vec2
     // Men already approaching the house keep their space, including during re-evaluation.
     if (other.health !== 'incapacitated' && other.path.length) occupied.push(other.path[other.path.length - 1]);
   }
-  const threats = buildThreatSet(state, s, state.teams.get(s.teamId)), hazards = fireHazards(state);
+  const threats = buildThreatSet(state, s, state.teams.get(s.teamId)), hazards = knownHazards(state,s);
   const safe = (p: Vec2) => isPassable(map, Math.floor(p.x), Math.floor(p.y), 'infantry') && !nearFireHazard(hazards, p);
   const free = (p: Vec2) => !occupied.some(o => dist(o, p) < SOLDIER_MIN_SPACE_TILES);
   const takenTile = (p: Vec2) => occupied.some(o => Math.floor(o.x) === Math.floor(p.x) && Math.floor(o.y) === Math.floor(p.y));

@@ -1,3 +1,7 @@
+import {planningMap} from './navigationKnowledge';
+import {withCommandRng} from './humanRandom';
+import {knownContacts,commandRecipient,observedVehicle,observedSoldier} from './perception';
+import type {PersonalContact} from '@/shared/types';
 import type {
   BattleState, Order, OrderType, Rect, Side, Soldier, Team, Vec2, Vehicle, VictoryLocation,
 } from '@/shared/types';
@@ -282,12 +286,12 @@ function nearestAttackingInfantryTeam(teams: Team[], vehicleTeam: Team): Team | 
 
 // -------------------------------------------------------------- order gate
 interface OrderRecord { key: string; at: number }
-const lastOrderTracks = new WeakMap<BattleState, Map<number, OrderRecord>>();
-const callCounters = new WeakMap<BattleState, Map<Side, number>>();
+
+
 
 function getOrderTrack(state: BattleState): Map<number, OrderRecord> {
-  let t = lastOrderTracks.get(state);
-  if (!t) { t = new Map(); lastOrderTracks.set(state, t); }
+  const store=state.aiRuntime??={};let t=store.orderTracks as Map<number,OrderRecord>|undefined;
+  if(!t){t=new Map();store.orderTracks=t;}
   return t;
 }
 
@@ -313,7 +317,7 @@ function tryIssueOrder(state: BattleState, battle: AIBattle, track: Map<number, 
 
 // ---------------------------------------------------------------- halftracks
 /** Squads a halftrack has already carried forward (they are not picked up again). */
-const carriedTeams = new WeakMap<BattleState, Set<number>>();
+
 const DISMOUNT_SHORT_M = 110;   // set down this far short of the objective ...
 const DISMOUNT_ENEMY_M = 150;   // ... or as soon as known enemy is this close
 const PICKUP_RANGE_M = 70;
@@ -343,8 +347,8 @@ function stepTransportAI(
   attackerTeams: Team[], enemyZoneCentre: Vec2, rng: Rng,
 ): boolean {
   if (vehicle.state !== 'ok') return false;
-  let carried = carriedTeams.get(state);
-  if (!carried) { carried = new Set(); carriedTeams.set(state, carried); }
+  const store=state.aiRuntime??={};let carried=store.carried as Set<number>|undefined;
+  if(!carried){carried=new Set();store.carried=carried;}
   const riders = passengersAboard(state, vehicle).filter((s) => s.health !== 'dead' && s.health !== 'incapacitated');
   const boarding = attackerTeams.find((t) => t.transportId === vehicle.id && t.order?.mountVehicleId === vehicle.id);
   const enemy = nearestSpottedSoldier(state, side, vehicle.pos);
@@ -482,13 +486,32 @@ export function aiDeploy(state: BattleState, side: Side, rng: Rng, battle: AIBat
   spaceOutVehicles(state, side);
 }
 
+const commandViews=new WeakMap<BattleState,Partial<Record<Side,BattleState>>>();
+const commandEvidence=new WeakMap<BattleState,PersonalContact[]>();
+function commandView(root:BattleState,side:Side):BattleState{
+ let views=commandViews.get(root);if(!views){views={};commandViews.set(root,views);}
+ const view=views[side]??={...root};views[side]=view;
+ const commander=commandRecipient(root,side),objectives=commander?.perception?.objectives??{};
+ const evidence=knownContacts(root,commander);commandEvidence.set(view,evidence);
+ const soldiers=new Map([...root.soldiers].filter(([,s])=>s.side===side)),vehicles=new Map([...root.vehicles].filter(([,v])=>v.side===side)),teams=new Map([...root.teams].filter(([,t])=>t.side===side));
+ for(const c of evidence){
+  if(c.entity==='soldier')soldiers.set(c.id,observedSoldier(c,otherSide(side)));else vehicles.set(c.id,observedVehicle(c,otherSide(side)));
+  let t=teams.get(c.teamId);if(!t){t={id:c.teamId,defId:'observed',side:otherSide(side),name:'Observed contact',type:c.teamType??(c.entity==='vehicle'?'tank':'rifle'),soldierIds:[],leaderId:c.id,vehicleId:null,order:null,facing:0,experience:50,morale:50,status:'Waiting',kills:0,aiObjective:null,outOfAction:false,pos:{...c.pos}};teams.set(t.id,t);}
+  if(c.entity==='soldier'){t.soldierIds.push(c.id);if(c.health!=='dead'&&c.health!=='incapacitated')t.outOfAction=false;}else{t.vehicleId=c.id;t.outOfAction=c.vehicleState==='knockedOut'||c.vehicleState==='burning';}
+ }
+ Object.assign(view,root,{map:{...planningMap(root,commander),victoryLocations:root.map.victoryLocations.map(v=>({...v,owner:objectives[v.id]?objectives[v.id].owner:otherSide(root.map.def.attacker),capturingSide:null,captureTimer:0}))},soldiers,vehicles,teams,spotted:{german:new Set(),soviet:new Set(),[side]:new Set(evidence.filter(c=>c.entity==='soldier').map(c=>c.id))},spottedVehicles:{german:new Set(),soviet:new Set(),[side]:new Set(evidence.filter(c=>c.entity==='vehicle').map(c=>c.id))}});
+ return view;
+}
+
 // ------------------------------------------------------------------ step ai
 /** One AI decision for `side` (called every AI_INTERVAL by the battle loop). The side attacking
  * on this map runs the phased attack plan below; the side holding the victory locations runs the
  * defence. Both only use what the side has spotted or believes. */
-export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Side): void {
-  let counters = callCounters.get(state);
-  if (!counters) { counters = new Map(); callCounters.set(state, counters); }
+export function stepAI(state: BattleState, _rng: Rng, battle: AIBattle, side: Side): void {
+  withCommandRng(state,side,rng=>{
+  const store=state.aiRuntime??={};let counters=store.counters as Map<Side,number>|undefined;
+  if(!counters){counters=new Map();store.counters=counters;}
+  state=commandView(state,side);
   const n = (counters.get(side) ?? 0) + 1;
   counters.set(side, n);
   if (state.config.difficulty === 'easy' && n % 2 === 0) return;
@@ -496,6 +519,8 @@ export function stepAI(state: BattleState, rng: Rng, battle: AIBattle, side: Sid
   updateContacts(state, side, mem);
   if (state.map.def.attacker === side) stepAttackAI(state, rng, battle, side, mem);
   else stepDefenceAI(state, rng, battle, side, n, mem);
+
+  });
 }
 
 // ------------------------------------------------------------------ the defence
@@ -805,6 +830,7 @@ export interface Contact {
   antiTank: boolean;
   /** a vehicle's hull facing when it was last seen (which plate it shows to where) */
   hullFacing?: number;
+  vehicleDefId?:string;
 }
 
 export type AttackPhase = 'prep' | 'advance' | 'assault' | 'allIn' | 'consolidate' | 'hold';
@@ -841,11 +867,11 @@ export interface AttackPlan {
 }
 
 interface SideMemory { contacts: Map<number, Contact>; plan: AttackPlan | null }
-const memories = new WeakMap<BattleState, Partial<Record<Side, SideMemory>>>();
+
 
 function getMemory(state: BattleState, side: Side): SideMemory {
-  let m = memories.get(state);
-  if (!m) { m = {}; memories.set(state, m); }
+  const store=state.aiRuntime??={};let m=store.memories as Partial<Record<Side,SideMemory>>|undefined;
+  if(!m){m={};store.memories=m;}
   let s = m[side];
   if (!s) { s = { contacts: new Map(), plan: null }; m[side] = s; }
   return s;
@@ -853,44 +879,23 @@ function getMemory(state: BattleState, side: Side): SideMemory {
 
 /** Read-only view of the attack plan (tests, harness instrumentation, debug overlays). */
 export function getAttackPlan(state: BattleState, side: Side): Readonly<AttackPlan> | null {
-  return memories.get(state)?.[side]?.plan ?? null;
+  return (state.aiRuntime?.memories as Partial<Record<Side,SideMemory>>|undefined)?.[side]?.plan ?? null;
 }
 /** The side's remembered contacts (tests / instrumentation). */
 export function getContacts(state: BattleState, side: Side): Contact[] {
-  return Array.from(memories.get(state)?.[side]?.contacts.values() ?? []);
+  return Array.from((state.aiRuntime?.memories as Partial<Record<Side,SideMemory>>|undefined)?.[side]?.contacts.values() ?? []);
 }
 
 const AT_CLASSES = new Set(['atgun', 'atrocket', 'atrifle']);
 
-function updateContacts(state: BattleState, side: Side, mem: SideMemory): void {
-  const sum = new Map<number, { x: number; y: number; n: number; at: boolean }>();
-  for (const id of state.spotted[side]) {
-    const s = state.soldiers.get(id);
-    if (!s || s.health === 'dead' || s.health === 'incapacitated' || s.activity === 'surrendered') continue;
-    if (s.vehicleId != null) continue;
-    let e = sum.get(s.teamId);
-    if (!e) { e = { x: 0, y: 0, n: 0, at: false }; sum.set(s.teamId, e); }
-    e.x += s.pos.x; e.y += s.pos.y; e.n++;
-    if (AT_CLASSES.has(WEAPONS[s.weaponId]?.cls ?? '')) e.at = true;
-  }
-  for (const [teamId, e] of sum) {
-    const team = state.teams.get(teamId);
-    if (!team) continue;
-    mem.contacts.set(teamId, { teamId, pos: { x: e.x / e.n, y: e.y / e.n }, at: state.time, vehicleId: null, type: team.type, antiTank: e.at });
-  }
-  for (const id of state.spottedVehicles[side]) {
-    const v = state.vehicles.get(id);
-    if (!v) continue;
-    if (v.state === 'knockedOut' || v.state === 'burning' || v.state === 'abandoned') { mem.contacts.delete(v.teamId); continue; }
-    const team = state.teams.get(v.teamId);
-    mem.contacts.set(v.teamId, { teamId: v.teamId, pos: { ...v.pos }, at: state.time, vehicleId: v.id, type: team?.type ?? 'tank', antiTank: !!VEHICLE_DEFS[v.defId]?.mainWeaponId, hullFacing: v.hullFacing });
-  }
-  for (const [k, c] of mem.contacts) {
-    if (state.time - c.at > CONTACT_KEEP_S) { mem.contacts.delete(k); continue; }
-    // a team that is seen to be finished (its men lie where we last saw them) is struck off
-    const t = state.teams.get(c.teamId);
-    if (!t || t.outOfAction) mem.contacts.delete(k);
-  }
+function updateContacts(state:BattleState,side:Side,mem:SideMemory):void{
+ const evidence=commandEvidence.get(state)??knownContacts(state,commandRecipient(state,side)),groups=new Map<number,PersonalContact[]>();
+ for(const c of evidence){const list=groups.get(c.teamId)??[];list.push(c);groups.set(c.teamId,list);}
+ for(const [id,list] of groups){const live=list.filter(c=>c.entity==='vehicle'?c.vehicleState!=='knockedOut'&&c.vehicleState!=='burning':c.health!=='dead'&&c.health!=='incapacitated');if(!live.length){mem.contacts.delete(id);continue;}
+  const c=live[0],vehicle=live.find(x=>x.entity==='vehicle');
+  mem.contacts.set(id,{teamId:id,pos:{x:live.reduce((n,c)=>n+c.pos.x,0)/live.length,y:live.reduce((n,c)=>n+c.pos.y,0)/live.length},at:Math.max(...live.map(c=>c.observedAt)),vehicleId:vehicle?.id??null,type:c.teamType??'rifle',antiTank:live.some(x=>AT_CLASSES.has(WEAPONS[x.weaponId??'']?.cls??''))||!!vehicle?.vehicleDefId,hullFacing:vehicle?.hullFacing,vehicleDefId:vehicle?.vehicleDefId});
+ }
+ for(const [id,c] of mem.contacts)if(state.time-c.at>CONTACT_KEEP_S)mem.contacts.delete(id);
 }
 
 function isSpottedNow(c: Contact, state: BattleState): boolean { return c.at >= state.time - 0.01; }
@@ -1123,15 +1128,13 @@ function losesDuel(state: BattleState, v: Vehicle, ev: Vehicle, from: Vec2 = v.p
   if (ours < 0.25) return true;
   if (ours >= theirs) return false;
   // comparable guns: the one who lays first wins
-  return timeToFirstShotS(state, v, ev.pos) > timeToFirstShotS(state, ev, v.pos) + 3;
+  return timeToFirstShotS(state, v, ev.pos) > 5 + 3;
 }
 
 /** The enemy vehicle of a contact AS IT WAS LAST SEEN (place and hull facing), for the duel and
  * fire-position sums: the AI never reads where an unseen vehicle really is now. */
-function asSeen(state: BattleState, c: Contact): Vehicle | null {
-  const ev = c.vehicleId != null ? state.vehicles.get(c.vehicleId) : undefined;
-  if (!ev) return null;
-  return { ...ev, pos: c.pos, hullFacing: c.hullFacing ?? ev.hullFacing };
+function asSeen(state:BattleState,c:Contact):Vehicle|null{
+ return c.vehicleId!=null&&c.vehicleDefId?observedVehicle({id:c.vehicleId,entity:'vehicle',teamId:c.teamId,pos:c.pos,observedAt:c.at,receivedAt:c.at,confidence:.7,uncertaintyM:5,sourceId:-1,vehicleDefId:c.vehicleDefId,hullFacing:c.hullFacing},state.teams.get(c.teamId)?.side??'soviet'):null;
 }
 
 /** Known enemy guns that would beat this vehicle (fresh contacts only). */

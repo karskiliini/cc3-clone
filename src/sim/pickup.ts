@@ -1,3 +1,7 @@
+import {planningMap} from './navigationKnowledge';
+import {hasLOS} from './los';
+import {humanCapability} from './humanCondition';
+import {visualIds,vehicleVisualIds,vehicleObserver,knownContacts,knowsDirectly,teamObserver,directContacts} from './perception';
 // ============================================================================
 // pickup.ts — picking things up is an individual decision (spec 2026-09-17 §9).
 //
@@ -48,10 +52,10 @@ const NO_LOOT_STATES = new Set(['pinned', 'cowering', 'panicked', 'broken', 'ber
 const NO_LOOT_ACTIVITIES = new Set<Activity>(['surrendered', 'routed', 'hiding', 'ambushing', 'panicked', 'cowering', 'pinned', 'berserk', 'dead', 'incapacitated']);
 
 interface PickupTrack { active: Set<number>; lastMsgAt: Map<number, number> }
-const tracks = new WeakMap<BattleState, PickupTrack>();
+
 function getTrack(state: BattleState): PickupTrack {
-  let t = tracks.get(state);
-  if (!t) { t = { active: new Set(), lastMsgAt: new Map() }; tracks.set(state, t); }
+  const store=state.humanRuntime??={};let t=store.pickup as PickupTrack|undefined;
+  if (!t) { t = { active: new Set(), lastMsgAt: new Map() }; store.pickup=t; }
   return t;
 }
 
@@ -115,7 +119,7 @@ function teamHasAt(state: BattleState, team: Team): boolean {
 }
 
 function enemyArmourKnown(state: BattleState, s: Soldier): boolean {
-  for (const id of state.spottedVehicles[s.side]) {
+  for (const id of visualIds(state,s,'vehicle')) {
     const v = state.vehicles.get(id);
     if (v && v.state !== 'knockedOut' && v.state !== 'burning' && v.state !== 'abandoned') return true;
   }
@@ -217,6 +221,7 @@ export function pickupPriority(state: BattleState, s: Soldier, team: Team, item:
 function chooseItem(state: BattleState, s: Soldier, team: Team, grid: Grid): { item: GroundItem; priority: number } | null {
   let best: GroundItem | null = null, bestP = 99, bestD = Infinity;
   forNear(grid, s.pos, REACH_SQUAD_MG_TILES, (it, d) => {
+    if(humanCapability(s,state.time).sensing<=.1||!hasLOS(state.map,s.pos,it.pos))return;
     if (it.claimedBy != null && it.claimedBy !== s.id) return;
     if (it.thrownAt != null && state.time - it.thrownAt < 2) return; // still in the air
     const p = pickupPriority(state, s, team, it, d, grid);
@@ -231,7 +236,7 @@ function startPickup(state: BattleState, s: Soldier, item: GroundItem, priority:
   let path: Vec2[] = [];
   if (d > ARRIVE_TILES) {
     const sameTile = Math.floor(s.pos.x) === Math.floor(item.pos.x) && Math.floor(s.pos.y) === Math.floor(item.pos.y);
-    path = sameTile ? [] : findPath(state.map, s.pos, item.pos, 'infantry', 1500);
+    path = sameTile ? [] : findPath(planningMap(state,s), s.pos, item.pos, 'infantry', 1500);
     if (!sameTile && path.length === 0) return; // cannot get there
     if (isPassable(state.map, Math.floor(item.pos.x), Math.floor(item.pos.y), 'infantry')) {
       if (path.length > 0) path.pop(); // the tile centre gives way to the item itself
@@ -265,7 +270,7 @@ function endPickup(state: BattleState, s: Soldier, track: PickupTrack, item: Gro
   }
   if (s.path.length > 0) { if (!MOVING.has(s.activity)) s.activity = 'moving'; return; }
   if (resume?.dest) {
-    s.path = findPath(state.map, s.pos, resume.dest, 'infantry', 3000);
+    s.path = findPath(planningMap(state,s), s.pos, resume.dest, 'infantry', 3000);
     s.activity = s.path.length > 0 ? (MOVING.has(resume.activity) ? resume.activity : 'moving') : 'idle';
   } else {
     s.activity = resume && (resume.activity === 'defending' || resume.activity === 'idle') ? resume.activity : 'idle';

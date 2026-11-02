@@ -165,7 +165,8 @@ it('crushes accepted tiles, runs over the accepted sweep, then rolls its fractio
   expect(mineRolls).toBe(1);
   expect(rng.state()).toBe(expectedRng.state());
   expect(mineAt(state.map, 20, 21)).toBe(MINE_NONE);
-  expect(v.state).toBe('immobilized');
+  expect([v.damage?.trackL,v.damage?.trackR]).toContain('destroyed');
+  expect(Object.values(v.trackChains??{}).some(chain=>chain.cutLink>=0)).toBe(true);
   expect(state.events.filter((event) => event.kind === 'kill')).toHaveLength(1);
 });
 
@@ -474,7 +475,8 @@ it('keeps ordinary tracked consequences while a live hull coasts through a short
   expect(takeHullDrive(v).speedMs).toBe(0);
   expect(v.pos.y).toBeLessThan(22);
   expect(mineAt(state.map, 20, 21)).toBe(MINE_NONE);
-  expect(draws).toBe(1); expect(v.state).toBe('immobilized');
+  expect(draws).toBe(1); expect([v.damage?.trackL,v.damage?.trackR]).toContain('destroyed');
+  expect(Object.values(v.trackChains??{}).some(chain=>chain.cutLink>=0)).toBe(true);
 });
 
 

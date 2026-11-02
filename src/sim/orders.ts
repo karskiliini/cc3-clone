@@ -1,3 +1,7 @@
+import {planningMap,knownHazards,observeNavigation} from './navigationKnowledge';
+import {openHumanRng} from './humanRandom';
+import {knownContacts,teamObserver,vehicleObserver} from './perception';
+import {humanCapability} from './humanCondition';
 import { requestMotorizedCrew } from './motorizedCrew';
 import { tryRemountOrder } from './vehicleCrew';
 import { transportOrderHook } from './transport';
@@ -67,11 +71,11 @@ function canObey(state: BattleState, rng: Rng, s: Soldier, team: Team, target: V
   }
   let p = 0.5 + s.mind.motivation / 200 + s.experience / 400 - s.mind.fear / 150;
   if (s.mind.trait === 'brave') p += 0.15;
-  if (isLeaderless(state, team)) p -= 0.2;
+  if (isLeaderless(state, team,s)) p -= 0.2;
   p = clamp(p, 0.15, 0.98);
 
   if (!rng.chance(p)) {
-    s.mind.hesitation = rng.range(1, 3);
+    s.mind.hesitation = rng.range(1, 3)*humanCapability(s,state.time).decision;
     s.mind.pendingOrderAt = issuedAt;
     return false;
   }
@@ -89,14 +93,8 @@ type OrderKind = Order['type'];
 /** C4: the id of a spotted enemy team whose position (or a tracked belief of it) is within
  * ASSAULT_TRIGGER_TILES of `p`, else null. Vehicles count (AT charge). */
 export const ASSAULT_TRIGGER_TILES = 5; // 15 m
-export function spottedEnemyTeamNear(state: BattleState, side: Side, p: Vec2): number | null {
-  for (const id of state.spotted[side]) {
-    const e = state.soldiers.get(id);
-    if (!e || e.health === 'dead') continue;
-    const t = state.teams.get(e.teamId);
-    if (!t || t.outOfAction) continue;
-    if (dist(t.pos, p) <= ASSAULT_TRIGGER_TILES) return t.id;
-  }
+export function spottedEnemyTeamNear(state: BattleState, side: Side, p: Vec2,observer?:Soldier|null): number | null {
+  for(const c of knownContacts(state,observer)){if(c.entity==='soldier'&&c.health!=='dead'&&dist(c.pos,p)<=ASSAULT_TRIGGER_TILES)return c.teamId;}
   return null;
 }
 
@@ -113,12 +111,12 @@ const DRIFT_MAX = 1.8;
 
 /** Direction of travel for each move order, fixed when the order is first applied so hesitant
  * soldiers who obey later rotate the formation the same way. */
-const orderHeading = new WeakMap<Order, number>();
+
 /** Destination tiles already claimed under an order (soldier id -> tile index): ordinary ground keeps separate tiles; building shelter can share a tile. */
-const orderClaims = new WeakMap<Order, Map<number, number>>();
+
 
 function headingFor(state: BattleState, team: Team, order: Order): number {
-  const known = orderHeading.get(order);
+  const known = order.formationHeading;
   if (known != null) return known;
   const leader = state.soldiers.get(team.leaderId);
   const wps = order.waypoints;
@@ -126,7 +124,7 @@ function headingFor(state: BattleState, team: Team, order: Order): number {
   const from = wps && wps.length > 0 ? wps[wps.length - 1]
     : leader && leader.health !== 'dead' && leader.health !== 'incapacitated' ? leader.pos : team.pos;
   const h = dist(from, order.target) > 0.5 ? angleTo(from, order.target) : formationBaseHeading(state.map, team.side);
-  orderHeading.set(order, h);
+
   return h;
 }
 
@@ -144,7 +142,7 @@ export function orderRoutePoints(order: Order): Vec2[] {
 }
 
 /** Per-point heading (radians) of the leg each point of a routed path belongs to. */
-const pathLegHeadings = new WeakMap<Vec2[], number[]>();
+
 
 /** Path cost added per tile within FIRE_HAZARD_M of a burning vehicle: enough that a route bends
  * up to ~100 m out of its way round the fire, but still a cost — with no way round, it goes through. */
@@ -153,9 +151,9 @@ export const FIRE_HAZARD_PATH_COST = 4;
 /** The extra path cost for routes while something burns, or undefined when nothing does (the usual
  * case: findPath then runs exactly as before). Men on foot and open-topped vehicles (halftracks)
  * keep clear of a hulk that may cook off; closed-up armour does not care. */
-export function fireHazardCost(state: BattleState, mover: 'infantry' | 'vehicle', softVehicle = false): TileCostFn | undefined {
+export function fireHazardCost(state: BattleState, mover: 'infantry' | 'vehicle', softVehicle = false,observer?:Soldier|null): TileCostFn | undefined {
   if (mover === 'vehicle' && !softVehicle) return undefined;
-  const hazards = fireHazards(state);
+  const hazards = knownHazards(state,observer);
   if (hazards.length === 0) return undefined;
   const p = { x: 0, y: 0 };
   return (x, y) => { p.x = x + 0.5; p.y = y + 0.5; return nearFireHazard(hazards, p) ? FIRE_HAZARD_PATH_COST : 0; };
@@ -165,24 +163,25 @@ export function fireHazardCost(state: BattleState, mover: 'infantry' | 'vehicle'
  * (`fireHazardCost`; `softVehicle`: an open-topped vehicle, which avoids them like infantry).
  * skipped (the route goes on to the next one). Records per-point leg headings for followers, and
  * records a failed leg's point so `stepOrderWaypoints` can drop the waypoint no one will visit. */
-export function routeVia(state: BattleState, from: Vec2, points: readonly Vec2[], mover: 'infantry' | 'vehicle', softVehicle = false, vehicleProfile?: VehiclePathProfile): Vec2[] {
-  const hazardCost = fireHazardCost(state, mover, softVehicle);
+export function routeVia(state: BattleState, from: Vec2, points: readonly Vec2[], mover: 'infantry' | 'vehicle', softVehicle = false, vehicleProfile?: VehiclePathProfile,observer?:Soldier|null): Vec2[] {
+  const map=planningMap(state,observer);
+  const hazardCost = fireHazardCost(state, mover, softVehicle,observer);
   if (points.length === 1) {
-    const path = findPath(state.map, from, points[0], mover, undefined, hazardCost, vehicleProfile);
-    if (path.length > 0) pathLegHeadings.set(path, new Array(path.length).fill(dist(from, points[0]) > 1e-6 ? angleTo(from, points[0]) : 0));
+    const path = findPath(map, from, points[0], mover, undefined, hazardCost, vehicleProfile);
+
     return path;
   }
   let path: Vec2[] = [];
   const headings: number[] = [];
   let cur = from;
-  let skipped = skippedLegs.get(state);
+  let skipped = (state.humanRuntime?.skippedLegs as Map<string,number>|undefined);
   for (let pi = 0; pi < points.length; pi++) {
     const p = points[pi];
-    const leg = findPath(state.map, cur, p, mover, undefined, hazardCost, vehicleProfile);
+    const leg = findPath(map, cur, p, mover, undefined, hazardCost, vehicleProfile);
     const reached = leg.length > 0 && dist(leg[leg.length - 1], p) <= 1;
     if (!reached) {
       if (pi < points.length - 1) {
-        if (!skipped) { skipped = new Map(); skippedLegs.set(state, skipped); }
+        if (!skipped) { skipped = new Map(); (state.humanRuntime??={}).skippedLegs=skipped; }
         skipped.set(pointKey(p), state.time);
       }
       continue;
@@ -197,7 +196,7 @@ export function routeVia(state: BattleState, from: Vec2, points: readonly Vec2[]
 
 /** Tile keys of waypoints whose routing leg failed (per state, with the time of the failure): a
  * follower (or the whole team) will never come near such a point, so its waypoint is dropped. */
-const skippedLegs = new WeakMap<BattleState, Map<string, number>>();
+
 const pointKey = (p: Vec2) => `${Math.floor(p.x)},${Math.floor(p.y)}`;
 
 /** Waypoint reached radius (tiles). */
@@ -229,7 +228,7 @@ export function stepOrderWaypoints(state: BattleState): void {
       if (!route.some((p) => dist(p, w) <= WAYPOINT_REACHED_TILES + 1)) { wps.shift(); dropped = true; }
     }
     if (!dropped && wps.length > 0) {
-      const skipped = skippedLegs.get(state);
+      const skipped = (state.humanRuntime?.skippedLegs as Map<string,number>|undefined);
       if (skipped) {
         for (let i = wps.length - 1; i >= 0; i--) {
           const key = pointKey(wps[i]);
@@ -266,17 +265,15 @@ const tileEq = (a: Vec2, b: Vec2) => Math.floor(a.x) === Math.floor(b.x) && Math
 /** The soldier's rotated slot at the order target, settled onto the best directional cover tile
  * within SETTLE_RADIUS that no teammate has claimed. */
 function destinationFor(state: BattleState, team: Team, s: Soldier, order: Order, slotOffset: Vec2): Vec2 {
-  const map = state.map;
+  const map = planningMap(state,s);
   const slot = {
     x: clamp(order.target.x + slotOffset.x, 0.5, map.width - 0.5),
     y: clamp(order.target.y + slotOffset.y, 0.5, map.height - 0.5),
   };
-  let claims = orderClaims.get(order);
-  if (!claims) { claims = new Map(); orderClaims.set(order, claims); }
-  claims.delete(s.id);
+  const claims=order.formationClaims??={};delete claims[s.id];
   const taken = new Set<number>();
-  for (const [id, tile] of claims) {
-    const o = state.soldiers.get(id);
+  for (const [id, tile] of Object.entries(claims)) {
+    const o = state.soldiers.get(Number(id));
     if (o && o.health !== 'dead' && o.health !== 'incapacitated') taken.add(tile);
   }
   const shelter = buildingDestination(state, s, order.target, slot);
@@ -286,13 +283,13 @@ function destinationFor(state: BattleState, team: Team, s: Soldier, order: Order
 }
 
 function claim(state: BattleState, order: Order, s: Soldier, p: Vec2): void {
-  const claims = orderClaims.get(order);
-  if (claims) claims.set(s.id, Math.floor(p.y) * state.map.width + Math.floor(p.x));
+  const claims=order.formationClaims;
+  if(claims)claims[s.id]=Math.floor(p.y)*state.map.width+Math.floor(p.x);
 }
 
 /** Extend `path` (or a soldier standing at `from`) with a short hop onto `dest`, ending exactly on
  * the destination point so men do not all stop on tile centres. Returns the end point reached. */
-function withArrivalHop(state: BattleState, from: Vec2, path: Vec2[], dest: Vec2): { path: Vec2[]; end: Vec2 } {
+function withArrivalHop(state: BattleState, s:Soldier, from: Vec2, path: Vec2[], dest: Vec2): { path: Vec2[]; end: Vec2 } {
   const end = path.length > 0 ? path[path.length - 1] : from;
   if (tileEq(end, dest)) {
     if (path.length === 0) return dist(from, dest) < 1e-4 ? { path, end: from } : { path: [{ ...dest }], end: dest };
@@ -300,7 +297,7 @@ function withArrivalHop(state: BattleState, from: Vec2, path: Vec2[], dest: Vec2
     out.push({ x: dest.x, y: dest.y });
     return { path: out, end: dest };
   }
-  const tail = findPath(state.map, end, dest, 'infantry', 120);
+  const tail = findPath(planningMap(state,s), end, dest, 'infantry', 120);
   if (tail.length === 0 || !tileEq(tail[tail.length - 1], dest)) return { path, end };
   tail[tail.length - 1] = { x: dest.x, y: dest.y };
   return { path: path.concat(tail), end: dest };
@@ -312,7 +309,7 @@ function withArrivalHop(state: BattleState, from: Vec2, path: Vec2[], dest: Vec2
  * a full A* per soldier. Returns null when the shifted path is not usable. */
 function followerPathFromLeader(state: BattleState, s: Soldier, leaderPath: Vec2[], shift: Vec2 | ((i: number) => Vec2), rng: Rng): Vec2[] | null {
   if (leaderPath.length === 0) return null;
-  const map = state.map;
+  const map = planningMap(state,s);
   const shifted: Vec2[] = [];
   let dx = 0, dy = 0;
   const n = leaderPath.length;
@@ -346,7 +343,7 @@ function followerPathFromLeader(state: BattleState, s: Soldier, leaderPath: Vec2
  * Two bounded A* searches instead of an unbounded one that can exhaust its node budget. */
 function followLeaderRoute(state: BattleState, s: Soldier, leaderPath: Vec2[], slot: Vec2): Vec2[] | null {
   if (leaderPath.length === 0) return null;
-  const map = state.map;
+  const map = planningMap(state,s);
   const first = leaderPath[0];
   let route: Vec2[];
   if (tileEq(first, s.pos)) route = leaderPath.slice();
@@ -367,7 +364,9 @@ function followLeaderRoute(state: BattleState, s: Soldier, leaderPath: Vec2[], s
 /** Apply the team's current order to one soldier (rolling obedience). Used by applyOrder for the
  * initial issue and by mind.ts to retry a refused order after hesitation. `leaderPath`, when
  * given, is the leader's freshly computed path to the target (shared by followers). */
-export function applyOrderToSoldier(state: BattleState, team: Team, s: Soldier, rng: Rng, leaderPath?: Vec2[]): void {
+export function applyOrderToSoldier(state: BattleState, team: Team, s: Soldier, _rng: Rng, leaderPath?: Vec2[]): void {
+  const local=openHumanRng(state,s,'orders'),rng=local.rng;try{
+  observeNavigation(state,s);
   const order = team.order;
   if (!order || team.outOfAction) { if (s.mind) s.mind.pendingOrderAt = undefined; return; }
   const type = effectiveType(team, order);
@@ -395,26 +394,26 @@ export function applyOrderToSoldier(state: BattleState, team: Team, s: Soldier, 
     }
     const offset = orderSlotOffset(state, team, s, order);
     const dest = destinationFor(state, team, s, order, offset);
-    const intoBuilding = buildingTiles(state.map, order.target).length > 0;
+    const intoBuilding = buildingTiles(planningMap(state,s), order.target).length > 0;
     let path: Vec2[] | null = null;
     const wps = order.waypoints && order.waypoints.length > 0 ? order.waypoints : null;
       if (intoBuilding && !wps && dist(s.pos, dest) < 1e-4) { path = []; }
       else if (s.id === team.leaderId) {
-        path = leaderPath ?? routeVia(state, s.pos, orderRoutePoints(order), 'infantry');
+        path = leaderPath ?? routeVia(state, s.pos, orderRoutePoints(order), 'infantry',false,undefined,s);
       } else {
         if (leaderPath) {
           // formation offset turned to each leg's direction of travel (the last leg's = the slot's)
-          const legs = wps ? pathLegHeadings.get(leaderPath) : undefined;
+          const legs: number[]|undefined=undefined; // leg headings are derived; no identity-keyed hidden state
           const base = formationBaseHeading(state.map, team.side);
           const shift = legs ? (i: number) => rotateOffset(s.formationOffset, (legs[i] ?? headingFor(state, team, order)) - base) : offset;
           path = (intoBuilding ? null : followerPathFromLeader(state, s, leaderPath, shift, rng)) ?? followLeaderRoute(state, s, leaderPath, dest);
         }
         if (!path) {
-          path = wps ? routeVia(state, s.pos, [...wps, dest], 'infantry') : findPath(state.map, s.pos, dest, 'infantry', undefined, fireHazardCost(state, 'infantry'));
-          if (path.length === 0) path = routeVia(state, s.pos, orderRoutePoints(order), 'infantry');
+          path = wps ? routeVia(state, s.pos, [...wps, dest], 'infantry',false,undefined,s) : findPath(planningMap(state,s), s.pos, dest, 'infantry', undefined, fireHazardCost(state, 'infantry',false,s));
+          if (path.length === 0) path = routeVia(state, s.pos, orderRoutePoints(order), 'infantry',false,undefined,s);
         }
       }
-    const hop = withArrivalHop(state, s.pos, path, dest);
+    const hop = withArrivalHop(state, s, s.pos, path, dest);
     path = hop.path;
     claim(state, order, s, hop.end);
     s.mind.anchor = { x: hop.end.x, y: hop.end.y };
@@ -433,7 +432,7 @@ export function applyOrderToSoldier(state: BattleState, team: Team, s: Soldier, 
     if (isVehicleTeam) { s.activity = 'firing'; s.facing = facingFromAngle(angleTo(s.pos, order.target)); return; }
     stopSoldier(s);
     s.activity = 'firing';
-    s.targetPoint = order.target;
+    s.targetPoint = {...order.target};
     s.stance = s.cover < 0.2 ? 'prone' : 'crouching';
     s.facing = facingFromAngle(angleTo(s.pos, order.target));
     return;
@@ -444,7 +443,7 @@ export function applyOrderToSoldier(state: BattleState, team: Team, s: Soldier, 
     if (team.type === 'mortar') {
       stopSoldier(s);
       s.activity = 'firing';
-      s.targetPoint = order.target;
+      s.targetPoint = {...order.target};
       return;
     }
     const rangeTiles = 30 / 2; // 30 m in tiles
@@ -452,16 +451,16 @@ export function applyOrderToSoldier(state: BattleState, team: Team, s: Soldier, 
     if (d <= rangeTiles) {
       stopSoldier(s);
       s.activity = 'firing';
-      s.targetPoint = order.target;
+      s.targetPoint = {...order.target};
       s.stance = s.cover < 0.2 ? 'prone' : 'crouching';
     } else {
       const dir = vnorm(vsub(order.target, team.pos));
       const shortM = 25 / 2;
       const approach = vadd(team.pos, vscale(dir, Math.max(0, d - shortM)));
-      s.path = findPath(state.map, s.pos, vadd(approach, orderSlotOffset(state, team, s, order)), 'infantry');
+      s.path = findPath(planningMap(state,s), s.pos, vadd(approach, orderSlotOffset(state, team, s, order)), 'infantry');
       s.activity = 'moving';
       s.stance = 'standing';
-      s.targetPoint = order.target;
+      s.targetPoint = {...order.target};
     }
     return;
   }
@@ -482,18 +481,20 @@ export function applyOrderToSoldier(state: BattleState, team: Team, s: Soldier, 
     s.stance = 'prone';
     s.facing = facingFromAngle(angleTo(s.pos, order.target));
   }
+
+  }finally{local.save();}
 }
 
 /** Validate and apply an order to a team: sets team.order, computes paths, and updates each
  * soldier's (or the team's vehicle's) activity/stance/facing per spec §6.3. */
-const delayedOrders = new WeakMap<BattleState, Map<number, { order: Order; at: number }>>();
+type DelayedOrders=Map<number,{order:Order;at:number}>;
 let releasingDelayed = false;
 /** An order waiting to reach a vehicle without a radio (HUD / tests). */
 export function delayedOrderOf(state: BattleState, teamId: number): Order | null {
-  return delayedOrders.get(state)?.get(teamId)?.order ?? null;
+  return (state.humanRuntime?.delayedOrders as DelayedOrders|undefined)?.get(teamId)?.order ?? null;
 }
 function releaseDelayedOrders(state: BattleState, rng: Rng): void {
-  const m = delayedOrders.get(state);
+  const m = (state.humanRuntime?.delayedOrders as DelayedOrders|undefined);
   if (!m || m.size === 0) return;
   for (const [teamId, rec] of Array.from(m.entries()).sort((a, b) => a[0] - b[0])) {
     if (state.time < rec.at) continue;
@@ -510,7 +511,7 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
   // C4: a Move Fast whose target lands on/near a spotted enemy is an ASSAULT — the team
   // charges at moveFast pace with weapons ready; grenades free-throw once in range.
   if (order.type === 'moveFast' && team.vehicleId == null && !['mortar', 'atgun', 'rocket'].includes(team.type)) {
-    const spotted = spottedEnemyTeamNear(state, team.side, order.target);
+    const spotted = spottedEnemyTeamNear(state, team.side, order.target,teamObserver(state,team.id));
     if (spotted != null) order = { ...order, type: 'assault', targetTeamId: spotted };
   }
   // a Move order onto the team's own abandoned vehicle sends the crew back into it, or is refused
@@ -529,8 +530,8 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
   // a vehicle whose radio is shot away gets its orders by hand signal or runner: they are acted on
   // RADIO_OUT_ORDER_DELAY_S later (released by stepAttackOrders)
   if (deadHull && !own && !releasingDelayed && radioOut(deadHull)) {
-    let m = delayedOrders.get(state);
-    if (!m) { m = new Map(); delayedOrders.set(state, m); }
+    let m = (state.humanRuntime?.delayedOrders as DelayedOrders|undefined);
+    if (!m) { m = new Map(); (state.humanRuntime??={}).delayedOrders=m; }
     const prev = m.get(team.id);
     const same = !!prev && prev.order.type === order.type && dist(prev.order.target, order.target) <= 1 && prev.order.targetTeamId === order.targetTeamId;
     m.set(team.id, { order, at: same ? prev!.at : state.time + RADIO_OUT_ORDER_DELAY_S });
@@ -562,6 +563,7 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
     team.deploymentFacing = setupDirection;
   }
   if (state.phase !== 'deploy') delete team.deploymentFacing;
+  order.formationHeading=headingFor(state,team,order);order.formationClaims={};
   team.order = order;
   if (team.vehicleId != null) { const v = state.vehicles.get(team.vehicleId); if (v) delete v.localDriver; }
   // G31 camouflage nets: an ambush order deploys the nets — they take effect immediately while
@@ -586,30 +588,30 @@ export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rn
 
   if (type === 'move' || type === 'moveFast' || type === 'sneak') {
     if (isVehicleTeam) {
-      if (vehicle) vehicle.path = routeVia(state, vehicle.pos, orderRoutePoints(order), 'vehicle', VEHICLE_DEFS[vehicle.defId]?.layout?.openTop === true, { def: VEHICLE_DEFS[vehicle.defId] });
+      if (vehicle) vehicle.path = routeVia(state, vehicle.pos, orderRoutePoints(order), 'vehicle', VEHICLE_DEFS[vehicle.defId]?.layout?.openTop === true, { def: VEHICLE_DEFS[vehicle.defId] },vehicleObserver(state,vehicle,'driver'));
     } else {
       const leader = state.soldiers.get(team.leaderId);
-      leaderPath = leader ? routeVia(state, leader.pos, orderRoutePoints(order), 'infantry') : [];
+      leaderPath = leader ? routeVia(state, leader.pos, orderRoutePoints(order), 'infantry',false,undefined,leader) : [];
     }
   } else if (type === 'fire') {
     initAttackOrder(state, team, order);
     if (vehicle) {
       vehicle.path = [];
-      vehicle.targetPoint = order.target;
+      vehicle.targetPoint = {...order.target};
       vehicle.targetVehicleId = null;
       vehicle.targetSoldierId = null;
     }
   } else if (type === 'smoke') {
     if (vehicle) {
       vehicle.path = [];
-      vehicle.targetPoint = order.target;
+      vehicle.targetPoint = {...order.target};
     }
     // infantry without smoke (and not a mortar) cannot execute the order at all
     if (!isVehicleTeam && team.type !== 'mortar' && !teamHasSmoke(state, team)) return;
   } else if (type === 'defend' || type === 'ambush') {
     if (vehicle) {
       vehicle.path = [];
-      vehicle.targetPoint = order.target;
+      vehicle.targetPoint = {...order.target};
       // G23: DURING DEPLOYMENT the hull and turret adopt the order bearing right away so the
       // deploy-screen sprite matches the arc the UI draws (arc pivots on team/gun facing). Once
       // the battle runs a vehicle never snaps: the driver swings the hull and the gunner the
@@ -721,28 +723,14 @@ export function attackPhase(state: BattleState, order: Order): AttackPhase {
 /** Validates/infers the attack-unit target of a freshly issued Fire order: a given targetTeamId is
  * kept only if that enemy team is currently spotted by the ordering side; otherwise the order becomes
  * area fire unless a spotted enemy stands at the clicked point. */
-function initAttackOrder(state: BattleState, team: Team, order: Order): void {
-  order.target = { x: order.target.x, y: order.target.y }; // never share the click point between teams
-  const enemySide = otherSide(team.side);
-  let target: Team | null = null;
-  if (order.targetTeamId != null) {
-    const t = state.teams.get(order.targetTeamId);
-    if (t && t.side === enemySide && !t.outOfAction && !attackTargetDestroyed(state, t) && spottedTargetCentre(state, team.side, t)) target = t;
-  }
-  if (!target) target = spottedEnemyTeamAt(state, order.target, enemySide);
-  delete order.targetTeamId;
-  delete order.targetVehicleId;
-  delete order.lastSeenAt;
-  delete order.lastKnownPos;
-  if (!target) return;
-  const centre = spottedTargetCentre(state, team.side, target);
-  if (!centre) return;
-  order.targetTeamId = target.id;
-  if (target.vehicleId != null) order.targetVehicleId = target.vehicleId;
-  order.target = centre;
-  order.lastKnownPos = { ...centre };
-  order.lastSeenAt = state.time;
+function initAttackOrder(state:BattleState,team:Team,order:Order):void{
+ order.target={...order.target};
+ const evidence=knownContacts(state,teamObserver(state,team.id));
+ const target=order.targetTeamId!=null?evidence.find(c=>c.teamId===order.targetTeamId):evidence.find(c=>dist(c.pos,order.target)<3);
+ if(target){order.targetTeamId=target.teamId;order.target={...target.pos};order.lastKnownPos={...target.pos};order.lastSeenAt=target.observedAt;if(target.entity==='vehicle')order.targetVehicleId=target.id;}
+ else if(order.targetTeamId!=null){order.lastKnownPos={...order.target};order.lastSeenAt=state.time;}
 }
+
 
 /** Per sim step: attack-unit Fire orders follow their target while it is spotted, keep the last
  * known position when it is lost, and complete (Defend facing it, "Target destroyed.") once the
@@ -754,22 +742,17 @@ export function stepAttackOrders(state: BattleState, rng: Rng): void {
     if (!order || order.type !== 'fire' || order.targetTeamId == null || team.outOfAction) continue;
     const target = state.teams.get(order.targetTeamId);
     const last = order.lastKnownPos ?? order.target;
-    if (attackTargetDestroyed(state, target)) {
-      addMessage(state, `${team.name}\nTarget destroyed.`, 'good', team.side);
-      applyOrder(state, team, { type: 'defend', target: { x: last.x, y: last.y }, issuedAt: state.time }, rng, true);
-      continue;
-    }
-    const centre = spottedTargetCentre(state, team.side, target!);
+    const evidence=knownContacts(state,teamObserver(state,team.id)).filter(c=>c.teamId===order.targetTeamId);
+    const destroyed=evidence.length>0&&evidence.every(c=>c.entity==='vehicle'?['knockedOut','burning','abandoned'].includes(c.vehicleState??'ok'):(['dead','incapacitated'].includes(c.health??'healthy')||c.activity==='surrendered'));
+    const allInformed=team.soldierIds.every(id=>{const s=state.soldiers.get(id);if(!s||s.health==='dead'||s.health==='incapacitated')return true;const c=knownContacts(state,s).filter(c=>c.teamId===order.targetTeamId);return c.length>0&&c.every(c=>c.entity==='vehicle'?['knockedOut','burning','abandoned'].includes(c.vehicleState??'ok'):(['dead','incapacitated'].includes(c.health??'healthy')||c.activity==='surrendered'));});
+    if(destroyed&&allInformed){addMessage(state,`${team.name}\nKnown targets neutralised.`,'good',team.side);applyOrder(state,team,{type:'defend',target:{...last},issuedAt:state.time},rng,true);continue;}
+    const live=evidence.filter(c=>c.entity==='vehicle'?!['knockedOut','burning','abandoned'].includes(c.vehicleState??'ok'):!(['dead','incapacitated'].includes(c.health??'healthy')||c.activity==='surrendered'));
+    const centre=live.length?{x:live.reduce((n,c)=>n+c.pos.x,0)/live.length,y:live.reduce((n,c)=>n+c.pos.y,0)/live.length}:null;
     if (centre) {
-      // mutate in place: soldiers' targetPoint shares this object
-      order.target.x = centre.x; order.target.y = centre.y;
-      order.lastKnownPos = { ...centre };
-      order.lastSeenAt = state.time;
-      team.facing = facingTo(team.pos, centre);
-      const v = team.vehicleId != null ? state.vehicles.get(team.vehicleId) : undefined;
-      if (v) v.targetPoint = order.target;
-    } else if (order.lastKnownPos) {
-      order.target.x = order.lastKnownPos.x; order.target.y = order.lastKnownPos.y;
+      // The order point remains what each recipient was told; personal reports
+      // update the recipient's own aim through recipientOrder(), never shared references.
+      order.lastKnownPos={...centre};order.lastSeenAt=Math.max(...live.map(c=>c.observedAt));
+
     }
   }
 }

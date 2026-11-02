@@ -1,3 +1,7 @@
+import {observeNavigationAll} from './navigationKnowledge';
+import {stepIndirectCommunication} from './indirectCommunication';
+import {stepHumanCondition} from './humanCondition';
+import {stepHearing,stepCommunication} from './perception';
 import { applyMultiplayerPolicy } from './multiplayerPolicy';
 import { stepDigging } from './digging';
 import { spawnMortarCarriers, alignMortarCarriers } from './mortarCarriers';
@@ -57,8 +61,6 @@ export class Battle {
   readonly controllers: Record<Side, Controller>;
 
   private accumulator = 0;
-  private spotAccum = 0;
-  private aiAccum = 0;
   /** Submitted commands waiting for their tick, and every command applied so far (the log). */
   private pending: Command[] = [];
   private applied: Command[] = [];
@@ -318,17 +320,20 @@ export class Battle {
     state.tick = (state.tick ?? 0) + 1;
     state.time = Math.round((state.time + dt) * 1000) / 1000;
 
+    stepHumanCondition(state,dt);
     stepCoverSeeking(state, this.rng, dt);
     stepMovement(state, this.rng, dt);
     stepVehicles(state, this.rng, dt);
     stepGrowth(state);
 
-    this.spotAccum += dt;
-    if (this.spotAccum >= SPOT_INTERVAL) {
-      this.spotAccum -= SPOT_INTERVAL;
+    if (state.tick! % Math.round(SPOT_INTERVAL/SIM_DT) === 0) {
       updateSpotting(state, this.rng);
+      observeNavigationAll(state);
     }
 
+    stepHearing(state);
+    stepCommunication(state);
+    stepIndirectCommunication(state);
     stepMinds(state, this.rng, dt);
 
     stepAttackOrders(state, this.rng);
@@ -344,9 +349,7 @@ export class Battle {
     stepVictory(state, dt);
     stepSmoke(state.map, dt);
 
-    this.aiAccum += dt;
-    if (this.aiAccum >= AI_INTERVAL) {
-      this.aiAccum -= AI_INTERVAL;
+    if (state.tick! % Math.round(AI_INTERVAL/SIM_DT) === 0) {
       // fixed side order (SIDES), independent of who is watching
       for (const side of SIDES) if (this.sideIsAI(side)) stepAI(state, this.rng, this, side);
       this.evaluateTruce();

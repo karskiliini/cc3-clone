@@ -1,3 +1,4 @@
+import {humanCapability} from './humanCondition';
 import type { Soldier } from '@/shared/types';
 
 /** Loaded infantry game tuning, metres/second before ground, fatigue and wounds. */
@@ -15,8 +16,7 @@ export function infantrySpeedMs(s: Soldier, requestedMs: number): number {
   const stanceLimit = s.stance === 'prone' ? INFANTRY_PACE.crawl
     : s.stance === 'crouching' ? INFANTRY_PACE.crouch : Infinity;
   let speed = Math.min(requestedMs, stanceLimit);
-  if (s.fatigue > 70) speed *= 0.5;
-  if (s.health === 'wounded') speed *= 0.7;
+  speed *= humanCapability(s).pace;
   if (s.carrying) speed *= 0.5;
   if (s.carryingMgMount != null) speed *= 0.7;
   return speed;

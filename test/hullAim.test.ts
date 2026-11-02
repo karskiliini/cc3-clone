@@ -1,3 +1,5 @@
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
 import { describe, expect, it } from 'vitest';
 import { VEHICLE_DEFS } from '@/data/units';
 import { createHullBody } from '@/sim/hullPhysics';
@@ -8,7 +10,7 @@ import { addTank, makeState, mkTeam, soldier } from './vehicleDamageHelpers';
 import { flat } from './hullPhysicsHelpers';
 import { SIM_DT } from '@/shared/types';
 import { Rng } from '@/shared/rng';
-import { stepCombat } from '@/sim/combat';
+import { stepCombat as rawStepCombat } from '@/sim/combat';
 import { FIRE_HALT_MAX_S } from '@/sim/gunTiming';
 import { gunAimPose, vehicleGunRay } from '@/sim/hullAim';
 import { VEHICLE_GUN_GEOMETRY } from '@/data/vehicleGunGeometry';

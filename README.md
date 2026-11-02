@@ -93,7 +93,7 @@ order first (hotkey, order bar, or right-click menu), then click the target.
   0.5 m below ground and 2 m above. Hills, ridges, valleys and river beds show as broad bands. Craters, foxholes and trenches show as depressions; blasts breach walls,
   flatten hedges and fences and bring buildings down, and the map follows. The vision overlay is hidden
   while it is on. **.** / **,** select the next / previous team.
-- **F3** pause, **F5** team data, **F6** inset map, **F7** soldier monitor, **F8** options, **O** overview map,
+- **F3** pause, **F5** team data, **F6** inset map, **F7** soldier monitor, **I** selected soldier’s own evidence/condition, **F8** options, **O** overview map,
   **Ctrl+K** toggle corpses, **+ / −** zoom, arrows or screen edge to scroll.
 - Bottom strip: Chat, Options, zoom, Map (inset on/off), Truce, Flee.
 

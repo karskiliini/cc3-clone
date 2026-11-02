@@ -1,3 +1,4 @@
+import {setTile} from './map';
 // ============================================================================
 // structures.ts — damage to walls, roofs, buildings, hedges and fences, and the debris casualties
 // it causes.
@@ -269,7 +270,7 @@ function damageRoof(state: BattleState, st: StructState, b: BuildingRec, i: numb
 function caveIn(state: BattleState, st: StructState, b: BuildingRec, i: number, ev: BlastEvent): void {
   const map = state.map;
   if (map.tiles[i] !== 'floor') return;
-  map.tiles[i] = 'rubble';
+  setTile(map,i%map.width,Math.floor(i/map.width),'rubble');
   st.roofHp[i] = NaN;
   b.caved.add(i);
   ev.changed.push(i);
@@ -291,13 +292,13 @@ function destroyTile(state: BattleState, st: StructState, i: number, power: numb
   const x = i % map.width, y = (i / map.width) | 0;
   st.hp[i] = NaN;
   if (isCrushed(t)) {
-    map.tiles[i] = 'open';
+    setTile(map,i%map.width,Math.floor(i/map.width),'open');
     ev.changed.push(i);
     return;
   }
   // wall breach
   const stone = t !== 'buildingWood';
-  map.tiles[i] = 'rubble';
+  setTile(map,i%map.width,Math.floor(i/map.width),'rubble');
   map.windows[i] = 0;
   ev.changed.push(i);
   setTileOverride(map, x, y, H_BREACH_LIP);

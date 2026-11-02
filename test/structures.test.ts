@@ -1,3 +1,5 @@
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
 import { describe, it, expect } from 'vitest';
 import type { BattleConfig, BattleState, GameMap, MapDef, Soldier, Team, Vec2 } from '@/shared/types';
 import { MapPainter } from '@/sim/mapdsl';
@@ -7,7 +9,7 @@ import { createMind } from '@/sim/mind';
 import { applyBlastDamage, buildingStatus, roofHp, ROOF_HP, structureHp, STRUCTURE_HP } from '@/sim/structures';
 import { Battle } from '@/sim/battle';
 import { applyOrder } from '@/sim/orders';
-import { stepCombat } from '@/sim/combat';
+import { stepCombat as rawStepCombat } from '@/sim/combat';
 import { Rng } from '@/shared/rng';
 import { SIM_DT } from '@/shared/types';
 

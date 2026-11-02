@@ -1,3 +1,4 @@
+import {humanCapability} from './humanCondition';
 import type { BattleState, Soldier, Terrain } from '@/shared/types';
 import { SIM_DT } from '@/shared/types';
 import { dist } from '@/shared/math';
@@ -11,7 +12,7 @@ export function diggingRate(state:BattleState,s:Soldier):number {
  const t=tileAt(state.map,Math.floor(s.pos.x),Math.floor(s.pos.y));
  if(!SOFT.has(t))return 0;
  if(state.map.def.decor?.some(d=>d.kind==='rocks'&&dist(d,s.pos)<.6))return 0;
- return (state.map.def.season==='winter'?.25:1)*(t==='rubble'?.2:1)*(s.health==='wounded'?.5:1)*Math.max(.25,1-s.fatigue/100);
+ return (state.map.def.season==='winter'?.25:1)*(t==='rubble'?.2:1)*(s.health==='wounded'?.5:1)*humanCapability(s,state.time).work;
 }
 export function canDig(state:BattleState,s:Soldier):boolean {
  const team=state.teams.get(s.teamId),m=s.mind;

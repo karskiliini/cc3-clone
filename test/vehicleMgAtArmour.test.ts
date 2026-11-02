@@ -1,8 +1,10 @@
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
 import { describe, expect, it } from 'vitest';
 import { SIM_DT } from '@/shared/types';
 import { Rng } from '@/shared/rng';
 import { stepVehicles } from '@/sim/vehicle';
-import { stepCombat } from '@/sim/combat';
+import { stepCombat as rawStepCombat } from '@/sim/combat';
 import type { BattleState } from '@/shared/types';
 import { addTank, makeState } from './vehicleDamageHelpers';
 

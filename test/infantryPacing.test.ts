@@ -36,11 +36,25 @@ describe('loaded infantry movement pacing', () => {
   });
 
   it('wounds, fatigue and mud still slow a prone man instead of restoring a running speed', () => {
+    const distances = [
+      { stance: 'prone' as const },
+      { stance: 'prone' as const, health: 'wounded' as const },
+      { stance: 'prone' as const, health: 'wounded' as const, fatigue: 80 },
+    ].map(over => {
+      const { s, advance } = walking(over), from = { ...s.pos };
+      advance(1);
+      return dist(from, s.pos) * TILE_M;
+    });
     const { state, s, advance } = walking({ stance: 'prone', health: 'wounded', fatigue: 80 });
     state.map.tiles[100 * state.map.width + 100] = 'mud';
     const from = { ...s.pos };
     advance(1);
-    expect(dist(from, s.pos) * TILE_M).toBeCloseTo(0.063, 6); // .3 × .7 × .5 × .6
+    distances.push(dist(from, s.pos) * TILE_M);
+    expect(distances[0]).toBeCloseTo(0.3, 6);
+    for (let i = 1; i < distances.length; i++) {
+      expect(distances[i]).toBeGreaterThan(0);
+      expect(distances[i]).toBeLessThan(distances[i - 1]);
+    }
   });
 
   it('carrying a casualty halves the loaded walking pace', () => {

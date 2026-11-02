@@ -1,3 +1,5 @@
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
 import { describe, expect, it } from 'vitest';
 import type { BattleState, OrderType, Soldier } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
@@ -6,7 +8,7 @@ import { dist } from '@/shared/math';
 import { stepMovement } from '@/sim/movement';
 import { stepMinds, onIncomingFire, TEAMMATE_FIRE_STRESS } from '@/sim/mind';
 import { stepMorale } from '@/sim/morale';
-import { stepCombat } from '@/sim/combat';
+import { stepCombat as rawStepCombat } from '@/sim/combat';
 import { applyOrder } from '@/sim/orders';
 import { hitChance } from '@/sim/ballistics';
 import { infantryAimReady } from '@/sim/infantryAim';

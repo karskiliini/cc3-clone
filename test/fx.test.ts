@@ -2,6 +2,7 @@ import { placeVehicleBody } from '@/sim/vehicle';
 import { VEHICLE_DEFS } from '@/data/units';
 import { groundProbe } from '@/sim/hullGround';
 // Combat FX / medic / assault — behaviour contracts for the spec-combat-fx work.
+import {recordVisual} from '@/sim/perception';
 import { describe, it, expect } from 'vitest';
 import { Battle } from '@/sim/battle';
 import { applyOrder } from '@/sim/orders';
@@ -151,6 +152,8 @@ describe('assault (C4)', () => {
     enemy.pos = { x: team.pos.x + 3, y: team.pos.y };
     const es = enemy.soldierIds.map((id) => st.soldiers.get(id)!).find((s) => s && s.health !== 'dead');
     if (!es) return;
+    es.pos={...enemy.pos};
+    recordVisual(st,st.soldiers.get(team.leaderId)!,es,'soldier');
     st.spotted[team.side].add(es.id);
     applyOrder(st, team, { type: 'moveFast', target: enemy.pos, issuedAt: st.time }, new Rng(1));
     expect(team.order?.type).toBe('assault');

@@ -1,3 +1,7 @@
+import {planningMap} from './navigationKnowledge';
+import {directSoldier,directVehicle,recipientOrder} from './perception';
+import {visualIds,vehicleVisualIds,vehicleObserver,knownContacts,knowsDirectly,teamObserver,directContacts} from './perception';
+import {humanCapability} from './humanCondition';
 // ============================================================================
 // crewWeapon.ts — crew-served weapons (mortars, heavy MGs, AT / infantry guns)
 // as objects on the map that are WORKED BY MEN, TASK BY TASK
@@ -326,12 +330,12 @@ export function packTimeS(weaponId: string): number {
 /** Where the weapon should point: the gunner's current target, the team's fire/defend/ambush
  * facing, the gunner's sense of the threat, or (fallback) his own facing. */
 function desiredFacing(state: BattleState, team: Team, gunner: Soldier, from: Vec2, fallback: number): number {
-  if (gunner.targetSoldierId != null) {
-    const t = state.soldiers.get(gunner.targetSoldierId);
+  if (gunner.targetSoldierId != null && knowsDirectly(state,gunner,gunner.targetSoldierId)) {
+    const t = directSoldier(state,gunner,gunner.targetSoldierId);
     if (t && t.health !== 'dead') return angleTo(from, t.pos);
   }
-  if (gunner.targetVehicleId != null) {
-    const v = state.vehicles.get(gunner.targetVehicleId);
+  if (gunner.targetVehicleId != null && knowsDirectly(state,gunner,gunner.targetVehicleId,'vehicle')) {
+    const v = directVehicle(state,gunner,gunner.targetVehicleId);
     if (v) return angleTo(from, v.pos);
   }
   if (gunner.targetPoint) return angleTo(from, gunner.targetPoint);
@@ -409,7 +413,7 @@ function roundToLoad(state: BattleState, cw: CrewWeaponState, gunner: Soldier): 
   if (want && counts[want] > 0) return want;
   if (!w.rounds) return counts.ap > 0 ? 'ap' : null;
   let armour = false;
-  for (const id of state.spottedVehicles[gunner.side]) {
+  for (const id of visualIds(state,gunner,'vehicle')) {
     const v = state.vehicles.get(id);
     if (v && v.state !== 'knockedOut' && v.state !== 'burning' && v.state !== 'abandoned') { armour = true; break; }
   }
@@ -569,7 +573,7 @@ function stepMgMount(state: BattleState, team: Team, cw: CrewWeaponState, dt: nu
     m.recovery = undefined;
     worker = mountHelpers(state, team, cw).find(s => dist(s.pos, m.pos) <= RETURN_RADIUS_TILES);
     if (!worker) return;
-    const path = findPath(state.map, worker.pos, m.pos, 'infantry');
+    const path = findPath(planningMap(state,worker), worker.pos, m.pos, 'infantry');
     if (!path.length && dist(worker.pos, m.pos) > AT_STATION_TILES) return;
     m.recovery = { soldierId: worker.id, path, worked: 0 };
   }
@@ -740,7 +744,7 @@ function stepAbandoned(state: BattleState, team: Team, cw: CrewWeaponState, cls:
     if (d <= bestD) { bestD = d; best = s; }
   }
   if (!best) return;
-  const path = findPath(state.map, best.pos, cw.pos, 'infantry');
+  const path = findPath(planningMap(state,best), best.pos, cw.pos, 'infantry');
   if (path.length === 0) return;
   best.path = path;
   best.activity = 'moving';
@@ -916,7 +920,7 @@ function stepTasks(state: BattleState, team: Team, cw: CrewWeaponState, cls: Cre
     // be placed or picked up across the obstacle from where the worker got stuck.
     const there = task === 'placeTripod' || task === 'liftTripod' ? dist(w.pos, station) <= AT_STATION_TILES : reached;
     // a man still recovering from a daze works slowly (sim/daze.ts: x0.7 fading back to 1)
-    const total = taskDurationS(cw, task, w, gunner) / recoveryFactor(w, state.time);
+    const total = taskDurationS(cw, task, w, gunner) / Math.max(.05,recoveryFactor(w, state.time)*humanCapability(w,state.time).work);
     if (there) {
       worked = true;
       if (w.stance === 'standing') w.stance = 'crouching';

@@ -1,3 +1,4 @@
+import {perception,recordVisual} from '@/sim/perception';
 import { describe, it, expect } from 'vitest';
 import type {
   BattleConfig, BattleState, GameMap, MapDef, Order, Soldier, Team, Terrain,
@@ -430,7 +431,9 @@ describe('attack AI: mass on one axis, then the next objective', () => {
     tick(f);
     for (const s of f.squads) expect(s.aiObjective).toEqual(MAIN_VL);
     expect(getAttackPlan(f.state, 'german')!.objectiveId).toBe(0);
-    // the objective falls
+    // HQ receives the capture report; changing world ownership alone is insufficient.
+    const hq=spawnTeam(f.state,TEAM_DEFS.ger_command,'german',{x:12,y:34},f.rng),commander=f.state.soldiers.get(hq.leaderId)!;
+    perception(commander).objectives={0:{owner:'german',observedAt:f.state.time,sourceId:commander.id}};
     f.state.map.victoryLocations[0].owner = 'german';
     for (const s of f.squads) teleport(f.state, s, { x: MAIN_VL.x - 2, y: MAIN_VL.y });
     tick(f);
@@ -498,8 +501,9 @@ describe('attack AI: only what the side knows', () => {
       for (const o of tick(f)) if (o.order.type === 'fire' || o.order.type === 'smoke') expect(dTiles(o.order.target, hidden.pos)).toBeGreaterThan(15);
     }
     expect(getContacts(f.state, 'german')).toHaveLength(0);
-    // now it is spotted: it becomes a contact and the mortar takes it on
-    for (const id of hidden.soldierIds) f.state.spotted.german.add(id);
+    // Explicitly deliver the sighting to an actual HQ endpoint.
+    const hq=spawnTeam(f.state,TEAM_DEFS.ger_command,'german',{x:12,y:34},f.rng),commander=f.state.soldiers.get(hq.leaderId)!;
+    for (const id of hidden.soldierIds) recordVisual(f.state,commander,f.state.soldiers.get(id)!,'soldier');
     const issued = tick(f);
     expect(getContacts(f.state, 'german').map((c) => c.teamId)).toEqual([hidden.id]);
     const mortarOrder = issued.find((o) => o.teamId === f.mortar.id);

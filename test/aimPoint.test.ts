@@ -1,3 +1,5 @@
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
 // Aim points by gunner experience (req_ammo_damage B).
 import { describe, it, expect } from 'vitest';
 import type { BattleState, RoundCounts } from '@/shared/types';
@@ -11,7 +13,7 @@ import {
 import { expectedArmorFrom, expectedArmorMm, resolveVehicleHit, locateHit, locationArmorMm, LUCKY_SPOT_CHANCE } from '@/sim/vehicleDamage';
 import { gunTarget, hullRayTo, vehicleAimTarget, intersectVehicle, legacyHullRay } from '@/sim/hullAim';
 import { createHullBody } from '@/sim/hullPhysics';
-import { stepCombat } from '@/sim/combat';
+import { stepCombat as rawStepCombat } from '@/sim/combat';
 import { stepCrewWeapons, fireMissionWait } from '@/sim/crewWeapon';
 import { makeState, addTank, addGun, soldier } from './vehicleDamageHelpers';
 
@@ -165,7 +167,7 @@ describe('cost of precision', () => {
 });
 
 describe('aim point on the fire mission', () => {
-  it('is stored on the mission, lengthens the lay by 20-40%, and the veteran can immobilise the KV-1', () => {
+  it('is stored on the mission, lengthens the lay by 20-40%, and the veteran can break the KV-1 track', () => {
     const layS = (experience: number): { aim: string | undefined; layS: number } => {
       const state = makeState(1942);
       const g = addGun(state, 'pak38', FROM, 3, { experience, ammo: 20, ammoReserve: 0, rounds: { ...NO_APCR } });
@@ -192,13 +194,13 @@ describe('aim point on the fire mission', () => {
       t.v.mainAmmo = 0; t.v.coaxAmmo = 0; t.v.bowAmmo = 0;
       state.spottedVehicles.german.add(t.v.id);
       run(state, new Rng(seed), 120);
-      if (t.v.state === 'immobilized' || t.v.state === 'abandoned') immobilised++;
+      if (t.v.damage?.trackL==='destroyed'||t.v.damage?.trackR==='destroyed') immobilised++;
       expect(t.v.state === 'knockedOut' || t.v.state === 'burning').toBe(false); // AP never gets through the KV-1
     }
     expect(immobilised).toBeGreaterThanOrEqual(5);
   });
 
-  it('tells the player: "Hit the tracks — KV-1 immobilised."', () => {
+  it('tells the player that the KV-1 is running over its broken chain', () => {
     let told = false;
     for (let seed = 1; seed <= 8 && !told; seed++) {
       const state = makeState(1942);
@@ -206,7 +208,7 @@ describe('aim point on the fire mission', () => {
       const t = kvAt(state, 300);
       state.spottedVehicles.german.add(t.v.id);
       run(state, new Rng(seed), 120);
-      told = state.messages.some((m) => m.text === `${g.team.name}\nHit the tracks — KV-1 immobilised.`);
+      told = state.messages.some((m) => m.text === `${g.team.name}\nTrack broken — KV-1 is running over the loose chain.`);
     }
     expect(told).toBe(true);
   });

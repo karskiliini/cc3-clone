@@ -13,7 +13,8 @@ import {
   vehicleDamageView, stepVehicleDamage, isImmobile, vehicleLayout, seatRoles, FIRE_BAIL_S, SEAT_SWAP_S,
   LOADER_DOWN_RELOAD_MUL, RADIO_OUT_ORDER_DELAY_S, sightAccuracyMul, sideShare, type HitLocation,
 } from '@/sim/vehicleDamage';
-import { applyHESplash, stepCombat } from '@/sim/combat';
+import { applyHESplash } from '@/sim/combat';
+import {stepCombatWithSight as stepCombat} from './fixtures/weaponSight';
 import { stepVehicles } from '@/sim/vehicle';
 import { stepVehicleCrews } from '@/sim/vehicleCrew';
 import { applyOrder, stepAttackOrders, delayedOrderOf } from '@/sim/orders';

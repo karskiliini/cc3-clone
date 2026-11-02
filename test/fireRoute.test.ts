@@ -1,4 +1,5 @@
 // Routes ordered while something burns go round the fire when they can (a path COST, never a block).
+import {recordVisual} from '@/sim/perception';
 import { describe, it, expect } from 'vitest';
 import type { Vec2 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
@@ -7,10 +8,17 @@ import { findPath } from '@/sim/path';
 import { setTile } from '@/sim/map';
 import { fireHazardCost, routeVia } from '@/sim/orders';
 import { FIRE_HAZARD_M } from '@/sim/vehicleExplosion';
-import { makeState, addTank } from './vehicleDamageHelpers';
+import { makeState, addTank,soldier } from './vehicleDamageHelpers';
 
 const FROM: Vec2 = { x: 100.5, y: 140.5 }, TO: Vec2 = { x: 100.5, y: 60.5 }, HULK: Vec2 = { x: 100.5, y: 100.5 };
 const closest = (path: Vec2[], p: Vec2): number => Math.min(...path.map((q) => dist(q, p))) * TILE_M;
+
+// Route costs use an explicitly delivered/observed hazard, never all world fires.
+function informedRoute(state:Parameters<typeof routeVia>[0],from:Vec2,points:readonly Vec2[],mover:'infantry'|'vehicle',soft=false){
+ const observer=soldier(99999,99999,'german',from,'kar98k');
+ for(const hull of state.vehicles.values())recordVisual(state,observer,hull,'vehicle');
+ return routeVia(state,from,points,mover,soft,undefined,observer);
+}
 
 describe('routes and burning vehicles', () => {
   it('nothing burning: no extra cost at all, and the route is the plain A* one', () => {
@@ -24,15 +32,15 @@ describe('routes and burning vehicles', () => {
     const state = makeState();
     addTank(state, 't34_76', HULK).v.state = 'burning';
     expect(closest(findPath(state.map, FROM, TO, 'infantry'), HULK)).toBeLessThan(3);
-    const foot = routeVia(state, FROM, [TO], 'infantry');
+    const foot = informedRoute(state, FROM, [TO], 'infantry');
     expect(closest(foot, HULK)).toBeGreaterThanOrEqual(FIRE_HAZARD_M - TILE_M);
     expect(dist(foot[foot.length - 1], TO)).toBeLessThan(1);
-    const soft = routeVia(state, FROM, [TO], 'vehicle', true);
+    const soft = informedRoute(state, FROM, [TO], 'vehicle', true);
     expect(closest(soft, HULK)).toBeGreaterThanOrEqual(FIRE_HAZARD_M - TILE_M);
-    const armour = routeVia(state, FROM, [TO], 'vehicle');
+    const armour = informedRoute(state, FROM, [TO], 'vehicle');
     expect(closest(armour, HULK)).toBeLessThan(3);
     // waypoint routes too
-    const via = routeVia(state, FROM, [{ x: 100.5, y: 125.5 }, TO], 'infantry');
+    const via = informedRoute(state, FROM, [{ x: 100.5, y: 125.5 }, TO], 'infantry');
     expect(closest(via, HULK)).toBeGreaterThanOrEqual(FIRE_HAZARD_M - TILE_M);
   });
 
@@ -40,7 +48,7 @@ describe('routes and burning vehicles', () => {
     const state = makeState();
     for (let x = 0; x < state.map.width; x++) if (Math.abs(x - 100) > 2) setTile(state.map, x, 100, 'water');
     addTank(state, 't34_76', HULK).v.state = 'burning';
-    const foot = routeVia(state, FROM, [TO], 'infantry');
+    const foot = informedRoute(state, FROM, [TO], 'infantry');
     expect(foot.length).toBeGreaterThan(0);
     expect(dist(foot[foot.length - 1], TO)).toBeLessThan(1);
     expect(closest(foot, HULK)).toBeLessThan(FIRE_HAZARD_M / 2);

@@ -1,3 +1,11 @@
+import {conscious,canObserveComrade} from './perception';
+import {openHumanRng,withHumanRng} from './humanRandom';
+import {directSoldier,directVehicle,recipientOrder} from './perception';
+import {emitShot,emitNoise} from './noise';
+import {seatOccupant} from './vehicleDamage';
+import {beginIndirectMission,stepIndirectCommunication,reportIndirectImpact,deliveredObservation} from './indirectCommunication';
+import {humanCapability} from './humanCondition';
+import {visualIds,vehicleVisualIds,vehicleObserver,knownContacts,knowsDirectly,teamObserver,directContacts} from './perception';
 import { riderCanExpose, onPassengerFired } from './passengerPhysics';
 import { PASSENGER_FIRE_MUL } from './transport';
 import type {
@@ -127,10 +135,10 @@ interface CombatTrack {
   meleeCooldown: Map<number, number>;
 }
 
-const tracks = new WeakMap<BattleState, CombatTrack>();
+
 
 function getTrack(state: BattleState): CombatTrack {
-  let t = tracks.get(state);
+  const runtime=state.humanRuntime??={};let t=runtime.combat as CombatTrack|undefined;
   if (!t) {
     t = {
       grenadeTimer: new Map(), outOfAmmoMessaged: new Set(), smokeRounds: new Map(),
@@ -141,7 +149,7 @@ function getTrack(state: BattleState): CombatTrack {
       beliefFireCounter: new Map(),
       meleeCooldown: new Map(),
     };
-    tracks.set(state, t);
+    runtime.combat=t;
   }
   return t;
 }
@@ -150,8 +158,8 @@ const SMALL_ARMS_CLASSES = new Set(['rifle', 'smg', 'lmg', 'hmg', 'pistol', 'coa
 
 /** Small-arms shots-fired/hits vs soldiers so far, for balance analysis (see harness). */
 export function getSmallArmsStats(state: BattleState): { fired: number; hit: number } {
-  const t = getTrack(state);
-  return { fired: t.smallArmsFired, hit: t.smallArmsHit };
+  const t=state.humanRuntime?.combat as CombatTrack|undefined;
+  return{fired:t?.smallArmsFired??0,hit:t?.smallArmsHit??0};
 }
 
 function addShots(state: BattleState, side: Side, n: number): void {
@@ -229,15 +237,15 @@ function canSoldierFire(s: Soldier, state: BattleState, allowPanic = false): boo
   return !!WEAPONS[s.weaponId];
 }
 
-function gatherCandidates(state: BattleState, side: Side): { soldiers: Soldier[]; vehicles: Vehicle[] } {
+function gatherCandidates(state: BattleState, observer: Soldier): { soldiers: Soldier[]; vehicles: Vehicle[] } {
   const soldiers: Soldier[] = [];
-  for (const id of state.spotted[side]) {
-    const s = state.soldiers.get(id);
+  for (const id of visualIds(state,observer)) {
+    const s = directSoldier(state,observer,id);
     if (s && s.health !== 'dead' && s.health !== 'incapacitated') soldiers.push(s);
   }
   const vehicles: Vehicle[] = [];
-  for (const id of state.spottedVehicles[side]) {
-    const v = state.vehicles.get(id);
+  for (const id of visualIds(state,observer,'vehicle')) {
+    const v = directVehicle(state,observer,id);
     if (v && v.state !== 'knockedOut' && v.state !== 'burning') vehicles.push(v);
   }
   return { soldiers, vehicles };
@@ -249,7 +257,7 @@ function gatherCandidates(state: BattleState, side: Side): { soldiers: Soldier[]
 const SELF_DEFENCE_M = 50;
 const AREA_FIRE_CLASSES = new Set(['rifle', 'smg', 'lmg', 'hmg', 'coaxmg', 'mortar', 'tankgun']);
 /** MG gunners rotate their bursts across the best few members of the target team. */
-const mgSpread = new WeakMap<BattleState, Map<number, number>>();
+
 
 /** Target selection for a soldier under an attack-unit Fire order: the best member of the target
  * team HE can engage (spotted, in range, LOS from his own position); otherwise suppress the tracked
@@ -265,11 +273,11 @@ function pickAttackUnitTarget(
   if (!tgt) return 'free';
   if (phase === 'tracking') {
     if (tgt.vehicleId != null) {
-      const v = state.vehicles.get(tgt.vehicleId);
+      const v = directVehicle(state,soldier,tgt.vehicleId);
       const def = v ? VEHICLE_DEFS[v.defId] : undefined;
       const canHurt = AT_WEAPON_CLASSES.has(weapon.cls)
         || ((weapon.cls === 'rifle' || weapon.cls === 'smg' || weapon.cls === 'lmg' || weapon.cls === 'hmg') && !!def && def.armor.side < 20);
-      if (v && canHurt && state.spottedVehicles[soldier.side].has(v.id) && v.state !== 'knockedOut' && inRangeLOS(v.pos)) {
+      if (v && canHurt && visualIds(state,soldier,'vehicle').has(v.id) && v.state !== 'knockedOut' && inRangeLOS(v.pos)) {
         // same gunner judgment as the free-target loop: an experienced (>=60) rocket man refuses a
         // lane blocked by vegetation unless desperate; a direct order does not bend physics, the
         // round would burst in the hedge regardless of who ordered it.
@@ -284,8 +292,8 @@ function pickAttackUnitTarget(
     }
     const cands: { s: Soldier; score: number }[] = [];
     for (const id of tgt.soldierIds) {
-      if (!state.spotted[soldier.side].has(id)) continue;
-      const e = state.soldiers.get(id);
+      if (!visualIds(state,soldier).has(id)) continue;
+      const e = directSoldier(state,soldier,id);
       if (!e || e.health === 'dead' || e.health === 'incapacitated' || e.activity === 'surrendered') continue;
       if (!inRangeLOS(e.pos)) continue;
       cands.push({ s: e, score: exposureScore(state, soldier.pos, e) });
@@ -296,8 +304,8 @@ function pickAttackUnitTarget(
       if (held) return { kind: 'soldier', soldier: held.s };
       let i = 0;
       if (weapon.cls === 'lmg' || weapon.cls === 'hmg') {
-        let m = mgSpread.get(state);
-        if (!m) { m = new Map(); mgSpread.set(state, m); }
+        const runtime=state.humanRuntime??={};let m=runtime.mgSpread as Map<number,number>|undefined;
+        if(!m){m=new Map();runtime.mgSpread=m;}
         const n = (m.get(soldier.id) ?? 0) + 1;
         m.set(soldier.id, n);
         i = n % Math.min(cands.length, 3);
@@ -328,7 +336,7 @@ function crawlerTarget(state: BattleState, s: Soldier, weapon: WeaponDef): Targe
   const facing = s.mind.threatDir ?? (s.path.length > 0 ? angleTo(s.pos, s.path[s.path.length - 1]) : facingAngle(s.facing));
   const inField = (p: Vec2) => Math.abs(wrapAngle(angleTo(s.pos, p) - facing)) <= CRAWL_FIELD_RAD;
   const ok = (p: Vec2) => dist(s.pos, p) * TILE_M <= rangeM && inField(p) && hasLOS(state.map, s.pos, p, { eyeM });
-  const { soldiers, vehicles } = gatherCandidates(state, s.side);
+  const { soldiers, vehicles } = gatherCandidates(state, s);
   let best: Target | null = null;
   let bestD = Infinity;
   if (AT_WEAPON_CLASSES.has(weapon.cls)) {
@@ -359,7 +367,7 @@ function pickTarget(state: BattleState, soldier: Soldier, team: Team | undefined
   // raised to 100m so an advancing team can shoot back for more of its approach.
   else if (soldier.activity === 'moving') maxRangeM = Math.min(maxRangeM, 100);
 
-  const order = team?.order;
+  const order = recipientOrder(state,soldier,team?.order);
   if (order?.type === 'ambush') maxRangeM = Math.min(maxRangeM, AMBUSH_TRIGGER_M);
   if (order?.type === 'smoke') return null;
 
@@ -374,7 +382,7 @@ function pickTarget(state: BattleState, soldier: Soldier, team: Team | undefined
   const pointAt = (pos: Vec2): Target | null => dist(soldier.pos, pos) * TILE_M <= maxRangeM
     ? areaPoint(state, soldier.pos, pos, canGuesstimate(weapon), { eyeM: firerEyeM }) : null;
 
-  const { soldiers: cands, vehicles: vcands } = gatherCandidates(state, soldier.side);
+  const { soldiers: cands, vehicles: vcands } = gatherCandidates(state, soldier);
   const preferVehicles = AT_WEAPON_CLASSES.has(weapon.cls);
 
   if (order?.type === 'fire' && order.target && order.targetTeamId != null) {
@@ -518,7 +526,7 @@ export function applyHit(
   const victimTeamForGunner = state.teams.get(victim.teamId);
   const victimWeapon = WEAPONS[victim.weaponId];
   if (victimTeamForGunner && victimWeapon && (victimWeapon.cls === 'lmg' || victimWeapon.cls === 'hmg')) {
-    onGunnerHit(state, victimTeamForGunner);
+    onGunnerHit(state, victimTeamForGunner,victim);
   }
 
   const killed = result === 'dead';
@@ -527,7 +535,7 @@ export function applyHit(
       if (id === victim.id) continue;
       const teammate = state.soldiers.get(id);
       if (!teammate || teammate.health === 'dead' || teammate.health === 'incapacitated') continue;
-      if (dist(teammate.pos, victim.pos) <= 15 && hasLOS(state.map, teammate.pos, victim.pos)) {
+      if (canObserveComrade(state,teammate,victim)) {
         onCasualtySeen(state, rng, teammate, victim, killed);
       }
     }
@@ -696,6 +704,7 @@ export function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: W
 
   const kind = weapon.heRadiusM >= 3 ? 'he' : 'small';
   state.explosions.push({ pos: { ...pos }, radiusM: weapon.heRadiusM, t: 0, kind, weaponId: weapon.id });
+  if(weapon.heRadiusM>0)emitNoise(state,pos,'blast',600,`blast:${shooterSide}:${pos.x}:${pos.y}:${state.time}`,shooterSide);
   state.events.push({ kind: 'explosion', pos: { ...pos }, side: shooterSide, weaponId: weapon.id });
   leaveCrater(state, pos, weapon);
   treesInBlast(state, rng, pos, weapon);
@@ -879,6 +888,13 @@ function fireAtVehicle(
   wantTracer: boolean,
   shot: VehicleShot = {},
 ): boolean {
+  const actual=state.vehicles.get(vehicle.id);
+  if(actual!==vehicle){
+    const def=VEHICLE_DEFS[vehicle.defId],radius=(Math.max(def?.lengthM??4,def?.widthM??2)/2)/TILE_M;
+    if(!actual||dist(actual.pos,vehicle.pos)>radius){const hit=traceRound(state,rng,shooterPos,vehicle.pos,weapon,shot.heights);if(wantTracer)traceTracers(state,hit,tracerKindFor(weapon));areaImpact(state,rng,shooterPos,shooterSide,weapon,hit.impact);return false;}
+    return fireAtVehicle(state,rng,weapon,shooterPos,shooterSide,actual,p,wantTracer,shot);
+  }
+
   const kind = tracerKindFor(weapon);
   const round: RoundType = shot.round ?? 'ap';
   const aim: AimPoint = shot.aimPoint ?? 'mass';
@@ -999,6 +1015,11 @@ function areaImpact(state: BattleState, rng: Rng, from: Vec2, side: Side, weapon
 }
 
 function resolveRound(state: BattleState, rng: Rng, shooter: Soldier, weapon: WeaponDef, target: Target, wantTracer: boolean): void {
+  if(target.kind==='soldier'&&state.soldiers.get(target.soldier.id)!==target.soldier){
+    const actual=state.soldiers.get(target.soldier.id),aim=target.soldier.pos;
+    target=actual&&dist(actual.pos,aim)<=.6?{kind:'soldier',soldier:actual}:{kind:'point',pos:{...aim}};
+  }
+
   const map = state.map;
   if (shooter.aiming?.hasty) {
     const aim = targetPosOf(target), range = dist(shooter.pos, aim);
@@ -1242,7 +1263,7 @@ function stepSmgBurst(state: BattleState, rng: Rng, s: Soldier, weapon: WeaponDe
     for (let i = tracerStart; i < state.tracers.length; i++) state.tracers[i].t = age;
     if (state.tracers[tracerStart]) state.tracers[tracerStart].fromHeightM = smgMuzzleHeight(s, b.mode) * 1.3;
     state.flashes.push({ pos: smgMuzzle(s, b.heading), facing: b.heading, t: age, atMuzzle: true, heightM: smgMuzzleHeight(s, b.mode) * 1.3 });
-    state.events.push({ kind: 'shot', pos: { ...s.pos }, weaponId: weapon.id, side: s.side, singleRound: true });
+    emitShot(state,{ kind: 'shot', pos: { ...s.pos }, weaponId: weapon.id, side: s.side, singleRound: true }, `s${s.id}`);
     addShots(state, s.side, 1);
   }
   if (state.time >= b.until) { s.smgBurst = undefined; infantryDidFire(s, state.time); }
@@ -1284,7 +1305,7 @@ function fireBurst(state: BattleState, rng: Rng, soldier: Soldier, weapon: Weapo
   const mx = soldier.pos.x + dm.sin(soldier.facing) * muzzleOffM;
   const my = soldier.pos.y - dm.cos(soldier.facing) * muzzleOffM;
   state.flashes.push({ pos: { x: mx, y: my }, facing: facingAngle(soldier.facing), t: 0, kind: flashKind });
-  state.events.push({ kind: 'shot', pos: { ...soldier.pos }, weaponId: weapon.id, side: soldier.side });
+  emitShot(state,{ kind: 'shot', pos: { ...soldier.pos }, weaponId: weapon.id, side: soldier.side }, `s${soldier.id}`);
   // B2: a rocket launcher vents its backblast — a dust puff behind the firer (opposite his
   // facing), read by the renderer as a flash with no muzzle cone.
   if (weapon.cls === 'atrocket') {
@@ -1411,7 +1432,7 @@ function stepSoldierCombat(state: BattleState, rng: Rng, dt: number, soldier: So
   // the round in the breech decides what the shot does (AP shot does not burst)
   const fired = hasChamberedRound(team, soldier) ? roundWeapon(weapon, chamberedRoundType(team, soldier)) : weapon;
   takeChamberedRound(team, soldier); // already counted out of the ammunition when it was loaded
-  fireBurst(state, rng, soldier, fired, target);
+  withHumanRng(state,soldier,'ballistics',local=>fireBurst(state,local,soldier,fired,target));
   if (!crewAimed) infantryDidFire(soldier, state.time);
   onMissionRound(state, team, soldier);
 }
@@ -1420,8 +1441,8 @@ function stepSoldierCombat(state: BattleState, rng: Rng, dt: number, soldier: So
 function nearestSpottedEnemy(state: BattleState, s: Soldier): Soldier | null {
   let best: Soldier | null = null;
   let bestD = Infinity;
-  for (const id of state.spotted[s.side]) {
-    const e = state.soldiers.get(id);
+  for (const id of visualIds(state,s)) {
+    const e = directSoldier(state,s,id);
     if (!e || e.health === 'dead' || e.health === 'incapacitated') continue;
     const d = dist(e.pos, s.pos);
     if (d < bestD) { bestD = d; best = e; }
@@ -1433,11 +1454,12 @@ function stepGrenades(state: BattleState, rng: Rng, dt: number, track: CombatTra
   const grenadeWeapon = WEAPONS.grenade;
   if (!grenadeWeapon) return;
   for (const s of state.soldiers.values()) {
+    const personal=openHumanRng(state,s,'grenade'),rng=personal.rng;try{
     if (s.health === 'dead' || s.health === 'incapacitated') continue;
     if (s.carryingMgMount != null || s.crewTask?.id === 'liftTripod' || s.crewTask?.id === 'placeTripod') continue;
     if (s.smgBurst && state.time < s.smgBurst.until) continue;
     if (s.activity === 'surrendered' || s.activity === 'routed' || s.activity === 'sneaking' || s.activity === 'ambushing') continue;
-    if (s.grenades <= 0 || isStunned(s, state.time) || isDazed(s, state.time)) continue;
+    if (s.grenades <= 0 || !humanCapability(s,state.time).canFire || isStunned(s, state.time) || isDazed(s, state.time)) continue;
     const charging = state.teams.get(s.teamId)?.order?.type === 'assault';
     const timer = (track.grenadeTimer.get(s.id) ?? 0) - dt;
     // C4: an assaulting man throws on arrival, not on the cooldown — the whole point of the charge
@@ -1447,7 +1469,7 @@ function stepGrenades(state: BattleState, rng: Rng, dt: number, track: CombatTra
     if (enemy && dist(enemy.pos, s.pos) * TILE_M <= 25 && hasLOS(state.map, s.pos, enemy.pos)) {
       s.grenades--;
       track.grenadeTimer.set(s.id, 1 / 0.1);
-      state.events.push({ kind: 'shot', pos: { ...s.pos }, weaponId: 'grenade', side: s.side });
+      emitShot(state,{ kind: 'shot', pos: { ...s.pos }, weaponId: 'grenade', side: s.side }, `s${s.id}`);
       // ballistic throw (A1/B1): the man winds up (throwAt drives the animation), the grenade
       // flies an arc, and the HE burst fires when it lands — not at throw time
       s.throwAt = state.time;
@@ -1462,6 +1484,8 @@ function stepGrenades(state: BattleState, rng: Rng, dt: number, track: CombatTra
     } else {
       track.grenadeTimer.set(s.id, 1);
     }
+
+    }finally{personal.save();}
   }
 }
 
@@ -1486,6 +1510,7 @@ export function stepPendingBursts(state: BattleState, rng: Rng): void {
       state.events.push({ kind: 'explosion', pos: { ...b.pos }, side: b.side, weaponId: b.weaponId });
       continue;
     }
+    if(b.shooterId!=null&&b.indirectMissionAt!=null){const source=state.soldiers.get(b.shooterId);if(source)reportIndirectImpact(state,source.teamId,b.indirectMissionAt,b.pos,b.at);}
     const w = WEAPONS[b.weaponId];
     const shooter = b.shooterId != null ? state.soldiers.get(b.shooterId) : undefined;
     applyHESplash(state, rng, b.pos, w ?? WEAPONS.grenade, b.side, b.trajectory?.sourcePos ?? shooter?.pos, undefined, { trajectory: b.trajectory });
@@ -1572,62 +1597,22 @@ export interface MortarObservationResult {
 /** Observation of the impact area at `aim` for `team`'s mortar right now (same LOS/visibility rules as
  * spotting.ts). Best tier wins; within it the best spotter: team leader and command teams first,
  * then highest experience, then nearest to the aim point. */
-export function mortarObservation(state: BattleState, team: Team, aim: Vec2): MortarObservationResult {
-  const areaTiles = MORTAR_SPOTTED_AREA_M / TILE_M;
-  const enemiesNear: Soldier[] = [];
-  for (const id of state.spotted[team.side]) {
-    const e = state.soldiers.get(id);
-    if (!e || e.health === 'dead' || e.health === 'incapacitated' || e.vehicleId != null) continue;
-    if (dist(e.pos, aim) <= areaTiles) enemiesNear.push(e);
-  }
-  let best: Soldier | null = null;
-  let bestTier = 0; // 2 spotted, 1 area
-  let bestKey: [number, number, number] = [0, 0, 0];
-  for (const s of state.soldiers.values()) {
-    if (s.side !== team.side || !canSpot(s) || isDazed(s, state.time)) continue;
-    const observer = { pos: s.pos, soldier: s };
-    if (observerVisibility(state, observer, aim, MORTAR_SPOTTER_MAX_M) <= 0) continue;
-    let tier = 1;
-    for (const e of enemiesNear) {
-      if (observerVisibility(state, observer, e.pos, MORTAR_SPOTTER_MAX_M) > 0) { tier = 2; break; }
-    }
-    const sTeam = state.teams.get(s.teamId);
-    const priority = (s.teamId === team.id && s.id === team.leaderId) || sTeam?.type === 'command' ? 1 : 0;
-    const key: [number, number, number] = [priority, s.experience, -dist(s.pos, aim)];
-    const better = !best || tier > bestTier
-      || (tier === bestTier && (key[0] > bestKey[0] || (key[0] === bestKey[0] && (key[1] > bestKey[1] || (key[1] === bestKey[1] && key[2] > bestKey[2])))));
-    if (better) { best = s; bestTier = tier; bestKey = key; }
-  }
-  if (!best) return { obs: 'none', spotter: null, mul: 1, own: false };
-  return { obs: bestTier === 2 ? 'spotted' : 'area', spotter: best, mul: spotterQualityMul(best, aim), own: best.teamId === team.id };
+export function mortarObservation(state:BattleState,team:Team,aim:Vec2):MortarObservationResult{
+ const report=deliveredObservation(state,team,aim);
+ if(!report)return{obs:'none',spotter:null,mul:1,own:false};
+ const spotter=state.soldiers.get(report.observerId)??null;
+ return{obs:report.tier,spotter,mul:report.quality,own:spotter?.teamId===team.id};
+}
+/** Walk-in advances only on unique delivered impact observations, not on launches. */
+export function mortarWalkState(team:Team):{tier:MortarObservation;rounds:number}|null{
+ const c=team.indirectControl;return c?{tier:c.report?.tier??'none',rounds:c.rounds}:null;
 }
 
-/** Rounds fired in the current observation tier, per mission (a tier change restarts walk-in). */
-const tierWalk = new WeakMap<object, { tier: MortarObservation; rounds: number }>();
-
-/** Test/HUD hook: the observation tier of the team's last mortar round and rounds fired in it. */
-export function mortarWalkState(team: Team): { tier: MortarObservation; rounds: number } | null {
-  return tierWalk.get(team.crewWeapon?.mission ?? team) ?? null;
-}
-
-function findEnemyCluster(state: BattleState, side: Side): Soldier | null {
-  const ids = Array.from(state.spotted[side]);
-  let best: Soldier | null = null;
-  let bestCount = 0;
-  for (const id of ids) {
-    const s = state.soldiers.get(id);
-    if (!s || s.health === 'dead') continue;
-    let count = 0;
-    for (const id2 of ids) {
-      const s2 = state.soldiers.get(id2);
-      if (!s2 || s2.health === 'dead') continue;
-      if (dist(s.pos, s2.pos) <= 5) count++;
-    }
-    if (count > bestCount) { bestCount = count; best = s; }
-  }
-  // Tried lowering this to 2 (more mortar targets on spread-out defenses); harness showed it made
-  // the attacker win rate slightly worse (31%->27%), so reverted to the original threshold.
-  return bestCount >= 3 ? best : null;
+function findEnemyCluster(state:BattleState,observer:Soldier|null):{pos:Vec2;teamId:number}|null{
+ const contacts=knownContacts(state,observer).filter(c=>c.entity==='soldier'&&c.health!=='dead'&&c.health!=='incapacitated'&&state.time-c.observedAt<30);
+ let best:typeof contacts[number]|null=null,count=0;
+ for(const c of contacts){const n=contacts.filter(o=>dist(o.pos,c.pos)<=5).length;if(n>count){count=n;best=c;}}
+ return count>=3&&best?{pos:{...best.pos},teamId:best.teamId}:null;
 }
 
 function findGunner(state: BattleState, team: Team): Soldier | null {
@@ -1650,7 +1635,7 @@ function mortarBeliefTarget(state: BattleState, team: Team, gunner: Soldier, wea
   let best: Vec2 | null = null;
   let bestScore = 0;
   const leader = state.soldiers.get(team.leaderId);
-  for (const s of [gunner, leader]) {
+  for (const s of [gunner]) {
     if (!s || s.health === 'dead' || s.health === 'incapacitated') continue;
     for (const b of s.mind.beliefs) {
       if (b.confidence < MORTAR_BELIEF_CONFIDENCE || !inMortarRange(gunner, weapon, b.pos)) continue;
@@ -1672,7 +1657,7 @@ export interface MortarAim { pos: Vec2; trackedTeamId: number | null; kind: 'ord
 
 /** Where this mortar would fire right now (null = hold fire). Pure except for the belief throttle. */
 export function pickMortarAim(state: BattleState, team: Team, gunner: Soldier, weapon: WeaponDef, track?: CombatTrack): MortarAim | null {
-  const order = team.order;
+  const order=recipientOrder(state,gunner,team.order);
   if (order?.type === 'smoke') {
     if (!weapon.smoke) return null;
     return inMortarRange(gunner, weapon, order.target) ? { pos: order.target, trackedTeamId: null, kind: 'smoke' } : null;
@@ -1689,7 +1674,7 @@ export function pickMortarAim(state: BattleState, team: Team, gunner: Soldier, w
       return { pos: order.target, trackedTeamId: order.targetTeamId, kind: phase === 'tracking' ? 'tracked' : 'lastKnown' };
     }
   }
-  const cluster = findEnemyCluster(state, team.side);
+  const cluster = findEnemyCluster(state, gunner);
   if (cluster && inMortarRange(gunner, weapon, cluster.pos)) {
     return { pos: cluster.pos, trackedTeamId: cluster.teamId, kind: 'cluster' };
   }
@@ -1736,18 +1721,13 @@ function stepMortarTeam(state: BattleState, rng: Rng, dt: number, team: Team, tr
   const target = aim.pos;
   const distM = dist(team.pos, target) * TILE_M;
   const isSmokeOrder = team.order?.type === 'smoke';
+  beginIndirectMission(state,team,target);
   const { obs, spotter, mul, own } = mortarObservation(state, team, target);
-  const extraDelay = obs !== 'none' && spotter && !own
-    ? MORTAR_SPOTTER_DELAY_S[1] - (MORTAR_SPOTTER_DELAY_S[1] - MORTAR_SPOTTER_DELAY_S[0]) * clamp(spotter.experience / 100, 0, 1)
-    : 0;
+  const extraDelay=0; // delivery delay is modeled by actual messages, not mechanical laying
   const wait = fireMissionWait(state, team, gunner, { aim: target, targetTeamId: aim.trackedTeamId, extraFirstRoundDelayS: extraDelay });
   if (wait > 0) { gunner.fireTimer = Math.min(wait, 0.5); return; }
 
-  const walkKey: object = team.crewWeapon?.mission ?? team;
-  let walk = tierWalk.get(walkKey);
-  if (!walk || walk.tier !== obs) { walk = { tier: obs, rounds: 0 }; tierWalk.set(walkKey, walk); }
-  const sigmaM = mortarDispersionM(distM, obs, walk.rounds, mul);
-  walk.rounds++;
+  const sigmaM=mortarDispersionM(distM,obs,team.indirectControl?.rounds??0,mul);
   onMissionRound(state, team, gunner);
 
   // item 020: rocket launchers pace a SALVO — one tube fires every ROCKET_RAIL_S until the racks
@@ -1756,7 +1736,7 @@ function stepMortarTeam(state: BattleState, rng: Rng, dt: number, team: Team, tr
   gunner.ammo--;
   gunner.lastFiredAt = state.time;
   gunner.activity = 'firing';
-  state.events.push({ kind: 'shot', pos: { ...gunner.pos }, weaponId: weapon.id, side: gunner.side });
+  emitShot(state,{ kind: 'shot', pos: { ...gunner.pos }, weaponId: weapon.id, side: gunner.side }, `s${gunner.id}`);
 
   const isRocket = weapon.cls === 'rocket';
   const tracerKind = isRocket ? 'rocket' : 'mortar';
@@ -1772,7 +1752,7 @@ function stepMortarTeam(state: BattleState, rng: Rng, dt: number, team: Team, tr
     t0: state.time, flightS,
     dirRad: angleTo(gunner.pos, impact), arcM: isRocket ? 22 : 10, hitKind: 'impact', preResolved: false,
   });
-  state.pendingBursts.push({ at: state.time + flightS, pos: { ...impact }, weaponId: weapon.id, side: gunner.side, shooterId: gunner.id, smoke: isSmokeOrder || undefined, trajectory: burstTrajectory(state, gunner.pos, 0.5, impact, flightS) });
+  state.pendingBursts.push({ at: state.time + flightS, pos: { ...impact }, weaponId: weapon.id, side: gunner.side, shooterId: gunner.id, indirectMissionAt:team.indirectControl?.startedAt, smoke: isSmokeOrder || undefined, trajectory: burstTrajectory(state, gunner.pos, 0.5, impact, flightS) });
 
   if (isSmokeOrder) {
     const order = team.order!;
@@ -1849,8 +1829,8 @@ export function noteMgBurst(state: BattleState, vehicle: Vehicle, soldier: Soldi
 function pickNearestInfantry(state: BattleState, vehicle: Vehicle, rangeM: number): Soldier | null {
   let best: Soldier | null = null;
   let bestD = Infinity;
-  for (const id of state.spotted[vehicle.side]) {
-    const s = state.soldiers.get(id);
+  for (const id of vehicleVisualIds(state,vehicle)) {
+    const s = directSoldier(state,vehicleObserver(state,vehicle),id);
     if (!s || s.health === 'dead' || s.health === 'incapacitated') continue;
     const d = dist(vehicle.pos, s.pos) * TILE_M;
     if (d > rangeM) continue;
@@ -1861,15 +1841,15 @@ function pickNearestInfantry(state: BattleState, vehicle: Vehicle, rangeM: numbe
 
 /** Coax MG target: members of an attack-unit target infantry team first, else nearest spotted. */
 function pickCoaxTarget(state: BattleState, vehicle: Vehicle, rangeM: number): Soldier | null {
-  const order = state.teams.get(vehicle.teamId)?.order;
+  const order=recipientOrder(state,vehicleObserver(state,vehicle),state.teams.get(vehicle.teamId)?.order);
   if (order?.type === 'fire' && order.targetTeamId != null && attackPhase(state, order) === 'tracking') {
     const tgt = state.teams.get(order.targetTeamId);
     if (tgt && tgt.vehicleId == null) {
       let best: Soldier | null = null;
       let bestD = Infinity;
       for (const id of tgt.soldierIds) {
-        if (!state.spotted[vehicle.side].has(id)) continue;
-        const e = state.soldiers.get(id);
+        if (!vehicleVisualIds(state,vehicle).has(id)) continue;
+        const e = directSoldier(state,vehicleObserver(state,vehicle),id);
         if (!e || e.health === 'dead' || e.health === 'incapacitated' || e.activity === 'surrendered') continue;
         const d = dist(vehicle.pos, e.pos) * TILE_M;
         if (d > rangeM || d >= bestD || !inCoaxMgArc(vehicle, e.pos) || !hasLOS(state.map, vehicle.pos, e.pos)) continue;
@@ -1881,8 +1861,8 @@ function pickCoaxTarget(state: BattleState, vehicle: Vehicle, rangeM: number): S
   // the free fallback only picks within the coax's field of fire — an MG cannot fire sideways
   let best: Soldier | null = null;
   let bestD = Infinity;
-  for (const id of state.spotted[vehicle.side]) {
-    const s = state.soldiers.get(id);
+  for (const id of vehicleVisualIds(state,vehicle)) {
+    const s = directSoldier(state,vehicleObserver(state,vehicle),id);
     if (!s || s.health === 'dead' || s.health === 'incapacitated' || s.activity === 'surrendered' || s.vehicleId != null) continue;
     const d = dist(vehicle.pos, s.pos) * TILE_M;
     if (d > rangeM || d >= bestD || !inCoaxMgArc(vehicle, s.pos) || !hasLOS(state.map, vehicle.pos, s.pos)) continue;
@@ -1896,7 +1876,7 @@ function pickCoaxTarget(state: BattleState, vehicle: Vehicle, rangeM: number): S
 function pickVisibleVehicleTarget(state: BattleState, vehicle: Vehicle): Target | null | 'mg' {
   const def = VEHICLE_DEFS[vehicle.defId];
   const weapon = def?.mainWeaponId ? WEAPONS[def.mainWeaponId] : null;
-  const order = state.teams.get(vehicle.teamId)?.order;
+  const order=recipientOrder(state,vehicleObserver(state,vehicle),state.teams.get(vehicle.teamId)?.order);
   if (order?.type === 'fire' && order.targetTeamId != null) {
     const picked = pickVehicleAttackTarget(state, vehicle, weapon, order);
     if (picked !== 'free') return picked;
@@ -1909,8 +1889,8 @@ function pickVisibleVehicleTarget(state: BattleState, vehicle: Vehicle): Target 
     // the loader then picks AP for it). Otherwise: threat ranking by time to first shot.
     let firingTeamId: number | null = null;
     let firingScore = Infinity;
-    for (const id of state.spotted[vehicle.side]) {
-      const s = state.soldiers.get(id);
+    for (const id of vehicleVisualIds(state,vehicle)) {
+      const s = directSoldier(state,vehicleObserver(state,vehicle),id);
       if (!s || s.health === 'dead' || s.health === 'incapacitated') continue;
       const d = dist(vehicle.pos, s.pos) * TILE_M;
       if (d > weapon.rangeM) continue;
@@ -1921,13 +1901,13 @@ function pickVisibleVehicleTarget(state: BattleState, vehicle: Vehicle): Target 
     }
     if (firingTeamId != null) {
       const hisTeam = state.teams.get(firingTeamId);
-      if (hisTeam && !hisTeam.outOfAction) {
+      if (hisTeam) {
         let bestMan: Soldier | null = null;
         let bestD = Infinity;
         for (const mid of hisTeam.soldierIds) {
-          const m = state.soldiers.get(mid);
+          const m = directSoldier(state,vehicleObserver(state,vehicle),mid);
           if (!m || m.health === 'dead' || m.health === 'incapacitated') continue;
-          if (!state.spotted[vehicle.side].has(mid)) continue;
+          if (!vehicleVisualIds(state,vehicle).has(mid)) continue;
           const d = dist(vehicle.pos, m.pos) * TILE_M;
           if (d > weapon.rangeM || d >= bestD) continue;
           bestD = d; bestMan = m;
@@ -1943,14 +1923,14 @@ function pickVisibleVehicleTarget(state: BattleState, vehicle: Vehicle): Target 
     // is kept unless another is clearly more urgent; range breaks ties
     let best: Vehicle | null = null;
     let bestScore = Infinity;
-    for (const id of state.spottedVehicles[vehicle.side]) {
-      const v = state.vehicles.get(id);
+    for (const id of vehicleVisualIds(state,vehicle,'vehicle')) {
+      const v = directVehicle(state,vehicleObserver(state,vehicle),id);
       if (!v || v.state === 'knockedOut') continue;
       const d = dist(vehicle.pos, v.pos) * TILE_M;
       if (d > weapon.rangeM) continue;
       const dead = v.state === 'burning' || v.state === 'abandoned';
       const ours = Math.min(60, timeToFirstShotS(state, vehicle, v.pos, Math.abs(v.speed) > 0.1));
-      const theirs = dead ? 60 : Math.min(60, timeToFirstShotS(state, v, vehicle.pos, Math.abs(vehicle.speed) > 0.1));
+      const theirs = dead ? 60 : Math.min(60, 5);
       let score = ours + 0.5 * theirs + d / 100;
       if (vehicle.gunLay?.key === `v${v.id}`) score -= 4;
       if (score < bestScore) { bestScore = score; best = v; }
@@ -1972,14 +1952,14 @@ function pickVisibleVehicleTarget(state: BattleState, vehicle: Vehicle): Target 
   return null;
 }
 /** Vehicle area fire draws on an explicit order or the commander's recent knowledge only. */
-export function vehicleAreaTarget(state: BattleState, vehicle: Vehicle, rangeM: number, accepts: (p: Vec2) => boolean = () => true): Target | null {
-  const order = state.teams.get(vehicle.teamId)?.order;
+export function vehicleAreaTarget(state: BattleState, vehicle: Vehicle, rangeM: number, accepts: (p: Vec2) => boolean = () => true,observer:Soldier|null=vehicleObserver(state,vehicle)): Target | null {
+  const order = recipientOrder(state,observer,state.teams.get(vehicle.teamId)?.order);
   if (order?.type === 'ambush' || order?.type === 'smoke') return null;
   if (order?.type === 'fire' && !(order.targetTeamId != null && attackPhase(state, order) === 'hold')) {
     if (dist(vehicle.pos, order.target) * TILE_M > rangeM || !accepts(order.target)) return null;
     return areaPoint(state, vehicle.pos, order.target, true, { eyeM: EYE_VEHICLE_M });
   }
-  const commander = vehicleCommander(state, vehicle);
+  const commander = observer;
   // item 038: a belief whose line of fire is blocked (hull-down behind a crest) is still a target
   // the commander engages: the tank creeps forward until the gun clears, then fires. Prefer beliefs
   // with a clear gun line when several qualify.
@@ -2035,13 +2015,13 @@ function startMainGunLoad(state: BattleState, vehicle: Vehicle, def: VehicleDef,
 /** The gunner's line of sight to what he is laying on, looked at afresh every GUN_LOS_EVERY_S (and
  * at once when either end has moved a tile); the shot itself always checks the line again. */
 const GUN_LOS_EVERY_S = 0.5;
-const gunLosCache = new WeakMap<Vehicle, { until: number; fx: number; fy: number; tx: number; ty: number; clear: boolean }>();
+
 function gunLos(state: BattleState, vehicle: Vehicle, tPos: Vec2): boolean {
   const fx = Math.floor(vehicle.pos.x), fy = Math.floor(vehicle.pos.y), tx = Math.floor(tPos.x), ty = Math.floor(tPos.y);
-  const c = gunLosCache.get(vehicle);
+  const c = vehicle.gunVisibility;
   if (c && state.time < c.until && state.time >= c.until - GUN_LOS_EVERY_S - 1e-6 && c.fx === fx && c.fy === fy && c.tx === tx && c.ty === ty) return c.clear;
   const clear = hasLOS(state.map, vehicle.pos, tPos, { eyeM: EYE_VEHICLE_M });
-  gunLosCache.set(vehicle, { until: state.time + GUN_LOS_EVERY_S, fx, fy, tx, ty, clear });
+  vehicle.gunVisibility={ until: state.time + GUN_LOS_EVERY_S, fx, fy, tx, ty, clear };
   return clear;
 }
 
@@ -2058,11 +2038,9 @@ function canHaltToFire(state: BattleState, vehicle: Vehicle): boolean {
 }
 
 /** Is `enemy` about to put a round into `me` before my own fine lay (`myFineLeftS`) is done? */
-function aboutToFireAt(enemy: Vehicle, me: Vehicle, myFineLeftS: number): boolean {
-  const lay = enemy.gunLay;
-  if (!lay || lay.key !== `v${me.id}` || !enemy.loadedRound) return false;
-  const left = Math.max(enemy.mainFireTimer, lay.designateLeftS + lay.fineLeftS);
-  return left <= 2 && left < myFineLeftS;
+function aboutToFireAt(state:BattleState,enemy:Vehicle,me:Vehicle,myFineLeftS:number):boolean{
+ const c=directContacts(state,vehicleObserver(state,me)).find(c=>c.entity==='vehicle'&&c.id===enemy.id);
+ return !!c&&myFineLeftS>2&&Math.abs(wrapAngle(angleTo(c.pos,me.pos)-(c.turretFacing??c.hullFacing??0)))<Math.PI/8;
 }
 
 // ------------------------------------------------- vehicle-mounted rocket artillery (item 020)
@@ -2074,10 +2052,10 @@ const ROCKET_ARC_WARN_S = 12;
 /** Where a vehicle-mounted rocket launcher should strike now: the ordered fire point, else the
  * densest spotted enemy cluster (indirect fire needs no LOS, but it needs something to shoot at). */
 function vehicleRocketAim(state: BattleState, vehicle: Vehicle): Vec2 | null {
-  const order = state.teams.get(vehicle.teamId)?.order;
+  const order=recipientOrder(state,vehicleObserver(state,vehicle),state.teams.get(vehicle.teamId)?.order);
   if (order?.type === 'ambush') return null; // hold fire on mere suspicion
   if (order?.type === 'fire' && order.target && attackPhase(state, order) !== 'hold') return order.target;
-  const cluster = findEnemyCluster(state, vehicle.side);
+  const cluster = findEnemyCluster(state, vehicleObserver(state,vehicle));
   return cluster ? cluster.pos : null;
 }
 
@@ -2087,6 +2065,7 @@ function vehicleRocketAim(state: BattleState, vehicle: Vehicle): Vec2 | null {
  * ROCKET_RAIL_S, then reloadS passes before the next salvo; rounds are area HE with mortar-style
  * observation-tier dispersion (no LOS is needed, the splash lands where the map is not in the way). */
 function stepVehicleRockets(state: BattleState, rng: Rng, dt: number, vehicle: Vehicle, def: VehicleDef, weapon: WeaponDef, crew: CrewEffects, track: CombatTrack): void {
+  if(!crew.gunner||!humanCapability(crew.gunner,state.time).canFire)return;
   const aim = vehicleRocketAim(state, vehicle);
   if (!aim) {
     vehicle.gunState = vehicle.mainAmmo > 0 ? 'ready' : undefined;
@@ -2131,17 +2110,14 @@ function stepVehicleRockets(state: BattleState, rng: Rng, dt: number, vehicle: V
   vehicle.rocketSalvoLeft = (vehicle.rocketSalvoLeft ?? 1) - 1;
   vehicle.mainAmmo--;
   vehicle.lastMainShotAt = state.time;
-  state.events.push({ kind: 'shot', pos: { ...vehicle.pos }, weaponId: weapon.id, side: vehicle.side });
+  emitShot(state,{ kind: 'shot', pos: { ...vehicle.pos }, weaponId: weapon.id, side: vehicle.side }, `v${vehicle.id}`);
   state.flashes.push({ pos: { ...vehicle.pos }, facing: vehicle.turretFacing, t: 0, kind: 'shell' });
   addShots(state, vehicle.side, 1);
 
   const team = state.teams.get(vehicle.teamId);
-  const obs = team ? mortarObservation(state, team, aim) : { obs: 'spotted' as const, mul: 1, own: true };
-  const walkKey: object = team ?? weapon;
-  let walk = tierWalk.get(walkKey);
-  if (!walk || walk.tier !== obs.obs) { walk = { tier: obs.obs, rounds: 0 }; tierWalk.set(walkKey, walk); }
-  const sigmaM = mortarDispersionM(distM, obs.obs, walk.rounds, obs.mul);
-  walk.rounds++;
+  if(team)beginIndirectMission(state,team,aim);
+  const obs=team?mortarObservation(state,team,aim):{obs:'none' as const,mul:1,own:true};
+  const sigmaM=mortarDispersionM(distM,obs.obs,team?.indirectControl?.rounds??0,obs.mul);
   const errTiles = sigmaM / TILE_M;
   const impact = {
     x: clamp(aim.x + rng.gauss() * errTiles, 0.01, state.map.width - 0.01),
@@ -2158,7 +2134,7 @@ function stepVehicleRockets(state: BattleState, rng: Rng, dt: number, vehicle: V
   const launch = vehicleGunOrigin(vehicle, def);
   if (!vehicle.body) launch.z += gunTarget(state, vehicle.pos).heightM - 0.5;
   state.pendingBursts.push({
-    at: state.time + 1.2 + distM / 120, pos: { ...impact }, weaponId: weapon.id, side: vehicle.side,
+    at: state.time + 1.2 + distM / 120, pos: { ...impact }, weaponId: weapon.id, side: vehicle.side,shooterId:crew.gunner?.id,indirectMissionAt:team?.indirectControl?.startedAt,
     trajectory: ballisticArrival(launch, { x: impact.x * TILE_M, y: impact.y * TILE_M, z: gunTarget(state, impact).heightM - 0.5 }, rocketFlightS(distM)),
   });
   if ((vehicle.rocketSalvoLeft ?? 0) <= 0) {
@@ -2189,7 +2165,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
   if (vehicle.mainFireTimer > 0) {
     const here = tileAt(state.map, Math.floor(vehicle.pos.x), Math.floor(vehicle.pos.y));
     const onRoad = here === 'dirtroad' || here === 'pavedroad' || here === 'bridge';
-    vehicle.mainFireTimer = Math.max(0, vehicle.mainFireTimer - dt / loadPaceMul(state, vehicle, onRoad));
+    vehicle.mainFireTimer = Math.max(0, vehicle.mainFireTimer - dt * (seatOccupant(state,vehicle,'loader')??vehicleCommander(state,vehicle)?humanCapability((seatOccupant(state,vehicle,'loader')??vehicleCommander(state,vehicle))!,state.time).work:0) / loadPaceMul(state, vehicle, onRoad));
   }
   if (vehicle.loadTotalS != null) vehicle.loadProgress = vehicle.loadTotalS > 0 ? clamp(1 - vehicle.mainFireTimer / vehicle.loadTotalS, 0, 1) : 1;
   vehicle.coaxFireTimer -= dt;
@@ -2197,7 +2173,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
 
   const crew = crewEffects(state, vehicle);
   const mainWeapon = def.mainWeaponId ? WEAPONS[def.mainWeaponId] : undefined;
-  const gunWorks = !!mainWeapon && mainGunUsable(vehicle) && !!crew.gunner;
+  const gunWorks = !!mainWeapon && mainGunUsable(vehicle) && !!crew.gunner&&humanCapability(crew.gunner,state.time).canFire;
   const settled = hullSettled(vehicle);
   // Any angular motion spoils a completed fine lay, even when its target is temporarily lost.
   // Reuse authoritative lay timers; the correction cannot count down until the hull settles.
@@ -2228,7 +2204,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
         counts[round]--; vehicle.mainAmmo--;
         if (counts[round] === 0) noteOutOf(state, team.id, round);
         addShots(state, vehicle.side, 1);
-        state.events.push({ kind: 'shot', pos: { ...vehicle.pos }, weaponId: mainWeapon.id, side: vehicle.side });
+        emitShot(state,{ kind: 'shot', pos: { ...vehicle.pos }, weaponId: mainWeapon.id, side: vehicle.side }, `v${vehicle.id}`);
       }
       if (round === 'smoke') {
         addSmoke(state.map, team.order.target, 3, 1.0);
@@ -2358,7 +2334,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
     // the turret (or the casemate's gun within its arc) comes round at its limited rate, once the
     // commander has called the target; a frozen turret is laid by turning the hull (vehicle.ts)
     const designated = lay.designateLeftS <= 0;
-    if (!designated) { if (los) lay.designateLeftS = Math.max(0, lay.designateLeftS - dt); }
+    if (!designated) { if (los) lay.designateLeftS = Math.max(0, lay.designateLeftS - dt / humanCapability(vehicleCommander(state,vehicle)??crew.gunner!,state.time).decision); }
     else if (!turretFrozen(vehicle)) {
       const rate = turretTraverseRad(def, vehicle, gunner.experience);
       if (def.hasTurret) vehicle.turretFacing = turnTowards(vehicle.turretFacing, desired, rate * dt);
@@ -2389,7 +2365,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
     if (lay.swayLeftS! > 0) {
       lay.swayLeftS = Math.max(0, lay.swayLeftS! - dt); // the recoil settles whatever else happens
     } else if (settled && designated && los && facingDiff <= COARSE_LAY_RAD && lay.fineLeftS > 0 && (!ownMoving || fireOnMove)) {
-      lay.fineLeftS = Math.max(0, lay.fineLeftS - dt);
+      lay.fineLeftS = Math.max(0, lay.fineLeftS - dt * humanCapability(crew.gunner!,state.time).work);
     }
     const left = clamp(1 - (lay.designateLeftS + lay.fineLeftS + (lay.swayLeftS ?? 0)) / Math.max(1e-6, lay.totalS), 0, 1);
     // a follow-up starts from a gun that is still nearly on target, not from nothing
@@ -2426,7 +2402,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
     let layMul = 1;
     let laid = settled && lay.fineLeftS <= 0 && !(lay.swayLeftS! > 0);
     if (settled && !laid && designated && loaded && target.kind === 'vehicle' && gunner.experience >= SNAP_SHOT_MIN_EXPERIENCE
-      && aboutToFireAt(target.vehicle, vehicle, lay.fineLeftS)) {
+      && aboutToFireAt(state,target.vehicle, vehicle, lay.fineLeftS)) {
       const fineTotal = Math.max(1e-6, lay.followUp ? lay.totalS : fineLayS(layIn));
       layMul = Math.max(SNAP_SHOT_MIN, clamp(1 - lay.fineLeftS / fineTotal, 0, 1));
       laid = true;
@@ -2441,7 +2417,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
       vehicle.loadedRound = undefined;
       vehicle.lastMainShotAt = state.time;
       addShots(state, vehicle.side, 1);
-      state.events.push({ kind: 'shot', pos: { ...vehicle.pos }, weaponId: weapon.id, side: vehicle.side });
+      emitShot(state,{ kind: 'shot', pos: { ...vehicle.pos }, weaponId: weapon.id, side: vehicle.side }, `v${vehicle.id}`);
       state.flashes.push({ pos: { ...vehicle.pos }, facing: facingRef, t: 0, kind: 'shell' });
 
       if (target.kind === 'vehicle') {
@@ -2495,7 +2471,7 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
       lay.lostAt ??= state.time;
       let keepS = GUN_LAY_KEEP_S;
       if (lay.key.startsWith('v')) {
-        const cmd = vehicleCommander(state, vehicle);
+        const cmd = vehicleObserver(state, vehicle);
         if (cmd?.mind.beliefs.some((b) => dist(b.pos, lay.aim) <= 6 && state.time - b.time <= 30)) keepS = GUN_LAY_BELIEF_KEEP_S;
       }
       if (state.time - lay.lostAt > keepS || !gunWorks) { vehicle.gunLay = undefined; vehicle.layProgress = undefined; }
@@ -2511,13 +2487,13 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
     const mgBearing = mgTarget ? angleTo(vehicle.pos, targetPosOf(mgTarget)) : vehicle.turretFacing;
     // The coax shares the gun mounting. With no usable main-gun mission, the MG gunner still
     // traverses it at the vehicle's real rate; an active main-gun lay retains priority.
-    if (mgTarget && (!target || !mainWeapon || !gunWorks || (vehicle.mainAmmo <= 0 && !vehicle.loadedRound)) && !turretFrozen(vehicle)) {
+    if (mgTarget && crew.gunner&&humanCapability(crew.gunner,state.time).canFire && (!target || !mainWeapon || !gunWorks || (vehicle.mainAmmo <= 0 && !vehicle.loadedRound)) && !turretFrozen(vehicle)) {
       const goal = def.hasTurret ? mgBearing : vehicle.hullFacing + clamp(wrapAngle(mgBearing - vehicle.hullFacing), -gunArcRad(def), gunArcRad(def));
       vehicle.turretFacing = turnTowards(vehicle.turretFacing, goal, turretTraverseRad(def, vehicle, crew.gunner?.experience ?? 50) * dt);
     }
-    if (mgTarget && vehicle.coaxFireTimer <= 0 && Math.abs(wrapAngle(mgBearing - vehicle.turretFacing)) <= COARSE_LAY_RAD) {
+    if (mgTarget && crew.gunner&&humanCapability(crew.gunner,state.time).canFire && vehicle.coaxFireTimer <= 0 && Math.abs(wrapAngle(mgBearing - vehicle.turretFacing)) <= COARSE_LAY_RAD) {
       vehicle.coaxFireTimer = 1 / coax.rate;
-      state.events.push({ kind: 'shot', pos: { ...vehicle.pos }, weaponId: coax.id, side: vehicle.side });
+      emitShot(state,{ kind: 'shot', pos: { ...vehicle.pos }, weaponId: coax.id, side: vehicle.side }, `v${vehicle.id}`);
       let coaxRounds = 0;
       for (let i = 0; i < coax.burst && vehicle.coaxAmmo > 0; i++) {
         vehicle.coaxAmmo--;
@@ -2547,26 +2523,35 @@ function stepVehicleCombat(state: BattleState, rng: Rng, dt: number, vehicle: Ve
 }
 
 // ------------------------------------------------------------------- bow MG
-function pickVehicleMgTarget(state: BattleState, vehicle: Vehicle, rangeM: number, visible: Soldier | null, accepts: (p: Vec2) => boolean = () => true): Target | null {
-  const order = state.teams.get(vehicle.teamId)?.order;
-  if (order?.type === 'fire' && order.targetTeamId == null) return vehicleAreaTarget(state, vehicle, rangeM, accepts);
+function pickVehicleMgTarget(state: BattleState, vehicle: Vehicle, rangeM: number, visible: Soldier | null, accepts: (p: Vec2) => boolean = () => true,observer:Soldier|null=vehicleObserver(state,vehicle)): Target | null {
+  const order = recipientOrder(state,observer,state.teams.get(vehicle.teamId)?.order);
+  if (order?.type === 'fire' && order.targetTeamId == null) return vehicleAreaTarget(state, vehicle, rangeM, accepts,observer);
   if (visible) {
     if (hasLOS(state.map, vehicle.pos, visible.pos, { eyeM: EYE_VEHICLE_M })) return { kind: 'soldier', soldier: visible };
     if (order?.type !== 'ambush') return areaPoint(state, vehicle.pos, visible.pos, true, { eyeM: EYE_VEHICLE_M });
   }
+  // A gunner can engage an open fighting compartment from their own sight;
+  // it does not require borrowing the commander's private belief list.
+  let open:Vec2|null=null,nearest=Infinity;
+  for(const c of directContacts(state,observer))if(c.entity==='vehicle'&&(c.vehicleState==='ok'||c.vehicleState==='immobilized')){
+    const def=VEHICLE_DEFS[c.vehicleDefId??''],distance=dist(vehicle.pos,c.pos)*TILE_M;
+    if(!def||!vehicleLayout(def).openTop||distance>rangeM||distance>=nearest||!accepts(c.pos)||!hasLOS(state.map,vehicle.pos,c.pos,{eyeM:EYE_VEHICLE_M}))continue;
+    open={...c.pos};nearest=distance;
+  }
+  if(open)return{kind:'point',pos:open};
   // An MG cannot damage the closed tank an attack-unit order is tracking.
   if (order?.targetTeamId != null && state.teams.get(order.targetTeamId)?.vehicleId != null) return null;
   // nor the closed hull the commander's belief is about: area fire only where men may be
-  return vehicleAreaTarget(state, vehicle, rangeM, (p) => accepts(p) && !atClosedEnemyArmour(state, vehicle.side, p));
+  return vehicleAreaTarget(state, vehicle, rangeM, (p) => accepts(p) && !atClosedEnemyArmour(state, vehicle, p,observer),observer);
 }
 
 /** Metres from a known enemy hull within which an MG's area fire would only rattle its armour. */
 const MG_ARMOUR_CLEAR_M = 6;
 /** Is `p` where a spotted enemy vehicle with a closed fighting compartment stands? */
-function atClosedEnemyArmour(state: BattleState, side: Side, p: Vec2): boolean {
-  for (const id of state.spottedVehicles[side]) {
-    const v = state.vehicles.get(id);
-    if (!v || v.side === side || v.state === 'knockedOut') continue;
+function atClosedEnemyArmour(state: BattleState, vehicle: Vehicle, p: Vec2,observer:Soldier|null=vehicleObserver(state,vehicle)): boolean {
+  for (const id of visualIds(state,observer,'vehicle')) {
+    const v = directVehicle(state,observer,id);
+    if (!v || v.side === vehicle.side || v.state === 'knockedOut') continue;
     const def = VEHICLE_DEFS[v.defId];
     if (!def || vehicleLayout(def).openTop) continue;
     if (dist(v.pos, p) * TILE_M <= MG_ARMOUR_CLEAR_M) return true;
@@ -2585,7 +2570,7 @@ function fireVehicleMgRound(
   const shot = traceRound(state, rng, muzzle, aim, weapon, { eyeM: EYE_VEHICLE_M, targetM: victim ? eyeHeightM(victim.stance) : 0.5 });
   const landed = hit && !shot.blocked && !shot.deflected;
   traceTracers(state, shot, tracerKind, landed);
-  if (landed && victim) applyHit(state, victim, weapon, rng, vehicle.side);
+  if (landed && victim){const actual=state.soldiers.get(victim.id);if(actual&&dist(actual.pos,aim)<=.6&&hasLOS(state.map,muzzle,actual.pos,{eyeM:EYE_VEHICLE_M,targetM:eyeHeightM(actual.stance)}))applyHit(state,actual,weapon,rng,vehicle.side);else areaImpact(state,rng,muzzle,vehicle.side,weapon,shot.impact,gunner??undefined);}
   else areaImpact(state, rng, muzzle, vehicle.side, weapon, shot.impact, gunner ?? undefined, target.kind === 'point' && !!target.guesstimate);
 }
 
@@ -2622,8 +2607,8 @@ export function inCoaxMgArc(vehicle: Vehicle, p: Vec2): boolean {
 function pickBowMgTarget(state: BattleState, vehicle: Vehicle): Soldier | null {
   let best: Soldier | null = null;
   let bestD = Infinity;
-  for (const id of state.spotted[vehicle.side]) {
-    const s = state.soldiers.get(id);
+  for (const id of vehicleVisualIds(state,vehicle,'soldier','radioOp')) {
+    const s = directSoldier(state,vehicleObserver(state,vehicle,'radioOp'),id);
     if (!s || s.health === 'dead' || s.health === 'incapacitated' || s.activity === 'surrendered' || s.vehicleId != null) continue;
     const d = dist(vehicle.pos, s.pos);
     if (d >= bestD || !inBowMgArc(vehicle, s.pos) || !hasLOS(state.map, vehicle.pos, s.pos)) continue;
@@ -2645,15 +2630,15 @@ function stepBowMg(state: BattleState, rng: Rng, vehicle: Vehicle, def: VehicleD
   vehicle.bowAmmo ??= BOW_MG_AMMO;
   if (vehicle.bowAmmo <= 0) return;
   const gunner = bowGunner(state, vehicle);
-  if (!gunner) return;
-  const target = pickVehicleMgTarget(state, vehicle, BOW_MG_RANGE_M, pickBowMgTarget(state, vehicle), (p) => inBowMgArc(vehicle, p));
+  if (!gunner||!humanCapability(gunner,state.time).canFire) return;
+  const target = pickVehicleMgTarget(state, vehicle, BOW_MG_RANGE_M, pickBowMgTarget(state, vehicle), (p) => inBowMgArc(vehicle, p),gunner);
   if (!target || !inBowMgArc(vehicle, targetPosOf(target))) return;
   const shieldVictim = target.kind === 'soldier' ? target.soldier : null;
   vehicle.bowFireTimer = 1 / mg.rate;
   // the muzzle is in the bow plate
   const fx = dm.sin(vehicle.hullFacing), fy = -dm.cos(vehicle.hullFacing);
   const muzzle = { x: vehicle.pos.x + (fx * def.lengthM * 0.4) / TILE_M, y: vehicle.pos.y + (fy * def.lengthM * 0.4) / TILE_M };
-  state.events.push({ kind: 'shot', pos: { ...muzzle }, weaponId: mg.id, side: vehicle.side });
+  emitShot(state,{ kind: 'shot', pos: { ...muzzle }, weaponId: mg.id, side: vehicle.side }, `v${vehicle.id}`);
   const skillMul = clamp(0.7 + gunner.experience / 200, 0.7, 1.2) * (systemState(vehicle, 'bowMg') === 'damaged' ? BOW_MG_DAMAGED_MUL : 1);
   let rounds = 0;
   for (let i = 0; i < mg.burst && vehicle.bowAmmo > 0; i++) {
@@ -2684,19 +2669,19 @@ export function stepCombat(state: BattleState, rng: Rng, dt: number): void {
   const track = getTrack(state);
 
   for (const soldier of state.soldiers.values()) {
-    stepSoldierCombat(state, rng, dt, soldier, track);
+    withHumanRng(state,soldier,'weapon',local=>stepSoldierCombat(state,local,dt,soldier,track));
   }
 
   stepGrenades(state, rng, dt, track);
 
   stepMelee(state, rng, dt, track);
   for (const team of state.teams.values()) {
-    if (team.vehicleId == null) stepMortarTeam(state, rng, dt, team, track);
+    if(team.vehicleId==null){const gunner=findGunner(state,team);if(gunner)withHumanRng(state,gunner,'indirect',local=>stepMortarTeam(state,local,dt,team,track));}
   }
 
   stepSmokeOrders(state);
 
   for (const vehicle of state.vehicles.values()) {
-    stepVehicleCombat(state, rng, dt, vehicle, track);
+    const operator=vehicleObserver(state,vehicle)??vehicleObserver(state,vehicle,'commander');if(operator)withHumanRng(state,operator,'vehicleWeapon',local=>stepVehicleCombat(state,local,dt,vehicle,track));
   }
 }

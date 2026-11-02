@@ -1,8 +1,12 @@
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
+const pickVehicleTarget=withWeaponSight(rawPickVehicleTarget);
+const mainGunAtInfantry=withWeaponSight(rawMainGunAtInfantry);
 import { describe, it, expect } from 'vitest';
 import { makeState, addTank, soldier, mkTeam, addGun } from './vehicleDamageHelpers';
-import { stepCombat } from '@/sim/combat';
-import { pickVehicleTarget } from '@/sim/combat';
-import { MG_GROUP_MIN, MG_GROUP_RADIUS_TILES, MG_ESCALATE_S, MG_ESCALATE_CLOSE_S, MG_ESCALATE_PINNED_S, MG_SUPPRESS_LEVEL, mainGunAtInfantry, noteMgBurst } from '@/sim/combat';
+import { stepCombat as rawStepCombat } from '@/sim/combat';
+import { pickVehicleTarget as rawPickVehicleTarget } from '@/sim/combat';
+import { MG_GROUP_MIN, MG_GROUP_RADIUS_TILES, MG_ESCALATE_S, MG_ESCALATE_CLOSE_S, MG_ESCALATE_PINNED_S, MG_SUPPRESS_LEVEL, mainGunAtInfantry as rawMainGunAtInfantry, noteMgBurst } from '@/sim/combat';
 import { Rng } from '@/shared/rng';
 import { setTile } from '@/sim/map';
 import { findPath } from '@/sim/path';
@@ -131,7 +135,7 @@ describe('item 018 — main-gun-at-infantry doctrine (mainGunAtInfantry)', () =>
     state.time = MG_ESCALATE_S;
     expect(mainGunAtInfantry(state, v, men[0])).toBe('escalated');
     // pinned (>= MG_SUPPRESS_LEVEL): the MGs keep him down for now...
-    men[0].suppression = MG_SUPPRESS_LEVEL;
+    men[0].suppression = MG_SUPPRESS_LEVEL;men[0].activity='pinned';
     expect(mainGunAtInfantry(state, v, men[0])).toBeNull();
     // ...but one man must not hold the tank up for long: pinned and still there, he gets the HE
     state.time = MG_ESCALATE_PINNED_S;
@@ -154,7 +158,7 @@ describe('item 018 — main-gun-at-infantry doctrine (mainGunAtInfantry)', () =>
     const v = tank(state);
     const { men } = addTeam(state, 1, { x: 202.5, y: 170 });
     setTile(state.map, 202, 170, 'buildingStone');
-    men[0].suppression = 100;
+    men[0].suppression = 100;men[0].activity='pinned';
     noteMgBurst(state, v, men[0]);
     state.time = MG_ESCALATE_S;
     expect(mainGunAtInfantry(state, v, men[0])).toBeNull();

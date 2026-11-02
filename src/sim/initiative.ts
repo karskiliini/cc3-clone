@@ -1,3 +1,5 @@
+import {openHumanRng} from './humanRandom';
+import {humanCapability} from './humanCondition';
 import type { BattleState, Side, Team, Vec2 } from '@/shared/types';
 import { otherSide, TILE_M } from '@/shared/types';
 import { Rng } from '@/shared/rng';
@@ -26,9 +28,9 @@ export interface InitiativeResult {
   target: Vec2;
   vlId: number | null;
 }
-function enemyVLs(state: BattleState, side: Side, from: { x: number; y: number }): { vl: BattleState['map']['victoryLocations'][number]; distM: number }[] {
+function enemyVLs(state: BattleState, side: Side, from: { x: number; y: number },leader:import('@/shared/types').Soldier): { vl: BattleState['map']['victoryLocations'][number]; distM: number }[] {
   return state.map.victoryLocations
-    .filter((vl) => vl.owner === otherSide(side))
+    .filter((vl) => (leader.perception?.objectives?.[vl.id]?leader.perception.objectives[vl.id].owner:otherSide(state.map.def.attacker)) === otherSide(side))
     .map((vl) => ({ vl, distM: dm.hypot(vl.x - from.x, vl.y - from.y) * TILE_M }))
     .sort((a, b) => a.distM - b.distM);
 }
@@ -46,17 +48,15 @@ export function stepSubordinateInitiative(state: BattleState, rng: Rng, side: Si
     if (team.side !== playerSide || team.outOfAction) continue;
     const leader = state.soldiers.get(team.leaderId);
     if (!leader || leader.health === 'dead' || leader.health === 'incapacitated') continue;
-    if (team.morale < MIN_MORALE) continue;
+    if (leader.morale < MIN_MORALE || !humanCapability(leader,state.time).canOperate) continue;
     // only teams with no standing player order (or a plain hold) may act
     if (team.order && team.order.type !== 'defend') continue;
-    // squads whose men are all cowering/pinned are in no state to plan
-    const men = team.soldierIds.map((id) => state.soldiers.get(id)).filter((s) => s && s.health !== 'dead');
-    if (men.length === 0 || men.every((s) => s!.mind.state === 'broken')) continue;
+    const local=openHumanRng(state,leader,'initiative');try{const rng=local.rng;
 
     if (!rng.chance(INITIATIVE_CHANCE_PER_TICK)) continue;
 
     // pick one of the two nearest enemy-held VLs (from THIS team), within a sane march
-    const options = enemyVLs(state, playerSide, team.pos).filter((o) => o.distM <= 400);
+    const options = enemyVLs(state, playerSide, leader.pos,leader).filter((o) => o.distM <= 400);
     if (options.length === 0) continue;
     const pick = options[rng.int(0, Math.min(2, options.length) - 1)];
     const target = { x: pick.vl.x, y: pick.vl.y };
@@ -65,6 +65,7 @@ export function stepSubordinateInitiative(state: BattleState, rng: Rng, side: Si
     team.aiObjective = target;
     issue(team.id, target);
     return { teamId: team.id, target, vlId: pick.vl.id };
+    }finally{local.save();}
   }
   return null;
 }

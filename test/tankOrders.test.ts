@@ -1,3 +1,5 @@
+import {observeNavigationAll} from '@/sim/navigationKnowledge';
+import {updateSpotting} from '@/sim/spotting';
 import { describe, expect, it } from 'vitest';
 import { SIM_DT } from '@/shared/types';
 import { Rng } from '@/shared/rng';
@@ -15,6 +17,7 @@ function run(state: BattleState, seconds: number, each?: () => void): void {
   const rng = new Rng(5);
   for (let i = 0; i < Math.round(seconds / SIM_DT); i++) {
     state.time += SIM_DT;
+    if(i%5===0){updateSpotting(state,rng);observeNavigationAll(state);}
     stepVehicles(state, rng, SIM_DT);
     each?.();
   }

@@ -1,0 +1,15 @@
+{
+  "engines": [
+    {
+      "name": "chromium",
+      "frames": 60,
+      "sha": "f9aca3e43f73cafb2f02d9ae9e408531bccc26dfe6e011be2c5e7dfdccc4d352"
+    },
+    {
+      "name": "webkit",
+      "frames": 60,
+      "sha": "f9aca3e43f73cafb2f02d9ae9e408531bccc26dfe6e011be2c5e7dfdccc4d352"
+    }
+  ],
+  "serverStopped": true
+}

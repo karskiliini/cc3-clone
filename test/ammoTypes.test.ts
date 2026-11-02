@@ -1,3 +1,5 @@
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
 // Ammunition types (req_ammo_damage A): AP / APCR / HE / smoke per gun, chosen at LOAD.
 import { describe, it, expect } from 'vitest';
 import type { BattleState } from '@/shared/types';
@@ -8,7 +10,7 @@ import { VEHICLE_DEFS } from '@/data/units';
 import { penetrates, expectedPenetrationChance, bestRoundAgainst, apcrIssued } from '@/sim/ballistics';
 import { chooseRound, splitRounds, soldierRounds, vehicleRounds } from '@/sim/aimPoint';
 import { resolveVehicleHit } from '@/sim/vehicleDamage';
-import { stepCombat } from '@/sim/combat';
+import { stepCombat as rawStepCombat } from '@/sim/combat';
 import { stepCrewWeapons } from '@/sim/crewWeapon';
 import { makeState, addTank, addGun, soldier, mkTeam } from './vehicleDamageHelpers';
 
@@ -193,8 +195,8 @@ describe('threat ranking uses the best round (mind spec §10.1)', () => {
 });
 
 describe('running gear', () => {
-  it('hits on the running gear immobilise, whatever the armour', () => {
-    let immobilised = 0;
+  it('hits on the running gear cut a physical chain, whatever the hull armour', () => {
+    let broken = 0;
     const rng = new Rng(6);
     for (let i = 0; i < 200; i++) {
       const state = makeState();
@@ -202,8 +204,8 @@ describe('running gear', () => {
       const res = resolveVehicleHit(state, rng, v, { weapon: WEAPONS.pak38, round: 'ap', shooterPos: { x: 100, y: 0 }, shooterSide: 'german', distM: 200, aimPoint: 'runningGear' });
       expect(res.location!.zone === 'runningGearL' || res.location!.zone === 'runningGearR').toBe(true);
       expect(v.state === 'knockedOut' || v.state === 'burning').toBe(false);
-      if (v.state === 'immobilized') immobilised++;
+      if(v.damage?.trackL==='destroyed'||v.damage?.trackR==='destroyed'){broken++;expect(Object.values(v.trackChains??{}).some(c=>c.points.length>10)).toBe(true);}
     }
-    expect(immobilised).toBeGreaterThan(100);
+    expect(broken).toBeGreaterThan(100);
   });
 });

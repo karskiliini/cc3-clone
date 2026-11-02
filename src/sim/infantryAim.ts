@@ -1,3 +1,4 @@
+import {humanCapability} from './humanCondition';
 import type { Soldier, Team, Vec2, WeaponDef } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import { angleTo, clamp, dist, facingAngle, facingFromAngle, wrapAngle } from '@/shared/math';
@@ -8,11 +9,9 @@ import { hastyFireKind } from './hastyFire';
 
 type Aim = NonNullable<Soldier['aiming']>;
 interface Memory { lastPos: Vec2; movedAt: number; walkUntil: number; shot?: Aim; shotAt: number }
-const memories = new WeakMap<Soldier, Memory>();
+
 function memory(s: Soldier): Memory {
-  let m = memories.get(s);
-  if (!m) { m = { lastPos: { ...s.pos }, movedAt: -Infinity, walkUntil: -Infinity, shotAt: -Infinity }; memories.set(s, m); }
-  return m;
+  return s.aimMemory??={lastPos:{...s.pos},movedAt:-Infinity,walkUntil:-Infinity,shotAt:-Infinity};
 }
 function advancing(s: Soldier): boolean {
   return s.path.length > 0 && (s.activity === 'moving' || s.activity === 'sneaking' || s.activity === 'movingFast');
@@ -34,7 +33,7 @@ export function observeInfantryMotion(s: Soldier, now: number): void {
 
 export function clearInfantryAim(s: Soldier): void {
   s.aiming = undefined;
-  const m = memories.get(s);
+  const m = s.aimMemory;
   if (m) m.shot = undefined;
 }
 
@@ -57,7 +56,7 @@ function aimSeconds(s: Soldier, weapon: WeaponDef, at: Vec2, now: number, follow
   // a rifleman's aiming is mostly his training: a recruit takes about twice a regular's time, a
   // veteran two thirds, a hero not much over a third
   const skill = Math.max(0.4, 1 + (50 - clamp(s.experience, 0, 100)) * 0.014);
-  const condition = 1 + s.fatigue * 0.008 + s.suppression * 0.008 + (s.mind?.stress ?? 0) * 0.004 + (s.health === 'wounded' ? 0.35 : 0);
+  const condition = humanCapability(s,now).settle + s.suppression*.008;
   return Math.max(0.5, (base + range * (followUp ? 0.3 : 1) + settle) * skill * condition * (hip ? 0.6 : 1));
 }
 

@@ -209,6 +209,8 @@ export interface PersonalFoxhole {
   depthM: number; workS: number; appliedWorkS: number;
 }
 export interface GameMap {
+  navigationBriefing?:GameMap;
+  navigationChanged?:Set<number>;
   foxholes?: Map<number, PersonalFoxhole>;
   def: MapDef;
   width: number;
@@ -409,7 +411,11 @@ export interface EnemyBelief {
   pos: Vec2;                  // tile coords
   count: number;              // enemies believed at this spot
   confidence: number;         // 0..1
-  kind: 'seen' | 'fired' | 'reported';
+  kind: 'seen' | 'fired' | 'reported' | 'heard';
+  uncertaintyM?: number;
+  sourceId?: number;
+  modality?: 'visual' | 'acoustic';
+  hops?:number;
   time: number;               // battle seconds of last refresh
   deadSeen: number;           // dead enemies seen near this spot
 }
@@ -465,7 +471,38 @@ export interface PassengerCompartment {
   benches: { min: Vec3; max: Vec3 }[];
 }
 
+/** Identified visual evidence: a frozen observation, never a live enemy reference. */
+export interface PersonalContact {
+  id:number; entity:'soldier'|'vehicle'; teamId:number; pos:Vec2; observedAt:number;
+  confidence:number; uncertaintyM:number; sourceId:number; receivedAt:number; hops?:number;
+  health?:Health; vehicleState?:Vehicle['state']; weaponId?:string; vehicleDefId?:string;
+  hullFacing?:number; turretFacing?:number; activity?:Activity; stance?:Stance; facing?:Facing8; teamType?:TeamType;
+}
+export interface AcousticCue { pos:Vec2; bearing:number; uncertaintyM:number; confidence:number; observedAt:number; kind:'shot'|'engine'|'blast'|'voice'; }
+export interface NavigationCell {
+ index:number;tile:Terrain;window:number;buildingId:number;bunkerId:number;wire:number;smoke:number;
+ observedAt:number;sourceId:number;hops:number;
+ samples?:{base:number[];dig:number[];height:number[];canopy:number[]};holes?:PersonalFoxhole[];edits?:[number,{original:number;dig:number}][];
+}
+export interface KnownHull {id:number;teamId:number;side:Side;defId:string;pos:Vec2;heading:number;state:VehicleState;observedAt:number;sourceId:number;hops:number;onFire:boolean;contact?:boolean}
+export interface PersonalPerception {
+  navigation?:{cells:Record<number,NavigationCell>;hulls:Record<number,KnownHull>;version?:number};
+  visual:PersonalContact[]; reports:PersonalContact[]; memory?:PersonalContact[]; sounds:AcousticCue[];
+  nextReportAt:number; lastSounds:Record<string,number>; sentReports?:Record<string,number>;
+  objectives?:Record<number,{owner:Side|null;observedAt:number;sourceId:number}>;
+  leaderId?:number;
+  leadership?:{leaderId:number;observedAt:number};
+  casualties:Record<string,{health:Health;pos:Vec2;observedAt:number;sourceId:number;isLeader:boolean}>;
+}
+export interface HumanCondition { breath:number; sweat:number; hearingLoss:number; at:number; lastPos:Vec2; }
+export interface PendingContactReport { from:number; to:number; sentAt:number; deliverAt:number; channel:'voice'|'intercom'|'radio'; contact?:PersonalContact; belief?:EnemyBelief; navigationCell?:NavigationCell; navigationHull?:KnownHull; objective?:{id:number;owner:Side|null;observedAt:number;sourceId:number}; casualty?:{id:number;health:Health;pos:Vec2;observedAt:number;sourceId:number;isLeader:boolean}; leadership?:{leaderId:number;observedAt:number}; }
 export interface Soldier {
+  lastMoanAt?:number;
+  randomStreams?:Record<string,number>;
+  perception?:PersonalPerception;
+  condition?:HumanCondition;
+  treatmentUntil?:number;
+  aimMemory?:{lastPos:Vec2;movedAt:number;walkUntil:number;shot?:Soldier['aiming'];shotAt:number};
   digging?: { siteId: number; startedAt: number };
   lastToolWorkAt?: number;
   /** campaign identity: stable across battles (G1). Undefined for AI forces. */
@@ -678,6 +715,7 @@ export interface PendingBurst {
   shooterId?: number;
   smoke?: boolean;
   trajectory?: IncomingTrajectory;
+  indirectMissionAt?:number;
 }
 /** Building destruction visuals (B3): dust, chips, settling rubble over `extentTiles`. */
 export interface StructureFx {
@@ -790,6 +828,7 @@ export interface VehicleNavigationMemory {
     fleeingSince: number | null; cooldownUntil: number; searchAfter?: number; fleeAnchor?: Vec2;
   };
   blockedSince?: number;
+  pursuitTraffic?: { since:number; corner:Vec2 };
   firingSpotLook?: { at: number; target: Vec2 };
   backingOnMove?: boolean;
   kTurning?: boolean;
@@ -812,6 +851,8 @@ export interface TrackChainState {
 }
 
 export interface Vehicle {
+  lastEngineNoiseAt?:number;
+  gunVisibility?:{until:number;fx:number;fy:number;tx:number;ty:number;clear:boolean};
   trackChains?: { L?: TrackChainState; R?: TrackChainState };
   id: number;
   teamId: number;
@@ -988,6 +1029,8 @@ export const ORDER_DOT_COLOR: Record<OrderType, string> = {
 export const AMBUSH_TRIGGER_M = 30;   // manual: ambush launches when enemy within 30 m
 
 export interface Order {
+  formationHeading?:number;
+  formationClaims?:Record<number,number>;
   type: OrderType;
   target: Vec2;               // destination, fire point, or facing point
   targetTeamId?: number;      // for fire orders on a team ("attack unit"; absent = area fire)
@@ -1063,7 +1106,12 @@ export interface TeamDef {
 /** militia: hasty replacements; line; seasoned: picked or long-serving men; elite */
 export type TeamQuality = 'militia' | 'line' | 'seasoned' | 'elite';
 
+export interface IndirectObservation {observerId:number;observedAt:number;receivedAt:number;aim:Vec2;tier:'spotted'|'area';quality:number;impactAt?:number}
+export interface IndirectControl {aim:Vec2;startedAt:number;orderAt?:number;nextRequestAt:number;report?:IndirectObservation;rounds:number;lastImpactAt:number}
+export interface IndirectMessage {kind:'request'|'observation';teamId:number;missionAt:number;aim:Vec2;route:number[];hop:number;deliverAt:number;channel:'voice'|'intercom'|'radio';observation?:IndirectObservation}
+export interface IndirectObserverTask {teamId:number;missionAt:number;aim:Vec2;observerId:number;nextReportAt:number}
 export interface Team {
+  indirectControl?:IndirectControl;
   id: number;
   defId: string;
   side: Side;
@@ -1357,7 +1405,19 @@ export interface BattleConfig {
   alwaysObeyOrders?: boolean;
 }
 
+export interface HumanMindTrack {
+ soldiers:Map<number,{panicLowFear:number;shakenLowFear:number;calmNoThreat:number;beliefAccum:number;shareAccum:number;hadFirstFire:boolean;freezeUntil:number;shotsFromSpot:number;spotAnchor:Vec2|null;buddyFearUntil:number;gunAbandoned:boolean}>;
+ berserkUntil:Map<number,number>;lastRallyAt:Map<number,number>;leaderDeadSince:Map<number,number>;gunTakeoverAt:Map<number,number>;lastMsgAt:Map<number,number>;
+}
+export interface HumanMoraleTrack {lastHealth:Map<number,Health>;tankScareAt:Map<number,number>;teamLastStatus:Map<number,TeamStatusWord>;hesitationMsgAt:Map<number,number>}
 export interface BattleState {
+  noise?:{nextId:number;sources:Record<string,number>;events:{id:number;key:string;at:number;pos:Vec2;kind:'shot'|'engine'|'blast'|'voice';rangeM:number;side?:Side}[]};
+  humanRuntime?:Record<string,unknown>;
+  aiRuntime?:Record<string,unknown>;
+  mindRuntime?:HumanMindTrack;
+  moraleRuntime?:HumanMoraleTrack;
+  communication?:{queue:PendingContactReport[]};
+  indirectCommunication?:{queue:IndirectMessage[];tasks:IndirectObserverTask[]};
   deploymentReady?: Record<Side,boolean>;
   multiplayerPolicy?: { active: boolean; speedVotes: Record<Side,number>; pausesUsed: Record<Side,number>; pauseOwner: Side|null };
   controllerOverrides?: Record<Side,Controller>;

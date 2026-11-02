@@ -246,14 +246,15 @@ describe('desync recovery (047)', () => {
         return m;
       }),
     });
-    // the German player gives two orders in the same turn, once the battle runs
+    // Reversing orders for different people can legitimately commute with personal RNG.
+    // Conflicting orders for the same team must change its final command and trigger repair.
     let given = false;
     recoverAndPlay(p, 1, 300, () => {
       const g = p.peers.german;
       if (!given && g.battle.state.phase === 'running' && g.turn >= 120) {
-        const [a, b] = g.battle.selectableTeams('german');
+        const [a] = g.battle.selectableTeams('german');
         g.issue({ type: 'order', teamId: a.id, order: { type: 'moveFast', target: { x: a.pos.x + 8, y: a.pos.y - 8 }, issuedAt: 0 } });
-        g.issue({ type: 'order', teamId: b.id, order: { type: 'sneak', target: { x: b.pos.x - 8, y: b.pos.y - 8 }, issuedAt: 0 } });
+        g.issue({ type: 'order', teamId: a.id, order: { type: 'sneak', target: { x: a.pos.x - 8, y: a.pos.y - 8 }, issuedAt: 0 } });
         given = true;
       }
     });

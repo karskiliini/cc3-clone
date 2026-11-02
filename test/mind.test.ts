@@ -1,3 +1,6 @@
+import {emitShot} from '@/sim/noise';
+import {stepHearing} from '@/sim/perception';
+import {recordVisual,stepCommunication} from '@/sim/perception';
 import { describe, it, expect } from 'vitest';
 import type {
   BattleConfig, BattleState, GameMap, MapDef, Soldier, Team, Terrain,
@@ -169,6 +172,8 @@ describe('beliefs', () => {
     state.soldiers.set(shooter.id, shooter);
     const rng = new Rng(9);
     onIncomingFire(state, rng, s, shooter, { x: 5, y: 4.5 }, 'rifle');
+    expect(s.mind.threatDir).toBeNull(); // impact alone does not identify the source
+    state.soldiers.set(s.id,s);emitShot(state,{kind:'shot',pos:{...shooter.pos},weaponId:shooter.weaponId,side:shooter.side},`s${shooter.id}`);state.time=.1;stepHearing(state);
     expect(s.mind.threatDir).not.toBeNull();
     // Shooter not in state.spotted -> the "LOS along incoming direction" branch adds a far belief.
     expect(s.mind.beliefs.length).toBeGreaterThan(0);
@@ -184,7 +189,7 @@ describe('beliefs', () => {
     leader.mind.beliefs.push({ pos: { x: 20, y: 20 }, count: 1, confidence: 1, kind: 'seen', time: 0, deadSeen: 0 });
 
     const rng = new Rng(2);
-    for (let i = 0; i < 25; i++) stepMinds(state, rng, 0.1); // >2s so sharing fires
+    for(let i=0;i<25;i++){state.time+=.1;stepCommunication(state);stepMinds(state,rng,.1);} // real voice delivery, not an instantaneous mind step
     expect(mate.mind.beliefs.some((b) => b.kind === 'reported')).toBe(true);
   });
 
@@ -193,7 +198,7 @@ describe('beliefs', () => {
     const s = makeSoldier(1, 1, { pos: { x: 5, y: 5 } });
     const deadEnemy = makeSoldier(2, 2, { side: 'soviet', pos: { x: 6, y: 5 }, health: 'dead' });
     state.soldiers.set(s.id, s);
-    state.soldiers.set(deadEnemy.id, deadEnemy);
+    state.soldiers.set(deadEnemy.id, deadEnemy);recordVisual(state,s,deadEnemy,'soldier');
     s.mind.beliefs.push({ pos: { x: 6, y: 5 }, count: 1, confidence: 1, kind: 'seen', time: 0, deadSeen: 0 });
     const rng = new Rng(4);
     for (let i = 0; i < 10; i++) stepMinds(state, rng, 0.1); // >0.5s so belief maintenance runs

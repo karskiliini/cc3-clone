@@ -1,6 +1,9 @@
+import {seatOccupant} from '@/sim/vehicleDamage';
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
 import { describe, expect, it } from 'vitest';
 import { Rng } from '@/shared/rng';
-import { stepCombat } from '@/sim/combat';
+import { stepCombat as rawStepCombat } from '@/sim/combat';
 import { addTank, makeState, mkTeam, soldier } from './vehicleDamageHelpers';
 
 function mgScenario(screen: 'woods' | 'smoke' | 'buildingStone' = 'woods') {
@@ -96,7 +99,7 @@ describe('obscured area fire', () => {
     const state = makeState(); state.time = 10;
     const { v, crew } = addTank(state, 'pz4gh', { x: 50, y: 50 }, 0);
     v.mainAmmo = 0; v.coaxAmmo = 0;
-    crew[0].mind.beliefs = [
+    seatOccupant(state,v,'radioOp')!.mind.beliefs = [
       { pos: { x: 50, y: 70 }, confidence: 0.9, kind: 'fired', time: 10, count: 1, deadSeen: 0 },
       { pos: { x: 50, y: 30 }, confidence: 0.8, kind: 'fired', time: 10, count: 1, deadSeen: 0 },
     ];

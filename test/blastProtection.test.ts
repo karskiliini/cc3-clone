@@ -1,9 +1,11 @@
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
 import { describe, expect, it } from 'vitest';
 import type { Soldier, Terrain, Vec2 } from '@/shared/types';
 import { TILE_M } from '@/shared/types';
 import { dist } from '@/shared/math';
 import { Rng } from '@/shared/rng';
-import { applyBlastKnockback, applyHESplash, stepCombat } from '@/sim/combat';
+import { applyBlastKnockback, applyHESplash, stepCombat as rawStepCombat } from '@/sim/combat';
 import { detonateVehicle } from '@/sim/vehicleExplosion';
 import { ragdollSample } from '@/render/soldierAnim';
 import { makeSoldier, makeState, makeTeam, mortar, W } from './kitHelpers';

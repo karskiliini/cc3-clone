@@ -1,3 +1,4 @@
+import {recordVisual} from '@/sim/perception';
 // Knocked down -> DAZED -> RECOVERING (user request 2026-09-17; sim/daze.ts). Deterministic.
 import { describe, it, expect } from 'vitest';
 import type { BattleConfig, BattleState, CrewTaskId, GameMap, MapDef, Soldier, Team, Terrain, Vec2, WeaponDef } from '@/shared/types';
@@ -131,7 +132,7 @@ describe('daze: what he cannot do', () => {
     expect(dazeVisionFactor(s, state.time)).toBeLessThanOrEqual(0.3);
     s.activity = 'reloading'; s.reloadTimer = 0.2; s.ammo = 0;
     const rng = new Rng(9);
-    const stepAll = () => { stepMovement(state, rng, 0.1); stepCombat(state, rng, 0.1); state.time += 0.1; enemy.health = 'healthy'; enemy.stunnedUntil = undefined; };
+    const stepAll = () => { if(!isDazed(s,state.time))recordVisual(state,s,enemy,'soldier');stepMovement(state, rng, 0.1); stepCombat(state, rng, 0.1); state.time += 0.1; enemy.health = 'healthy'; enemy.stunnedUntil = undefined; };
     while (state.time < s.dazedUntil! - 0.2) stepAll();
     expect(s.lastFiredAt).toBe(-999);
     expect(s.grenades).toBe(2);

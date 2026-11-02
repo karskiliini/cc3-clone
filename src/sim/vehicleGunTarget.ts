@@ -1,3 +1,5 @@
+import {directSoldier,directVehicle,recipientOrder} from './perception';
+import {visualIds,vehicleVisualIds,vehicleObserver,knownContacts,knowsDirectly,teamObserver,directContacts} from './perception';
 import { crewEffects } from './vehicleDamage';
 import { chooseAimPointAt, gunnerSkill, splitRounds } from './aimPoint';
 import type { BattleState, Order, Soldier, Vec2, Vehicle, WeaponDef } from '@/shared/types';
@@ -71,9 +73,9 @@ export function mainGunAtInfantry(state: BattleState, vehicle: Vehicle, s: Soldi
   if (team) {
     let clustered = 0;
     for (const id of team.soldierIds) {
-      const m = state.soldiers.get(id);
+      const m = directSoldier(state,vehicleObserver(state,vehicle),id);
       if (!m || m.health === 'dead' || m.health === 'incapacitated' || m.activity === 'surrendered') continue;
-      if (!state.spotted[vehicle.side].has(id)) continue;
+      if (!vehicleVisualIds(state,vehicle).has(id)) continue;
       if (dist(m.pos, s.pos) <= MG_GROUP_RADIUS_TILES) clustered++;
     }
     if (clustered >= MG_GROUP_MIN && !strongCover) return 'group';
@@ -87,10 +89,10 @@ export function mainGunAtInfantry(state: BattleState, vehicle: Vehicle, s: Soldi
     let bestSupp = 0;
     if (team) {
       for (const id of team.soldierIds) {
-        const m = state.soldiers.get(id);
+        const m = directSoldier(state,vehicleObserver(state,vehicle),id);
         if (!m || m.health === 'dead' || m.health === 'incapacitated' || m.activity === 'surrendered') continue;
-        if (!state.spotted[vehicle.side].has(id)) continue;
-        bestSupp = Math.max(bestSupp, m.suppression);
+        if (!vehicleVisualIds(state,vehicle).has(id)) continue;
+        bestSupp=Math.max(bestSupp,m.activity==='pinned'||m.activity==='cowering'?70:0);
       }
     }
     if (bestSupp < MG_SUPPRESS_LEVEL) return 'escalated';
@@ -101,6 +103,7 @@ export function mainGunAtInfantry(state: BattleState, vehicle: Vehicle, s: Soldi
 /** Main-gun target for a vehicle on an attack-unit Fire order: AP at the target vehicle, HE at the
  * best visible member of a target infantry team, HE on the tracked/last known position otherwise. */
 export function pickVehicleAttackTarget(state: BattleState, vehicle: Vehicle, weapon: WeaponDef | null, order: Order): VehicleGunTarget | null | 'free' | 'mg' {
+  order=recipientOrder(state,vehicleObserver(state,vehicle),order)!;
   const phase = attackPhase(state, order);
   if (phase === 'hold') return 'free';
   const tgt = state.teams.get(order.targetTeamId!);
@@ -108,17 +111,17 @@ export function pickVehicleAttackTarget(state: BattleState, vehicle: Vehicle, we
   const rangeM = weapon ? weapon.rangeM : 400;
   if (phase === 'tracking') {
     if (tgt.vehicleId != null) {
-      const v = state.vehicles.get(tgt.vehicleId);
+      const v = directVehicle(state,vehicleObserver(state,vehicle),tgt.vehicleId);
       // item 038: the target may have ducked behind a bank or driven out of sight since the order
       // was issued; the gun keeps pointing at the ordered (last-known) point instead of going
       // silent — when it re-spots, the vehicle branch takes over again.
-      if (v && v.state !== 'knockedOut' && state.spottedVehicles[vehicle.side].has(v.id) && dist(vehicle.pos, v.pos) * TILE_M <= rangeM) return { kind: 'vehicle', vehicle: v };
+      if (v && v.state !== 'knockedOut' && vehicleVisualIds(state,vehicle,'vehicle').has(v.id) && dist(vehicle.pos, v.pos) * TILE_M <= rangeM) return { kind: 'vehicle', vehicle: v };
     }
     let best: Soldier | null = null;
     let bestScore = -Infinity;
     for (const id of tgt.soldierIds) {
-      if (!state.spotted[vehicle.side].has(id)) continue;
-      const e = state.soldiers.get(id);
+      if (!vehicleVisualIds(state,vehicle).has(id)) continue;
+      const e = directSoldier(state,vehicleObserver(state,vehicle),id);
       if (!e || e.health === 'dead' || e.health === 'incapacitated' || e.activity === 'surrendered') continue;
       if (dist(vehicle.pos, e.pos) * TILE_M > rangeM || !hasLOS(state.map, vehicle.pos, e.pos)) continue;
       const sc = exposureScore(state, vehicle.pos, e);
@@ -147,8 +150,8 @@ export function orderedVehicleGunTarget(state: BattleState, vehicle: Vehicle, or
     return target === 'free' || target === 'mg' ? null : target;
   }
   // Legacy direct vehicle-id previews without a team id still obey side visibility.
-  if (order.targetVehicleId != null && state.spottedVehicles[vehicle.side].has(order.targetVehicleId)) {
-    const target = state.vehicles.get(order.targetVehicleId);
+  if (order.targetVehicleId != null && vehicleVisualIds(state,vehicle,'vehicle').has(order.targetVehicleId)) {
+    const target = directVehicle(state,vehicleObserver(state,vehicle),order.targetVehicleId);
     if (target && target.state !== 'knockedOut') return { kind: 'vehicle', vehicle: target };
   }
   return { kind: 'point', pos: order.target };

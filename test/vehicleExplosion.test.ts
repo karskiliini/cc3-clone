@@ -1,3 +1,5 @@
+import {updateSpotting} from '@/sim/spotting';
+import {observeNavigation} from '@/sim/navigationKnowledge';
 // Catastrophic vehicle explosions: the ammunition-rack detonation as an area event, the delayed
 // cook-off of a burning vehicle, burning hulks as a danger source (sim/vehicleExplosion.ts).
 import { describe, it, expect } from 'vitest';
@@ -261,6 +263,7 @@ describe('burning hulks as a danger source', () => {
     s.activity = 'defending';
     expect(bestCoverNear(state, s, 6)!.tile).toEqual({ x: 102.5, y: 100.5 }); // not burning yet
     v.state = 'burning';
+    updateSpotting(state,new Rng(2));observeNavigation(state,s);
     const pick = bestCoverNear(state, s, 12);
     expect(pick).not.toBeNull();
     expect(dist(pick!.tile, v.pos) * TILE_M).toBeGreaterThan(FIRE_HAZARD_M);

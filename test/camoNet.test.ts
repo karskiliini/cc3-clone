@@ -21,9 +21,9 @@ describe('G31 camouflage nets', () => {
     for (let rep = 0; rep < 40; rep++) {
       const rngA = new Rng(100 + rep), rngB = new Rng(500 + rep);
       { const { state } = scene(false);
-        for (let t = 0; t < 120; t++) { updateSpotting(state, rngA); if (state.spotted.german.has(2)) { plainSpots++; break; } } }
+        for (let t = 0; t < 120; t++) { state.tick=t;state.time=t*.1;updateSpotting(state, rngA); if (state.spotted.german.has(2)) { plainSpots++; break; } } }
       { const { state } = scene(true);
-        for (let t = 0; t < 120; t++) { updateSpotting(state, rngB); if (state.spotted.german.has(2)) { camoSpots++; break; } } }
+        for (let t = 0; t < 120; t++) { state.tick=t;state.time=t*.1;updateSpotting(state, rngB); if (state.spotted.german.has(2)) { camoSpots++; break; } } }
     }
     expect(plainSpots).toBeGreaterThan(20); // open-ground prone man is found regularly
     expect(camoSpots).toBe(0); // beyond CAMO_NET_MAX_SPOT_M the net hides him completely

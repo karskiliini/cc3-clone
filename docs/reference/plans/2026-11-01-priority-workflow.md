@@ -22,7 +22,7 @@ capacity and preserve other jobs. Use immutable isolated inputs for long tests.
 | 3 | 054 terrain compression | Complete; accepted load/height/cover/art integration | Loaded accepted track/wheel contacts progressively compress holes/rims by vehicle weight and passes; height, cover and visuals agree; rejected movement creates no deformation |
 | 4 | 055 infantry digging | Complete; canonical sites/cover/tasks/animation/render integration | Eligible idle men dig visibly over time; orders/threats interrupt; persistent site depth/cover evolves deterministically and interacts with stage 3 |
 | 5 | 044 + 047b online multiplayer and recovery | Implementation complete; real relay/lobby/UI/recovery verified; public deployment left to user | Relay/browser transport, room join and forces/deployment, game UI, speed/pause policy, disconnect takeover/forfeit/rejoin, visible desync rebuild/failure/report flow, two browser/host verification |
-| 6 | 056 individual perception and human condition | Active: personal evidence and capability migration | Personal visual/acoustic contacts and delivered reports replace omniscient decisions; integrated pain/exertion/shock/exhaustion/sweat/tremor affect capability; hidden-state/viewer independence and exact replay tests |
+| 6 | 056 individual perception and human condition | Complete; personal evidence/capability, replay and navigation integration | Personal visual/acoustic contacts and delivered reports replace omniscient decisions; integrated pain/exertion/shock/exhaustion/sweat/tremor affect capability; hidden-state/viewer independence and exact replay tests |
 
 ## Stage 1: compartment implementation decisions
 
@@ -99,3 +99,11 @@ valid substitute for compartment occlusion. Render or model fixes belong to 051.
   stopped. Public Internet hosting and cross-browser soak remain explicitly
   unverified/user-deployed; see `docs/reference/multiplayer-protocol.md` and report
   `docs/superpowers/reports/workflow-044-20261101/README.md`.
+
+- Stage 056 completed: 1919 passed / 2 skipped in the full 206-file final-source
+  regression and network batches; types/build; 10/10 real-map driving goals;
+  exact M5/M2/Chromium/WebKit 60-step trace SHA
+  `f9aca3e43f73cafb2f02d9ae9e408531bccc26dfe6e011be2c5e7dfdccc4d352`.
+  Read-only own-person I-key inspector verified in real Chromium. All owned test
+  browsers/servers stopped. Full evidence and calibration/compatibility limits:
+  `docs/superpowers/reports/workflow-056-20261101/README.md`.

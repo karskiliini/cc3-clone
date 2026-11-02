@@ -1,3 +1,4 @@
+import {emitNoise} from './noise';
 import { worsen } from './vehicleDamage';
 import { inverseRotate, yawQuat } from './hullMath';
 import { VEHICLE_DEFS } from '@/data/units';
@@ -87,6 +88,7 @@ export function soldierMineCheck(state: BattleState, s: Soldier, rng: Rng): void
   if (!rng.chance(0.7)) return;
   consumeMine(state.map, idx);
   state.explosions.push({ pos: { x: s.pos.x, y: s.pos.y }, radiusM: 3, t: 0, kind: 'small' });
+  emitNoise(state,s.pos,'blast',500,`mine:${s.id}:${state.time}`);
   addMessage(state, 'A mine explodes.', 'bad', s.side);
   if (kind === MINE_AP) {
     const weapon = WEAPONS[AP_MINE_WEAPON_ID];

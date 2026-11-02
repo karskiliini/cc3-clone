@@ -1,3 +1,5 @@
+import {withWeaponSight,stepCombatWithSight} from './fixtures/weaponSight';
+const stepCombat=stepCombatWithSight;
 // Play-feedback regressions (2026-09-26):
 //  1. "when I press defend, and a new direction, the tank immediately jumps to that direction"
 //  2. "a tiger tank tends to turn its back and the back of its turret to the most dangerous enemy"
@@ -7,7 +9,7 @@ import { SIM_DT } from '@/shared/types';
 import { Rng } from '@/shared/rng';
 import { angleTo, wrapAngle } from '@/shared/math';
 import { VEHICLE_DEFS } from '@/data/units';
-import { stepCombat } from '@/sim/combat';
+import { stepCombat as rawStepCombat } from '@/sim/combat';
 import { stepVehicles, isVehicleReversing } from '@/sim/vehicle';
 import { applyOrder } from '@/sim/orders';
 import { setTile } from '@/sim/map';

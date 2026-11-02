@@ -1,3 +1,5 @@
+import {recordVisual,vehicleObserver} from '@/sim/perception';
+import {ensureSeats} from '@/sim/vehicleDamage';
 import { expect, it } from 'vitest';
 import { Rng } from '@/shared/rng';
 import { takeHullDrive } from '@/sim/hullDrive';
@@ -16,6 +18,7 @@ for (const obstacle of ['none', 'water', 'hull'] as const) {
     if (obstacle === 'hull') {
       const other = addTank(state, 't34_76', { x: 20.5, y: 23 });
       other.v.state = 'knockedOut';
+      ensureSeats(state,v);recordVisual(state,vehicleObserver(state,v,'driver')!,other.v,'vehicle');
       for (const id of other.team.soldierIds) state.soldiers.delete(id);
     }
     state.time = 0.1;

@@ -11,7 +11,7 @@ Process requests in the order received. New requests are appended to the queue w
 Pushing to GitHub works again (since 2026-09-25); the earlier Zscaler push blocker no longer applies.
 ## Active
 
-**051 → 052 → 054 → 055 → 044/047b → 056 — user-requested implementation workflow (2026-11-01).** The user explicitly reprioritized these items and requested their implementation now as a workflow. **Active stage: 056, individual perception and human condition; 051, 052, 054, 055 and the 044/047b implementation complete. Public relay deployment/Internet acceptance remain with the user.** Execution and evidence ledger: `docs/reference/plans/2026-11-01-priority-workflow.md`. Complete and verify each stage, commit/push it, then continue to the next without a new approval ceremony.
+**051 → 052 → 054 → 055 → 044/047b → 056 — user-requested implementation workflow (2026-11-01).** The user explicitly reprioritized these items and requested their implementation now as a workflow. **Workflow implementation complete: 051, 052, 054, 055, 044/047b and 056. No new queued feature is activated by this completion. Public relay deployment/Internet acceptance remain with the user.** Execution and evidence ledger: `docs/reference/plans/2026-11-01-priority-workflow.md`. Complete and verify each stage, commit/push it, then continue to the next without a new approval ceremony.
 
 **050 P2 parked for this workflow.** Remaining routing/determinism/balance acceptance is not claimed complete. Performance optimization remains deferred at the user's request: current performance is sufficient for now; resume profiling/optimization only when requested. Latest measurement: 40 moving vehicles, 2.59450 ms/tick on the Mac mini (`docs/superpowers/reports/2026-11-01-p2-line-interest-performance.md`). The former 0.5 ms target does not block this workflow.
 
@@ -72,19 +72,6 @@ Completion: plan milestones M1–M5 are met.
 - A disconnect offers AI takeover or forfeit.
 - A reloaded tab rejoins by fast-forwarding the command log.
 - A desync produces a downloadable log that reproduces offline.
-
-**056 — Feature: Individual perception, communication and human condition.**
-Request (2026-10-11): every person must act from what they themselves see/hear, their mental disposition, orders and actual abilities, rather than the whole battlefield or the player's view. Pain, breathlessness, shell shock, exhaustion, sweating and tremor must affect action, movement speed, aim and decision-making.
-Audit: `docs/superpowers/specs/2026-10-11-individual-perception-physiology-audit.md`. Existing personal psychology, pain bouts, fatigue and daze are foundations. The focused audit found side/team knowledge leaks in targeting, fear, fleeing and casualty awareness, hidden-neighbor counts and hidden-destruction memory clearing; it did not prove a direct camera-dependent simulation bug or exhaustively audit all consumers.
-Scope: first personal visual/acoustic contacts and explicit communication, then one integrated condition/capability model reusing existing state. All people, including vehicle and weapon crews, participate. Physical collision/damage may use world truth; decisions receive only perceived evidence and delivered reports. Acoustic contacts carry uncertain bearing/location and confidence, and reports retain original age rather than tracking hidden live targets. New future-affecting state and applicable legacy human-state omissions need deterministic hashing and replay coverage.
-Done when:
-- Two isolated people can know different things about the same enemy. Another observer's sighting does not grant exact personal targeting, fear or a flee direction without a delivered report; a report does not substitute for direct visual acquisition.
-- Changes to hidden enemy position/count/status outside legitimate sensory and physical influence leave the observer's decisions and beliefs unchanged. Seeing one enemy does not reveal unseen neighbors; hidden destruction does not clear memory remotely.
-- Occluded audible activity produces an uncertain cue without a confirmed hidden ID/exact position. Masking, hearing capability and communication eligibility affect receipt; stale reports never refresh through sharing loops.
-- Pain, breathlessness, acute shock, exhaustion, sweat and tremor have documented observable effects on sensing, movement, weapon settling/dispersion, crew work and decision/obedience latency. Controlled same-order fixtures distinguish individual condition/personality and show bounded recovery without double-counting causes.
-- With controllers/commands fixed, viewer side, selection, camera and display modes leave every simulation hash and individual decision unchanged. Read-only decision explanations consume no RNG or state.
-- Exact future-state mutation, replay/resync and cross-engine checks cover perception, reports, condition and timers. Legitimate unseen physical hits, area fire and communicated indirect fire still function.
-No implementation or passing acceptance is claimed by this audit. Queue after the active request; numeric physiological calibration is a documented gameplay assumption, not a clinical claim.
 
 **057 — Feature / feasibility study: JEV “kärpäsaivot” as a soldier or tank-driver controller.**
 Request (2026-10-12, user's words): "voiko JEV kärpäsaivot laittaa pelaamaan sotilaita tai tankin ohjaajaa niin että ne osaavat reagoida tilanteisiin nopeasti ja järkeväsit".
@@ -274,3 +261,25 @@ Done when:
 Open questions: the dig rate per period and terrain (frozen ground in winter, rock, urban rubble); whether a crew-served weapon team digs a weapon pit.
 
 Implemented and verified. Details: `docs/superpowers/specs/2026-11-01-individual-entrenchment.md`.
+
+## Completed workflow stage 056 — 2026-11-02
+
+**056 — Feature: Individual perception, communication and human condition.**
+Request (2026-10-11): every person must act from what they themselves see/hear, their mental disposition, orders and actual abilities, rather than the whole battlefield or the player's view. Pain, breathlessness, shell shock, exhaustion, sweating and tremor must affect action, movement speed, aim and decision-making.
+Audit: `docs/superpowers/specs/2026-10-11-individual-perception-physiology-audit.md`. Existing personal psychology, pain bouts, fatigue and daze are foundations. The focused audit found side/team knowledge leaks in targeting, fear, fleeing and casualty awareness, hidden-neighbor counts and hidden-destruction memory clearing; it did not prove a direct camera-dependent simulation bug or exhaustively audit all consumers.
+Scope: first personal visual/acoustic contacts and explicit communication, then one integrated condition/capability model reusing existing state. All people, including vehicle and weapon crews, participate. Physical collision/damage may use world truth; decisions receive only perceived evidence and delivered reports. Acoustic contacts carry uncertain bearing/location and confidence, and reports retain original age rather than tracking hidden live targets. New future-affecting state and applicable legacy human-state omissions need deterministic hashing and replay coverage.
+Done when:
+- Two isolated people can know different things about the same enemy. Another observer's sighting does not grant exact personal targeting, fear or a flee direction without a delivered report; a report does not substitute for direct visual acquisition.
+- Changes to hidden enemy position/count/status outside legitimate sensory and physical influence leave the observer's decisions and beliefs unchanged. Seeing one enemy does not reveal unseen neighbors; hidden destruction does not clear memory remotely.
+- Occluded audible activity produces an uncertain cue without a confirmed hidden ID/exact position. Masking, hearing capability and communication eligibility affect receipt; stale reports never refresh through sharing loops.
+- Pain, breathlessness, acute shock, exhaustion, sweat and tremor have documented observable effects on sensing, movement, weapon settling/dispersion, crew work and decision/obedience latency. Controlled same-order fixtures distinguish individual condition/personality and show bounded recovery without double-counting causes.
+- With controllers/commands fixed, viewer side, selection, camera and display modes leave every simulation hash and individual decision unchanged. Read-only decision explanations consume no RNG or state.
+- Exact future-state mutation, replay/resync and cross-engine checks cover perception, reports, condition and timers. Legitimate unseen physical hits, area fire and communicated indirect fire still function.
+Implemented and verified. Numeric physiological calibration remains a documented gameplay assumption, not a clinical claim.
+
+Final-source verification: 1919 passed, 2 skipped across 206 files;
+all 32 lockstep/recovery cases, separate-process replay, viewer independence,
+10/10 real-map vehicle goals, types/build and exact M5/M2/Chromium/WebKit trace.
+Own-person evidence/condition is available with I. Specification:
+`docs/superpowers/specs/2026-11-01-personal-evidence-and-capability.md`.
+Evidence: `docs/superpowers/reports/workflow-056-20261101/README.md`.
