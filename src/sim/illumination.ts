@@ -1,4 +1,3 @@
-import {emitRadio,radioOrderSender} from './radioTraffic';
 /** Canonical aerial light and mortar illumination. World rays use metres;
  * orders and map locations use tiles. Renderer queries are strictly read-only. */
 import type {BattleState,HeightField,IlluminationFlare,Side,Soldier,Team,Vec2,Vec3} from '@/shared/types';
@@ -172,7 +171,6 @@ export function requestIllumination(state:BattleState,side:Side,teamId:number,ta
     addMessage(state,`${team.name}\n${!team.illuminationAmmo?'No illumination rounds.':`Illumination range: ${weapon.minRangeM??0}–${weapon.rangeM} m.`}`,'warn',side);return false;
   }
   if(team.order?.illumination&&team.illuminationMission&&dist(team.illuminationMission.target,target)<.5)return true;
-  if(radioOrderSender(state,side,teamId))emitRadio(state,side,{kind:'message',text:'Illumination requested',target});
   const traverse=Math.abs(wrapAngle(angleTo(cw.pos,target)-cw.facing));
   team.illuminationMission={target:{...target},orderedAt:state.time,nextRoundAt:Math.max(state.time,cw.nextMortarShotAt??0),rounds:0,layUntil:2+traverse/.4};
   team.order={type:'fire',target:{...target},issuedAt:state.time,illumination:true};

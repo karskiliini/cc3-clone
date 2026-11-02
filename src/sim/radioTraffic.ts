@@ -1,5 +1,6 @@
-import type {BattleState,RadioPayload,RadioTransmission,Side,Soldier,PendingContactReport} from '@/shared/types';
-import {communicationLink,commandRecipient,conscious} from './perception';
+import type {BattleState,RadioPayload,RadioTransmission,Side,Soldier,PendingContactReport,Order} from '@/shared/types';
+import {commandRoute} from './commandRoute';
+import {commandRecipient,conscious} from './perception';
 import {VEHICLE_DEFS} from '@/data/units';
 export const RADIO_TRAFFIC_LIMIT=256;
 /** Public wire content only: never attach live senders or private plans. */
@@ -13,12 +14,24 @@ export function emitRadio(state:BattleState,senderSide:Side,payload:RadioPayload
 }
 export function interceptedRadio(state:BattleState,side:Side):readonly RadioTransmission[]{return(state.radioTraffic?.messages??[]).filter(m=>m.senderSide!==side);}
 export function radioOrderSender(state:BattleState,side:Side,teamId:number):Soldier|null{
- const sender=commandRecipient(state,side),team=state.teams.get(teamId),recipient=team?state.soldiers.get(team.leaderId):undefined;
- return sender&&recipient&&communicationLink(state,sender,recipient)?.channel==='radio'?sender:null;
+ const hop=commandRoute(state,side,teamId)?.find(h=>h.channel==='radio');
+ return hop?state.soldiers.get(hop.from)??null:null;
+}
+export function emitTelephone(state:BattleState,side:Side,payload:RadioPayload):void{
+ const net=state.telephoneTraffic??={nextId:0,messages:[]};net.messages.push({id:net.nextId++,at:state.time,senderSide:side,payload:structuredClone(payload)});if(net.messages.length>256)net.messages.splice(0,net.messages.length-256);
+}
+export function emitCommandTraffic(state:BattleState,side:Side,teamId:number,order:Order):void{
+ const route=commandRoute(state,side,teamId);if(!route)return;
+ const payload:RadioPayload={kind:'message',text:order.illumination?'Illumination order':`${order.type} order`,target:order.target};
+ if(route.some(h=>h.channel==='radio'))emitRadio(state,side,payload);
+ if(route.some(h=>h.channel==='telephone'))emitTelephone(state,side,payload);
 }
 /** Evidence coordinates are permitted; exact caller/source positions and identity are not. */
-export function emitContactRadio(state:BattleState,side:Side,r:PendingContactReport):void{
+export function emitContactRadio(state:BattleState,side:Side,r:PendingContactReport,automatic=false):void{
  if(r.channel!=='radio'&&r.channel!=='telephone')return;
+ // Observation-memory synchronization is not an order spoken into a radio.
+ // Explicit observer/fire-support reports can still be transmitted by their real call sites.
+ if(automatic&&r.channel==='radio')return;
  let payload:RadioPayload|undefined;
  if(r.contact)payload={kind:'report',text:`Contact report: ${r.contact.vehicleDefId?VEHICLE_DEFS[r.contact.vehicleDefId]?.name??'tank':r.contact.entity}`,target:r.contact.pos};
  else if(r.casualty)payload={kind:'report',text:`Casualty report: ${r.casualty.health}`,target:r.casualty.pos};
@@ -34,7 +47,7 @@ export function emitContactRadio(state:BattleState,side:Side,r:PendingContactRep
  spoken[base]=state.time;spoken[key]=state.time;
  for(const [key,at] of Object.entries(spoken))if(state.time-at>120)delete spoken[key];
  if(r.channel==='radio')emitRadio(state,side,payload);
- else{const net=state.telephoneTraffic??={nextId:0,messages:[]};net.messages.push({id:net.nextId++,at:state.time,senderSide:side,payload:structuredClone(payload)});if(net.messages.length>256)net.messages.splice(0,net.messages.length-256);}
+ else emitTelephone(state,side,payload);
 }
 /** Global player headset access; this does not deliver knowledge to soldiers. */
 export function headsetTraffic(state:BattleState){

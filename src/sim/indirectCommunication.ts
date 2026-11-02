@@ -77,8 +77,11 @@ function adopt(state:BattleState,msg:IndirectMessage):void{
   if(report.impactAt!=null&&report.impactAt>c.lastImpactAt){c.lastImpactAt=report.impactAt;c.rounds++;}
  }
 }
-function transmit(state:BattleState,msg:Pick<IndirectMessage,'kind'|'teamId'|'missionAt'|'aim'>):void{
- const team=state.teams.get(msg.teamId);if(team)emitRadio(state,team.side,{kind:msg.kind==='request'?'fireRequest':'fireCorrection',missionId:msg.teamId,target:msg.aim});
+function transmit(state:BattleState,msg:Pick<IndirectMessage,'kind'|'teamId'|'missionAt'|'aim'|'observation'>):void{
+ if(msg.kind==='observation'&&msg.observation?.impactAt==null)return;
+ const key=`indirect-call:${msg.teamId}:${msg.missionAt}:${msg.kind}:${msg.observation?.impactAt??'request'}`,sent=state.spokenReports??={};
+ if(sent[key]!=null)return;
+ const team=state.teams.get(msg.teamId);if(team){sent[key]=state.time;emitRadio(state,team.side,{kind:msg.kind==='request'?'fireRequest':'fireCorrection',missionId:msg.teamId,target:msg.aim});}
 }
 function send(state:BattleState,msg:Omit<IndirectMessage,'hop'|'deliverAt'|'channel'>):void{
  const n=net(state);if(n.queue.length>=2048)return;

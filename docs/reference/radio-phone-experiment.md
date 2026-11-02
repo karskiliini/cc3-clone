@@ -24,6 +24,22 @@ payloads. Player audio does not automatically grant every soldier knowledge.
 
 ## Voice flood fix from live trial feedback
 
+2026-11-03 clarification: radio is a real command medium, not a narration of
+every simulation update. Orders use local voice/intercom when possible, then
+an intact telephone path (including leader relays), with radio only when no
+non-radio command path exists. Only the media actually present on the chosen
+path produce headset traffic. A nearby order is not a phone/radio call merely
+because equipment is available. Automatic perception-memory updates no longer
+produce radio speech; own telephone contact reports remain supported. Explicit
+radio signals and genuine external-support calls still produce public radio
+traffic. One fire mission/correction is not voiced once per observer/packet.
+The existing ordinary order-execution timing is unchanged; this trial does not
+yet implement full queued command delivery or the future company hierarchy.
+The routing correction passed 80 targeted tests across nine files, including
+actual queued player orders over telephone versus radio, local/voice relays,
+phone-to-voice relays, severed-wire fallback, and the existing support/report
+tests. TypeScript passed. This is targeted validation, not a full-suite claim.
+
 - One utterance at a time instead of overlapping every incoming packet.
 - Routine voice announcements: at most eight per real minute, at least six
   seconds between starts. Old background announcements are not replayed later.

@@ -55,10 +55,10 @@ export function communicationLink(state:BattleState,a:Soldier,b:Soldier):{channe
  if(a.side!==b.side||a.id===b.id||!conscious(a,state.time)||!conscious(b,state.time)||humanCapability(b,state.time).hearing<.1)return null;
  if(a.mind.state==='panicked'||a.mind.state==='broken'||b.mind.state==='panicked'||b.mind.state==='broken')return null;
  if(a.vehicleId!=null&&a.vehicleId===b.vehicleId)return{channel:'intercom',delay:.5};
- const phone=telephoneLink(state,a,b);if(phone)return phone;
  const dM=dist(a.pos,b.pos)*TILE_M,at=state.teams.get(a.teamId),bt=state.teams.get(b.teamId);
  const voice=(a.activity==='ambushing'||a.activity==='hiding'?5:at?.leaderId===a.id?30:10)*humanCapability(b,state.time).hearing;
  if(a.vehicleId==null&&b.vehicleId==null&&dM<=voice&&hasLOS(state.map,a.pos,b.pos))return{channel:'voice',delay:.7+dM/340};
+ const phone=telephoneLink(state,a,b);if(phone)return phone;
  const endpoint=(s:Soldier,t:typeof at)=>{
   if(t?.leaderId!==s.id)return false;if(t.type==='command'||t.type==='mortar'||t.type==='rocket')return true;
   const v=t.vehicleId!=null?state.vehicles.get(t.vehicleId):undefined,def=v?VEHICLE_DEFS[v.defId]:null;
@@ -137,7 +137,7 @@ export function stepCommunication(state:BattleState):void{
    for(const hull of navHulls)if(hullsSent<8&&net.queue.length<8192&&hull.sourceId!==b.id&&fresh(`hull:${hull.id}`,hull.observedAt)){net.queue.push({...base,navigationHull:{...structuredClone(hull),hops:hull.hops+1}});hullsSent++;}
    for(const [id,e] of Object.entries(p.objectives??{}))if(net.queue.length<8192&&e.sourceId!==b.id&&fresh(`objective:${id}`,e.observedAt))net.queue.push({...base,objective:{id:Number(id),...e}});
    if(s.teamId===b.teamId&&p.leadership&&net.queue.length<8192&&fresh('leadership',p.leadership.observedAt))net.queue.push({...base,leadership:{...p.leadership}});
-   if(link.channel==='radio'||link.channel==='telephone')for(let i=before;i<net.queue.length;i++)emitContactRadio(state,s.side,net.queue[i]);
+   if(link.channel==='radio'||link.channel==='telephone')for(let i=before;i<net.queue.length;i++)emitContactRadio(state,s.side,net.queue[i],true);
    if(!spoke&&link.channel==='voice'&&net.queue.length>before){spoke=true;emitNoise(state,s.pos,'voice',s.activity==='ambushing'||s.activity==='hiding'?5:s.id===state.teams.get(s.teamId)?.leaderId?40:15,`voice:${s.id}`,s.side);}
   }
  }

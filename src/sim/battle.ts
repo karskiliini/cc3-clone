@@ -7,7 +7,7 @@ import {updateNightGroundMemory} from './nightVisibility';
 import {stepIndirectCommunication} from './indirectCommunication';
 import {initializeArtillery,requestArtillery,cancelArtillery,stepArtillery} from './artillery';
 import {setPlannedOrder,cancelPlannedOrder,sendPlanSignal,stepBattlePlan} from './battlePlan';
-import {emitRadio,radioOrderSender} from './radioTraffic';
+import {emitCommandTraffic} from './radioTraffic';
 import {stepHumanCondition} from './humanCondition';
 import {stepHearing,stepCommunication} from './perception';
 import { applyMultiplayerPolicy } from './multiplayerPolicy';
@@ -436,7 +436,7 @@ export class Battle {
   issueOrder(teamId: number, order: Order, transmit=true): void {
     const team = this.state.teams.get(teamId);
     if (!team) return;
-    if(transmit&&this.state.phase==='running'&&radioOrderSender(this.state,team.side,teamId))emitRadio(this.state,team.side,{kind:'message',text:`${order.type} order`,target:order.target});
+    if(transmit&&this.state.phase==='running')emitCommandTraffic(this.state,team.side,teamId,order);
     const full: Order = { ...order, issuedAt: this.state.time };
     applyOrder(this.state, team, full, this.rng);
     // B7: the leader shouts the order back — a beat later (voice over the din, not radio),
