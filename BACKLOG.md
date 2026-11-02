@@ -106,8 +106,11 @@ Request (2026-11-02): in later fields both sides strengthen their defensive posi
 **066 — Feature: Scenario-limited defensive AP and AT mine placement.**
 Request (2026-11-02): defenders can lay AP mines in selected fields and AT mines in some fields. Completion: explicit scenario stocks/types, legal defensive-area placement, correct AP/AT triggering and consumption, friendly physical risk, personal knowledge/clearing, persistence and replay/network validation. Audit existing tile-coordinate/trigger behavior before exposing the new tools. Requirements: `docs/reference/plans/stalingrad-and-field-defenses.md`, 066.
 
-062–066 are queued requirements, not implemented or automatically reprioritized.
-The next request receives ID 067.
+**067 — Feature: Sixth Army campaign from Fall Blau to the Stalingrad pocket.**
+Request/clarification (2026-11-02): one campaign centers on the Sixth Army's advance toward Stalingrad, getting fixed in the city, encirclement and the winter ending. Link 062–066 through that narrative, preserving a recurring tactical force and the changing battlefield/supply situation. Completion: a selectable historically sourced summer-1942–February-1943 campaign, compatible unit routes, persistent people/losses/terrain, meaningful local outcomes, urban/night reinforcement phases and explained strategic transitions. Historical chronology and game-design boundaries: `docs/reference/plans/stalingrad-and-field-defenses.md`, 067. Other campaigns remain available; this does not automatically replace the whole existing operation list.
+
+062–067 are queued requirements, not implemented or automatically reprioritized.
+The next request receives ID 068.
 
 ## Completed
 

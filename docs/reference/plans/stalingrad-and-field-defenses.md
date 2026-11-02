@@ -1,8 +1,62 @@
 # Stalingrad, persistent destruction and defensive construction
 
-Requested 2026-11-02. **Queued requirements, not implemented**: backlog 062–066.
+Requested 2026-11-02. **Queued requirements, not implemented**: backlog 062–067.
 The existing queue order and deferred 050 P2 work remain unchanged. This document
 records the requested outcome and completion criteria without an approval gate.
+
+## 067 — One campaign following Sixth Army, summer 1942–February 1943
+
+User clarification (2026-11-02): the German Sixth Army's story is central to one
+campaign, beginning with the Fall Blau advance toward Stalingrad, becoming fixed
+in the city, then facing encirclement and collapse. This frames 062–066 as linked
+campaign systems. It does not replace every existing campaign or silently
+reprioritize their implementation. The full narrative extends beyond the summer
+offensive itself into the winter siege.
+
+Historical framework, with game interpretation kept separate:
+
+| Period | Historical phase | Intended campaign experience |
+|---|---|---|
+| Late June–August 1942 | Summer offensive, advance toward/over the Don and toward the Volga | Mobile attacks, villages, river crossings, lengthening supply lines |
+| Late August–September | Major bombing and fighting into Stalingrad | Approaches and urban assaults; some districts already damaged before ground entry |
+| September–November | Attritional urban/factory fighting, Soviet supply across the Volga | Persistent ruins, strongpoints, engineers, night landings and costly local progress |
+| 19–23 November | Operation Uranus attacks the flanks and closes the encirclement | Shift from attack to defense; orders/intelligence and ground supply deteriorate |
+| December–2 February 1943 | Inadequate air supply, failed outside relief, reduction of the pocket | Ammunition/food/medical pressure, shrinking positions, survival and the historical ending |
+
+Fall Blau opened on 28 June 1942 as a wider southern offensive involving the
+Caucasus and Volga objectives; Sixth Army supplies this campaign's Stalingrad
+thread rather than representing every army in that offensive. The major bombing
+of 23 August precedes the main September city fighting. Keep intact/less-damaged
+districts available with appropriate dates; avoid making the entire city pristine
+when every urban mission starts. Uranus closes the pocket on 23 November.
+Paulus and the southern pocket surrender on 31 January; organized resistance in
+the remaining northern pocket ends on 2 February. Do not collapse those dates
+into a single surrender by Paulus on 2 February.
+
+The proposed tactical viewpoint is a recurring Sixth Army battle group, with
+persistent named people, attachments, equipment and losses. Select historically
+compatible parent formations/routes before choosing a mission list: one company
+must not appear at every famous landmark regardless of which unit fought there.
+Army-level orders, adjacent formations, supply access and strategic events frame
+the local fighting. Outside relief is an external operation, not an unexplained
+teleportation of the player's surrounded unit to the relief force.
+
+Keep local outcomes meaningful: casualties, retained ground, ammunition and
+survivors affect later missions. Distinguish a historical strategic timeline from
+any optional alternate-history breakout/victory branch; tactical success alone
+must not silently rewrite the entire front. Detailed branching and victory
+conditions remain to be designed, not claimed implemented.
+
+Done when one selectable campaign links the sourced historical stages, preserves
+the player's force/battlefield history, represents the changing supply/reinforcement
+conditions, explains strategic transitions, and offers coherent local objectives
+through the ending. This is a campaign requirement, not yet an implementation.
+
+Historical references checked 2026-11-02:
+- [US Army Center of Military History, The German Campaign in Russia: Planning and Operations (1940–1942)](https://history.army.mil/portals/143/Images/Publications/catalog/104-21.pdf): summer-offensive chronology and operational planning. Search-index contents accessible; PDF fetch was blocked during this check.
+- [National WWII Museum, History Through the Viewfinder](https://www.nationalww2museum.org/war/articles/history-through-viewfinder): 23 August advance to the Volga and major bombing.
+- [West Point Modern War Institute, Battle of Stalingrad](https://mwi.westpoint.edu/urban-warfare-project-case-study-1-battle-of-stalingrad/): urban attrition, Volga reinforcement and November encirclement. Its closing sentence conflates Paulus's surrender with the end of the battle; use the distinction above.
+- [Rutgers Oral History Archives, Facing Stalingrad](https://oralhistory.rutgers.edu/projects/facing-stalingrad/facing-stalingrad-interviews/2928-facing-stalingrad-the-battle-of-stalingrad): the campaign narrative, December relief and January/February surrender distinction. Cross-check detailed chronology against operational histories before mission authoring.
 
 ## Existing foundations
 
