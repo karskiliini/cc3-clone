@@ -30,6 +30,29 @@ calendar/index cannot advance Germany to Stalingrad without the needed ground.
 The 067 rule requiring at least one capable, active side in each offered tactical
 mission still applies; rest/refit intervals occur on the operational layer.
 
+### Tactical force size follows operational concentration
+
+User clarification (11:33): a tactical battle may involve a platoon or a reinforced
+company depending on forces actually moved into the area. Build the roster from
+present, eligible formations and arrived detachments, with their real current
+strength; do not normalize every mission to an identical company. Keep reserves,
+late arrivals, other commitments and transfer travel time meaningful. A battalion
+on the grand map need not place every member onto one tactical map at once.
+
+Whole-battalion tactical battles are a feasibility question, not a promised
+capacity or a reason to discard the user's small-unit scenarios. Current source
+check: Stalingrad is 230 × 170 tiles at 2 m/tile (460 × 340 m); ordinary force
+selection has 15 slots, and campaign difficulty uses 12/15/18. These are selection
+limits, not a measured simulation ceiling. Existing 40-vehicle physics timing
+does not establish hundreds-of-infantry perception/routing/render performance.
+
+Before offering a whole battalion, validate larger-map space, deployment, command
+grouping, movement/traffic, sensing/communications, actual combat and rendering
+with both sides present, plus replay/recovery. Use date-specific organization and
+actual fighting strength; administrative totals include personnel outside the
+immediate fight. Keep army-level battalion counts sourced by date and category
+rather than multiplying a generic battalion template into every formation.
+
 ### Transfer smaller units between friendly formations
 
 User clarification (11:31): formations can send smaller units to other friendly
