@@ -4,7 +4,7 @@ Requested 2026-11-02. **Queued requirements, not implemented**: backlog 062–06
 The existing queue order and deferred 050 P2 work remain unchanged. This document
 records the requested outcome and completion criteria without an approval gate.
 
-## 067 — One campaign following Sixth Army, summer 1942–February 1943
+## 067 — Dynamic Sixth Army campaign, with 1942–1943 as its historical frame
 
 User clarification (2026-11-02): the German Sixth Army's story is central to one
 campaign, beginning with the Fall Blau advance toward Stalingrad, becoming fixed
@@ -13,7 +13,8 @@ campaign systems. It does not replace every existing campaign or silently
 reprioritize their implementation. The full narrative extends beyond the summer
 offensive itself into the winter siege.
 
-Historical framework, with game interpretation kept separate:
+Historical reference phases, available when the actual front reaches them;
+they are not a mandatory mission sequence:
 
 | Period | Historical phase | Intended campaign experience |
 |---|---|---|
@@ -21,7 +22,7 @@ Historical framework, with game interpretation kept separate:
 | Late August–September | Major bombing and fighting into Stalingrad | Approaches and urban assaults; some districts already damaged before ground entry |
 | September–November | Attritional urban/factory fighting, Soviet supply across the Volga | Persistent ruins, strongpoints, engineers, night landings and costly local progress |
 | 19–23 November | Operation Uranus attacks the flanks and closes the encirclement | Shift from attack to defense; orders/intelligence and ground supply deteriorate |
-| December–2 February 1943 | Inadequate air supply, failed outside relief, reduction of the pocket | Ammunition/food/medical pressure, shrinking positions, survival and the historical ending |
+| December–2 February 1943 | Inadequate air supply, failed outside relief, reduction of the pocket | Active local attacks/defense/withdrawal under supply pressure; the ending follows actual campaign state |
 
 Fall Blau opened on 28 June 1942 as a wider southern offensive involving the
 Caucasus and Volga objectives; Sixth Army supplies this campaign's Stalingrad
@@ -42,15 +43,53 @@ the local fighting. Outside relief is an external operation, not an unexplained
 teleportation of the player's surrounded unit to the relief force.
 
 Keep local outcomes meaningful: casualties, retained ground, ammunition and
-survivors affect later missions. Distinguish a historical strategic timeline from
-any optional alternate-history breakout/victory branch; tactical success alone
-must not silently rewrite the entire front. Detailed branching and victory
-conditions remain to be designed, not claimed implemented.
+survivors affect later missions. The user's 10:54 clarification makes territorial
+branching **required default behavior**. Germany reaches Stalingrad only by
+actually advancing through the campaign; if the offensive stalls earlier, the
+campaign stays there, retreats or ends before Stalingrad. Calendar dates govern
+conditions and available forces, not automatic geographic progress.
+
+### Result-driven front and mission selection
+
+Track controlled/contested connected sectors, supply connections, available
+forces, losses and elapsed time. Choose the next mission from that actual state.
+A secured relevant objective and a sustainable route can open the next area;
+a defeat/stalemate can lead to another fight on the same ground, defense against
+a counterattack, rest/reorganization or withdrawal. A generic victory score is
+not enough if the bridge/road needed for the advance remains in enemy hands.
+Adjacent operations may exert authored pressure, but must not unlock the city
+on the player's represented axis merely because its historical date has arrived.
+
+Stalingrad missions are unavailable until an approach into the city is secured.
+Likewise, an encirclement requires actual enemy control cutting the represented
+ground supply routes; a date alone must not apply a pocket flag while those routes
+remain open. If the front never reaches Stalingrad, generate a coherent earlier
+campaign ending or continued fighting on the real front. This needs a bounded
+sector/connection model, not automatically the full hex/battalion system of 053.
+
+### Every tactical mission needs an active side
+
+User clarification (10:53): do not offer battles where both exhausted forces
+simply sit still. At least one side must have the people, physical capability,
+ammunition/fuel, route and orders needed to act on a concrete objective. The
+opponent can defend with a tired force while fresh attackers or reinforcements
+provide pressure. Do not erase the individual fatigue/wound model or refill
+stocks merely to make a mission start.
+
+If neither side can act, resolve the interval through campaign time, rest,
+resupply, withdrawal or the ending rather than an inert tactical match. Opposing
+initiative and supply consequences still apply during that interval. Check actual
+scenario behavior as well as roster totals: active AI attacks, landings or other
+objective pressure must be possible through the real terrain and sensing rules.
 
 Done when one selectable campaign links the sourced historical stages, preserves
 the player's force/battlefield history, represents the changing supply/reinforcement
-conditions, explains strategic transitions, and offers coherent local objectives
-through the ending. This is a campaign requirement, not yet an implementation.
+conditions, explains strategic transitions and chooses reachable, active local
+missions and endings from actual results. Acceptance fixtures must prove that
+repeated German failure leaves Stalingrad locked despite advancing dates; securing
+an approach opens it; losing a supply link affects the next mission; open routes
+do not produce a scripted encirclement; and two unable forces do not generate an
+inert battle. These are queued requirements, not an implemented campaign.
 
 Historical references checked 2026-11-02:
 - [US Army Center of Military History, The German Campaign in Russia: Planning and Operations (1940–1942)](https://history.army.mil/portals/143/Images/Publications/catalog/104-21.pdf): summer-offensive chronology and operational planning. Search-index contents accessible; PDF fetch was blocked during this check.
@@ -65,6 +104,9 @@ Historical references checked 2026-11-02:
   not yet the requested set of different Stalingrad scenarios.
 - Campaign data repeats that map; `CampaignState` preserves personnel/teams and
   daily air allocations, with no persistent battlefield-damage record.
+- `advanceOperation` currently increments a flat battle index regardless of the
+  result. That is insufficient for 067: the new campaign needs result-driven
+  territorial state and mission selection, not just a renamed linear list.
 - Buildings, terrain, craters and earthworks already change within a battle.
   058 supplies physical air ordnance; 059 supplies night conditions, individual
   light-dependent sight and mortar illumination.
@@ -119,6 +161,18 @@ identity/location to the opposing player. Campaign reserves are spent once and
 the surviving/new force is recorded. Done when a real night battle demonstrates
 multiple crossings and disembarkations, interruption changes actual arrivals,
 and replay/save/recovery reproduce the schedule and resulting people exactly.
+
+Concrete mission requested at 10:53: **interdict the Volga reinforcement traffic**.
+Once the campaign genuinely reaches this district, a capable German detachment
+tries to reduce arrivals or seize/hold a landing or its inland connection. Soviet
+ferries repeatedly bring fresh troops during the authored mission window; those
+troops disembark and protect/expand the bridgehead. A tired German force can be
+the defender while the arriving Soviet force provides movement and initiative.
+Use finite authored reserves sufficient for repeated traffic, actual transport
+turnaround/capacity and losses. Select a clear time/throughput/territorial objective;
+do not require killing every enemy while the scenario keeps adding new ones.
+Verify that traffic and post-landing action continue when the other side holds
+position, and that successful interdiction changes real arrivals and the result.
 
 ## 064 — Persistent battlefield and between-battle bombardment
 
