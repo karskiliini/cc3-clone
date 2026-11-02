@@ -185,7 +185,57 @@ paths, successful delivered requests after reconnection/relay, no inherited
 spotting without a report, protected urban phones versus cuttable field wire,
 individual refusal/condition constraints and exact replay/network recovery.
 
-### Historical starting references
+## 073 — Optional parent-command perspective on selection
+
+Requested 2026-11-02, 13:57. **Queued design alternative, not implemented.**
+Do not silently replace the ordinary view or 072's local-command proposal.
+Selection in this mode identifies the immediate parent command context:
+
+| Selected element | Displayed command picture | Command recipients |
+|---|---|---|
+| Individual squad | Its platoon | Proposed: that platoon's squad leaders |
+| Platoon leader | Its company | That company's platoon leaders, explicitly requested |
+| Company leader | Its battalion | Proposed extension: company leaders; not yet a user-selected requirement |
+
+Display the active formation and role clearly, for example **Company command ·
+2nd Company**, so selecting a platoon leader is not mistaken for directly
+possessing that leader's personal field of view. Retain an explicit distinction
+between this parent-command perspective and directly acting as a local leader
+under 072. Exact interaction for entering/leaving either mode remains to settle.
+
+“What the platoon/company sees” means the relevant commander's own observations
+and actually received reports, including their age, uncertainty and incomplete
+coverage. It is not a live union of every subordinate's current sight. Radio,
+telephone, voice and courier paths determine when a sighting reaches that picture.
+A broken connection leaves old reports; it does not continuously update hidden
+contacts or delete information already received. Reconnection needs actual report
+delivery. Scoped enemy radio intercepts also need to reach the applicable command
+context rather than becoming every subordinate's personal knowledge automatically.
+
+Apply the perspective to map contacts, terrain knowledge/visibility overlays,
+minimap, tooltips, targeting previews and support markers consistently. Selecting
+another formation cannot leave its live contact tracking/target lock behind in
+the previous perspective. The player can remember previously seen information;
+switching the UI must not copy it into a soldier's knowledge or turn it into a
+newly delivered report. Orders still use the selected command authority's real
+communication routes, and troops implement them through individual capability.
+
+Preserve 072's direct control of an isolated local element and explicit own
+on-map mortar order exception; lack of a parent report must not silently remove
+that promised control. Preserve previously received battle plans/signals and
+071's cuttable surface versus protected urban phone lines. Actual organization
+and attachments must exist before exposing platoon/company/battalion contexts;
+today's flat team roster is not an already implemented hierarchy.
+
+Acceptance: two platoons with different reports show different scoped pictures;
+company view gains a sighting only on real delivery; isolated formations retain
+aged knowledge and local-control options; selection does not mutate canonical
+knowledge, grant global enemy updates or route orders from the wrong leader.
+Verify overlays/minimap/targeting alongside the main view and exact deterministic
+save/replay/recovery. Keep this an optional alternative until its mode choice and
+relationship to the ordinary view are settled.
+
+## Historical starting references
 
 - US Army Office of the Chief of Military History, Albert Praun,
   [German Radio Intelligence](https://www.nsa.gov/portals/75/documents/news-features/declassified-documents/friedman-documents/publications/FOLDER_240/41748549078781.pdf),
