@@ -30,6 +30,44 @@ calendar/index cannot advance Germany to Stalingrad without the needed ground.
 The 067 rule requiring at least one capable, active side in each offered tactical
 mission still applies; rest/refit intervals occur on the operational layer.
 
+### Transfer smaller units between friendly formations
+
+User clarification (11:31): formations can send smaller units to other friendly
+formations on the grand map. Examples include an engineer squad, an antitank
+detachment or a tank platoon. This reallocates existing people/equipment rather
+than purchasing a duplicate or instantly changing the recipient's roster.
+
+Create a transfer order with source, destination, actual unit/cargo, transport
+mode, route and estimated arrival. Show travel time, required transport/fuel/
+other resources and the source's reduced capability before the order is issued.
+Respect unit integrity and declared attachments: guns need their crews, and
+organic carriers/support must follow the chosen transfer package consistently.
+
+Walking takes time, rations and physical effort; motorized movement also needs
+available capacity, fuel and suitable routes. Transport remains committed for
+its actual delivery/return journey. Costs depend on the chosen route/mode and
+conditions, not a universal free transfer or fixed instantaneous fee. Use the
+campaign clock consistently when determining tactical reinforcement arrival.
+
+After departure the unit is unavailable to the source; before arrival it is
+unavailable to the destination. It has a real in-transit state/location and
+cannot join two simultaneous battles. If the destination fights before arrival,
+it starts without that unit; arrival during a battle is possible only through
+the actual reinforcement timing and a valid entry route.
+
+A cut road, lost bridge, contested sector or exhausted transport supply can
+delay/stop the transfer or require rerouting and applicable contact resolution.
+Cancellation/rerouting preserves progress and spent resources rather than
+teleporting the unit back or refunding consumed fuel. Completion changes the
+command attachment once and preserves identities, experience, wounds, fatigue,
+weapons, vehicles and remaining stores. Transfer itself does not heal/refill them.
+
+Persist transfer identity, ownership/attachment, route/progress, transport
+commitments and reserved/spent resources through save/load and recovery. Prove
+source/destination strength changes at the correct times, arrival affects the
+right tactical battle, blocked/under-resourced routes cannot complete for free,
+and repeated completion/load never duplicates people, equipment or supplies.
+
 ### Supply and encirclement have real tactical consequences
 
 Compute supply from controlled, usable connections to actual supply sources,
