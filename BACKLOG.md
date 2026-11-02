@@ -118,8 +118,14 @@ Clarification (11:26): 053 now supplies the requested operational grand map acro
 **068 — Feature: Allocated artillery support with small and large fire missions.**
 Request (2026-11-02, 11:26): artillery should often deliver a small fire mission and only occasionally a large concentration; campaign players can allocate support to areas. Completion: actual battery/gun/ammunition/readiness/communication constraints, repeated small requests, scarce large missions, geographically valid allocation/commitment without duplicated resources, observer-based corrections, physical delayed impacts including friendly damage, persistent expenditure and replay/recovery. Distinguish on-map mortars, aircraft, tactical artillery and background bombardment. Requirements: `docs/reference/plans/operational-campaign-and-artillery.md`, 068.
 
-053 and 062–068 are queued requirements, not implemented or automatically reprioritized.
-The next request receives ID 069.
+**069 — Feature: Battalion command through company missions and physical signals.**
+Request (2026-11-02, 12:26): command companies to Defend, Attack, Prepare to Attack or Support Attack; subordinate AI arranges the actual troops. Assign indirect-fire units to companies. Coordinate through received H-hour plans, recognized flare signals and physical messengers, with Kübelwagen/Kettenkrad transport when available. Completion: individual-information constraints, real support handover, travel/resource costs, late/lost/stale messages and acknowledgment, physical HQ radio dependencies, clear reported order status and deterministic persistence/recovery. Whole-battalion capacity still needs measurement. Extends 053 and 068; requirements: `docs/reference/plans/battalion-command-and-signals.md`, 069.
+
+**070 — Feature: Capability-based passive radio intelligence for either side.**
+Request (2026-11-02, 12:27): enemy radio intelligence may hear commands, including delayed reports from Soviet listeners or vice versa. Completion: separate actual emission detection, partial/clear/cipher interpretation and uncertain direction/location; equipment/operator/language conditions; processing and own-network reporting delays; no unsent-plan/courier/omniscient leaks, automatic decryption or live exact HQ reveal. Preserve aged private reports and deterministic queues/recovery. Supports 069's radio-versus-courier tradeoff. Requirements and historical starting sources: `docs/reference/plans/battalion-command-and-signals.md`, 070.
+
+053 and 062–070 are queued requirements, not implemented or automatically reprioritized.
+The next request receives ID 071.
 
 ## Completed
 

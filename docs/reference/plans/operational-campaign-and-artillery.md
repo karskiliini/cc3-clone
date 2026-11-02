@@ -53,6 +53,13 @@ actual fighting strength; administrative totals include personnel outside the
 immediate fight. Keep army-level battalion counts sourced by date and category
 rather than multiplying a generic battalion template into every formation.
 
+User clarification (12:26–12:27): at battalion scale the player commands company
+missions, while subordinate commanders arrange and lead their own troops.
+Indirect-fire attachments, H-hour/flare/courier synchronization and passive
+enemy radio intelligence are queued as 069/070 in
+`docs/reference/plans/battalion-command-and-signals.md`. These extend 053/068;
+they do not establish a measured whole-battalion simulation capacity.
+
 ### Transfer smaller units between friendly formations
 
 User clarification (11:31): formations can send smaller units to other friendly
