@@ -189,6 +189,9 @@ individual refusal/condition constraints and exact replay/network recovery.
 
 Requested 2026-11-02, 13:57. **Queued design alternative, not implemented.**
 Do not silently replace the ordinary view or 072's local-command proposal.
+074/075 define the map baseline, remembered scene, height-aware observations and
+pre-battle aerial coverage used by each context; see
+`docs/reference/plans/battlefield-knowledge-and-recon.md`.
 Selection in this mode identifies the immediate parent command context:
 
 | Selected element | Displayed command picture | Command recipients |
