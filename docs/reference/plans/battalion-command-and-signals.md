@@ -132,6 +132,59 @@ expose only their transmitted target and updates; no unsent/courier-only leaks o
 automatic position reveal. Save/replay/recovery preserve private plans, emissions,
 intercepts and execution state without duplicate triggers or camera dependence.
 
+## 072 — Direct local control versus delivered HQ orders
+
+Requested 2026-11-02, 13:51. **Queued, not implemented.** User requirements:
+direct lower-unit control remains possible without radio/telephone contact, but
+the available commands differ; external indirect-fire calls need connectivity;
+the player's own on-map mortar team can always receive a fire command.
+
+Proposed interpretation: the player can act as the selected local leader as well
+as the battalion commander. Disconnected direct commands are decisions that
+leader can make locally, rather than new HQ orders that arrived telepathically.
+Retain ordinary move, fire, defend/hide and local withdrawal using the selected
+unit's own observations, delivered reports, known map and received intent. Do not
+invent an arbitrary movement radius or a radio delay for a local decision.
+Condition, hesitation and practical capability still govern execution under 056.
+
+| Action | Working HQ/support communication | Disconnected local control |
+|---|---|---|
+| Ordinary tactical movement/fire/cover | Delivered orders and local decisions | Local leader's decision using its legitimate knowledge |
+| New distant coordination, revised shared plan or attachment | Actual message path and receipt | Needs a courier/voice relay or restored link; cannot synchronize other units telepathically |
+| External battery / another unit's indirect fire | Connected caller-to-support path, including legitimate relays | Unavailable until a request can reach the supporting element |
+| Selected own on-map mortar fire order | Available | Available: explicit organic-mortar exception |
+| Correct fire using another observer's information | Delivered observation/correction | Only the mortar's own observations and previously delivered information |
+| Previously received H-hour plan | Executes when due and capable | Still executes; loss of contact does not erase briefing |
+
+A radio somewhere in the force is not by itself a valid support route. Require
+working endpoints and the actual path to the support authority/battery. A nearby
+leader can convey orders by voice, and a courier can carry a new instruction,
+with their actual limits and travel time. Telephone routing must use 071's intact
+wire and working endpoints. Only real radio hops produce 070 interceptions;
+a telephone-only or face-to-face exchange does not emit radio traffic.
+
+“Always command the own mortar” removes the HQ-connection prerequisite only.
+The player may give an area-fire order even when no observer sees the impact
+area, with normal blind-fire uncertainty. It does not supply hidden enemy
+positions, magically correct the aim, restore ammunition, revive crews, skip
+setup/loading/preparation/flight or remove minimum/maximum range. The exception
+does not allow a disconnected rifle team to call a separate mortar as if it were
+physically part of that team; select the actual organic mortar to give its order.
+
+UI: show **Local control** versus **HQ connected**, and the actual path/status
+when known. Explain disabled support actions with a concrete reason such as
+“No connection to battery.” Switching selection must not copy the player's or
+another unit's live enemy knowledge into the chosen soldier. Received orders,
+local decisions and pending courier/remote orders remain distinct canonical data.
+Do not apply the old blanket out-of-command refusal to legitimate local decisions.
+
+Before implementation, settle the command/authority matrix without weakening
+the explicit direct-control and organic-mortar requirements. Verify actual local
+movement and mortar launches without HQ, rejected external calls on broken
+paths, successful delivered requests after reconnection/relay, no inherited
+spotting without a report, protected urban phones versus cuttable field wire,
+individual refusal/condition constraints and exact replay/network recovery.
+
 ### Historical starting references
 
 - US Army Office of the Chief of Military History, Albert Praun,
