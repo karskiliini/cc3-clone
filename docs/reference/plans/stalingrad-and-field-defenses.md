@@ -64,8 +64,11 @@ Stalingrad missions are unavailable until an approach into the city is secured.
 Likewise, an encirclement requires actual enemy control cutting the represented
 ground supply routes; a date alone must not apply a pocket flag while those routes
 remain open. If the front never reaches Stalingrad, generate a coherent earlier
-campaign ending or continued fighting on the real front. This needs a bounded
-sector/connection model, not automatically the full hex/battalion system of 053.
+campaign ending or continued fighting on the real front. The user's 11:26 request
+now adds 053's operational grand map across Sixth Army's area, including force
+moves, connected supply and area artillery allocation. Shared requirements:
+`operational-campaign-and-artillery.md`. A bounded sector graph or hex layout can
+represent it; the front-to-tactical effects are required, not just map markers.
 
 ### Operational key points become meaningful map flags
 

@@ -35,7 +35,7 @@ Request (2026-10-07): "i want the vehicles in the game to be actual 3d meshes, s
 
 Next: the P2 plan (deterministic hull physics core).
 
-**053 — Feature (future idea, not scheduled): Operational campaign layer — battalions on a front sector.**
+**053 — Feature: Operational grand campaign across Sixth Army's front.**
 Request (2026-10-09, user's words): "kampanja, molemmat pelaajat voivat liikutella pataljoonia jollain rintamalohkolla, jokainen pataljoona sisältää n määrän joukkoja, joita komennetaan. Pataljoona voi jäädä paikalleen, jolloin se saa vähän hitaammin täydennyksiä, se voi vetäytyä, jolloin tulee enemmän täydennyksiä, tai se voi hyökätä ja jälleen täydennyksiä tulee vähän hitaammin. Painopistesuunnassa olevalle pataljoonalle voidaan myös määrätä lisätäydennyksiä, tai niitä voidaan ripotella eri pataljoonille, kuitenkin siten että käyttöliittymä on selkeä. Täydennykset ovat yleensä vihreitä joukkoja, mutta aikakauden mukaisesti varusteltu. Esimerkki: saksa on ollut hyökkäyskannalla, mutta heiltä alkaa voimat olla vähissä, he haluavat pysähtyä jotta saavat täydennettyä itseään -> vastustaja iskeekin omasta puolestaan hyökkäyksen, jolloin saksalainen pataljoona ei ehdikään odottamaan itselleen täydennyksiä (eli tavallaan täydennykset saapuvat vasta kierroksen päätyttyä?). Jos kartta olisi heksapohjainen, niin yhteen ruutuun voi hyökätä usealta suunnalta - kenties olisi parasta että liikuteltavat joukot olisivat aina komppanioita, jolloin yhteen taisteluun mahtuu max pataljoona / puoli."
 Gist:
 - Both players move battalions on a front sector; each battalion holds n commanded units.
@@ -45,7 +45,7 @@ Gist:
 - Replacements arrive only when the turn ends, so a side that pauses to refit can be hit before they arrive. Example: an exhausted German attacker halts to refit, and the Soviets strike first.
 - Possibly a hex map, where one hex can be attacked from several directions. The moved pieces might then be companies, capping one battle at a battalion per side.
 Open questions: hexes vs. sectors; company vs. battalion pieces; how this relates to the existing operation/campaign code (`src/data/operation.ts`, `campaign.ts`); the turn order (simultaneous vs. alternating).
-Done when: this goes through brainstorming into a written spec the user approves. It is not scheduled until the user asks for it.
+User explicitly requested the grand-campaign possibility on 2026-11-02 (11:26), refining this existing item rather than creating a duplicate: move forces across the whole represented Sixth Army area, with each move affecting tactical contact, forces, directions, reserves and supply. A surrounded formation loses incoming ground supply while consuming its retained stocks; real limited air/river deliveries remain possible when allocated. The layer supports dynamic campaign 067 and area artillery allocation 068. Completion: actual operational moves and connected supply, persistent conserved people/equipment/stocks, resulting tactical differences, exactly-once battle reconciliation and deterministic save/replay. Requirements: `docs/reference/plans/operational-campaign-and-artillery.md`. Queued; implementation priority is not automatically changed, and no mandatory brainstorming/approval stage is added.
 
 **047b — Feature: Desync recovery in the real game (remaining part of 047).**
 
@@ -111,9 +111,13 @@ Request (2026-11-02): defenders can lay AP mines in selected fields and AT mines
 Request/clarification (2026-11-02): one campaign centers on the Sixth Army's advance toward Stalingrad, getting fixed in the city, encirclement and the winter ending. Link 062–066 through that narrative, preserving a recurring tactical force and the changing battlefield/supply situation. Completion: a selectable historically sourced summer-1942–February-1943 campaign, compatible unit routes, persistent people/losses/terrain, meaningful local outcomes, urban/night reinforcement phases and explained strategic transitions. Historical chronology and game-design boundaries: `docs/reference/plans/stalingrad-and-field-defenses.md`, 067. Other campaigns remain available; this does not automatically replace the whole existing operation list.
 Clarifications (10:53–10:54): **default progression is dynamic**. If Germany does not advance in the battles, it does not reach Stalingrad. Actual connected territory, objectives, force readiness and supply determine advancement, renewed fighting, defense or withdrawal; advancing the calendar/index cannot unlock the city or force an encirclement. Every offered tactical mission needs at least one side capable of meaningful action. Resolve mutually exhausted intervals through campaign time/rest/reorganization rather than an inert battle. These requirements supersede any earlier implication of an inevitable historical mission sequence.
 Clarification (11:16): put visible objective flags on the genuine operational key points: bridges/crossings, junctions, landings, strongpoints and supply sites as appropriate. Their secured, connected and usable state must actually open/close routes, supply, reinforcement access or the next sector. Explain each effect in briefing/UI/debrief; unrelated point totals cannot substitute for the required crossing. Reuse existing capture/contest foundations, preserve physical infrastructure and individual-information constraints, and persist the consequences.
+Clarification (11:26): 053 now supplies the requested operational grand map across Sixth Army's area. Force moves, supply connections/encirclements and artillery allocations feed this campaign's tactical missions and outcomes. Requirements: `docs/reference/plans/operational-campaign-and-artillery.md`.
 
-062–067 are queued requirements, not implemented or automatically reprioritized.
-The next request receives ID 068.
+**068 — Feature: Allocated artillery support with small and large fire missions.**
+Request (2026-11-02, 11:26): artillery should often deliver a small fire mission and only occasionally a large concentration; campaign players can allocate support to areas. Completion: actual battery/gun/ammunition/readiness/communication constraints, repeated small requests, scarce large missions, geographically valid allocation/commitment without duplicated resources, observer-based corrections, physical delayed impacts including friendly damage, persistent expenditure and replay/recovery. Distinguish on-map mortars, aircraft, tactical artillery and background bombardment. Requirements: `docs/reference/plans/operational-campaign-and-artillery.md`, 068.
+
+053 and 062–068 are queued requirements, not implemented or automatically reprioritized.
+The next request receives ID 069.
 
 ## Completed
 
