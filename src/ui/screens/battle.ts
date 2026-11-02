@@ -1,5 +1,5 @@
 import {drawIndividualInspector} from '@/ui/hud/individualInspector';
-import type { CursorKind, GameSettings, InputState, BattleState, OrderType, Rect, Screen, Side, Team, Vec2, Camera } from '@/shared/types';
+import type { AirRole,CursorKind, GameSettings, InputState, BattleState, OrderType, Rect, Screen, Side, Team, Vec2, Camera } from '@/shared/types';
 import { ORDER_DOT_COLOR, ORDER_HOTKEYS, ORDER_TYPES, TILE_PX, VIEW_H, VIEW_W, otherSide } from '@/shared/types';
 import { COMMAND_RADIUS_TILES } from '@/sim/command';
 import { game } from '@/game';
@@ -14,6 +14,11 @@ import { centerCamera, clampCamera, panCamera, screenToWorld, worldToScreen, zoo
 import { TerrainRenderer } from '@/render/terrainRender';
 import { drawUnits, vehiclesWithGrass3d } from '@/render/unitRender';
 import { drawEffects } from '@/render/effects';
+import {configureNightVehicleLighting,drawNightLighting} from '@/render/nightLighting';
+import {drawAirSupport} from '@/render/airSupport';
+import {airSupportStatus} from '@/sim/airSupport';
+import {mortarIlluminationAvailable} from '@/sim/illumination';
+import {AIRCRAFT,AIR_LOADS,airLoadFor} from '@/data/airSupport';
 import { VisibilityOverlay } from '@/render/visibilityOverlay';
 import { DepthOverlay } from '@/render/depthOverlay';
 import { pickOrderMarker, drawOrderBall } from '@/render/orderMarkers';
@@ -62,6 +67,9 @@ const RIGHT_GESTURE_MS = 400;
 const DOUBLE_CLICK_MS = 350;
 const HOVER_RING_R = 14;
 const FLEE_CONFIRM_MS = 2000;
+const AIR_BUTTON:Rect={x:8,y:8,w:136,h:28};
+const AIR_ROLE_BUTTON:Rect={x:150,y:8,w:122,h:28};
+const FLARE_BUTTON:Rect={x:278,y:8,w:156,h:28};
 
 /** Big gold word on a small 60%-black box, centred in the map viewport — used for
  * the PAUSED overlay and the end-of-battle result word. CC3 shows no whole-view dim
@@ -134,6 +142,8 @@ export class BattleScreen implements Screen {
    * teach lesson 1's "select your rifle team" step). */
   get selectionCount(): number { return this.selectedTeamIds.length; }
   private pendingOrder: OrderType | null = null;
+  private airRole:AirRole='auto';
+  private pendingSupport:{kind:'air'}|{kind:'illumination';teamId:number}|null=null;
   /** Fire order pending and the pointer is over an enemy team that can be targeted right now. */
   private targetHover: TargetHover | null = null;
   /** what the pointer is over on the map, named in the pointer readout */
@@ -260,6 +270,7 @@ export class BattleScreen implements Screen {
    * the minimap / soldier monitor insets that float over the map viewport. Presses and releases
    * there must never select, deselect, box-select or issue orders. */
   private overHud(p: Vec2): boolean {
+    if([AIR_BUTTON,AIR_ROLE_BUTTON,FLARE_BUTTON].some(r=>hitRect(p,r)))return true;
     if (p.y >= VIEW_H) return true;
     if (this.showMinimap && hitRect(p, this.minimap.rect)) return true;
     if (this.showSoldierMonitor) {
@@ -269,6 +280,82 @@ export class BattleScreen implements Screen {
       if (r && hitRect(p, r)) return true;
     }
     return false;
+  }
+
+  private selectedMortar():Team|undefined {
+    const t=this.selectedTeamId!=null?this.battle.state.teams.get(this.selectedTeamId):undefined;
+    return t&&t.side===this.battle.playerSide()&&mortarIlluminationAvailable(this.battle.state,t)?t:undefined;
+  }
+  private armSupport(kind:'air'|'illumination'):void {
+    if(this.replay||this.battle.state.phase==='ended')return;
+    this.pendingSupport=null;this.pendingOrder=null;this.pendingWaypoints=[];this.markerDrag=null;this.leftDrag.active=false;this.rightDrag.active=false;this.commandMenu.close();
+    if(kind==='air'){
+      const status=airSupportStatus(this.battle.state,this.battle.playerSide());
+      if(!status.available){this.notice(status.reason,'warn');return;}
+      this.pendingSupport={kind:'air'};
+    }else{
+      const team=this.selectedMortar();
+      if(!team||(team.illuminationAmmo??0)<=0){this.notice(team?'No illumination rounds remaining.':'Select a mortar team for illumination.','warn');return;}
+      this.pendingSupport={kind:'illumination',teamId:team.id};
+    }
+  }
+  /** Support targeting consumes the same map gesture so it cannot also select or fire HE. */
+  private updateSupportInput(input:InputState):InputState {
+    if(this.replay)return input;
+    const keysPressed=new Set(input.keysPressed);
+    if(!input.keysDown.has('control')&&!input.keysDown.has('meta')){
+      if(keysPressed.has('u')){this.armSupport('air');keysPressed.delete('u');}
+      if(keysPressed.has('l')&&!input.keysDown.has('shift')&&this.selectedMortar()){this.armSupport('illumination');keysPressed.delete('l');}
+    }
+    if(this.pendingSupport&&ORDER_TYPES.some(o=>keysPressed.has(ORDER_HOTKEYS[o])))this.pendingSupport=null;
+    if(this.pendingSupport&&keysPressed.has('escape')){this.pendingSupport=null;keysPressed.delete('escape');}
+    const clicks=input.clicks.filter(c=>{
+      if(c.button===0&&hitRect(c,AIR_ROLE_BUTTON)){
+        const roles:AirRole[]=['auto','bombing','armour'];this.airRole=roles[(roles.indexOf(this.airRole)+1)%roles.length];return false;
+      }
+      if(c.button===0&&hitRect(c,AIR_BUTTON)){this.armSupport('air');return false;}
+      if(c.button===0&&hitRect(c,FLARE_BUTTON)){this.armSupport('illumination');return false;}
+      if(!this.pendingSupport)return true;
+      if(c.button===2){this.pendingSupport=null;return false;}
+      if(c.button!==0||this.overHud(c))return true;
+      const target=screenToWorld(game.cam,c),pending=this.pendingSupport;
+      if(target.x<0||target.y<0||target.x>=this.battle.state.map.width||target.y>=this.battle.state.map.height)return false;
+      if(pending.kind==='air'){
+        const team=this.selectedTeamId!=null?this.battle.state.teams.get(this.selectedTeamId):undefined;
+        this.command({type:'airSupport',target,role:this.airRole,requesterId:team?.leaderId});
+      }else this.command({type:'illuminate',teamId:pending.teamId,target});
+      this.pendingSupport=null;this.leftDrag.active=false;game.audio?.play('click');return false;
+    });
+    return{...input,keysPressed,clicks};
+  }
+  private drawSupportControls(ctx:CanvasRenderingContext2D):void {
+    const state=this.battle.state,side=this.battle.playerSide(),status=airSupportStatus(state,side),mortar=this.selectedMortar(),mouse=game.input.state.mouse;
+    const mission=state.airSupport?.missions.find(m=>m.side===side&&m.phase!=='complete');
+    const waiting=Math.max(0,Math.ceil(status.availableAt-state.time));
+    const labels=[`✈ AIR [U] ${status.remaining}${mission?' · flying':waiting&&status.remaining?` · ${waiting}s`:status.available?' · ready':' · unavailable'}`,`Role: ${this.airRole.toUpperCase()}`,`FLARE [L] ${mortar?.illuminationAmmo??'—'}${mortar?.illuminationMission?' · firing':''}`];
+    ctx.save();ctx.font='bold 11px Arial, Helvetica, sans-serif';ctx.textBaseline='middle';ctx.textAlign='left';
+    [AIR_BUTTON,AIR_ROLE_BUTTON,FLARE_BUTTON].forEach((r,i)=>{
+      const hot=hitRect(mouse,r),active=i===0&&this.pendingSupport?.kind==='air'||i===2&&this.pendingSupport?.kind==='illumination';
+      ctx.fillStyle=active?'#754b18':hot?'#39382b':'rgba(17,22,25,.94)';ctx.fillRect(r.x,r.y,r.w,r.h);
+      ctx.strokeStyle=active?'#ffda79':'#8a8970';ctx.strokeRect(r.x+.5,r.y+.5,r.w-1,r.h-1);
+      ctx.fillStyle=(i===0&&!status.available&&!mission||i===2&&!mortar)?'#969a96':'#f6e4b6';ctx.fillText(labels[i],r.x+7,r.y+r.h/2,r.w-14);
+    });
+    ctx.font='11px Arial, Helvetica, sans-serif';ctx.textBaseline='top';
+    const conditions=`${state.config.scenarioDate??state.config.year} · ${(state.config.timeOfDay??'day').toUpperCase()} / ${(state.config.weather??'clear').toUpperCase()}`;
+    ctx.fillStyle='rgba(10,15,22,.86)';ctx.fillRect(8,40,320,19);ctx.fillStyle='#c8d6df';ctx.fillText(conditions,14,44);
+    const hotAir=hitRect(mouse,AIR_BUTTON)||hitRect(mouse,AIR_ROLE_BUTTON),hotFlare=hitRect(mouse,FLARE_BUTTON);
+    if(hotAir||hotFlare){
+      const load=mission?AIR_LOADS[mission.loadId]:airLoadFor(state.config,side,this.airRole==='armour');
+      const other=airLoadFor(state.config,side,true);
+      const lines=hotAir?[`${status.reason}. ${AIRCRAFT[load.aircraftId].name}: ${load.name}`,this.airRole==='auto'?`Auto uses only the requesting leader's reports. Alternative: ${other.name}`:'Click AIR, then a map point. One pass; area attacks can hit friendlies.','U: choose area · Role button: auto / bombing / armour · Escape / right-click: cancel']:[mortar?`${mortar.name}: ${mortar.illuminationAmmo??0} illumination rounds. ${mortar.illuminationMission?'Mission active.':'Ready for an area order.'}`:'Select a mortar team to fire an illumination mission.','Click FLARE or press L, then a map point. Both sides benefit from the light.','Illumination uses separate finite ammunition and normal crew readiness.'];
+      ctx.fillStyle='rgba(13,17,22,.97)';ctx.fillRect(8,62,660,58);ctx.fillStyle='#efe4ca';lines.forEach((line,i)=>ctx.fillText(line,15,68+i*16));
+    }
+    if(this.pendingSupport){
+      const label=this.pendingSupport.kind==='air'?`AIR SUPPORT · ${this.airRole.toUpperCase()} · click target area`:'MORTAR ILLUMINATION · click target area';
+      ctx.fillStyle='rgba(55,37,13,.94)';ctx.fillRect(8,124,610,25);ctx.fillStyle='#ffe4a0';ctx.fillText(`${label} · Escape / right-click cancels`,15,131);
+      if(!this.overHud(mouse)){ctx.strokeStyle='#ffe4a0';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(mouse.x,mouse.y,18,0,Math.PI*2);ctx.moveTo(mouse.x-24,mouse.y);ctx.lineTo(mouse.x+24,mouse.y);ctx.moveTo(mouse.x,mouse.y-24);ctx.lineTo(mouse.x,mouse.y+24);ctx.stroke();}
+    }
+    ctx.restore();
   }
 
   private addToSelection(ids: number[]): void {
@@ -346,6 +433,8 @@ export class BattleScreen implements Screen {
         return;
       }
     }
+
+    input=this.updateSupportInput(input);
 
     updateCameraEdgeScrollAndKeys(cam, input, dt, state.map.width, state.map.height, this.edgeScroll);
 
@@ -669,6 +758,8 @@ export class BattleScreen implements Screen {
     const m = input.mouse;
     const r = this.minimap.rect;
     this.hudHover = !this.commandMenu.isOpen && (
+      [AIR_BUTTON,AIR_ROLE_BUTTON,FLARE_BUTTON].some(r=>hitRect(m,r))
+      ||
       this.bottomStrip['hover'].size > 0
       || this.controlGroupBar.isHovering()
       || (this.showMinimap && m.x >= r.x && m.x < r.x + r.w && m.y >= r.y && m.y < r.y + r.h));
@@ -851,12 +942,15 @@ export class BattleScreen implements Screen {
     // tall growth: flattened wakes under the units, standing blades over their lower edges
     this.grassFx.update(state, battle.playerSide());
     if (!game.settings.showDepthMap) this.grassFx.drawTrails(ctx, cam);
+    configureNightVehicleLighting(state);
     drawUnits(ctx, cam, state, battle.playerSide(), this.selectedTeamIds, game.settings, this.showDead, this.hoveredOrderMarker, this.hoverTeamId, this.soldierMonitor.watchedSoldierId());
     // The original's drag feel: the dragged marker's ball follows the cursor while held.
     if (this.markerDrag) drawOrderBall(ctx, game.input.state.mouse, 3.2 * 1.4);
     this.grassFx.drawStanding(ctx, cam, state, battle.playerSide(), vehiclesWithGrass3d());
     drawEffects(ctx, cam, state);
     this.blastFx.draw(ctx, cam, state.time);
+    drawAirSupport(ctx,cam,state,battle.playerSide());
+    drawNightLighting(ctx,cam,state,battle.playerSide());
 
     const selTeam = this.selectedTeamId != null ? state.teams.get(this.selectedTeamId) ?? null : null;
     const aimingFire = this.pendingOrder === 'fire' || this.pendingOrder === 'smoke';
@@ -1035,6 +1129,7 @@ export class BattleScreen implements Screen {
     this.combatMessages.draw(ctx, state);
     this.bottomStrip.draw(ctx, state, selTeam, this.soldierMonitor.watchedSoldierForTeam(state, selTeam));
     this.controlGroupBar.draw(ctx, this.controlGroups.slots(this.selectedTeamIds));
+    this.drawSupportControls(ctx);
 
     if (this.commandMenu.isOpen) this.commandMenu.draw(ctx);
     if(this.showIndividualInspector){const id=this.soldierMonitor.watchedSoldierForTeam(state,selTeam)??selTeam?.leaderId;const s=id!=null?state.soldiers.get(id):undefined;if(s&&s.side===battle.playerSide())drawIndividualInspector(ctx,state,s,selTeam?.order??null);}
@@ -1131,6 +1226,7 @@ export class BattleScreen implements Screen {
   }
 
   cursor(): CursorKind {
+    if(this.pendingSupport)return'crosshair';
     if (this.targetHover) return targetCursorKind(this.targetHover);
     if (this.pendingOrder) return 'crosshair';
     if (this.modernPanDrag.active) return 'hand';

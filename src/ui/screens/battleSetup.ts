@@ -76,6 +76,7 @@ class BattleRequisitionScreen implements Screen {
   draw(ctx: CanvasRenderingContext2D): void {
     drawMenuFrame(ctx, 'REQUISITION', () => {
       this.picker.draw(ctx);
+      drawLabel(ctx,`${this.cfgBase.scenarioDate} · ${(this.cfgBase.timeOfDay??'day').toUpperCase()} / ${(this.cfgBase.weather??'clear').toUpperCase()} · Air: ${this.cfgBase.timeOfDay==='night'||this.cfgBase.weather!=='clear'?'unavailable':'1 assigned mission'}`,60,79,UI.note,UI.gold);
       this.strip.draw(ctx);
     });
   }
@@ -88,12 +89,12 @@ class BattleRequisitionScreen implements Screen {
 const MAP_ROW_H = 24;
 const MAP_LIST: Rect = { x: 17, y: 89, w: 358, h: MAPS.length * MAP_ROW_H };
 const THUMB: Rect = { x: 46, y: MAP_LIST.y + MAP_LIST.h + 14, w: 300, h: 176 };
-const SETTINGS: Rect = { x: 396, y: 88, w: 388, h: 232 };
-const DESC: Rect = { x: 396, y: 332, w: 388, h: 212 };
+const SETTINGS: Rect = { x: 396, y: 88, w: 388, h: 288 };
+const DESC: Rect = { x: 396, y: 388, w: 388, h: 156 };
 const CUSTOM_KEY = 'cc3.custom';
 const CTRL_X = 540;
 const CTRL_W = 228;
-const rowY = (i: number) => SETTINGS.y + 16 + i * 44;
+const rowY = (i: number) => SETTINGS.y + 12 + i * 33;
 
 export class BattleSetupScreen implements Screen {
   private mapSelected = 0;
@@ -104,6 +105,9 @@ export class BattleSetupScreen implements Screen {
   private year: number;
   private difficulty: 'easy' | 'normal' | 'hard' = 'normal';
   private durationMin = 20;
+  private timeOfDay:'day'|'night'='day';
+  private weather:'clear'|'overcast'|'rain'='clear';
+  private scenarioMonth='07';
 
   private sideGerR: Rect = { x: CTRL_X, y: rowY(0), w: CTRL_W / 2 - 4, h: 24 };
   private sideSovR: Rect = { x: CTRL_X + CTRL_W / 2 + 4, y: rowY(0), w: CTRL_W / 2 - 4, h: 24 };
@@ -111,8 +115,11 @@ export class BattleSetupScreen implements Screen {
   private yearPlusR: Rect = { x: CTRL_X + CTRL_W - 30, y: rowY(1), w: 30, h: 24 };
   private diffR: Rect = { x: CTRL_X, y: rowY(2), w: CTRL_W, h: 24 };
   private durR: Rect = { x: CTRL_X, y: rowY(3), w: CTRL_W, h: 24 };
-  private saveR: Rect = { x: CTRL_X, y: rowY(4), w: CTRL_W / 2 - 4, h: 24 };
-  private loadR: Rect = { x: CTRL_X + CTRL_W / 2 + 4, y: rowY(4), w: CTRL_W / 2 - 4, h: 24 };
+  private timeR:Rect={x:CTRL_X,y:rowY(4),w:CTRL_W,h:24};
+  private weatherR:Rect={x:CTRL_X,y:rowY(5),w:CTRL_W,h:24};
+  private dateR:Rect={x:CTRL_X,y:rowY(6),w:CTRL_W,h:24};
+  private saveR: Rect = { x: CTRL_X, y: rowY(7), w: CTRL_W / 2 - 4, h: 24 };
+  private loadR: Rect = { x: CTRL_X + CTRL_W / 2 + 4, y: rowY(7), w: CTRL_W / 2 - 4, h: 24 };
   private hasSaved = false;
 
   private strip = new BottomStrip({ next: 'Next →' });
@@ -137,6 +144,7 @@ export class BattleSetupScreen implements Screen {
         year: this.year,
         difficulty: this.difficulty,
         durationMin: this.durationMin,
+        timeOfDay:this.timeOfDay,weather:this.weather,scenarioDate:`${this.year}-${this.scenarioMonth}-15`,
       }));
       this.hasSaved = true;
     } catch {
@@ -148,13 +156,16 @@ export class BattleSetupScreen implements Screen {
     try {
       const raw = localStorage.getItem(CUSTOM_KEY);
       if (!raw) return;
-      const p = JSON.parse(raw) as { mapId?: string; playerSide?: Side; year?: number; difficulty?: 'easy' | 'normal' | 'hard'; durationMin?: number };
+      const p = JSON.parse(raw) as Partial<BattleConfig>&{durationMin?:number};
       const idx = MAPS.findIndex((m) => m.id === p.mapId);
       if (idx >= 0) this.mapSelected = idx;
       if (p.playerSide === 'german' || p.playerSide === 'soviet') this.playerSide = p.playerSide;
       this.year = clamp(p.year ?? 1941, 1941, 1945);
       if (p.difficulty && DIFFICULTIES.includes(p.difficulty)) this.difficulty = p.difficulty;
       if (p.durationMin && DURATIONS.includes(p.durationMin)) this.durationMin = p.durationMin;
+      this.timeOfDay=p.timeOfDay==='night'?'night':'day';
+      this.weather=p.weather==='rain'||p.weather==='overcast'?p.weather:'clear';
+      this.scenarioMonth=p.scenarioDate&&['01','07','11'].includes(p.scenarioDate.slice(5,7))?p.scenarioDate.slice(5,7):'07';
     } catch {
       // a corrupt preset is ignored
     }
@@ -194,6 +205,12 @@ export class BattleSetupScreen implements Screen {
         this.difficulty = DIFFICULTIES[(DIFFICULTIES.indexOf(this.difficulty) + 1) % DIFFICULTIES.length];
       } else if (pointInRect(c, this.durR)) {
         this.durationMin = DURATIONS[(DURATIONS.indexOf(this.durationMin) + 1) % DURATIONS.length];
+      } else if(pointInRect(c,this.timeR)){
+        this.timeOfDay=this.timeOfDay==='day'?'night':'day';
+      } else if(pointInRect(c,this.weatherR)){
+        const weather:typeof this.weather[]=['clear','overcast','rain'];this.weather=weather[(weather.indexOf(this.weather)+1)%weather.length];
+      } else if(pointInRect(c,this.dateR)){
+        const months=['01','07','11'];this.scenarioMonth=months[(months.indexOf(this.scenarioMonth)+1)%months.length];
       } else if (pointInRect(c, this.saveR)) {
         this.saveSetup();
       } else if (this.hasSaved && pointInRect(c, this.loadR)) {
@@ -212,6 +229,7 @@ export class BattleSetupScreen implements Screen {
         mapId: def.id,
         playerSide: this.playerSide,
         year: this.year,
+        timeOfDay:this.timeOfDay,weather:this.weather,scenarioDate:`${this.year}-${this.scenarioMonth}-15`,
         seed: Date.now() & 0xffff,
         durationS: this.durationMin >= 999 ? 999 * 60 : this.durationMin * 60,
         difficulty: this.difficulty,
@@ -253,7 +271,7 @@ export class BattleSetupScreen implements Screen {
       ctx.font = UI.body;
       ctx.fillStyle = UI.text;
       let ty = DESC.y + 48;
-      for (const line of wrapText(ctx, def.description, DESC.w - 32).slice(0, 10)) {
+      for (const line of wrapText(ctx, def.description, DESC.w - 32).slice(0, 5)) {
         ctx.fillText(line, DESC.x + 16, ty);
         ty += 16;
       }
@@ -272,7 +290,10 @@ export class BattleSetupScreen implements Screen {
       drawSmallMetalButton(ctx, this.diffR, DIFFICULTY_LABEL[this.difficulty], { hot: hot(this.diffR) });
       label(3, 'Battle Length');
       drawSmallMetalButton(ctx, this.durR, durationLabel(this.durationMin), { hot: hot(this.durR) });
-      label(4, 'Custom Setup');
+      label(4,'Time');drawSmallMetalButton(ctx,this.timeR,this.timeOfDay==='night'?'Night':'Daylight',{hot:hot(this.timeR)});
+      label(5,'Weather');drawSmallMetalButton(ctx,this.weatherR,this.weather[0].toUpperCase()+this.weather.slice(1),{hot:hot(this.weatherR)});
+      label(6,'Scenario date');drawSmallMetalButton(ctx,this.dateR,`${this.year}-${this.scenarioMonth}-15`,{hot:hot(this.dateR)});
+      label(7, 'Custom Setup');
       drawSmallMetalButton(ctx, this.saveR, 'Save', { hot: hot(this.saveR) });
       if (this.hasSaved) drawSmallMetalButton(ctx, this.loadR, 'Load', { hot: hot(this.loadR) });
 

@@ -148,6 +148,8 @@ export class DebriefScreen implements Screen {
       const state = this.battle.state;
       drawShadowText(ctx, RESULT_WORDS[state.result ?? 'draw'], 400, 80, UI.title, UI.gold, 'rgba(0,0,0,0.8)', 'center');
       this.drawScoreboard(ctx);
+      const air=state.airSupport?.assignments[state.config.playerSide];
+      if(air)drawLabel(ctx,`Air sorties used: ${air.used}${game.campaign?.airSupportDaily?` · Daily missions left: ${game.campaign.airSupportDaily.remaining[state.config.playerSide]}`:''}`,SCORE.x+12,SCORE.y+SCORE.h-8,UI.note,UI.dim);
       const hasAwards = this.drawAwards(ctx);
       this.drawTeams(ctx, hasAwards ? AWARDS.y + AWARDS.h + 8 : AWARDS.y);
       if (this.replayable()) {

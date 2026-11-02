@@ -1029,6 +1029,7 @@ export const ORDER_DOT_COLOR: Record<OrderType, string> = {
 export const AMBUSH_TRIGGER_M = 30;   // manual: ambush launches when enemy within 30 m
 
 export interface Order {
+  illumination?: boolean;
   formationHeading?:number;
   formationClaims?:Record<number,number>;
   type: OrderType;
@@ -1111,6 +1112,8 @@ export interface IndirectControl {aim:Vec2;startedAt:number;orderAt?:number;next
 export interface IndirectMessage {kind:'request'|'observation';teamId:number;missionAt:number;aim:Vec2;route:number[];hop:number;deliverAt:number;channel:'voice'|'intercom'|'radio';observation?:IndirectObservation}
 export interface IndirectObserverTask {teamId:number;missionAt:number;aim:Vec2;observerId:number;nextReportAt:number}
 export interface Team {
+  illuminationAmmo?: number;
+  illuminationMission?: { target:Vec2; orderedAt:number; nextRoundAt:number; rounds:number; layUntil:number };
   indirectControl?:IndirectControl;
   id: number;
   defId: string;
@@ -1169,6 +1172,8 @@ export interface Team {
 export type CrewWeaponPhase = 'packed' | 'settingUp' | 'ready' | 'packing';
 
 export interface CrewWeaponState {
+  /** Absolute mortar cycle deadline shared by HE, smoke and illumination missions. */
+  nextMortarShotAt?: number;
   transport?: {
     vehicleId: number;
     phase: 'loading' | 'loaded' | 'unloading' | 'coupling' | 'towed' | 'uncoupling';
@@ -1374,7 +1379,26 @@ export interface SideState {
 /** Who gives a side its orders: a person through `Battle.submit`, or the sim's own AI. */
 export type Controller = 'human' | 'ai';
 
+export type AirRole = 'auto' | 'bombing' | 'armour';
+export interface AirAssignment { remaining:number; availableAt:number; used:number; announced?:boolean }
+export interface AirMission {
+  id:number; side:Side; aircraftId:string; loadId:string; target:Vec2; heading:number;
+  phase:'inbound'|'attacking'|'departing'|'complete'; calledAt:number; arriveAt:number;
+  pos:Vec3; releaseIndex:number; nextReleaseAt:number; pilot:Soldier;
+  reports:PersonalContact[]; reportsAt:number; attackTarget?:Vec2; attackAt?:number;
+  reporterId?:number; requestedRole?:AirRole;
+}
+export interface AirOrdnance { id:number; missionId:number; side:Side; weaponId:string; from:Vec3; impact:Vec2; impactZ?:number; releasedAt:number; impactAt:number }
+export interface AirSupportState { assignments:Record<Side,AirAssignment>; missions:AirMission[]; ordnance:AirOrdnance[] }
+export interface IlluminationFlare { id:number; side:Side; teamId:number; burstAt:number; origin:Vec3; wind:Vec2; descentMs:number; durationS:number; radiusM:number; intensity:number; sourceRadiusM:number }
+export interface IlluminationShot { id:number; side:Side; teamId:number; from:Vec2; target:Vec2; firedAt:number; burstAt:number; altitudeM:number }
+
 export interface BattleConfig {
+  timeOfDay?: 'day' | 'night';
+  weather?: 'clear' | 'overcast' | 'rain';
+  scenarioDate?: string;
+  airSupport?: false | Partial<Record<Side, { missions: number; availableAtS?: number }>>;
+  illuminationRounds?: number;
   multiplayer?: boolean;
   mapId: string;
   /** The local viewer's side: the UI's perspective (selection, fog, own message log, debrief).
@@ -1411,6 +1435,10 @@ export interface HumanMindTrack {
 }
 export interface HumanMoraleTrack {lastHealth:Map<number,Health>;tankScareAt:Map<number,number>;teamLastStatus:Map<number,TeamStatusWord>;hesitationMsgAt:Map<number,number>}
 export interface BattleState {
+  airSupport?: AirSupportState;
+  flares?: IlluminationFlare[];
+  illuminationShots?: IlluminationShot[];
+  nightGroundMemory?: Partial<Record<Side,Record<number,number>>>;
   noise?:{nextId:number;sources:Record<string,number>;events:{id:number;key:string;at:number;pos:Vec2;kind:'shot'|'engine'|'blast'|'voice';rangeM:number;side?:Side}[]};
   humanRuntime?:Record<string,unknown>;
   aiRuntime?:Record<string,unknown>;
@@ -1494,6 +1522,9 @@ export interface Camera {
 
 // ------------------------------------------------------------- operation
 export interface OperationBattleDef {
+  scenarioDate?: string;
+  timeOfDay?: BattleConfig['timeOfDay'];
+  weather?: BattleConfig['weather'];
   mapId: string;
   year: number;
   title: string;              // "Barbarossa, June 1941"
@@ -1547,6 +1578,7 @@ export interface TeamOutcome {
 
 /** End-of-battle export for the player side: the campaign layer's only input. */
 export interface BattleReport {
+  airMissionsUsed?: Record<Side,number>;
   result: BattleResult;
   fledSide: Side | null;
   teams: TeamOutcome[];
@@ -1596,6 +1628,7 @@ export interface CampaignTeam {
 
 /** Full campaign state persisted between battles. */
 export interface CampaignState {
+  airSupportDaily?: { date:string; remaining:Record<Side,number> };
   seed: number;
   playerSide: Side;
   battleIndex: number;

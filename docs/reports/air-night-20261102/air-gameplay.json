@@ -1,0 +1,190 @@
+{
+  "errors": [],
+  "console": [
+    "[.WebGL-0x10c00440800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+    "[.WebGL-0x10c00440800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+    "[.WebGL-0x10c00440800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+    "[.WebGL-0x10c00440800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels (this message will no longer repeat)"
+  ],
+  "setup": {
+    "time": 30,
+    "mortar": 1,
+    "cw": {
+      "weaponId": "mortar81",
+      "pos": {
+        "x": 110.95422804890966,
+        "y": 119.17301485474889
+      },
+      "facing": 0,
+      "phase": "ready",
+      "timer": 0,
+      "phaseTotal": 7,
+      "gunnerId": 3,
+      "abandoned": false,
+      "abandonedAt": 0,
+      "setAt": 0.1,
+      "done": [
+        "placeBaseplate",
+        "mountTube",
+        "setBipod"
+      ],
+      "goal": "deploy",
+      "progress": {},
+      "workers": {},
+      "open": [],
+      "mountBlocked": false,
+      "lastWorkedAt": 30
+    },
+    "stock": 2,
+    "tank": 17,
+    "hash": 1014473396
+  },
+  "armed": {
+    "pending": {
+      "kind": "air"
+    },
+    "count": 0
+  },
+  "approach": {
+    "time": 43,
+    "missions": [
+      {
+        "side": "german",
+        "phase": "attacking",
+        "load": "sc50",
+        "released": 0
+      },
+      {
+        "side": "soviet",
+        "phase": "attacking",
+        "load": "ptab",
+        "released": 0
+      }
+    ],
+    "ordnance": 0
+  },
+  "release": {
+    "time": 47,
+    "missions": [
+      {
+        "side": "german",
+        "phase": "attacking",
+        "load": "sc50",
+        "released": 3
+      },
+      {
+        "side": "soviet",
+        "phase": "attacking",
+        "load": "ptab",
+        "released": 84
+      }
+    ],
+    "ordnance": 87
+  },
+  "impact": {
+    "time": 53,
+    "missions": [
+      {
+        "side": "german",
+        "phase": "departing",
+        "load": "sc50",
+        "released": 4
+      },
+      {
+        "side": "soviet",
+        "phase": "departing",
+        "load": "ptab",
+        "released": 192
+      }
+    ],
+    "ordnance": 1
+  },
+  "departure": {
+    "time": 60,
+    "missions": [
+      {
+        "side": "german",
+        "phase": "complete",
+        "load": "sc50",
+        "released": 4
+      },
+      {
+        "side": "soviet",
+        "phase": "complete",
+        "load": "ptab",
+        "released": 192
+      }
+    ],
+    "ordnance": 0
+  },
+  "mission": {
+    "time": 92,
+    "missions": [
+      {
+        "side": "german",
+        "load": "sc50",
+        "phase": "complete",
+        "released": 4
+      },
+      {
+        "side": "soviet",
+        "load": "ptab",
+        "phase": "complete",
+        "released": 192
+      },
+      {
+        "side": "german",
+        "load": "bk37",
+        "phase": "complete",
+        "released": 24
+      }
+    ],
+    "ordnance": 0,
+    "commands": [
+      {
+        "type": "airSupport",
+        "target": {
+          "x": 105,
+          "y": 83
+        },
+        "role": "auto",
+        "requesterId": 2,
+        "side": "german",
+        "tick": 300,
+        "seq": 7
+      },
+      {
+        "type": "airSupport",
+        "target": {
+          "x": 108,
+          "y": 100
+        },
+        "role": "armour",
+        "side": "soviet",
+        "tick": 300,
+        "seq": 8
+      },
+      {
+        "type": "airSupport",
+        "target": {
+          "x": 108,
+          "y": 89
+        },
+        "role": "armour",
+        "requesterId": 2,
+        "side": "german",
+        "tick": 600,
+        "seq": 9
+      }
+    ]
+  },
+  "readonly": {
+    "hash": 1326997207,
+    "rng": 1105541805
+  },
+  "after": {
+    "hash": 1326997207,
+    "rng": 1105541805
+  },
+  "serverStopped": true
+}

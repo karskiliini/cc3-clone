@@ -11,6 +11,7 @@ import { dazeVisionFactor } from './daze';
 import { VEHICLE_DEFS } from '@/data/units';
 import { vehicleEyes, type VehicleEye } from './vehicleVision';
 import * as dm from '@/shared/dmath';
+import {illuminationAt,prepareIllumination,type IlluminationQuery} from './illumination';
 
 export const SOLDIER_SPOT_RANGE_M = 300;
 /** Item 014: radius (m) of the glow cast by a burning vehicle — anyone inside it and in LOS of
@@ -185,8 +186,15 @@ function eyeClass(m: number): number {
  */
 export function observerVisibility(
   state: BattleState, observer: Spotter, targetPos: Vec2,
-  rangeM: number = SOLDIER_SPOT_RANGE_M, losFor?: LosVisibilityFn, targetM: number = EYE_STANDING_M,
+  rangeM: number = SOLDIER_SPOT_RANGE_M, losFor?: LosVisibilityFn, targetM: number = EYE_STANDING_M, receiverVehicleId?:number, illumination?:IlluminationQuery,
 ): number {
+  let nightFactor=1;
+  if(state.config?.timeOfDay==='night'){
+    const point={x:targetPos.x*TILE_M,y:targetPos.y*TILE_M,z:groundAtTile(state.map,targetPos.x,targetPos.y)+targetM};
+    const light=illumination?illumination(point,receiverVehicleId):illuminationAt(state,point,receiverVehicleId);
+    nightFactor=.08+.92*light;
+    rangeM=Math.min(rangeM,25+rangeM*light);
+  }
   const eye = observer.vehicleEye;
   if (eye) {
     if (!withinEyeArc(eye, observer.pos, targetPos)) return 0;
@@ -198,7 +206,7 @@ export function observerVisibility(
   const v = losFor
     ? losFor(observer.pos, targetPos, eyeM, targetM)
     : losTrace(state.map, observer.pos, targetPos, { eyeM, targetM }).visibility;
-  return v > 0 ? v : 0;
+  return v > 0 ? v*nightFactor : 0;
 }
 
 /**
@@ -240,6 +248,10 @@ export function item14FloorM(state: BattleState, ev: Vehicle): number {
 }
 
 export function updateSpotting(state: BattleState, _rng: Rng): void {
+  // This pass changes perception/beliefs only, never source or occluder geometry.
+  // Preparing once retains the exact per-point memo without serializing the
+  // entire light/vehicle signature for each observer-target pair.
+  const illumination=state.config.timeOfDay==='night'?prepareIllumination(state):undefined;
   const previous=new Map<number,Set<string>>();
   for(const s of state.soldiers.values()){const p=perception(s);previous.set(s.id,new Set(p.visual.map(c=>`${c.entity}:${c.id}`)));p.visual=[];}
   for(const side of SIDES){
@@ -249,7 +261,7 @@ export function updateSpotting(state: BattleState, _rng: Rng): void {
       for(const e of state.soldiers.values()){
         if(e.side===side||e.vehicleId!=null)continue;
         const net=state.teams.get(e.teamId),netted=!!net?.camouflaged&&e.activity==='ambushing'&&!isFiringRecently(e,state.time);
-        const visibility=observerVisibility(state,sp,e.pos,netted?CAMO_NET_MAX_SPOT_M:SOLDIER_SPOT_RANGE_M,losFor,eyeHeightM(e.stance));
+        const visibility=observerVisibility(state,sp,e.pos,netted?CAMO_NET_MAX_SPOT_M:SOLDIER_SPOT_RANGE_M,losFor,eyeHeightM(e.stance),undefined,illumination);
         if(visibility<=0)continue;
         const mind=owner?mindSpotFactor(owner,e.pos):sp.vehicleEye?.factor??1;
         const p=visibility*visibilityStanceFactor(e.stance)*(isMoving(e.activity)?1.5:1)*(isFiringRecently(e,state.time)?3:1)*mind*spotterPainFactor(state,sp)*heightSpotFactor(state,sp.pos,e.pos)*(netted?CAMO_NET_VISIBILITY:1);
@@ -264,13 +276,13 @@ export function updateSpotting(state: BattleState, _rng: Rng): void {
         // Existing wreck illumination can extend acquisition range, but never LOS.
         // Both the light-to-target and observer-to-target paths must be clear.
         const illuminated=v.state==='burning'||v.engineOnFire||Array.from(state.vehicles.values()).some(f=>f.id!==v.id&&f.state==='burning'&&distSqTiles(f.pos,v.pos)<=dm.pow(FIRELIGHT_RANGE_M/TILE_M,2)&&losFor(f.pos,v.pos,EYE_VEHICLE_M,EYE_VEHICLE_M)>.025);
-        const visibility=observerVisibility(state,sp,v.pos,illuminated?Infinity:VEHICLE_SPOT_RANGE_M,losFor,EYE_VEHICLE_M);
+        const visibility=observerVisibility(state,sp,v.pos,state.config.timeOfDay==='night'?VEHICLE_SPOT_RANGE_M:illuminated?Infinity:VEHICLE_SPOT_RANGE_M,losFor,EYE_VEHICLE_M,v.id,illumination);
         // Fire and engine sounds cannot turn an occluded hull into an identified vehicle.
         if(visibility*spotterPainFactor(state,sp)*(sp.vehicleEye?.factor??1)<=.025)continue;
         vehicles.add(v.id);if(owner)recordVisual(state,owner,v,'vehicle');
       }
       if(owner){
-        const objectives=perception(owner).objectives??={};for(const vl of state.map.victoryLocations)if(observerVisibility(state,sp,{x:vl.x,y:vl.y},100,losFor)>.1)objectives[vl.id]={owner:vl.owner,observedAt:state.time,sourceId:owner.id};
+        const objectives=perception(owner).objectives??={};for(const vl of state.map.victoryLocations)if(observerVisibility(state,sp,{x:vl.x,y:vl.y},100,losFor,EYE_STANDING_M,undefined,illumination)>.1)objectives[vl.id]={owner:vl.owner,observedAt:state.time,sourceId:owner.id};
         const seen=perception(owner).visual;
         for(const c of seen)if(c.entity==='soldier'&&c.health!=='dead'){
           const e=state.soldiers.get(c.id)!;

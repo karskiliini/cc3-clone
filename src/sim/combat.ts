@@ -1690,6 +1690,10 @@ export function pickMortarAim(state: BattleState, team: Team, gunner: Soldier, w
 }
 
 function stepMortarTeam(state: BattleState, rng: Rng, dt: number, team: Team, track: CombatTrack): void {
+  if(team.order?.illumination){
+    const gunner=findGunner(state,team);if(gunner)gunner.fireTimer=Math.max(0,gunner.fireTimer-dt);
+    return; // separate stock and crew service; never a simultaneous HE mission
+  }
   const gunner = findGunner(state, team);
   if (!gunner) return;
   const weapon = WEAPONS[gunner.weaponId];
@@ -1716,6 +1720,8 @@ function stepMortarTeam(state: BattleState, rng: Rng, dt: number, team: Team, tr
   }
   if (gunner.fireTimer > 0) return;
 
+  if(state.time<(team.crewWeapon?.nextMortarShotAt??0))return;
+
   const aim = pickMortarAim(state, team, gunner, weapon, track);
   if (!aim) return;
   const target = aim.pos;
@@ -1733,6 +1739,7 @@ function stepMortarTeam(state: BattleState, rng: Rng, dt: number, team: Team, tr
   // item 020: rocket launchers pace a SALVO — one tube fires every ROCKET_RAIL_S until the racks
   // are empty ("empties in ten seconds"), instead of the mortar's one-round-per-reload cadence
   gunner.fireTimer = weapon.cls === 'rocket' ? ROCKET_RAIL_S : 1 / weapon.rate;
+  if(team.crewWeapon&&weapon.cls==='mortar')team.crewWeapon.nextMortarShotAt=state.time+1/weapon.rate;
   gunner.ammo--;
   gunner.lastFiredAt = state.time;
   gunner.activity = 'firing';

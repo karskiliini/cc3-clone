@@ -507,6 +507,7 @@ function releaseDelayedOrders(state: BattleState, rng: Rng): void {
 }
 
 export function applyOrder(state: BattleState, team: Team, order: Order, rng: Rng, own = false): void {
+  if(!order.illumination)delete team.illuminationMission;
   for(const id of team.soldierIds){const s=state.soldiers.get(id);if(s)delete s.digging;}
   // C4: a Move Fast whose target lands on/near a spotted enemy is an ASSAULT — the team
   // charges at moveFast pace with weapons ready; grenades free-throw once in range.
@@ -724,6 +725,7 @@ export function attackPhase(state: BattleState, order: Order): AttackPhase {
  * kept only if that enemy team is currently spotted by the ordering side; otherwise the order becomes
  * area fire unless a spotted enemy stands at the clicked point. */
 function initAttackOrder(state:BattleState,team:Team,order:Order):void{
+ if(order.illumination){delete order.targetTeamId;delete order.targetVehicleId;return;}
  order.target={...order.target};
  const evidence=knownContacts(state,teamObserver(state,team.id));
  const target=order.targetTeamId!=null?evidence.find(c=>c.teamId===order.targetTeamId):evidence.find(c=>dist(c.pos,order.target)<3);
@@ -739,7 +741,7 @@ export function stepAttackOrders(state: BattleState, rng: Rng): void {
   releaseDelayedOrders(state, rng);
   for (const team of state.teams.values()) {
     const order = team.order;
-    if (!order || order.type !== 'fire' || order.targetTeamId == null || team.outOfAction) continue;
+    if (!order || order.type !== 'fire' || order.illumination || order.targetTeamId == null || team.outOfAction) continue;
     const target = state.teams.get(order.targetTeamId);
     const last = order.lastKnownPos ?? order.target;
     const evidence=knownContacts(state,teamObserver(state,team.id)).filter(c=>c.teamId===order.targetTeamId);

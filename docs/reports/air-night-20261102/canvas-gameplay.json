@@ -1,0 +1,177 @@
+{
+  "errors": [],
+  "console": [],
+  "setup": {
+    "time": 30,
+    "mortar": 1,
+    "cw": {
+      "weaponId": "mortar81",
+      "pos": {
+        "x": 110.95422804890966,
+        "y": 119.17301485474889
+      },
+      "facing": 0,
+      "phase": "ready",
+      "timer": 0,
+      "phaseTotal": 7,
+      "gunnerId": 3,
+      "abandoned": false,
+      "abandonedAt": 0,
+      "setAt": 0.1,
+      "done": [
+        "placeBaseplate",
+        "mountTube",
+        "setBipod"
+      ],
+      "goal": "deploy",
+      "progress": {},
+      "workers": {},
+      "open": [],
+      "mountBlocked": false,
+      "lastWorkedAt": 30
+    },
+    "stock": 1,
+    "tank": 17,
+    "hash": 3982419150
+  },
+  "armed": {
+    "pending": {
+      "kind": "illumination",
+      "teamId": 1
+    },
+    "count": 0
+  },
+  "burst": 36.72199283292147,
+  "high": {
+    "time": 39.8,
+    "flares": [
+      {
+        "pos": {
+          "x": 209.90916573268694,
+          "y": 165.88345405195807,
+          "z": 113.32537218766551
+        },
+        "strength": 1.35
+      }
+    ],
+    "stock": 0,
+    "hash": 1534179493,
+    "renderer": {
+      "backend": "canvas",
+      "cpuPassMs": 18,
+      "width": 40,
+      "height": 26,
+      "sourceSamples": 5,
+      "floatLinear": false
+    }
+  },
+  "mid": {
+    "time": 78.8,
+    "flares": [
+      {
+        "pos": {
+          "x": 216.14916573268695,
+          "y": 167.83345405195809,
+          "z": 74.32537218766551
+        },
+        "strength": 1.35
+      }
+    ],
+    "stock": 0,
+    "hash": 3767287968,
+    "renderer": {
+      "backend": "canvas",
+      "cpuPassMs": 24.099999994039536,
+      "width": 40,
+      "height": 26,
+      "sourceSamples": 5,
+      "floatLinear": false
+    }
+  },
+  "low": {
+    "time": 113.8,
+    "flares": [
+      {
+        "pos": {
+          "x": 221.74916573268695,
+          "y": 169.58345405195809,
+          "z": 39.32537218766551
+        },
+        "strength": 1.35
+      }
+    ],
+    "stock": 0,
+    "hash": 3036915393,
+    "renderer": {
+      "backend": "canvas",
+      "cpuPassMs": 49.20000000298023,
+      "width": 40,
+      "height": 26,
+      "sourceSamples": 5,
+      "floatLinear": false
+    }
+  },
+  "extinct": {
+    "time": 128.8,
+    "flares": [],
+    "stock": 0,
+    "hash": 1963018871,
+    "renderer": {
+      "backend": "canvas",
+      "cpuPassMs": 0.5999999940395355,
+      "width": 40,
+      "height": 26,
+      "sourceSamples": 5,
+      "floatLinear": false
+    }
+  },
+  "mission": {
+    "time": 128.8,
+    "stock": 0,
+    "flares": [],
+    "commands": [
+      {
+        "type": "illuminate",
+        "teamId": 1,
+        "target": {
+          "x": 105,
+          "y": 83
+        },
+        "side": "german",
+        "tick": 300,
+        "seq": 7
+      }
+    ]
+  },
+  "renderer": {
+    "backend": "canvas",
+    "cpuPassMs": 0.5999999940395355,
+    "width": 40,
+    "height": 26,
+    "sourceSamples": 5,
+    "floatLinear": false
+  },
+  "performance": {
+    "drawMs": {
+      "samples": 593,
+      "median": 22.899999991059303,
+      "p95": 52.099999994039536,
+      "max": 54.5
+    },
+    "frameMs": {
+      "samples": 593,
+      "median": 45.70000000298023,
+      "p95": 119.59999999403954,
+      "max": 133.5
+    }
+  },
+  "readonly": {
+    "hash": 1963018871,
+    "rng": 1105541805
+  },
+  "after": {
+    "hash": 1963018871,
+    "rng": 1105541805
+  },
+  "serverStopped": true
+}

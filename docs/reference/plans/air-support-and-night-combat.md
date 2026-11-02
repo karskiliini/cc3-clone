@@ -1,7 +1,9 @@
 # Air support and illuminated night combat
 
-Requested 2026-11-01. Status: queued requirements, not implemented. Backlog 058–059;
-050 P2 stays active under the existing FIFO rule. These requirements add no approval gate.
+Requested 2026-11-01, explicitly activated and verified 2026-11-02. Backlog 058–059
+are implemented. Rules: `2026-11-02-air-night-implementation.md`; evidence:
+`../../reports/air-night-20261102/README.md`. 050 P2 performance remains deferred
+at the user's request. These requirements add no approval gate.
 
 ## 058 — Air support, following later Close Combat games
 

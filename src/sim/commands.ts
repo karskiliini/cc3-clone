@@ -1,4 +1,4 @@
-import type { BattleConfig, Controller, Order, Side, Vec2 } from '@/shared/types';
+import type { AirRole, BattleConfig, Controller, Order, Side, Vec2 } from '@/shared/types';
 
 /**
  * Everything a player can do to a battle, as plain serializable data (multiplayer plan §7 P1).
@@ -7,6 +7,8 @@ import type { BattleConfig, Controller, Order, Side, Vec2 } from '@/shared/types
  * depend on the frame a click landed in and a command log can replay a battle exactly.
  */
 export type CommandBody =
+  | { type:'airSupport'; target:Vec2; role:AirRole; requesterId?:number }
+  | { type:'illuminate'; teamId:number; target:Vec2 }
   | { type: 'order'; teamId: number; order: Order }
   | { type: 'deployTeam'; teamId: number; pos: Vec2 }
   /** The deploy screen's Auto button: the AI deploys the side's teams. */

@@ -1,0 +1,47 @@
+{
+  "same": true,
+  "originalExact": true,
+  "sha256": "769900083d32a228074c2889a76c1d341316f9fe6d0888d44d109bd2528372db",
+  "cases": [
+    {
+      "night": false,
+      "ticks": 400,
+      "finalHash": 3537027956,
+      "replayHash": 3537027956,
+      "activity": {
+        "shots": 0,
+        "flares": 0,
+        "ordnance": 196,
+        "released": 196,
+        "complete": 2
+      },
+      "remainingFlares": 0,
+      "illuminationAmmo": 1,
+      "loads": [
+        "sc50",
+        "ptab"
+      ]
+    },
+    {
+      "night": true,
+      "ticks": 1300,
+      "finalHash": 2771458169,
+      "replayHash": 2771458169,
+      "activity": {
+        "shots": 1,
+        "flares": 1,
+        "ordnance": 0,
+        "released": 0,
+        "complete": 0
+      },
+      "remainingFlares": 0,
+      "illuminationAmmo": 0,
+      "loads": []
+    }
+  ],
+  "engines": [
+    "node",
+    "chromium",
+    "webkit"
+  ]
+}

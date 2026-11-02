@@ -16,6 +16,7 @@ import { CoaScreen } from './coa';
 import { MainMenuScreen } from './mainMenu';
 import { DeployScreen } from './deploy';
 import { RosterScreen } from './roster';
+import {campaignAirAssignment,operationScenarioDate,settleDailySupport} from '@/campaign/airSupport';
 
 const OPERATION_KEY = 'cc3.operation';
 const CAMPAIGN_KEY = 'cc3.campaign';
@@ -85,7 +86,10 @@ export function advanceOperation(result: BattleResult): void {
   // (kills, wounds, experience, vehicle damage) into it, then persist.
   const battle = game.battle;
   if (battle && game.campaign) {
-    applyReport(game.campaign, battle.battleReport());
+    const report=battle.battleReport();
+    const date=battle.state.config.scenarioDate??operationScenarioDate(OPERATION[op.index]);
+    settleDailySupport(game.campaign,date,report.airMissionsUsed??{german:battle.state.airSupport?.assignments.german.used??0,soviet:battle.state.airSupport?.assignments.soviet.used??0});
+    applyReport(game.campaign, report);
     game.campaign.selectedUids = [];
   }
 
@@ -145,6 +149,7 @@ export class OperationScreen implements Screen {
       game.campaign = campaign;
     }
     const campaign = game.campaign;
+    campaignAirAssignment(campaign,operationScenarioDate(battleDef));
     // older saves may carry nameless soldiers; repair deterministically
     ensureNames(campaign);
     const uids = campaign.teams.map((t) => t.uid);
@@ -234,6 +239,9 @@ export class OperationScreen implements Screen {
         mapId: battleDef.mapId,
         playerSide: op.playerSide,
         year: battleDef.year,
+        scenarioDate:operationScenarioDate(battleDef),
+        timeOfDay:battleDef.timeOfDay??'day',weather:battleDef.weather??'clear',
+        airSupport:campaignAirAssignment(campaign,operationScenarioDate(battleDef)),
         seed: Date.now() & 0xffff,
         durationS: 20 * 60,
         difficulty: 'normal',
@@ -284,7 +292,11 @@ export class OperationScreen implements Screen {
     }
     ctx.font = UI.body;
     ctx.fillStyle = UI.text;
-    ctx.fillText(truncateText(ctx, `${mapDef.name} — ${mapDef.description}`, 748), 26, 78);
+    const date=operationScenarioDate(battleDef),pool=game.campaign?.airSupportDaily;
+    const timeOfDay=battleDef.timeOfDay??'day',weather=battleDef.weather??'clear';
+    const remaining=pool?.date===date?pool.remaining[op.playerSide]:1;
+    const air=timeOfDay==='night'||weather!=='clear'?'unavailable':Math.min(1,remaining);
+    ctx.fillText(truncateText(ctx, `${mapDef.name} · ${date}${battleDef.scenarioDate?'':' (representative day)'} · ${timeOfDay.toUpperCase()} / ${weather.toUpperCase()} · Air: ${air}`, 748), 26, 78);
     this.picker.draw(ctx);
   }
 

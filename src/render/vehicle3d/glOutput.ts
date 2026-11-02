@@ -73,7 +73,7 @@ export class GlOutput {
     const ppm = (TILE_PX * cam.zoom) / TILE_M;
     vs.fitSun(cam.x * TILE_M + this.w / (2 * ppm), cam.y * TILE_M + this.h / (2 * ppm), Math.hypot(this.w, this.h) / (2 * ppm) + 6);
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-    if (opts.shadow !== false) {
+    if (opts.shadow !== false && !vs.night) {
       this.r.clear(); this.r.render(vs.shadowScene, this.camera);
       ctx.globalAlpha = alpha * SHADOW_ALPHA; ctx.drawImage(this.canvas, 0, 0, this.w, this.h);
     }

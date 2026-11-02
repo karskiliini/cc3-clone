@@ -4,7 +4,7 @@
 // shown or hidden per frame by modelNodes; the same structure again under the
 // shadow root with a flat black material. Pure scene graph: tested in Node.
 // ============================================================================
-import { BackSide, DirectionalLight, DoubleSide, Group, HemisphereLight, Matrix4, Quaternion, Vector3, Mesh, MeshBasicMaterial, Scene } from 'three';
+import { BackSide, DirectionalLight, DoubleSide, Group, HemisphereLight, Matrix4, Quaternion, Vector3, Mesh, MeshBasicMaterial, PointLight, Scene } from 'three';
 import { withoutBrokenRuns } from './trackGeometry';
 import { TrackScene } from './trackScene';
 import { LightTransportScene } from './lightTransportScene';
@@ -32,6 +32,9 @@ const SHADOW_MAP_PX = 4096;
 interface Part { group: Group; meshes: Map<string, Mesh>; rims: Map<string, Mesh>; shadowGroup: Group; shadowMeshes: Map<string, Mesh> }
 interface Instance { transport: LightTransportScene; model: VehicleModel; hull: Part; turret: Part; gun: Part; wheelsL: Part; wheelsR: Part; wheels: Map<number, Part>; used: boolean }
 
+/** Physical simulation coordinates: east, south, height, all in metres. */
+export interface VehicleNightLight { x: number; y: number; z: number; strength: number }
+
 export class VehicleScene {
   readonly scene = new Scene();
   readonly shadowScene = new Scene();
@@ -40,6 +43,9 @@ export class VehicleScene {
   private readonly chainHulls = new Map<VehicleModel, Map<string, Mesh>>();
   /** casts the self-shadows (turret on deck, open compartments) the sprites have baked in */
   readonly sun = new DirectionalLight(0xfff5e0, SUN_INTENSITY);
+  readonly sky = new HemisphereLight(FILL_SKY, FILL_GROUND, FILL_INTENSITY);
+  private readonly flareLights: PointLight[] = [];
+  night = false;
   /** the 3D tall grass round the hulls standing in growth (grassField.bladesFor fills it each frame) */
   readonly grass = new GrassLayer();
   readonly tracks = new TrackScene();
@@ -51,11 +57,34 @@ export class VehicleScene {
     sun.shadow.bias = -0.0005;
     sun.shadow.normalBias = 0.02;
     this.fitSun(0, 0, 50);
-    this.scene.add(sun, sun.target, new HemisphereLight(FILL_SKY, FILL_GROUND, FILL_INTENSITY));
+    this.scene.add(sun, sun.target, this.sky);
     this.scene.add(this.grass.grass, this.grass.wheat, this.tracks.group);
     this.shadowRoot.matrixAutoUpdate = false;
     this.shadowRoot.matrix.identity();
     this.shadowScene.add(this.shadowRoot);
+  }
+
+  /** Geometry gets the real incident direction. The common world light mask applies
+   * falloff and terrain/vehicle occlusion after the 3D canvas has been composited.
+   * Keeping point-light decay at zero avoids applying that attenuation twice. */
+  setNightLighting(night: boolean, sources: readonly VehicleNightLight[]): void {
+    this.night = night;
+    this.sun.visible = !night;
+    this.sun.castShadow = !night;
+    this.sky.color.setHex(night ? 0xc4d1e5 : FILL_SKY);
+    this.sky.groundColor.setHex(night ? 0x686e7b : FILL_GROUND);
+    this.sky.intensity = night ? 2.7 : FILL_INTENSITY;
+    if (night && !this.flareLights.length) for (let i = 0; i < 8; i++) {
+      const light = new PointLight(0xffd49a, 0, 0, 0);
+      light.castShadow = false;
+      this.flareLights.push(light); this.scene.add(light);
+    }
+    const total = sources.slice(0, 8).reduce((sum, s) => sum + s.strength, 0);
+    for (let i = 0; i < this.flareLights.length; i++) {
+      const light = this.flareLights[i], source = night ? sources[i] : undefined;
+      light.intensity = source ? 5 * source.strength / Math.max(1, total) : 0;
+      if (source) light.position.set(source.x, source.z, source.y);
+    }
   }
 
   /** Aims the sun's orthographic shadow camera at the view centre (world metres) so it covers a

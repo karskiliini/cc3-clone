@@ -78,6 +78,8 @@ export function hashState(battle: { state: BattleState; rng: Rng }): number {
   const { state, rng } = battle;
   const h = new Fnv();
   h.int(rng.state());h.data(state.noise);
+  h.data(state.airSupport);h.data(state.flares);h.data(state.illuminationShots);h.data(state.nightGroundMemory);
+  h.data([state.config.timeOfDay,state.config.weather,state.config.scenarioDate,state.config.airSupport,state.config.illuminationRounds]);
   h.int(state.tick ?? 0);
   h.num(state.time);
   h.int(state.nextId);

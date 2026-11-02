@@ -148,7 +148,9 @@ export async function createRelayServer(opts: RelayOptions = {}) {
       if (r.phase !== 'lobby' || !validRoster(r, side, f.forces) || typeof f.ready !== 'boolean') { error(ws, 'BAD_ROSTER', 'Choose 1–15 eligible teams within your points.'); return; }
       m.forces = [...f.forces]; m.ready = f.ready; changed(r);
       if (SIDES.every(s => r.members[s]?.ready && r.members[s]?.socket)) {
-        r.config = { mapId: r.settings.mapId, playerSide: r.host, year: r.settings.year, durationS: r.settings.durationS, seed: r.settings.seed, difficulty: 'normal', multiplayer: true, controllers: { german: 'human', soviet: 'human' }, forces: { german: [...r.members.german!.forces], soviet: [...r.members.soviet!.forces] } };
+        r.config = { mapId: r.settings.mapId, playerSide: r.host, year: r.settings.year, durationS: r.settings.durationS, seed: r.settings.seed, difficulty: 'normal', multiplayer: true,
+          timeOfDay:r.settings.timeOfDay??'day',weather:r.settings.weather??'clear',scenarioDate:r.settings.scenarioDate,
+          controllers: { german: 'human', soviet: 'human' }, forces: { german: [...r.members.german!.forces], soviet: [...r.members.soviet!.forces] } };
         r.phase = 'playing'; broadcast(r, { op: 'start', config: r.config, generation: r.generation }); changed(r);
       }
       return;

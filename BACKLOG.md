@@ -11,6 +11,12 @@ Process requests in the order received. New requests are appended to the queue w
 Pushing to GitHub works again (since 2026-09-25); the earlier Zscaler push blocker no longer applies.
 ## Active
 
+**058 → 059 — user-requested air support and illuminated night combat (2026-11-02).**
+Complete and verified: assigned air support, personal pilot evidence, real ordnance,
+night fog, finite mortar illumination and descending dynamic shadows. Evidence:
+`docs/reports/air-night-20261102/README.md`. 050 P2 performance remains deferred;
+no next queued feature is automatically activated.
+
 **051 → 052 → 054 → 055 → 044/047b → 056 — user-requested implementation workflow (2026-11-01).** The user explicitly reprioritized these items and requested their implementation now as a workflow. **Workflow implementation complete: 051, 052, 054, 055, 044/047b and 056. No new queued feature is activated by this completion. Public relay deployment/Internet acceptance remain with the user.** Execution and evidence ledger: `docs/reference/plans/2026-11-01-priority-workflow.md`. Complete and verify each stage, commit/push it, then continue to the next without a new approval ceremony.
 
 **050 P2 parked for this workflow.** Remaining routing/determinism/balance acceptance is not claimed complete. Performance optimization remains deferred at the user's request: current performance is sufficient for now; resume profiling/optimization only when requested. Latest measurement: 40 moving vehicles, 2.59450 ms/tick on the Mac mini (`docs/superpowers/reports/2026-11-01-p2-line-interest-performance.md`). The former 0.5 ms target does not block this workflow.
@@ -85,22 +91,14 @@ Done when:
 - Record a reasoned go/no-go recommendation, expected benefit, integration scope and remaining risks. A live-game integration requires a separate approved specification; this ticket does not schedule training or replace the current controller.
 Queued after 056; does not interrupt the active 050 P2 work.
 
-**058 — Feature: Close Combat-style air support (Ju 87 / Ju 87G / IL-2).**
-Request (2026-11-01): callable Stuka support, later cannon-armed Ju 87G for armour, and IL-2 conventional bombs or anti-armour bomblets; research and imitate later Close Combat air-support mechanics.
-Requirements and sources: `docs/reference/plans/air-support-and-night-combat.md`, section 058. Assigned, delayed, usually single-use support; icon plus map targeting; one aircraft attack pass; dated aircraft/load availability; animated delivery and real damage. The target-dependent load is chosen from reported target class and available assets, never hidden enemy counts. Pilot perception follows 056; canonical state/commands replay deterministically. Done when the full call-to-departure flow works in battle with correct ordnance, damage, availability, feedback, replay and an in-game visual check.
-Queued after 057; does not interrupt active 050 P2.
-
-**059 — Feature: Night fog of war and descending mortar illumination with dynamic shadows.**
-Request (2026-11-01): clearly readable night fog of war; mortar illumination rounds that light a localized area for a long time; a nearly ray-traced-looking effect with continuously lengthening shadows as the flare descends.
-Requirements: `docs/reference/plans/air-support-and-night-combat.md`, section 059. Distinct finite mortar illumination stock and real crew/flight constraints; parachute descent, sustained localized light, occlusion, moving/lengthening shadows from terrain/buildings/trees/vehicles and gradual burnout. Shared canonical lighting affects both sides' individual acquisition through ordinary LOS, not automatic enemy revelation. Camera/render quality never changes simulation. Done when an actual in-game mortar mission demonstrates the full effect through extinction, hidden-unit behavior stays correct, replay/cross-engine checks pass and representative rendering performance is measured. A flat radial glow alone does not meet the request.
-Queued after 058; does not interrupt active 050 P2.
-
 The next request receives ID 062.
 
 ## Completed
 
 | ID | Type | Request | Result |
 | --- | --- | --- | --- |
+| 058 | Feature | Assigned Ju 87 / Ju 87G / IL-2 support | Ready cue, AIR/U area command, dated loads, pilot-only evidence/radio, physical friendly/enemy damage, single passes and persisted daily pool. Replay and repair verified. |
+| 059 | Feature | Night fog and descending mortar illumination | Setup/room conditions, finite crew-operated FLARE/L missions, parachute/wind/descent/burnout, physical shadows and shared individual sensing; GPU/Canvas recordings and measured cost. |
 | 051 | Feature | Physical infantry aboard APCs: visible boarding/riding, crouching/firing, jumping out and casualties constrained by the compartment. | Implemented canonical bench seats and hatch endpoints, live crouch/fire posture and shield exposure, seven-particle articulated casualty bodies against sloping walls/floor/benches, hull momentum, open-top ejection and ground settling; 3D occupants/body meshes follow the hull, with a rear-rim vault and sprite fallback. Spec `docs/superpowers/specs/2026-11-01-physical-apc-passengers.md`. Verified: 252 related tests / 12 files, final 53 changed-path tests (including 10 dedicated physics/transform cases), types/build; 100-tick M5/M2 byte parity; real Chromium 10 men aboard, two casualties retained during motion, five firing, eight survivors out; no page errors, own server stopped. Full/cross-browser suite not rerun here. |
 | 061 | Feature / bug | Setup Defend and Ambush / Hide must arrange every unit in the selected direction (2026-11-01); user confirmed Ambush and Hide are one command. | Added the clickable command menu to setup. Direction orders rotate canonical formation slots about the fixed anchor, face all men in parallel, preserve legal deployment bounds and exact bearing in subsequent placement previews, and immediately orient hull/turret and crew-weapon preview. Repeated turns do not accumulate deformation; combat orders retain ordinary movement and physical turn rates. Exact setup bearing is canonical/hashed. Menu and README show Ambush / Hide; spec section 5 updated. Verified on Mac mini: 179 tests / 10 files, physics-tool types and production build pass. Real Chromium mouse-menu checks passed for rifle Defend and Ambush, tank Defend and MG Ambush, with no page errors; own test server/browser stopped. Browser evidence: `docs/superpowers/reports/setup-facing-20261101/browser.json`. The pre-existing mortar carrying test also failed on baseline `1f6e9b1`: corrected its displacement origin to the end-of-packing position, preserving the movement threshold and complete relocation/setup checks. Full suite not rerun. |
 | 060 | Bug | Setup lets individual men cross the allowed-zone boundary when the team anchor is legal (2026-11-01); fix and specify containment. | Fixed in `spawn.ts`, `battle.ts` and `deploy.ts`: every dismounted member is assigned a distinct passable tile within the own deployment zone, with a half-tile body margin. Initial and Auto placement use the same restriction; drag ghosts, validation and final placement share `deploymentPositions`. Insufficient space rejects a drop without mutation. Spec section 6.1 updated. Verified: 47 focused tests across six files, including all ten maps, both sides, all edges/corners, fractional bounds, blocked slots, insufficient space, preview equivalence, vehicle placement and exact replay; TypeScript passed. Full suite and browser visual pass not rerun. |
@@ -283,3 +281,22 @@ all 32 lockstep/recovery cases, separate-process replay, viewer independence,
 Own-person evidence/condition is available with I. Specification:
 `docs/superpowers/specs/2026-11-01-personal-evidence-and-capability.md`.
 Evidence: `docs/superpowers/reports/workflow-056-20261101/README.md`.
+
+## Completed 058–059 — 2026-11-02
+
+**058 — Feature: Close Combat-style air support (Ju 87 / Ju 87G / IL-2).**
+Request (2026-11-01): callable Stuka support, later cannon-armed Ju 87G for armour, and IL-2 conventional bombs or anti-armour bomblets; research and imitate later Close Combat air-support mechanics.
+Requirements and sources: `docs/reference/plans/air-support-and-night-combat.md`, section 058. Assigned, delayed, usually single-use support; icon plus map targeting; one aircraft attack pass; dated aircraft/load availability; animated delivery and real damage. The target-dependent load is chosen from reported target class and available assets, never hidden enemy counts. Pilot perception follows 056; canonical state/commands replay deterministically. Done when the full call-to-departure flow works in battle with correct ordnance, damage, availability, feedback, replay and an in-game visual check.
+Implemented and verified 2026-11-02 with 059. Controls: AIR/U, role selector, then map target.
+
+**059 — Feature: Night fog of war and descending mortar illumination with dynamic shadows.**
+Request (2026-11-01): clearly readable night fog of war; mortar illumination rounds that light a localized area for a long time; a nearly ray-traced-looking effect with continuously lengthening shadows as the flare descends.
+Requirements: `docs/reference/plans/air-support-and-night-combat.md`, section 059. Distinct finite mortar illumination stock and real crew/flight constraints; parachute descent, sustained localized light, occlusion, moving/lengthening shadows from terrain/buildings/trees/vehicles and gradual burnout. Shared canonical lighting affects both sides' individual acquisition through ordinary LOS, not automatic enemy revelation. Camera/render quality never changes simulation. Done when an actual in-game mortar mission demonstrates the full effect through extinction, hidden-unit behavior stays correct, replay/cross-engine checks pass and representative rendering performance is measured. A flat radial glow alone does not meet the request.
+Implemented and verified 2026-11-02 after 058. Select Night in setup; select mortar, then FLARE/L and map target.
+
+Specification: `docs/reference/plans/2026-11-02-air-night-implementation.md`.
+Evidence: `docs/reports/air-night-20261102/README.md` — 1953 ordinary checks passed,
+2 existing skips; final-source affected checks, two support desync repairs, full
+Node/Chromium/WebKit command traces and actual in-game lifecycle recordings pass.
+The legacy full-size 32-case lockstep soak was stopped and is not claimed complete
+again here. All owned feature-test services are stopped on completion.

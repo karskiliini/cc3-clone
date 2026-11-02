@@ -9,6 +9,9 @@ export const MAX_ROOM_HISTORY_BYTES = 8 * 1024 * 1024;
 export const SIDES: readonly Side[] = ['german', 'soviet'];
 export interface RoomSettings {
   mapId: string; year: number; durationS: number; seed: number; points: number;
+  timeOfDay?: 'day'|'night';
+  weather?: 'clear'|'overcast'|'rain';
+  scenarioDate?: string;
 }
 export interface RoomMember { connected: boolean; ready: boolean; forces: string[]; turn: number; sealedTo:number }
 export interface RoomView {
@@ -59,5 +62,9 @@ export function validSettings(v: unknown): v is RoomSettings {
     && Number.isInteger(v.year) && v.year >= 1941 && v.year <= 1945
     && Number.isInteger(v.durationS) && v.durationS >= 60 && v.durationS <= 3600
     && Number.isInteger(v.seed) && v.seed >= 0 && v.seed <= 0xffffffff
-    && Number.isInteger(v.points) && v.points >= 50 && v.points <= 1000;
+    && Number.isInteger(v.points) && v.points >= 50 && v.points <= 1000
+    && (v.timeOfDay==null||['day','night'].includes(v.timeOfDay))
+    && (v.weather==null||['clear','overcast','rain'].includes(v.weather))
+    && (v.scenarioDate==null||typeof v.scenarioDate==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v.scenarioDate)&&v.scenarioDate.startsWith(`${v.year}-`)
+      &&Number.isFinite(Date.parse(v.scenarioDate))&&new Date(v.scenarioDate).toISOString().slice(0,10)===v.scenarioDate);
 }

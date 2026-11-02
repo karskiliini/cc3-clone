@@ -40,6 +40,9 @@ export class OnlineLobbyScreen implements Screen {
     p.innerHTML=`<section id="connect"><label>Relay server <input id="relay-address" aria-label="Relay server" style="width:98%"></label><p style="margin:6px 0 18px;color:#b9aa8e">Use the game’s server, or enter the address supplied by your host.</p><div style="display:flex;gap:12px;align-items:center"><label>My side <select id="host-side" aria-label="My side"><option value="german">German</option><option value="soviet">Soviet</option></select></label><button id="create-room">Create room</button></div><hr style="border-color:#655943;margin:22px 0"><label>Room code <input id="room-code" aria-label="Room code" maxlength="6" size="9" autocomplete="off" style="text-transform:uppercase"></label> <button id="join-room">Join room</button> <button id="rejoin-room">Rejoin saved game</button></section>
 <section id="room" hidden><p>Share room code: <input id="share-code" aria-label="Share room code" readonly size="9" style="font-weight:bold;letter-spacing:4px"></p><p id="members"></p><div style="display:grid;grid-template-columns:2fr 1fr;gap:12px"><label>Map <select id="battle-map" aria-label="Battle map" style="width:100%"></select></label><label>Year <select id="battle-year" aria-label="Battle year"></select></label><label>Duration <select id="battle-duration" aria-label="Battle duration"><option value="600">10 minutes</option><option value="900">15 minutes</option><option value="1200">20 minutes</option><option value="1800">30 minutes</option><option value="3600">60 minutes</option></select></label><label>Force points <input id="battle-points" aria-label="Force points" type="number" min="50" max="1000" style="width:80px"></label></div><p><button id="apply-setup">Apply battle settings</button> <button id="choose-forces">Choose my forces</button></p><p style="color:#b9aa8e">Both players choose their own forces, then deploy and press Begin.</p></section>
 <p id="online-status" role="status" aria-live="polite" style="min-height:36px;line-height:18px"></p><button id="online-back">Back to main menu</button>`;
+    const environment=document.createElement('div');
+    environment.innerHTML='<label>Time <select id="battle-time" aria-label="Time of day"><option value="day">Day</option><option value="night">Night</option></select></label> <label>Weather <select id="battle-weather" aria-label="Weather"><option value="clear">Clear</option><option value="overcast">Overcast</option><option value="rain">Rain</option></select></label> <label>Date <input id="battle-date" type="date" aria-label="Scenario date"></label>';
+    p.querySelector('#room')!.insertBefore(environment,p.querySelector('#room > p:last-child'));
     for(const e of p.querySelectorAll<HTMLElement>('input,select,button'))e.style.cssText+=';font:14px Arial;background:#3c382d;color:#f1e5ca;border:1px solid #9a8967;padding:7px;';
     for(const map of MAPS){const o=document.createElement('option');o.value=map.id;o.textContent=map.name;p.querySelector('#battle-map')!.append(o);}
     for(let year=1941;year<=1945;year++){const o=document.createElement('option');o.value=String(year);o.textContent=String(year);p.querySelector('#battle-year')!.append(o);}
@@ -97,6 +100,7 @@ export class OnlineLobbyScreen implements Screen {
       const peer=room.members[this.client!.side==='german'?'soviet':'german'];
       this.el('members').textContent=`You: ${this.client!.side==='german'?'German':'Soviet'} · Opponent: ${peer?.connected?(peer.ready?'ready':'choosing forces'):'not connected'}`;
       for(const [id,value]of [['battle-map',room.settings.mapId],['battle-year',room.settings.year],['battle-duration',room.settings.durationS],['battle-points',room.settings.points]] as const){const e=this.el<HTMLInputElement>(id);e.value=String(value);e.disabled=!host;}
+      for(const [id,value]of [['battle-time',room.settings.timeOfDay??'day'],['battle-weather',room.settings.weather??'clear'],['battle-date',room.settings.scenarioDate??`${room.settings.year}-07-15`]] as const){const e=this.el<HTMLInputElement>(id);e.value=value;e.disabled=!host;}
       (this.el('apply-setup') as HTMLButtonElement).disabled=!host;
     }
     this.panel.style.display=this.view==='forces'?'none':'block';
@@ -104,6 +108,9 @@ export class OnlineLobbyScreen implements Screen {
   private applySettings():void {
     if(!this.client)return;
     const settings={...this.settings,mapId:this.el<HTMLSelectElement>('battle-map').value,year:Number(this.el<HTMLSelectElement>('battle-year').value),durationS:Number(this.el<HTMLSelectElement>('battle-duration').value),points:Number(this.el<HTMLInputElement>('battle-points').value)};
+    settings.timeOfDay=this.el<HTMLSelectElement>('battle-time').value as RoomSettings['timeOfDay'];
+    settings.weather=this.el<HTMLSelectElement>('battle-weather').value as RoomSettings['weather'];
+    settings.scenarioDate=`${settings.year}-${(this.el<HTMLInputElement>('battle-date').value||`${settings.year}-07-15`).slice(5)}`;
     this.client.request({op:'settings',settings});
   }
   private chooseForces():void {

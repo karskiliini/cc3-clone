@@ -5,6 +5,8 @@ import type { Battle } from '@/sim/battle';
 import { centerCamera, clampCamera, panCamera, screenToWorld, worldToScreen, zoomIn, zoomOut } from '@/engine/camera';
 import { TerrainRenderer } from '@/render/terrainRender';
 import { drawUnits } from '@/render/unitRender';
+import {configureNightVehicleLighting,drawNightLighting} from '@/render/nightLighting';
+import {drawAirSupport} from '@/render/airSupport';
 import { VisibilityOverlay } from '@/render/visibilityOverlay';
 import { DepthOverlay } from '@/render/depthOverlay';
 import { pickOrderMarker, drawOrderMarkers } from '@/render/orderMarkers';
@@ -655,7 +657,10 @@ export class DeployScreen implements Screen {
       this.visionOverlay.draw(ctx, cam, state, this.selectedTeamIds.length > 0 ? this.selectedTeamIds : []);
     }
 
+    configureNightVehicleLighting(state);
     drawUnits(ctx, cam, state, this.battle.playerSide(), this.selectedTeamIds, game.settings, true, this.hoveredOrderMarker);
+    drawAirSupport(ctx,cam,state,this.battle.playerSide());
+    drawNightLighting(ctx,cam,state,this.battle.playerSide());
     drawOrderMarkers(ctx, cam, state, this.battle.playerSide(), this.selectedTeamIds, null);
 
 
@@ -712,6 +717,10 @@ export class DeployScreen implements Screen {
     this.teamGrid.draw(ctx, teams, state, this.selectedTeamId);
     this.combatMessages.draw(ctx, state);
     this.bottomStrip.draw(ctx, state, selTeam, this.soldierMonitor.watchedSoldierForTeam(state, selTeam));
+    ctx.save();ctx.fillStyle='rgba(10,15,22,.9)';ctx.fillRect(8,8,720,42);ctx.font='bold 12px Arial, Helvetica, sans-serif';ctx.textBaseline='top';ctx.fillStyle='#e4dfcf';
+    ctx.fillText(`DEPLOYMENT · ${state.config.scenarioDate??state.config.year} · ${(state.config.timeOfDay??'day').toUpperCase()} / ${(state.config.weather??'clear').toUpperCase()}`,16,15);
+    const assignment=state.airSupport?.assignments[this.battle.playerSide()];
+    ctx.font='11px Arial, Helvetica, sans-serif';ctx.fillStyle='#c8d6df';ctx.fillText(state.config.timeOfDay==='night'?'Air unavailable at night. Mortar illumination: select mortar, then L during battle.':state.config.weather&&state.config.weather!=='clear'?'Air unavailable in this weather.':`Air support: ${assignment?.remaining??0} assigned mission(s); availability announced after battle begins.`,16,32);ctx.restore();
 
     this.commandMenu.draw(ctx);
     if (this.quitConfirm) this.drawQuitConfirm(ctx);

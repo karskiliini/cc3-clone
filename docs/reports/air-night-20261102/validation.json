@@ -1,0 +1,1291 @@
+{
+  "sourceFingerprint": "c89888b6039cd98dfa3d87cc841533bd20818be04b597b9f46bd30dbebe9932f",
+  "passed": 1953,
+  "skipped": 2,
+  "failed": 0,
+  "files": 213,
+  "notRerunSlowFiles": [
+    "test/lockstep.test.ts"
+  ],
+  "note": "Distinct-file union of completed immutable ordinary snapshots, overridden by final-source affected checks. All ordinary files covered; only legacy 32-case full-size lockstep soak was stopped and is not claimed complete. Two new bounded actual-support lockstep/repair cases pass.",
+  "results": {
+    "test/ai.test.ts": {
+      "passed": 18,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/aimPoint.test.ts": {
+      "passed": 16,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/airSupport.test.ts": {
+      "passed": 18,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "final guarded-source affected checks"
+    },
+    "test/airSupportProtocol.test.ts": {
+      "passed": 6,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "final guarded-source affected checks"
+    },
+    "test/ammoTypes.test.ts": {
+      "passed": 12,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/armourExchanges.test.ts": {
+      "passed": 6,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/attackOrder.test.ts": {
+      "passed": 6,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/battle.test.ts": {
+      "passed": 1,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/battleReport.test.ts": {
+      "passed": 4,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/battleSupportInput.test.ts": {
+      "passed": 6,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "final guarded-source affected checks"
+    },
+    "test/blast.test.ts": {
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/blastCrew.test.ts": {
+      "passed": 4,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/blastFx.test.ts": {
+      "passed": 2,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/blastProtection.test.ts": {
+      "passed": 16,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/bootModal.test.ts": {
+      "passed": 3,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/bootcamp.test.ts": {
+      "passed": 3,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/bottomStrip.test.ts": {
+      "passed": 3,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/bowMg.test.ts": {
+      "passed": 10,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/buildingShelter.test.ts": {
+      "passed": 15,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/bunker.test.ts": {
+      "passed": 3,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/camera.test.ts": {
+      "passed": 11,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/camoNet.test.ts": {
+      "passed": 2,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/campaignAirSupport.test.ts": {
+      "passed": 4,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "final guarded-source affected checks"
+    },
+    "test/campaignStructure.test.ts": {
+      "passed": 4,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/casemateArc.test.ts": {
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/catalog.test.ts": {
+      "passed": 3,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/coaxArc.test.ts": {
+      "passed": 2,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/coaxFireArc.test.ts": {
+      "passed": 2,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/combat.test.ts": {
+      "passed": 12,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/combatMessages.test.ts": {
+      "passed": 10,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/command.test.ts": {
+      "passed": 4,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/commandLayer.test.ts": {
+      "passed": 10,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/controlGroups.test.ts": {
+      "passed": 8,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/cover.test.ts": {
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/coverSeek.test.ts": {
+      "passed": 4,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/craters.test.ts": {
+      "passed": 14,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/crawlUnderFire.test.ts": {
+      "passed": 8,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/crewBailout.test.ts": {
+      "passed": 8,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/crewCapability.test.ts": {
+      "passed": 4,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/crewTasks.test.ts": {
+      "passed": 17,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "final guarded-source affected checks"
+    },
+    "test/crewWeapon.test.ts": {
+      "passed": 8,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/data.test.ts": {
+      "passed": 17,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/daze.test.ts": {
+      "passed": 15,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/debrief.test.ts": {
+      "passed": 4,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/debris.test.ts": {
+      "passed": 9,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/deployOrders.test.ts": {
+      "passed": 10,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/deploymentBounds.test.ts": {
+      "passed": 8,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/deploymentFacing.test.ts": {
+      "passed": 14,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/digging.test.ts": {
+      "passed": 10,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/dmath.test.ts": {
+      "passed": 14,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/earthworkCompression.test.ts": {
+      "passed": 9,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/elevation.test.ts": {
+      "passed": 23,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "final guarded-source affected checks"
+    },
+    "test/elevationReadout.test.ts": {
+      "passed": 1,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/experience.test.ts": {
+      "passed": 7,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/fireAimPreview.test.ts": {
+      "passed": 6,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/fireRoute.test.ts": {
+      "passed": 4,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/firelight.test.ts": {
+      "passed": 4,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/flameTank.test.ts": {
+      "passed": 1,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/fleeMapEdge.test.ts": {
+      "passed": 3,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/formation.test.ts": {
+      "passed": 7,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/fx.test.ts": {
+      "passed": 6,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/fxRender.test.ts": {
+      "passed": 3,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/grassCrush.test.ts": {
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/grassField.test.ts": {
+      "passed": 21,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/grassFx.test.ts": {
+      "passed": 20,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/grassLayer.test.ts": {
+      "passed": 8,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/groundMarks.test.ts": {
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/groundStates.test.ts": {
+      "passed": 3,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/growth.test.ts": {
+      "passed": 3,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/guesstimateFire.test.ts": {
+      "passed": 10,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/gunBlock.test.ts": {
+      "passed": 17,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/gunTiming.test.ts": {
+      "passed": 21,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/harness.test.ts": {
+      "passed": 2,
+      "skipped": 1,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/hastyFire.test.ts": {
+      "passed": 9,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/heightField.test.ts": {
+      "passed": 15,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/historicalMaps.test.ts": {
+      "passed": 6,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/houseVisibility.test.ts": {
+      "passed": 2,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/hoverInfo.test.ts": {
+      "passed": 10,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/hullActuation.test.ts": {
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/hullAim.test.ts": {
+      "passed": 19,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/hullArmor.test.ts": {
+      "passed": 20,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/hullBerlinStability.test.ts": {
+      "passed": 2,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/hullCrushContacts.test.ts": {
+      "passed": 11,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/hullFootprint.test.ts": {
+      "passed": 3,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/hullGameplay.test.ts": {
+      "passed": 26,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/hullGround.test.ts": {
+      "passed": 13,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/hullHash.test.ts": {
+      "passed": 86,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/hullMath.test.ts": {
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/hullMovingSlope.test.ts": {
+      "passed": 9,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/hullPhysics.test.ts": {
+      "passed": 24,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/hullSlope.test.ts": {
+      "passed": 10,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/hullTraction.test.ts": {
+      "passed": 42,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/hullVehicleIntegration.test.ts": {
+      "passed": 36,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/illumination.test.ts": {
+      "passed": 22,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "final guarded-source affected checks"
+    },
+    "test/indirectFire.test.ts": {
+      "passed": 13,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/infantryAim.test.ts": {
+      "passed": 10,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/infantryPacing.test.ts": {
+      "passed": 21,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/initiative.test.ts": {
+      "passed": 4,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/inputCard.test.ts": {
+      "passed": 7,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/inputEditing.test.ts": {
+      "passed": 6,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/inputMouseDown.test.ts": {
+      "passed": 3,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/integrity.test.ts": {
+      "passed": 4,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/items.test.ts": {
+      "passed": 20,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/lightTransportRender.test.ts": {
+      "passed": 13,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/localDriver.test.ts": {
+      "passed": 7,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/localDriverBraking.test.ts": {
+      "passed": 4,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/localDriverLifecycle.test.ts": {
+      "passed": 7,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/localDriverReplay.test.ts": {
+      "passed": 1,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/localDriverV32.test.ts": {
+      "passed": 3,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/localDriverV4.test.ts": {
+      "passed": 10,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/los.test.ts": {
+      "passed": 9,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/losProfile.test.ts": {
+      "passed": 4,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/mainGunDoctrine.test.ts": {
+      "passed": 19,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/map.test.ts": {
+      "passed": 6,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/markerDragWaypoints.test.ts": {
+      "passed": 4,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/medals.test.ts": {
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/melee.test.ts": {
+      "passed": 2,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/mgMount.test.ts": {
+      "passed": 23,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/mgMountRender.test.ts": {
+      "passed": 7,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/mind.test.ts": {
+      "passed": 16,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/mines.test.ts": {
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/morale.test.ts": {
+      "passed": 22,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/moraleRecovery.test.ts": {
+      "passed": 3,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/mortarCarriers.test.ts": {
+      "passed": 4,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/motorizedCrew.test.ts": {
+      "passed": 11,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/moveFastUnderFire.test.ts": {
+      "passed": 9,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/multiplayerPolicy.test.ts": {
+      "passed": 4,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/navigationKnowledge.test.ts": {
+      "passed": 8,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/netHealth.test.ts": {
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/nightLighting.test.ts": {
+      "passed": 6,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "final guarded-source affected checks"
+    },
+    "test/operation.test.ts": {
+      "passed": 2,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "final guarded-source affected checks"
+    },
+    "test/orders.test.ts": {
+      "passed": 24,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/overrun.test.ts": {
+      "passed": 9,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/overrunGun.test.ts": {
+      "passed": 2,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/painVision.test.ts": {
+      "passed": 7,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/passengerPhysics.test.ts": {
+      "passed": 10,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/path.test.ts": {
+      "passed": 9,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/penChance.test.ts": {
+      "passed": 4,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/personalEvidence.test.ts": {
+      "passed": 8,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/pixelfont.test.ts": {
+      "passed": 6,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/probe_elev.test.ts": {
+      "passed": 1,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/realismOptions.test.ts": {
+      "passed": 3,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/relay.test.ts": {
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/replay.test.ts": {
+      "passed": 11,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/requisition.test.ts": {
+      "passed": 15,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/rockets.test.ts": {
+      "passed": 6,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/roster.test.ts": {
+      "passed": 6,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/rosterScreen.test.ts": {
+      "passed": 8,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/sensoryBoundaries.test.ts": {
+      "passed": 14,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/sfx.test.ts": {
+      "passed": 11,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/shellFx.test.ts": {
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/shieldAndCollision.test.ts": {
+      "passed": 14,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/shotInterdiction.test.ts": {
+      "passed": 22,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/shotTrace.test.ts": {
+      "passed": 12,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/smgAnim.test.ts": {
+      "passed": 8,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/smgAtlas.test.ts": {
+      "passed": 8,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/smgEffects.test.ts": {
+      "passed": 4,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/smgFire.test.ts": {
+      "passed": 19,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/smoke.test.ts": {
+      "passed": 2,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/soldierAnim.test.ts": {
+      "passed": 33,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/soldierMonitor.test.ts": {
+      "passed": 9,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/spotting.test.ts": {
+      "passed": 4,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "final guarded-source affected checks"
+    },
+    "test/spriteAtlas.test.ts": {
+      "passed": 13,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/structures.test.ts": {
+      "passed": 7,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/supportLockstep.test.ts": {
+      "passed": 2,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "final guarded-source affected checks"
+    },
+    "test/supportReplay.test.ts": {
+      "passed": 2,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "final guarded-source affected checks"
+    },
+    "test/tankDriving.test.ts": {
+      "passed": 1,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/tankFacing.test.ts": {
+      "passed": 10,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/tankOrders.test.ts": {
+      "passed": 8,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/terrain.test.ts": {
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/trackKinematics.test.ts": {
+      "passed": 3,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/trackPhysics.test.ts": {
+      "passed": 8,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/trackedDrive.test.ts": {
+      "passed": 6,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/trackedMovement.test.ts": {
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/trackedYawReserve.test.ts": {
+      "passed": 3,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/transport.test.ts": {
+      "passed": 11,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/truce.test.ts": {
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/turnRates.test.ts": {
+      "passed": 2,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/upgradeChains.test.ts": {
+      "passed": 8,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/vehicle3dIsolation.test.ts": {
+      "passed": 1,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/vehicle3dLook.test.ts": {
+      "passed": 21,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/vehicle3dMaterial.test.ts": {
+      "passed": 2,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/vehicle3dModels.test.ts": {
+      "passed": 8,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/vehicle3dProjection.test.ts": {
+      "passed": 8,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/vehicle3dScene.test.ts": {
+      "passed": 21,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/vehicleBankApproach.test.ts": {
+      "passed": 2,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/vehicleCorridor.test.ts": {
+      "passed": 6,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/vehicleCorridorProduction.test.ts": {
+      "passed": 3,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/vehicleCoverDrive.test.ts": {
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/vehicleDamage.test.ts": {
+      "passed": 19,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/vehicleDeath.test.ts": {
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/vehicleDefendFacing.test.ts": {
+      "passed": 1,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/vehicleDeploy.test.ts": {
+      "passed": 7,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/vehicleDismount.test.ts": {
+      "passed": 16,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/vehicleExplosion.test.ts": {
+      "passed": 13,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/vehicleGiveWay.test.ts": {
+      "passed": 3,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/vehicleMgAtArmour.test.ts": {
+      "passed": 2,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/vehicleMind.test.ts": {
+      "passed": 13,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/vehicleModels.test.ts": {
+      "passed": 37,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/vehiclePhysics.test.ts": {
+      "passed": 18,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "initial ordinary snapshot"
+    },
+    "test/vehicleRecoveryTurn.test.ts": {
+      "passed": 1,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/vehicleRouteTerrainBudget.test.ts": {
+      "passed": 1,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/vehicleSpotFloor.test.ts": {
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/vehicleTow.test.ts": {
+      "passed": 7,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/vehicleTrenchApproach.test.ts": {
+      "passed": 7,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/vehicleVision.test.ts": {
+      "passed": 7,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/victory.test.ts": {
+      "passed": 7,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/visibility.test.ts": {
+      "passed": 9,
+      "skipped": 1,
+      "failed": 0,
+      "evidence": "final guarded-source affected checks"
+    },
+    "test/waypointChain.test.ts": {
+      "passed": 3,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/waypointInput.test.ts": {
+      "passed": 9,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/waypoints.test.ts": {
+      "passed": 3,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/wire.test.ts": {
+      "passed": 6,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    },
+    "test/wreckAmmo.test.ts": {
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0,
+      "evidence": "remaining ordinary release snapshot"
+    }
+  }
+}

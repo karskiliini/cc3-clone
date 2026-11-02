@@ -1,4 +1,7 @@
 import {observeNavigationAll} from './navigationKnowledge';
+import {initializeAirSupport,requestAirSupport,stepAirSupport} from './airSupport';
+import {initializeIllumination,requestIllumination,stepIllumination} from './illumination';
+import {updateNightGroundMemory} from './nightVisibility';
 import {stepIndirectCommunication} from './indirectCommunication';
 import {stepHumanCondition} from './humanCondition';
 import {stepHearing,stepCommunication} from './perception';
@@ -119,6 +122,9 @@ export class Battle {
     }
 
     spawnMortarCarriers(this.state, this.rng);
+    initializeAirSupport(this.state);
+    initializeIllumination(this.state);
+    updateNightGroundMemory(this.state);
 
     // AI-controlled sides deploy themselves. The sim visits sides in the fixed SIDES order, never
     // by the viewer: two clients watching different sides must consume the RNG identically.
@@ -230,6 +236,22 @@ export class Battle {
     if(state.multiplayerPolicy?.active&&state.phase==='deploy'&&this.isReady(cmd.side)&&['order','deployTeam','autoDeploy'].includes(cmd.type))return;
     if(applyMultiplayerPolicy(state,cmd.side,cmd))return;
     switch (cmd.type) {
+      case 'airSupport':
+        if(state.phase==='running'||state.phase==='paused')requestAirSupport(state,cmd.side,cmd.target,cmd.role,cmd.requesterId);
+        return;
+      case 'illuminate':
+        if(state.phase==='running'||state.phase==='paused'){
+          const t=state.teams.get(cmd.teamId);
+          if(t?.side===cmd.side){
+            if(requestIllumination(state,cmd.side,cmd.teamId,cmd.target)){
+              // The normal crew order hook brings a packed mortar into action.
+              const mission=t.illuminationMission;
+              this.issueOrder(cmd.teamId,{type:'fire',target:{...cmd.target},issuedAt:state.time,illumination:true});
+              t.illuminationMission=mission;
+            }
+          }
+        }
+        return;
       case 'order': {
         const team = state.teams.get(cmd.teamId);
         if (team && team.side === cmd.side) this.issueOrder(cmd.teamId, cmd.order);
@@ -324,11 +346,14 @@ export class Battle {
     stepCoverSeeking(state, this.rng, dt);
     stepMovement(state, this.rng, dt);
     stepVehicles(state, this.rng, dt);
+    stepIllumination(state,dt);
+    stepAirSupport(state,dt);
     stepGrowth(state);
 
     if (state.tick! % Math.round(SPOT_INTERVAL/SIM_DT) === 0) {
       updateSpotting(state, this.rng);
       observeNavigationAll(state);
+      updateNightGroundMemory(state);
     }
 
     stepHearing(state);
@@ -633,7 +658,8 @@ export class Battle {
       }
       teams.push({ defId: team.defId, kills: team.kills, soldiers, vehicleDamage });
     }
-    return { result: this.state.results?.[side] ?? this.state.result ?? 'draw', fledSide: this.state.fledSide ?? null, teams };
+    return { result: this.state.results?.[side] ?? this.state.result ?? 'draw', fledSide: this.state.fledSide ?? null, teams,
+      airMissionsUsed:{german:this.state.airSupport?.assignments.german.used??0,soviet:this.state.airSupport?.assignments.soviet.used??0} };
   }
 }
 

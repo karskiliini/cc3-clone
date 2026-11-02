@@ -1,0 +1,187 @@
+{
+  "errors": [],
+  "console": [],
+  "setup": {
+    "time": 30,
+    "mortar": 1,
+    "cw": {
+      "weaponId": "mortar81",
+      "pos": {
+        "x": 110.95422804890966,
+        "y": 119.17301485474889
+      },
+      "facing": 0,
+      "phase": "ready",
+      "timer": 0,
+      "phaseTotal": 7,
+      "gunnerId": 3,
+      "abandoned": false,
+      "abandonedAt": 0,
+      "setAt": 0.1,
+      "done": [
+        "placeBaseplate",
+        "mountTube",
+        "setBipod"
+      ],
+      "goal": "deploy",
+      "progress": {},
+      "workers": {},
+      "open": [],
+      "mountBlocked": false,
+      "lastWorkedAt": 30
+    },
+    "stock": 2,
+    "tank": 17,
+    "hash": 504181670
+  },
+  "armed": {
+    "pending": {
+      "kind": "illumination",
+      "teamId": 1
+    },
+    "count": 0
+  },
+  "mission": {
+    "time": 53,
+    "mission": {
+      "target": {
+        "x": 105,
+        "y": 83
+      },
+      "orderedAt": 30,
+      "nextRoundAt": 97.5,
+      "rounds": 1,
+      "layUntil": 3
+    },
+    "stock": 1,
+    "flares": [
+      {
+        "id": 59,
+        "side": "german",
+        "teamId": 1,
+        "burstAt": 36.72199283292147,
+        "origin": {
+          "x": 209.41668458595439,
+          "y": 165.72955369360415,
+          "z": 116.40337935474403
+        },
+        "wind": {
+          "x": 0.16,
+          "y": 0.05
+        },
+        "descentMs": 1,
+        "durationS": 90,
+        "radiusM": 110,
+        "intensity": 1.35,
+        "sourceRadiusM": 1.8
+      }
+    ],
+    "shots": [],
+    "commands": [
+      {
+        "type": "illuminate",
+        "teamId": 1,
+        "target": {
+          "x": 105,
+          "y": 83
+        },
+        "side": "german",
+        "tick": 300,
+        "seq": 7
+      }
+    ],
+    "cw": {
+      "weaponId": "mortar81",
+      "pos": {
+        "x": 110.95422804890966,
+        "y": 119.17301485474889
+      },
+      "facing": -0.17035657737729817,
+      "phase": "ready",
+      "timer": 0,
+      "phaseTotal": 7,
+      "gunnerId": 3,
+      "abandoned": false,
+      "abandonedAt": 0,
+      "setAt": 0.1,
+      "done": [
+        "placeBaseplate",
+        "mountTube",
+        "setBipod"
+      ],
+      "goal": "deploy",
+      "progress": {},
+      "workers": {},
+      "open": [],
+      "mountBlocked": false,
+      "lastWorkedAt": 53,
+      "laid": false,
+      "nextMortarShotAt": 39.166666666666664
+    }
+  },
+  "benchmarks": {
+    "day": {
+      "drawMs": {
+        "median": 3.2000000029802322,
+        "p95": 4.4000000059604645,
+        "max": 4.699999988079071,
+        "samples": 119
+      },
+      "frameMs": {
+        "median": 16.099999994039536,
+        "p95": 24.299999997019768,
+        "max": 25.200000002980232,
+        "samples": 119
+      },
+      "renderer": {
+        "backend": "canvas",
+        "cpuPassMs": 21.900000005960464,
+        "width": 40,
+        "height": 26,
+        "sourceSamples": 5,
+        "floatLinear": false
+      },
+      "restored": true
+    },
+    "night": {
+      "drawMs": {
+        "median": 0.8999999910593033,
+        "p95": 20.299999997019768,
+        "max": 20.69999998807907,
+        "samples": 119
+      },
+      "frameMs": {
+        "median": 13.400000005960464,
+        "p95": 31,
+        "max": 31.200000002980232,
+        "samples": 119
+      },
+      "renderer": {
+        "backend": "canvas",
+        "cpuPassMs": 19.399999991059303,
+        "width": 40,
+        "height": 26,
+        "sourceSamples": 5,
+        "floatLinear": false
+      },
+      "restored": true
+    }
+  },
+  "renderer": {
+    "backend": "canvas",
+    "cpuPassMs": 19.399999991059303,
+    "width": 40,
+    "height": 26,
+    "sourceSamples": 5,
+    "floatLinear": false
+  },
+  "readonly": {
+    "hash": 414246693,
+    "rng": 1105541805
+  },
+  "after": {
+    "hash": 414246693,
+    "rng": 1105541805
+  },
+  "serverStopped": true
+}

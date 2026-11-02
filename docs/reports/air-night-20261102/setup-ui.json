@@ -1,0 +1,28 @@
+{
+  "errors": [],
+  "passed": true,
+  "fingerprint": "c89888b6039cd98dfa3d87cc841533bd20818be04b597b9f46bd30dbebe9932f",
+  "saved": {
+    "timeOfDay": "night",
+    "weather": "overcast",
+    "month": "11"
+  },
+  "requisition": {
+    "mapId": "border_1941",
+    "playerSide": "german",
+    "year": 1941,
+    "timeOfDay": "night",
+    "weather": "overcast",
+    "scenarioDate": "1941-11-15",
+    "seed": 12571,
+    "durationS": 1200,
+    "difficulty": "normal"
+  },
+  "room": {
+    "timeOfDay": "night",
+    "weather": "rain",
+    "scenarioDate": "1944-02-29",
+    "guestControlsDisabled": true
+  },
+  "ownedServicesStopped": true
+}

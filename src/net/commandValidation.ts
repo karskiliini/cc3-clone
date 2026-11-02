@@ -8,6 +8,8 @@ export function validCommand(v: unknown, width: number, height: number): v is Co
   const point = (p: unknown) => isRecord(p) && Number.isFinite(p.x) && Number.isFinite(p.y)
     && p.x >= 0 && p.y >= 0 && p.x < width && p.y < height;
   switch (v.type) {
+    case 'airSupport': return point(v.target)&&['auto','bombing','armour'].includes(v.role)&&(v.requesterId==null||id(v.requesterId));
+    case 'illuminate': return id(v.teamId)&&point(v.target);
     case 'order': return id(v.teamId) && isRecord(v.order) && Object.hasOwn(ORDER_DOT_COLOR, v.order.type)
       && point(v.order.target) && Number.isFinite(v.order.issuedAt) && v.order.issuedAt >= 0
       && (v.order.waypoints == null || Array.isArray(v.order.waypoints) && v.order.waypoints.length <= 64 && v.order.waypoints.every(point));

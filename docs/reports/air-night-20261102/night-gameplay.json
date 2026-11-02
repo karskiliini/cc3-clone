@@ -1,0 +1,182 @@
+{
+  "errors": [],
+  "console": [
+    "[.WebGL-0x12c0008ae00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+    "[.WebGL-0x12c00093800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+    "[.WebGL-0x12c0008ae00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+    "[.WebGL-0x12c0008ae00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels (this message will no longer repeat)"
+  ],
+  "setup": {
+    "time": 30,
+    "mortar": 1,
+    "cw": {
+      "weaponId": "mortar81",
+      "pos": {
+        "x": 110.95422804890966,
+        "y": 119.17301485474889
+      },
+      "facing": 0,
+      "phase": "ready",
+      "timer": 0,
+      "phaseTotal": 7,
+      "gunnerId": 3,
+      "abandoned": false,
+      "abandonedAt": 0,
+      "setAt": 0.1,
+      "done": [
+        "placeBaseplate",
+        "mountTube",
+        "setBipod"
+      ],
+      "goal": "deploy",
+      "progress": {},
+      "workers": {},
+      "open": [],
+      "mountBlocked": false,
+      "lastWorkedAt": 30
+    },
+    "stock": 1,
+    "tank": 17,
+    "hash": 3982419150
+  },
+  "armed": {
+    "pending": {
+      "kind": "illumination",
+      "teamId": 1
+    },
+    "count": 0
+  },
+  "burst": 36.72199283292147,
+  "high": {
+    "time": 39.8,
+    "flares": [
+      {
+        "pos": {
+          "x": 209.90916573268694,
+          "y": 165.88345405195807,
+          "z": 113.32537218766551
+        },
+        "strength": 1.35
+      }
+    ],
+    "stock": 0,
+    "hash": 1534179493,
+    "renderer": {
+      "backend": "webgl2",
+      "cpuPassMs": 8.600000008940697,
+      "width": 192,
+      "height": 126,
+      "sourceSamples": 3,
+      "floatLinear": true
+    }
+  },
+  "mid": {
+    "time": 78.8,
+    "flares": [
+      {
+        "pos": {
+          "x": 216.14916573268695,
+          "y": 167.83345405195809,
+          "z": 74.32537218766551
+        },
+        "strength": 1.35
+      }
+    ],
+    "stock": 0,
+    "hash": 3767287968,
+    "renderer": {
+      "backend": "webgl2",
+      "cpuPassMs": 11.600000008940697,
+      "width": 192,
+      "height": 126,
+      "sourceSamples": 3,
+      "floatLinear": true
+    }
+  },
+  "low": {
+    "time": 113.8,
+    "flares": [
+      {
+        "pos": {
+          "x": 221.74916573268695,
+          "y": 169.58345405195809,
+          "z": 39.32537218766551
+        },
+        "strength": 1.35
+      }
+    ],
+    "stock": 0,
+    "hash": 3036915393,
+    "renderer": {
+      "backend": "webgl2",
+      "cpuPassMs": 17.200000002980232,
+      "width": 192,
+      "height": 126,
+      "sourceSamples": 3,
+      "floatLinear": true
+    }
+  },
+  "extinct": {
+    "time": 128.8,
+    "flares": [],
+    "stock": 0,
+    "hash": 1963018871,
+    "renderer": {
+      "backend": "webgl2",
+      "cpuPassMs": 4.299999997019768,
+      "width": 192,
+      "height": 126,
+      "sourceSamples": 3,
+      "floatLinear": true
+    }
+  },
+  "mission": {
+    "time": 128.8,
+    "stock": 0,
+    "flares": [],
+    "commands": [
+      {
+        "type": "illuminate",
+        "teamId": 1,
+        "target": {
+          "x": 105,
+          "y": 83
+        },
+        "side": "german",
+        "tick": 300,
+        "seq": 7
+      }
+    ]
+  },
+  "renderer": {
+    "backend": "webgl2",
+    "cpuPassMs": 4.299999997019768,
+    "width": 192,
+    "height": 126,
+    "sourceSamples": 3,
+    "floatLinear": true
+  },
+  "performance": {
+    "drawMs": {
+      "samples": 602,
+      "median": 33.1000000089407,
+      "p95": 42.20000000298023,
+      "max": 386.29999999701977
+    },
+    "frameMs": {
+      "samples": 602,
+      "median": 52.8999999910593,
+      "p95": 111.09999999403954,
+      "max": 500.79999999701977
+    }
+  },
+  "readonly": {
+    "hash": 1963018871,
+    "rng": 1105541805
+  },
+  "after": {
+    "hash": 1963018871,
+    "rng": 1105541805
+  },
+  "serverStopped": true
+}
