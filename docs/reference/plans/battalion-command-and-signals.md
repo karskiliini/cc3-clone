@@ -6,6 +6,23 @@ signals (059), active campaign missions (067) and allocated artillery (068).
 
 ## 069 — Command companies through their own commanders
 
+### Pre-battle battle plan and advance orders
+
+Clarification (2026-11-02, 13:03): before battle, create a battle plan and issue
+advance orders. Configure a small set of agreed signals (typically two or three),
+each mapped to defined actions for specified recipients: for example, begin the
+prepared attack, shift support or execute a fallback. Show each participant's
+orders and signal meaning before accepting the plan. Initial participating units
+receive their assigned plan during setup; enemy units do not receive it.
+
+During battle, a received agreed signal activates the recipient's already-known
+orders. It does not carry the hidden plan to the enemy. A signal without a known
+meaning cannot create an order; units absent from the briefing need a legitimate
+delivery of the plan. Changes after battle starts follow ordinary communication
+rules. Preserve H-hour, visible flares and couriers as alternative coordination
+methods. Save the plan, signal definitions, recipients and execution state;
+duplicate reception must not restart or duplicate a completed action.
+
 At battalion scale the player gives companies a mission and destination/area:
 Defend, Attack, Prepare to Attack or Support Attack. Include purpose, timing and
 constraints where needed. Subordinate commanders arrange platoons/squads and
@@ -69,47 +86,46 @@ actual command AI, individual combat, movement and rendering before promising ca
 
 ## 070 — Passive radio intelligence for either side
 
-Either side can intercept actual enemy radio transmissions when the scenario's
-date-appropriate receivers, operators and conditions permit it. The mechanism
-is symmetric; equipment, training and availability need not be identical.
-Do not make all Soviet or German messages automatically readable.
+**Superseding game rule (2026-11-02, 13:03): every actual radio transmission is
+immediately heard by the opposing side.** This replaces the earlier proposal of
+capability-gated reception and delayed translation/analysis. Apply it equally to
+both factions, with no random interception chance or artificial intercept delay.
+The friendly radio link still requires functioning equipment/operators; an order
+that never transmits produces nothing to overhear. Enemy reception does not imply
+successful delivery to the intended friendly recipient.
 
-Keep three separate results:
+Ordinary transmitted content is exposed immediately. For a prearranged signal,
+reveal that the identifiable signal was given, but never its private meaning,
+linked orders, recipients' plans or intended maneuver. Do not automatically
+decode its meaning after waiting or after repeated use. The opponent can draw
+its own conclusions from observed action. Unsent plans, physical courier payloads,
+voice/intercom-only conversations and other personal memories are not radio traffic.
 
-1. Detect a transmission/traffic through a compatible, in-range receiver and
-   capable operator. No actual emission means no radio intercept.
-2. Interpret content: clear speech/text can be understood promptly by a capable
-   listener; language, noise and analysis may yield delayed fragments. Coded or
-   encrypted traffic may remain unreadable indefinitely. Waiting alone does not
-   guarantee decryption.
-3. Estimate direction/location only with the required capability and observations.
-   Deliver a bearing or uncertain area, not exact coordinates, identity or a
-   continuously updated enemy marker.
+An indirect-fire call exposes its transmitted target location/area immediately,
+so the opponent knows where fire is being requested next. Corrections and radio
+cancellations expose their transmitted updates too. Show a request/intercept,
+not guaranteed future impacts: a battery may reject, queue or cancel the mission.
+Do not reveal hidden shell trajectories, exact impact times, untransmitted stock
+or the caller's/battery's exact location. The actual target remains the transmitted
+coordinate/area even if empty; do not attach hidden live enemy tracking to it.
 
-The user's proposed delay belongs to scanning, recognition, translation,
-analysis and reporting through the listener's own command network, not slow
-radio propagation. Store observation and report-arrival times, uncertainty,
-confidence and partial interpretation. A report can arrive too late to act on.
+Keep enemy reception separate from ordinary same-side communication delivery.
+Show intercepted traffic in the opposing commander's information/UI immediately;
+individual enemy soldiers still act only on their own observations and delivered
+orders/reports under 056. Hearing a signal does not automatically grant every
+enemy individual the opponent's battle plan or a new maneuver order.
 
-Intercept only actual emitted message payload/traffic. Never inspect the full
-command log, unsent player plans, courier contents or another person's entire
-memory. An enemy can receive an emission even when its intended recipient does
-not. Keep passive reception separate from friendly communication delivery;
-do not make the existing same-side communication link leak personal reports
-directly to the opposing side.
+Radio trades fast command delivery for guaranteed disclosure of emitted content.
+Prearranged signals conceal meaning; couriers conceal their carried message from
+radio listening but take physical travel time. Interception alone does not locate
+the transmitter. Any future direction-finding feature requires separate capability
+and uncertain, aged estimates rather than exact continuous HQ markers.
 
-Radio trades fast command delivery for possible exposure. Radio silence and
-couriers reduce emissions while slowing information. No automatic warning that
-the enemy heard a message without evidence; the UI may explain general exposure
-risk. Interception does not instantly reveal HQ or create a precise artillery
-solution. Action on a report follows ordinary targeting, communication, range
-and ammunition rules. A relocated transmitter leaves an aged report behind.
-
-Completion: both factions use the same capability-based mechanism; clear traffic
-can produce useful delayed reports; cipher traffic can remain unreadable;
-courier-only/unsent plans never leak; uncertain location stays stale after movement;
-broken own reporting links delay delivery. Emissions, private knowledge, queues
-and timers survive save/replay/recovery and remain camera-independent.
+Completion: each emitted radio message reaches the opponent at the same simulation
+time; signals expose identity/existence without private meaning; fire requests
+expose only their transmitted target and updates; no unsent/courier-only leaks or
+automatic position reveal. Save/replay/recovery preserve private plans, emissions,
+intercepts and execution state without duplicate triggers or camera dependence.
 
 ### Historical starting references
 
@@ -124,6 +140,6 @@ and timers survive save/replay/recovery and remain camera-independent.
   radio interception in late 1942. The full PDF fetch returned HTTP 403; use this
   as a starting reference, not proof of a particular unit's equipment at a given date.
 
-Exact scenario establishments, language/cipher capabilities and processing
-delays still need dated evidence before implementation. Do not infer guaranteed
-instant plaintext access or a nationality-wide advantage from these sources.
+These sources supply historical context, not evidence for universal instant
+interception. The 13:03 rule above is an explicit gameplay abstraction selected
+by the user; do not describe it as historically universal radio access.

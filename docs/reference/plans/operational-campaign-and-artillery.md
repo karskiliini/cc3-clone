@@ -166,6 +166,37 @@ contact does not undo shells already fired; only unfired reservations can return
 to stock. Give the player readable request/acceptance/preparation/firing/impact/
 completion feedback and a way to cancel pending fire.
 
+### Real delay and faster repeat fire on registered targets
+
+Clarification (2026-11-02, 13:03): indirect fire has a realistic request-to-impact
+delay. Model message delivery, battery queue/acceptance, fire-data preparation,
+laying/loading and actual projectile flight separately. No instant damage or
+arbitrary universal cooldown. Derive weapon-specific timings from sourced data
+and document gameplay calibration before implementing numerical defaults.
+
+If the same battery/weapon has previously fired at the same target area and
+retains applicable firing data, its repeat mission has shorter preparation.
+Record target/aim data and relevant firing position/weapon state; do not grant
+all batteries shared experience merely because one fired there. Movement, changed
+conditions or a sufficiently different target require recalculation as appropriate.
+Prior fire saves preparation/correction work, not message travel, a busy battery's
+queue, unavailable ammunition, loading or shell flight. Do not require a globally
+visible enemy casualty to remember that a target has been fired upon.
+
+Under 070's revised immediate-interception rule, a radio fire call reveals its
+transmitted target to the opponent immediately. The preparation/flight interval
+therefore offers a real opportunity to move, subject to ordinary movement/order
+constraints; repeat fire can reduce that opportunity. An intercept is not a
+guarantee the requested mission will be accepted or land. Requests delivered by
+non-radio channels do not generate an invented radio intercept.
+
+Acceptance: first versus repeat missions under otherwise equal conditions show
+shorter repeat preparation and correct physical impact timing; changed battery/
+position does not inherit invalid data; queues, supply, cancellation and already
+airborne shells remain correct. Persist firing-data history and all timing phases
+through save/load/replay/recovery. Apply the model consistently to callable
+artillery and on-map indirect weapons as appropriate to their actual procedures.
+
 Artillery availability depends on the battery's own stores, range, commitment
 and communications. A surrounded infantry formation can still receive reachable
 outside fire support if those conditions hold; its lost ground supply is not a
