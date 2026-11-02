@@ -67,6 +67,53 @@ remain open. If the front never reaches Stalingrad, generate a coherent earlier
 campaign ending or continued fighting on the real front. This needs a bounded
 sector/connection model, not automatically the full hex/battalion system of 053.
 
+### Operational key points become meaningful map flags
+
+User clarification (11:16): the campaign's real advancement requirements should
+appear as flags on the tactically important locations, giving a concrete reason
+to capture and defend them. Build on existing `VictoryLocation` ownership,
+capture time and contest handling. Add explicit authored operational roles and
+connections; a point's generic 1–3 score must not substitute for its actual role.
+
+| Example flag | Concrete consequence when secured and usable |
+|---|---|
+| Bridge / crossing | Opens the connected route for the force/supply classes that can physically cross |
+| Road junction | Connects a supply corridor or an approach into the next sector |
+| Volga landing | Enables the actual landing/disembarkation route and its inland connection |
+| Factory strongpoint | Secures a defended corridor/position needed to enter or hold the adjacent district |
+| Supply site | Gives access to its authored, finite supplies when those stores remain available |
+
+Briefing and flag labels/tooltips must explain the specific effect, required
+connections and whether it is currently secured, contested, cut off or damaged.
+Use only meaningful authored locations, not extra flags scattered for collection.
+Examples: "Bridge — opens the eastern approach" and "Landing — reinforcement
+entry". Physically useful high ground can also be an objective; observation still
+requires an actual observer and ordinary LOS, not a visibility bonus for the flag.
+
+Require consolidated control through the ordinary capture rules, a connected
+route and the relevant infrastructure's actual condition. A demolished bridge
+does not carry supply merely because its flag changed color; an isolated flag
+does not teleport supplies through enemy-held sectors. Losing a point can close
+the connection or force another mission on that ground. Capture must be based
+on capable present people/crews, not an empty vehicle automatically claiming land.
+
+For continuous ferry missions, flag control affects actual landing options and
+traffic/territorial objectives. It must not delete already-landed soldiers or
+teleport boats when ownership changes. Persist objective identity, control,
+condition and route consequences with the battlefield and campaign results.
+
+Objective locations can be known from briefing; current enemy control and
+occupation use legitimate observation/reports or an explicit campaign briefing
+update. Flag logic must not grant individuals hidden enemy identities, counts or
+positions, or make their decisions depend on the player's view.
+
+Acceptance: the briefing explains why a point matters; taking the connected,
+usable bridge changes access to the next sector; taking unrelated score flags
+does not bypass a missing bridge; a cut-off/destroyed crossing supplies nothing;
+recapture closes/reopens the appropriate connection; and unknown enemy changes
+remain subject to the information model. Show the consequences in debrief and
+next-mission selection, and reproduce them in saves/replays.
+
 ### Every tactical mission needs an active side
 
 User clarification (10:53): do not offer battles where both exhausted forces
@@ -107,6 +154,9 @@ Historical references checked 2026-11-02:
 - `advanceOperation` currently increments a flat battle index regardless of the
   result. That is insufficient for 067: the new campaign needs result-driven
   territorial state and mission selection, not just a renamed linear list.
+- Existing flags affect local scoring (`value × 10` plus casualty/prisoner terms
+  in `sideScore`); their current type has no operational route/supply role. 067
+  must connect flags to campaign consequences rather than only changing artwork.
 - Buildings, terrain, craters and earthworks already change within a battle.
   058 supplies physical air ordnance; 059 supplies night conditions, individual
   light-dependent sight and mortar illumination.
