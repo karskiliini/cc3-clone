@@ -91,7 +91,23 @@ Done when:
 - Record a reasoned go/no-go recommendation, expected benefit, integration scope and remaining risks. A live-game integration requires a separate approved specification; this ticket does not schedule training or replace the current controller.
 Queued after 056; does not interrupt the active 050 P2 work.
 
-The next request receives ID 062.
+**062 — Feature: Stalingrad scenario family and damage phases.**
+Request (2026-11-02): a largely intact city assault, historically grounded Red Barricades factory fighting, a Volga-bank level including night action, and a devastated-city version. Combine distinct districts with selectable initial damage phases and progressive destruction rather than requiring every battle to use today's single map. Completion: selectable/linked, historically sourced and correctly scaled scenarios; distinct actual in-game visuals, objectives and routes; destructible structures. Full requirements: `docs/reference/plans/stalingrad-and-field-defenses.md`, 062.
+
+**063 — Feature: Repeated Soviet reinforcement crossings over the Volga.**
+Request (2026-11-02): the Red Army repeatedly brings new soldiers across the visible river, especially at night. Completion: authored reserve/schedule/capacity, visible transport and landing into ordinary teams, real interruption consequences, night/illumination/personal-perception rules, persistent accounting and deterministic replay/recovery. Verify river scale and the transport path first. Requirements: `docs/reference/plans/stalingrad-and-field-defenses.md`, 063.
+
+**064 — Feature: Persistent city destruction and seeded between-battle bombardment.**
+Request (2026-11-02): the intact city can become devastated during fighting; several dozen computer-directed artillery/air strikes between battles may add variable building damage and craters. Completion: stable district identity, saved cumulative damage/defenses, seeded fresh-campaign variation, physical cover/LOS/navigation changes, one-time transition accounting and a playable devastated preset. Background bombardment uses its own scenario budget. Requirements: `docs/reference/plans/stalingrad-and-field-defenses.md`, 064.
+
+**065 — Feature: Defender placement of barbed wire, Spanish horses and field obstacles.**
+Request (2026-11-02): in later fields both sides strengthen their defensive positions. Completion: either defending faction and AI can place allocated obstacles near positions with legal whole-footprint previews, orientation and finite resources; wire is a separate element; actual infantry/vehicle interaction and engineer-created gaps persist. Combat construction, when allowed, needs a present capable worker and time. Existing wire simulation is a foundation, not a finished placement UI. Requirements: `docs/reference/plans/stalingrad-and-field-defenses.md`, 065.
+
+**066 — Feature: Scenario-limited defensive AP and AT mine placement.**
+Request (2026-11-02): defenders can lay AP mines in selected fields and AT mines in some fields. Completion: explicit scenario stocks/types, legal defensive-area placement, correct AP/AT triggering and consumption, friendly physical risk, personal knowledge/clearing, persistence and replay/network validation. Audit existing tile-coordinate/trigger behavior before exposing the new tools. Requirements: `docs/reference/plans/stalingrad-and-field-defenses.md`, 066.
+
+062–066 are queued requirements, not implemented or automatically reprioritized.
+The next request receives ID 067.
 
 ## Completed
 
