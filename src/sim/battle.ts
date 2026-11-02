@@ -1,4 +1,5 @@
 import {artillerySpent} from '@/campaign/artillery';
+import {initializeFieldTelephone,connectTelephone,removeTelephone,requestTelephoneRepair,stepFieldTelephone} from './fieldTelephone';
 import {observeNavigationAll} from './navigationKnowledge';
 import {initializeAirSupport,requestAirSupport,stepAirSupport} from './airSupport';
 import {initializeIllumination,requestIllumination,stepIllumination} from './illumination';
@@ -128,6 +129,7 @@ export class Battle {
     spawnMortarCarriers(this.state, this.rng);
     initializeAirSupport(this.state);
     initializeArtillery(this.state);
+    initializeFieldTelephone(this.state);
     initializeIllumination(this.state);
     updateNightGroundMemory(this.state);
 
@@ -238,9 +240,12 @@ export class Battle {
 
   private applyCommand(cmd: Command): void {
     const state = this.state;
-    if(state.multiplayerPolicy?.active&&state.phase==='deploy'&&this.isReady(cmd.side)&&['order','deployTeam','autoDeploy','planOrder','cancelPlanOrder'].includes(cmd.type))return;
+    if(state.multiplayerPolicy?.active&&state.phase==='deploy'&&this.isReady(cmd.side)&&['order','deployTeam','autoDeploy','planOrder','cancelPlanOrder','connectTelephone','removeTelephone'].includes(cmd.type))return;
     if(applyMultiplayerPolicy(state,cmd.side,cmd))return;
     switch (cmd.type) {
+      case 'connectTelephone':connectTelephone(state,cmd.side,cmd.fromTeamId,cmd.toTeamId,cmd.points,cmd.underground);return;
+      case 'removeTelephone':removeTelephone(state,cmd.side,cmd.lineId);return;
+      case 'repairTelephone':requestTelephoneRepair(state,cmd.side,cmd.lineId,cmd.teamId);return;
       case 'planOrder':setPlannedOrder(state,cmd.side,cmd.teamId,cmd.order,cmd.trigger);return;
       case 'cancelPlanOrder':cancelPlannedOrder(state,cmd.side,cmd.teamId);return;
       case 'signal':sendPlanSignal(state,cmd.side,cmd.signal);return;
@@ -371,6 +376,7 @@ export class Battle {
     }
 
     stepHearing(state);
+    stepFieldTelephone(state,dt);
     stepCommunication(state);
     stepIndirectCommunication(state);
     initializeArtillery(state);

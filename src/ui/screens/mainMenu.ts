@@ -9,6 +9,8 @@ import { BootCampScreen } from './bootCampPicker';
 import { OperationScreen } from './operation';
 import { HistoryScreen } from './history';
 import { OptionsScreen } from './options';
+import { DeployScreen } from './deploy';
+import { createTelephoneExperiment } from '@/data/telephoneExperiment';
 
 interface MenuButtonSpec {
   label: string;
@@ -22,6 +24,7 @@ const BTN_H = 50;
 /** The title screen: banner buttons stepped down across the fire glow, as in CC3. */
 export class MainMenuScreen implements Screen {
   private buttons: MenuButtonSpec[] = [
+    { label: 'Signal experiment', rect: { x: 20, y: 510, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new DeployScreen(createTelephoneExperiment())) },
     { label: 'Play A Game', rect: { x: 402, y: 150, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new BattleSetupScreen()) },
     { label: 'Boot Camp (Training)', rect: { x: 418, y: 222, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new BootCampScreen()) },
     { label: 'Operation', rect: { x: 434, y: 294, w: BTN_W, h: BTN_H }, action: () => game.setScreen(new OperationScreen()) },

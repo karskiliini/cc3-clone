@@ -8,4 +8,4 @@ declare const __SIMULATION_BUILD__: string | undefined;
 export const SIMULATION_BUILD = typeof __SIMULATION_BUILD__ === 'string' ? __SIMULATION_BUILD__ : 'unbundled-test';
 
 /** Replay behavior contract; includes plans, radio traffic, registered fire and finite batteries. */
-export const SIMULATION_VERSION = 'battle-plan-radio-artillery-1';
+export const SIMULATION_VERSION = 'radio-phone-experiment-1';

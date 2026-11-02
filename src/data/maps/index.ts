@@ -9,8 +9,9 @@ import { forest_1944 } from './forest_1944';
 import { vistula_1944 } from './vistula_1944';
 import { berlin_1945 } from './berlin_1945';
 import { kremlin_1945 } from './kremlin_1945';
+import {telephone_experiment} from './telephone_experiment';
 
-export const MAPS: MapDef[] = [border_1941, winter_1941, village_1942, stalingrad_1942, steppe_1943, korsun_1944, forest_1944, vistula_1944, berlin_1945, kremlin_1945];
+export const MAPS: MapDef[] = [border_1941, winter_1941, village_1942, stalingrad_1942, steppe_1943, korsun_1944, forest_1944, vistula_1944, berlin_1945, kremlin_1945,telephone_experiment];
 
 export function getMap(id: string): MapDef {
   const m = MAPS.find((d) => d.id === id);

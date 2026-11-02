@@ -495,7 +495,7 @@ export interface PersonalPerception {
   casualties:Record<string,{health:Health;pos:Vec2;observedAt:number;sourceId:number;isLeader:boolean}>;
 }
 export interface HumanCondition { breath:number; sweat:number; hearingLoss:number; at:number; lastPos:Vec2; }
-export interface PendingContactReport { from:number; to:number; sentAt:number; deliverAt:number; channel:'voice'|'intercom'|'radio'; contact?:PersonalContact; belief?:EnemyBelief; navigationCell?:NavigationCell; navigationHull?:KnownHull; objective?:{id:number;owner:Side|null;observedAt:number;sourceId:number}; casualty?:{id:number;health:Health;pos:Vec2;observedAt:number;sourceId:number;isLeader:boolean}; leadership?:{leaderId:number;observedAt:number}; }
+export interface PendingContactReport { from:number; to:number; sentAt:number; deliverAt:number; channel:'voice'|'intercom'|'radio'|'telephone';phoneLineIds?:number[]; contact?:PersonalContact; belief?:EnemyBelief; navigationCell?:NavigationCell; navigationHull?:KnownHull; objective?:{id:number;owner:Side|null;observedAt:number;sourceId:number}; casualty?:{id:number;health:Health;pos:Vec2;observedAt:number;sourceId:number;isLeader:boolean}; leadership?:{leaderId:number;observedAt:number}; }
 export interface Soldier {
   lastMoanAt?:number;
   randomStreams?:Record<string,number>;
@@ -1111,7 +1111,7 @@ export type TeamQuality = 'militia' | 'line' | 'seasoned' | 'elite';
 
 export interface IndirectObservation {observerId:number;observedAt:number;receivedAt:number;aim:Vec2;tier:'spotted'|'area';quality:number;impactAt?:number}
 export interface IndirectControl {aim:Vec2;startedAt:number;orderAt?:number;nextRequestAt:number;report?:IndirectObservation;rounds:number;lastImpactAt:number;readyAt?:number;preparationS?:number;repeat?:boolean;origin?:Vec2;weaponId?:string;conditions?:string}
-export interface IndirectMessage {kind:'request'|'observation';teamId:number;missionAt:number;aim:Vec2;route:number[];hop:number;deliverAt:number;channel:'voice'|'intercom'|'radio';observation?:IndirectObservation}
+export interface IndirectMessage {kind:'request'|'observation';teamId:number;missionAt:number;aim:Vec2;route:number[];hop:number;deliverAt:number;channel:'voice'|'intercom'|'radio'|'telephone';phoneLineIds?:number[];observation?:IndirectObservation}
 export interface IndirectObserverTask {teamId:number;missionAt:number;aim:Vec2;observerId:number;nextReportAt:number}
 export interface Team {
   illuminationAmmo?: number;
@@ -1704,9 +1704,18 @@ export type RadioPayload =
 export interface RadioTransmission {id:number;at:number;senderSide:Side;payload:RadioPayload}
 export type PlanTrigger={kind:'signal';signal:1|2|3}|{kind:'time';at:number};
 export interface PlannedOrder {teamId:number;order:Order;trigger:PlanTrigger;status:'waiting'|'executed'|'failed';executedAt?:number}
-export interface BattlePlan {orders:PlannedOrder[];signals:{signal:1|2|3;sentAt:number;senderId?:number;deliveries?:{teamId:number;recipientId:number;channel:'voice'|'intercom'|'radio'|'self';at:number;delivered?:boolean}[]}[]}
+export interface BattlePlan {orders:PlannedOrder[];signals:{signal:1|2|3;sentAt:number;senderId?:number;deliveries?:{teamId:number;recipientId:number;channel:'voice'|'intercom'|'radio'|'telephone'|'self';at:number;delivered?:boolean}[]}[]}
 export interface ArtilleryBattery {id:number;side:Side;name:string;weaponId:string;guns:number;ammo:number;readyAt:number;registration?:{target:Vec2;at:number;weaponId?:string;conditions?:string};registrations?:{target:Vec2;at:number;weaponId?:string;conditions?:string}[];assignedTeamId?:number}
 export interface ArtilleryMission {id:number;batteryId:number;side:Side;target:Vec2;size:'small'|'large';phase:'requested'|'queued'|'preparing'|'firing'|'complete'|'cancelled';cancelAt?:number;cancelRequesterId?:number;calledAt:number;acceptedAt:number;readyAt:number;nextShotAt:number;roundsLeft:number;repeat:boolean;requesterId:number}
 export interface ArtilleryShell {id:number;missionId:number;side:Side;target:Vec2;weaponId:string;firedAt:number;impactAt:number}
 export interface ArtilleryState {batteries:ArtilleryBattery[];missions:ArtilleryMission[];shells:ArtilleryShell[]}
 export interface BattleState {radioTraffic?:{nextId:number;messages:RadioTransmission[]}}
+
+export interface FieldTelephoneLine {
+ id:number;side:Side;fromTeamId:number;toTeamId:number;points:Vec2[];lengthM:number;
+ underground:boolean[];cutSegments:number[];repair?:{teamId:number;segment:number;remainingS:number};
+}
+export interface BattleState {fieldTelephone?:{nextId:number;lines:FieldTelephoneLine[];stockM:Record<Side,number>}}
+export interface BattleConfig {telephoneUnderground?:boolean;telephoneWireStockM?:number}
+
+export interface BattleState {telephoneTraffic?:{nextId:number;messages:{id:number;at:number;senderSide:Side;payload:RadioPayload}[]};spokenReports?:Record<string,number>}

@@ -18,14 +18,28 @@ export function radioOrderSender(state:BattleState,side:Side,teamId:number):Sold
 }
 /** Evidence coordinates are permitted; exact caller/source positions and identity are not. */
 export function emitContactRadio(state:BattleState,side:Side,r:PendingContactReport):void{
- if(r.channel!=='radio')return;
- if(r.contact)emitRadio(state,side,{kind:'report',text:`Contact report: ${r.contact.entity}`,target:r.contact.pos});
- else if(r.belief)emitRadio(state,side,{kind:'report',text:'Enemy activity report',target:r.belief.pos});
- else if(r.casualty)emitRadio(state,side,{kind:'report',text:`Casualty report: ${r.casualty.health}`,target:r.casualty.pos});
- else if(r.navigationCell)emitRadio(state,side,{kind:'report',text:'Terrain report'});
- else if(r.navigationHull)emitRadio(state,side,{kind:'report',text:'Vehicle obstruction report'});
- else if(r.objective)emitRadio(state,side,{kind:'report',text:`Objective ${r.objective.id}: ${r.objective.owner??'uncontrolled'}`});
- else if(r.leadership)emitRadio(state,side,{kind:'report',text:'Leadership succession report'});
+ if(r.channel!=='radio'&&r.channel!=='telephone')return;
+ let payload:RadioPayload|undefined;
+ if(r.contact)payload={kind:'report',text:`Contact report: ${r.contact.vehicleDefId?VEHICLE_DEFS[r.contact.vehicleDefId]?.name??'tank':r.contact.entity}`,target:r.contact.pos};
+ else if(r.casualty)payload={kind:'report',text:`Casualty report: ${r.casualty.health}`,target:r.casualty.pos};
+ else if(r.objective)payload={kind:'report',text:`Objective ${r.objective.id}: ${r.objective.owner??'uncontrolled'}`};
+ else if(r.leadership)payload={kind:'report',text:'Leadership succession report'};
+ // Bulk cell/belief synchronization is not a separate spoken human utterance.
+ if(!payload)return;
+ const identity=r.contact?`contact:${r.contact.entity}:${r.contact.id}:${r.contact.vehicleState??r.contact.health??'seen'}`:r.casualty?`casualty:${r.casualty.id}:${r.casualty.health}`:r.objective?`objective:${r.objective.id}:${r.objective.owner}`:'leadership';
+ const base=`${r.channel}:${side}:${identity}`,area='target' in payload&&payload.target?`${Math.round(payload.target.x/5)},${Math.round(payload.target.y/5)}`:'none';
+ const key=`${base}:${area}:${'text' in payload?payload.text:payload.kind}`,spoken=state.spokenReports??={};
+ // A relayed observation is one announcement, not one voice per receiver/frame.
+ if(spoken[base]!=null&&state.time-spoken[base]<12||spoken[key]!=null&&state.time-spoken[key]<60)return;
+ spoken[base]=state.time;spoken[key]=state.time;
+ for(const [key,at] of Object.entries(spoken))if(state.time-at>120)delete spoken[key];
+ if(r.channel==='radio')emitRadio(state,side,payload);
+ else{const net=state.telephoneTraffic??={nextId:0,messages:[]};net.messages.push({id:net.nextId++,at:state.time,senderSide:side,payload:structuredClone(payload)});if(net.messages.length>256)net.messages.splice(0,net.messages.length-256);}
+}
+/** Global player headset access; this does not deliver knowledge to soldiers. */
+export function headsetTraffic(state:BattleState){
+ return [...(state.radioTraffic?.messages??[]).map(m=>({id:m.id*2,at:m.at,side:m.senderSide,channel:'radio' as const,payload:m.payload})),
+ ...(state.telephoneTraffic?.messages??[]).map(m=>({id:m.id*2+1,at:m.at,side:m.senderSide,channel:'telephone' as const,payload:m.payload}))].sort((a,b)=>a.at-b.at||a.id-b.id);
 }
 
 /** Operational HQ radio endpoint, without requiring successful friendly reception. */

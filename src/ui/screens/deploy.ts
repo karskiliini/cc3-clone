@@ -1,4 +1,5 @@
 import { BattlePlanPanel } from '@/ui/battlePlanPanel';
+import { TelephonePanel } from '@/ui/telephonePanel';
 import type { BattleState, Camera, CursorKind, InputState, Rect, Screen, Team, Vec2 } from '@/shared/types';
 import { VIEW_H, VIEW_W, ORDER_HOTKEYS, ORDER_DOT_COLOR, otherSide, type OrderType } from '@/shared/types';
 import { game } from '@/game';
@@ -64,6 +65,7 @@ export class DeployScreen implements Screen {
    * then click a target. LOS preview draws while aiming. */
   private commandMenu = new CommandMenu();
   private planPanel = new BattlePlanPanel();
+  private telephonePanel = new TelephonePanel(304);
   private pendingOrder: OrderType | null = null;
   private pendingWaypoints: Vec2[] = [];
   private draggingTeamId: number | null = null;
@@ -162,7 +164,7 @@ export class DeployScreen implements Screen {
   /** Bottom panel, or the minimap / soldier monitor insets floating over the map viewport:
    * presses and releases there never select, pick up or drop a team. */
   private overHud(p: Vec2): boolean {
-    if (p.y >= VIEW_H || this.planPanel.contains(p)) return true;
+    if (p.y >= VIEW_H || this.planPanel.contains(p) || this.telephonePanel.contains(p)) return true;
     if (this.showMinimap && hitRect(p, this.minimap.rect)) return true;
     const state = this.battle.state;
     const selTeam = this.selectedTeamId != null ? state.teams.get(this.selectedTeamId) ?? null : null;
@@ -185,6 +187,7 @@ export class DeployScreen implements Screen {
     }
 
     input=this.planPanel.update(input,state,this.battle.playerSide(),body=>this.command(body));
+    input=this.telephonePanel.update(input,state,this.battle.playerSide(),this.selectedTeamId,cam,body=>this.command(body));
 
     // Setup uses the same clickable orders as battle, before any pan or drop
     // handlers can consume the menu click. Empty-ground right drag still pans.
@@ -650,6 +653,7 @@ export class DeployScreen implements Screen {
     ctx.fillStyle = PALETTE.black;
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
     this.terrain.draw(ctx, cam);
+    this.telephonePanel.drawWires(ctx,state,this.battle.playerSide(),cam);
     this.terrain.drawOverlays(ctx, cam, state);
 
     // Deployment shading (manual): own zone unshaded, enemy zone dark gray,
@@ -727,6 +731,7 @@ export class DeployScreen implements Screen {
     ctx.font='11px Arial, Helvetica, sans-serif';ctx.fillStyle='#c8d6df';ctx.fillText(state.config.timeOfDay==='night'?'Air unavailable at night. Mortar illumination: select mortar, then L during battle.':state.config.weather&&state.config.weather!=='clear'?'Air unavailable in this weather.':`Air support: ${assignment?.remaining??0} assigned mission(s); availability announced after battle begins.`,16,32);ctx.restore();
 
     this.planPanel.draw(ctx,state,this.battle.playerSide());
+    this.telephonePanel.draw(ctx,state,this.battle.playerSide(),this.selectedTeamId);
     this.commandMenu.draw(ctx);
     if (this.quitConfirm) this.drawQuitConfirm(ctx);
   }

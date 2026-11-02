@@ -1,3 +1,4 @@
+import {damageTelephoneSweep} from './fieldTelephone';
 import {planningMap,knownHulls,learnHullContact,learnTerrainContact} from './navigationKnowledge';
 import {directSoldier,directVehicle,recipientOrder} from './perception';
 import {hearNoise,visualIds,vehicleVisualIds,vehicleObserver,knownContacts,knowsDirectly,teamObserver,directContacts} from './perception';
@@ -123,6 +124,7 @@ function processAcceptedVehicleMovement(
   sweep: AcceptedHullPoint[], poses: AcceptedHullPose[], contacts: Vec2[], params: HullParams,
 ): void {
   if (!movement) return;
+  for (let i=1;i<sweep.length;i++) damageTelephoneSweep(state,sweep[i-1].pos,sweep[i].pos,Math.hypot(def.widthM,def.lengthM)/2);
   const moved = sweep.some(p => p.pos.x !== sweep[0].pos.x || p.pos.y !== sweep[0].pos.y);
   const overrun = () => {
     if (moved && movement.overrunDir != null) stepOverrun(state, rng, v, movement.overrunDir, sweep);

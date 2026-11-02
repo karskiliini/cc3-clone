@@ -4,6 +4,7 @@
 // method before unlock()/AudioContext exists — all become no-ops.
 // ============================================================================
 
+import { HeadsetAudio } from './communications';
 import type { BattleEvent, Camera } from '@/shared/types';
 import { clamp } from '@/shared/math';
 import {
@@ -34,6 +35,7 @@ const SCREAM_MIN_INTERVAL_S = 1.2;
 const TEAM_BROKEN_MIN_INTERVAL_S = 3;
 
 export class Sfx {
+  readonly headset = new HeadsetAudio();
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private masterVolume = 0.7;
@@ -58,6 +60,7 @@ export class Sfx {
 
   /** Call on the first user gesture (click/keydown). Safe to call many times. */
   unlock(): void {
+    this.headset.unlock();
     if (!this.ctx) {
       const AC: typeof AudioContext | undefined =
         (window as any).AudioContext || (window as any).webkitAudioContext;
@@ -77,6 +80,7 @@ export class Sfx {
     }
   }
   setVolume(v: number): void {
+    this.headset.setVolume(v);
     this.masterVolume = clamp(v, 0, 1);
     if (this.master && !this.paused) this.master.gain.value = this.muted ? 0 : this.masterVolume;
   }
@@ -84,6 +88,7 @@ export class Sfx {
   /** CTRL+S (manual input card): hard mute of every output while keeping the
    * volume setting. Survives pause/unpause cycles — setPaused re-applies it. */
   setMuted(v: boolean): void {
+    this.headset.setMuted(v);
     if (this.muted === v) return;
     this.muted = v;
     if (this.master && this.ctx) {
@@ -99,6 +104,7 @@ export class Sfx {
    * bus (so any already-playing engine/ambient loop goes silent too, not just
    * new one-shots) and stops admitting new sounds until unpaused. */
   setPaused(v: boolean): void {
+    this.headset.setPaused(v);
     if (this.paused === v) return;
     this.paused = v;
     if (this.master && this.ctx) {
@@ -234,6 +240,7 @@ export class Sfx {
    * Call when leaving the battle screen so nothing keeps looping underneath
    * the debrief/menu screens. */
   stopAll(): void {
+    this.headset.stopAll();
     this.ambient(false);
     for (const id of [...this.engines.keys()]) this.engine(id, null);
   }

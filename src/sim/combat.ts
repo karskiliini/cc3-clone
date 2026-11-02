@@ -1,3 +1,4 @@
+import {damageTelephoneBlast} from './fieldTelephone';
 import {conscious,canObserveComrade} from './perception';
 import {openHumanRng,withHumanRng} from './humanRandom';
 import {directSoldier,directVehicle,recipientOrder} from './perception';
@@ -645,6 +646,7 @@ export function throwLooseObjects(state: BattleState, rng: Rng, burst: Vec2, wea
 
 export function applyHESplash(state: BattleState, rng: Rng, pos: Vec2, weapon: WeaponDef, shooterSide: Side, from?: Vec2, skipVehicleId?: number,
   blastOptions: { innerLethalM?: number; knockdownShare?: number; directHitId?: number; killer?: Soldier; trajectory?: IncomingTrajectory } = {}): void {
+  damageTelephoneBlast(state, pos, weapon.heRadiusM);
   const radiusTiles = weapon.heRadiusM / TILE_M;
   const eligibleVehicles = blastOptions.trajectory && radiusTiles > 0 ? [...state.vehicles.values()].filter(v => v.id !== skipVehicleId && v.side !== shooterSide
     && v.state !== 'knockedOut' && v.state !== 'burning'

@@ -1,4 +1,5 @@
 import {emitContactRadio} from './radioTraffic';
+import {telephoneLink} from './fieldTelephone';
 import {vehicleEyes} from './vehicleVision';
 import {observerVisibility} from './spotting';
 import {rememberCell,rememberHull} from './navigationKnowledge';
@@ -50,10 +51,11 @@ export function recordVisual(state:BattleState,s:Soldier,target:Soldier|Vehicle,
  const p=perception(s),memory=p.memory??=[];const remembered=memory.findIndex(o=>o.entity===entity&&o.id===target.id);if(remembered>=0)memory[remembered]=structuredClone(c);else memory.push(structuredClone(c));if(memory.length>64)memory.shift();const i=p.visual.findIndex(o=>o.entity===entity&&o.id===target.id);if(i>=0)p.visual[i]=c;else p.visual.push(c);
 }
 /** Explicit voice/intercom/radio endpoints, with no no-HQ radio fallback. */
-export function communicationLink(state:BattleState,a:Soldier,b:Soldier):{channel:'voice'|'intercom'|'radio';delay:number}|null{
+export function communicationLink(state:BattleState,a:Soldier,b:Soldier):{channel:'voice'|'intercom'|'radio'|'telephone';delay:number;lineIds?:number[]}|null{
  if(a.side!==b.side||a.id===b.id||!conscious(a,state.time)||!conscious(b,state.time)||humanCapability(b,state.time).hearing<.1)return null;
  if(a.mind.state==='panicked'||a.mind.state==='broken'||b.mind.state==='panicked'||b.mind.state==='broken')return null;
  if(a.vehicleId!=null&&a.vehicleId===b.vehicleId)return{channel:'intercom',delay:.5};
+ const phone=telephoneLink(state,a,b);if(phone)return phone;
  const dM=dist(a.pos,b.pos)*TILE_M,at=state.teams.get(a.teamId),bt=state.teams.get(b.teamId);
  const voice=(a.activity==='ambushing'||a.activity==='hiding'?5:at?.leaderId===a.id?30:10)*humanCapability(b,state.time).hearing;
  if(a.vehicleId==null&&b.vehicleId==null&&dM<=voice&&hasLOS(state.map,a.pos,b.pos))return{channel:'voice',delay:.7+dM/340};
@@ -102,7 +104,8 @@ export function stepCommunication(state:BattleState):void{
  for(const s of state.soldiers.values())if(conscious(s,state.time))perception(s).leaderId??=state.teams.get(s.teamId)?.leaderId;
  for(const r of net.queue){
   if(r.deliverAt>state.time){keep.push(r);continue;}const a=state.soldiers.get(r.from),b=state.soldiers.get(r.to);
-  if(!a||!b||communicationLink(state,a,b)?.channel!==r.channel)continue;
+  const live=a&&b?communicationLink(state,a,b):null;
+  if(!a||!b||live?.channel!==r.channel||r.channel==='telephone'&&JSON.stringify(live?.lineIds)!==JSON.stringify(r.phoneLineIds))continue;
   if(r.navigationCell)rememberCell(b,r.navigationCell);
   if(r.navigationHull)rememberHull(b,r.navigationHull);
   if(r.objective){const p=perception(b),known=(p.objectives??={})[r.objective.id];if(!known||known.observedAt<r.objective.observedAt)p.objectives![r.objective.id]={owner:r.objective.owner,observedAt:r.objective.observedAt,sourceId:r.objective.sourceId};}
@@ -124,7 +127,7 @@ export function stepCommunication(state:BattleState):void{
   for(const b of state.soldiers.values()){
    const link=communicationLink(state,s,b);if(!link)continue;
    const before=net.queue.length;
-   const base={from:s.id,to:b.id,sentAt:state.time,deliverAt:state.time+link.delay,channel:link.channel};
+   const base={from:s.id,to:b.id,sentAt:state.time,deliverAt:state.time+link.delay,channel:link.channel,...(link.lineIds?{phoneLineIds:[...link.lineIds]}:{})};
    const fresh=(key:string,at:number)=>{const k=`${b.id}:${key}`;if(sent[k]!=null&&sent[k]>=at)return false;if(!Object.hasOwn(sent,k))sentKeys.push(k);sent[k]=at;if(sentKeys.length-sentHead>512)delete sent[sentKeys[sentHead++]];return true;};
    for(const c of contacts){if(net.queue.length>=8192)break;if(c.sourceId===b.id||!fresh(`${c.entity}:${c.id}`,c.observedAt))continue;net.queue.push({...base,contact:{...c,pos:{...c.pos},confidence:c.confidence*.7,hops:(c.hops??0)+1,uncertaintyM:Math.max(c.uncertaintyM,link.channel==='intercom'?2:5)}});}
    for(const belief of beliefs){if(net.queue.length>=8192)break;const source=belief.sourceId??s.id;if(source===b.id||!fresh(`belief:${source}:${belief.pos.x}:${belief.pos.y}`,belief.time))continue;net.queue.push({...base,belief:{...belief,pos:{...belief.pos},hops:(belief.hops??0)+1,sourceId:source,uncertaintyM:Math.max(5,belief.uncertaintyM??0)}});}
@@ -134,7 +137,7 @@ export function stepCommunication(state:BattleState):void{
    for(const hull of navHulls)if(hullsSent<8&&net.queue.length<8192&&hull.sourceId!==b.id&&fresh(`hull:${hull.id}`,hull.observedAt)){net.queue.push({...base,navigationHull:{...structuredClone(hull),hops:hull.hops+1}});hullsSent++;}
    for(const [id,e] of Object.entries(p.objectives??{}))if(net.queue.length<8192&&e.sourceId!==b.id&&fresh(`objective:${id}`,e.observedAt))net.queue.push({...base,objective:{id:Number(id),...e}});
    if(s.teamId===b.teamId&&p.leadership&&net.queue.length<8192&&fresh('leadership',p.leadership.observedAt))net.queue.push({...base,leadership:{...p.leadership}});
-   if(link.channel==='radio')for(let i=before;i<net.queue.length;i++)emitContactRadio(state,s.side,net.queue[i]);
+   if(link.channel==='radio'||link.channel==='telephone')for(let i=before;i<net.queue.length;i++)emitContactRadio(state,s.side,net.queue[i]);
    if(!spoke&&link.channel==='voice'&&net.queue.length>before){spoke=true;emitNoise(state,s.pos,'voice',s.activity==='ambushing'||s.activity==='hiding'?5:s.id===state.teams.get(s.teamId)?.leaderId?40:15,`voice:${s.id}`,s.side);}
   }
  }

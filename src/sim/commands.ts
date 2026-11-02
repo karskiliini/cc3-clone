@@ -7,6 +7,9 @@ import type { AirRole, BattleConfig, Controller, Order, PlanTrigger, Side, Vec2 
  * depend on the frame a click landed in and a command log can replay a battle exactly.
  */
 export type CommandBody =
+  | {type:'connectTelephone';fromTeamId:number;toTeamId:number;points:Vec2[];underground:boolean}
+  | {type:'removeTelephone';lineId:number}
+  | {type:'repairTelephone';lineId:number;teamId:number}
   | {type:'planOrder';teamId:number;order:Order;trigger:PlanTrigger}
   | {type:'cancelPlanOrder';teamId:number}
   | {type:'signal';signal:1|2|3}

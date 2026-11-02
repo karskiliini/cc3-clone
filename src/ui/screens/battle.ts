@@ -1,4 +1,6 @@
-import { interceptedRadio, radioCommandSender } from '@/sim/radioTraffic';
+import { interceptedRadio, radioCommandSender,headsetTraffic } from '@/sim/radioTraffic';
+import { TelephonePanel } from '@/ui/telephonePanel';
+import {directContacts,teamObserver as knowledgeObserver} from '@/sim/perception';
 import {drawIndividualInspector} from '@/ui/hud/individualInspector';
 import type { AirRole,CursorKind, GameSettings, InputState, BattleState, OrderType, Rect, Screen, Side, Team, Vec2, Camera } from '@/shared/types';
 import { ORDER_DOT_COLOR, ORDER_HOTKEYS, ORDER_TYPES, TILE_PX, VIEW_H, VIEW_W, otherSide } from '@/shared/types';
@@ -175,6 +177,7 @@ export class BattleScreen implements Screen {
   private modernPanDrag: DragPanState = makeDragPanState();
   private hoverTeamId: number | null = null;
   private hudHover = false;
+  private telephonePanel = new TelephonePanel(58);
   private lastMapClickTeamId: number | null = null;
   private lastMapClickTime = 0;
   /** performance.now() deadline for the second Flee click; 0 = not armed. */
@@ -243,6 +246,9 @@ export class BattleScreen implements Screen {
   onEnter(): void {
     if (this.entered) return;
     this.entered = true;
+    if(this.battle.state.config.mapId==='telephone_experiment'){
+      const receiver=[...this.battle.state.teams.values()].find(t=>t.name==='Receiving squad');if(receiver)this.setSelection([receiver.id]);this.showRadio=true;
+    }
     const map = this.battle.state.map;
     const centroid = friendlyCentroid(this.battle.state, this.battle.playerSide());
     centerCamera(game.cam, centroid);
@@ -279,6 +285,7 @@ export class BattleScreen implements Screen {
    * the minimap / soldier monitor insets that float over the map viewport. Presses and releases
    * there must never select, deselect, box-select or issue orders. */
   private overHud(p: Vec2): boolean {
+    if(this.telephonePanel.contains(p))return true;
     if([AIR_BUTTON,AIR_ROLE_BUTTON,FLARE_BUTTON,ARTILLERY_BUTTON,ARTILLERY_SIZE,RADIO_BUTTON,CANCEL_ARTILLERY,...SIGNAL_BUTTONS].some(r=>hitRect(p,r)) || this.showRadio&&hitRect(p,RADIO_PANEL))return true;
     if (p.y >= VIEW_H) return true;
     if (this.showMinimap && hitRect(p, this.minimap.rect)) return true;
@@ -342,7 +349,7 @@ export class BattleScreen implements Screen {
       if(this.showRadio&&hitRect(c,RADIO_PANEL)){
         if(c.button===0){
           const row=Math.floor((c.y-91)/18);
-          const message=row>=0&&row<8?interceptedRadio(this.battle.state,this.battle.playerSide()).slice(-8).reverse()[row]:undefined;
+          const message=row>=0&&row<8?headsetTraffic(this.battle.state).filter(m=>m.channel==='radio'||m.side===this.battle.playerSide()).slice(-8).reverse()[row]:undefined;
           const payload=message?.payload,target=payload&&'target' in payload?payload.target:undefined;
           if(target){centerCamera(game.cam,target);clampCamera(game.cam,this.battle.state.map.width,this.battle.state.map.height);}
         }
@@ -408,13 +415,13 @@ export class BattleScreen implements Screen {
     ctx.fillStyle=missions.length?'#703f2a':'#303b41';ctx.fillRect(CANCEL_ARTILLERY.x,CANCEL_ARTILLERY.y,CANCEL_ARTILLERY.w,CANCEL_ARTILLERY.h);ctx.strokeStyle='#8a8970';ctx.strokeRect(CANCEL_ARTILLERY.x+.5,CANCEL_ARTILLERY.y+.5,CANCEL_ARTILLERY.w-1,CANCEL_ARTILLERY.h-1);ctx.fillStyle=missions.length?'#ffe4c4':'#929894';ctx.fillText('Cancel fire',922,50);
     if(this.showRadio){
       ctx.fillStyle='rgba(13,19,24,.96)';ctx.fillRect(RADIO_PANEL.x,RADIO_PANEL.y,RADIO_PANEL.w,RADIO_PANEL.h);ctx.strokeStyle='#8a8970';ctx.strokeRect(RADIO_PANEL.x+.5,RADIO_PANEL.y+.5,RADIO_PANEL.w-1,RADIO_PANEL.h-1);
-      ctx.fillStyle='#f6e4b6';ctx.fillText('INTERCEPTED RADIO · click a target row to locate',658,78);
-      const messages=interceptedRadio(state,side).slice(-8).reverse();
+      ctx.fillStyle='#f6e4b6';ctx.fillText('HEADSET · all radio / own telephone',658,78);
+      const messages=headsetTraffic(state).filter(m=>m.channel==='radio'||m.side===side).slice(-8).reverse();
       if(!messages.length){ctx.fillStyle='#aebcc0';ctx.fillText('No enemy transmissions received.',658,101);}
       messages.forEach((m,i)=>{
         const p=m.payload;
         const text=p.kind==='signal'?`Signal ${p.signalId}`:p.kind==='message'||p.kind==='report'?`${p.text}${p.target?` → ${p.target.x.toFixed(0)},${p.target.y.toFixed(0)}`:''}`:`${p.kind} #${p.missionId} → ${p.target.x.toFixed(0)},${p.target.y.toFixed(0)}`;
-        ctx.fillStyle='#d5dfd4';ctx.fillText(`${Math.floor(m.at)}s · ${text}`,658,100+i*18,350);
+        ctx.fillStyle='#d5dfd4';ctx.fillText(`${Math.floor(m.at)}s ${m.side==='german'?'GER':'SOV'} ${m.channel==='telephone'?'TEL':'RAD'} · ${text}`,658,100+i*18,350);
       });
     }ctx.restore();
   }
@@ -489,6 +496,8 @@ export class BattleScreen implements Screen {
     const battle = this.battle;
     const state = battle.state;
     const cam = game.cam;
+
+    input=this.telephonePanel.update(input,state,battle.playerSide(),this.selectedTeamId,cam,body=>this.command(body));
 
     if (this.quitConfirm) {
       this.updateQuitConfirm(input);
@@ -951,6 +960,7 @@ export class BattleScreen implements Screen {
     const events = battle.drainEvents().filter((e) => e.kind !== 'message' || !e.side || e.side === viewer);
     this.blastFx.onEvents(events, state.time);
     game.audio?.handleEvents(events, cam);
+    game.audio?.headset.update(headsetTraffic(state),state.time,viewer);
     game.audio?.ambient(state.phase === 'running' && !this.paused);
     game.audio?.updateVehicles(
       [...state.vehicles.values()].map((v) => {
@@ -1026,6 +1036,7 @@ export class BattleScreen implements Screen {
     const shake = this.blastFx.shake(cam, state.time);
     if (shake.x || shake.y) ctx.translate(shake.x, shake.y);
     this.terrain.draw(ctx, cam);
+    this.telephonePanel.drawWires(ctx,state,battle.playerSide(),cam);
     this.terrain.drawOverlays(ctx, cam, state);
     if (this.showCommandRadii) this.drawCommandRadii(ctx, cam, state);
     if (game.settings.showDepthMap) this.depthOverlay.draw(ctx, cam);
@@ -1212,6 +1223,16 @@ export class BattleScreen implements Screen {
     ctx.restore();
 
     this.drawInterceptedFireMarkers(ctx);
+    if(this.selectedTeamId!=null){
+      const observer=knowledgeObserver(state,this.selectedTeamId),seen=new Set(directContacts(state,observer).map(c=>`${c.entity}:${c.id}`));
+      ctx.save();ctx.font='bold 11px Arial';ctx.textAlign='left';ctx.textBaseline='middle';
+      for(const report of observer?.perception?.reports??[]){
+        if(report.entity!=='vehicle'||seen.has(`${report.entity}:${report.id}`)||state.time-report.observedAt>120)continue;
+        const point=worldToScreen(cam,report.pos);ctx.strokeStyle='#ffd077';ctx.setLineDash([4,3]);ctx.strokeRect(point.x-12,point.y-12,24,24);ctx.setLineDash([]);
+        const text=`Reported ${report.vehicleDefId?VEHICLE_DEFS[report.vehicleDefId]?.name??'vehicle':'vehicle'} · ${Math.floor(state.time-report.observedAt)}s old`;
+        ctx.fillStyle='rgba(27,22,13,.9)';ctx.fillRect(Math.max(0,point.x+15),Math.max(0,point.y-9),ctx.measureText(text).width+8,18);ctx.fillStyle='#ffd077';ctx.fillText(text,Math.max(4,point.x+19),Math.max(9,point.y));
+      }ctx.restore();
+    }
 
     // Minimap and soldier monitor sit over the map viewport itself.
     if (this.showMinimap) this.minimap.draw(ctx, this.terrain, state, cam, battle.playerSide());
@@ -1220,6 +1241,7 @@ export class BattleScreen implements Screen {
     drawHudBase(ctx);
     if (this.showTeamGrid) this.teamGrid.draw(ctx, this.rosterTeams(battle.playerSide()), state, this.selectedTeamIds);
     this.combatMessages.draw(ctx, state);
+    this.telephonePanel.draw(ctx,state,battle.playerSide(),this.selectedTeamId);
     this.bottomStrip.draw(ctx, state, selTeam, this.soldierMonitor.watchedSoldierForTeam(state, selTeam));
     this.controlGroupBar.draw(ctx, this.controlGroups.slots(this.selectedTeamIds));
     this.drawSupportControls(ctx);

@@ -8,6 +8,9 @@ export function validCommand(v: unknown, width: number, height: number): v is Co
   const point = (p: unknown) => isRecord(p) && Number.isFinite(p.x) && Number.isFinite(p.y)
     && p.x >= 0 && p.y >= 0 && p.x < width && p.y < height;
   switch (v.type) {
+    case 'connectTelephone':return id(v.fromTeamId)&&id(v.toTeamId)&&typeof v.underground==='boolean'&&Array.isArray(v.points)&&v.points.length>=2&&v.points.length<=256&&v.points.every(point);
+    case 'removeTelephone':return id(v.lineId);
+    case 'repairTelephone':return id(v.lineId)&&id(v.teamId);
     case 'planOrder': return id(v.teamId)&&validCommand({type:'order',teamId:v.teamId,order:v.order},width,height)&&isRecord(v.trigger)&&
       (v.trigger.kind==='signal'&&[1,2,3].includes(v.trigger.signal)||v.trigger.kind==='time'&&Number.isFinite(v.trigger.at)&&v.trigger.at>=0&&v.trigger.at<=86400);
     case 'cancelPlanOrder':return id(v.teamId);
