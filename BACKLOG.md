@@ -150,7 +150,9 @@ Clarification (2026-11-03, 00:53, 076/077 experiment): not every action/update i
 Experimental 076/077 checkpoint: `codex/radio-phone-experiment` adds a playable telephone training scenario, actual report routing/wire damage, offline headset speech and the 22:58 user-requested spam restriction. One utterance at a time; routine voice capped at eight per real minute with critical-call priority; stationary reports coalesce. This is a trial, not completion of the full telephone/voice/hierarchy roadmap. Scope, controls and 20 focused passing tests: `docs/reference/radio-phone-experiment.md`.
 Request (2026-11-02, 14:22): a squad leader can know a T-34 is in an area without seeing it if telephone communication connects the observing platoon and the squad's own platoon, and the report is relayed to that leader. Completion: actual observer → originating platoon → working telephone/legitimate relay → receiving platoon → recipient squad delivery, multi-hop delays and endpoint capability, source-supported identification/position/uncertainty and preserved original observation age, no automatic live tracking or knowledge teleport on merely connecting/selecting, correct interrupted/duplicate/stale reports and independent direct-LOS firing limits. Player audio rules076 do not themselves deliver soldier knowledge. Extend existing personal report machinery and 071 telephone paths; verify real acquisition by a non-observing leader, failure before receipt on broken links, retention after disconnection and refresh only after new delivered reports, save/replay/recovery. Requirements: `docs/reference/plans/battalion-command-and-signals.md`, 077. Queued, not implemented for telephone routing.
 
-The next request receives ID 078.
+**078 — Standalone battles based on public footage of past engagements in Ukraine.** Start with a scoped Hostomel airport pilot. Verify footage against dated maps, separate sourced details from gameplay assumptions, and keep modern rosters separate from WWII. [Source shortlist and pilot brief](docs/reference/plans/video-based-battles.md). Queued, not implemented.
+
+The next request receives ID 079.
 
 ## Completed
 
