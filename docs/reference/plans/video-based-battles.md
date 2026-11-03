@@ -30,3 +30,20 @@ and put period equipment in a separate scenario roster before calling the
 result a reconstruction. Aircraft and helicopters can remain outside the first
 playable sector. Acceptance: a reproducible source-to-map ledger and a standalone
 scenario that both sides can start and finish.
+
+## Follow-on shortlist
+
+User shortlist, 2026-11-04: Avdiivka, Bakhmut, Kharkiv and Kherson. These are
+candidates after Hostomel; their internal order is open. The sectors below are
+design proposals, pending footage review and historical map verification.
+
+| Candidate | Proposed playable sector |
+|---|---|
+| Avdiivka | A corner of the coke plant grounds: service road, rail siding and industrial buildings. |
+| Bakhmut | A few urban blocks around a single street junction, with courtyards and rubble. |
+| Kharkiv region | A Balakliia approach during the September 2022 counteroffensive: road, field edge and first houses. |
+| Kherson region | One village on the Dnipro's west bank during the autumn 2022 counteroffensive: streets, gardens and an approach across open ground. |
+
+For Kharkiv and Kherson, these proposals concern the regional operations;
+a scenario set in either city itself would need a separately sourced engagement.
+Select a specific date and sector for each map before authoring units or objectives.
